@@ -129,7 +129,6 @@ export default function RegisterScreen() {
         </TouchableOpacity>
       </View>
 
-
       <View className="mb-2">
         <Text className="text-black text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Select Role</Text>
       </View>
@@ -150,7 +149,6 @@ export default function RegisterScreen() {
           <Picker.Item label="Organizer" value="organizer" color="#4D998C" />
         </Picker>
       </View>
-
 
       <View>
         <Text className = "text-black text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Verify Your Identity</Text>
