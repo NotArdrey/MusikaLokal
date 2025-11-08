@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 
 
-export default function Header({ title}) {
+export default function Header({title}) {
 
     const pathname = usePathname();
     const [backVisible, setBackVisible] = useState(false);
@@ -27,31 +27,27 @@ export default function Header({ title}) {
         
 
     return (
-    <View className="flex-row bg-white justify-between items-center pt-8 px-4 gap-2">
+    <View className="flex-row bg-white justify-between items-center pt-8 gap-2">
         {/*back button. Conditional of visibility*/}
-        <View className="w-1/4">
-        {backVisible&&(
+        {/*profile icon. Conditional. navigation still not yet set*/}
+        <View className="w-12 justify-center items-start">
+        {backVisible ? (
             <TouchableOpacity onPress={() => navigation.goBack()}>
                 <Ionicons name ="arrow-back" size={24} color="black"/>
             </TouchableOpacity>
-        )}
-        </View>
-
-        <View className="w-1/4">
-            {/*profile icon. Conditional. navigation still not yet set*/}
-            {profileVisible&&(
-                <TouchableOpacity onPress={() =>navigation.goBack()} >
-                    <FontAwesome name="user-circle" size={28} color="black" />
-                </TouchableOpacity>
-            )}
+        ):profileVisible ? (
+            <TouchableOpacity onPress={() =>navigation.goBack()} >
+                <FontAwesome name="user-circle" size={28} color="black" />
+            </TouchableOpacity>
+        ):null}
         </View>
 
         {/*Title of the Page in the center*/}
-        <View className="flex-1 items-center">
+        <View className="flex-1 justify-center items-center">
             <Text className="text-black text-xl" style={{ fontFamily: 'Poppins_600SemiBold' }}>{title}</Text>
         </View>
 
-        <View className="w-1/4 flex-row justify-end">
+        <View className="w-12 justify-center items-end">
             {/*notification icon. Conditional. navigation not yet set*/}
             {notifVisible&&(
                 <TouchableOpacity onPress = {() => navigation.goBack()}>
