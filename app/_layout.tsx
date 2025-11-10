@@ -25,5 +25,13 @@ export default function RootLayout() {
     return null;
   }
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <Stack 
+      screenOptions={{ 
+        headerShown: false,
+        // Prevent automatic navigation on reload
+        animation: 'none'
+      }} 
+    />
+  );
 }

@@ -16,7 +16,7 @@ export default function Navbar() {
     }
     
     return (
-    <View className="flex-row bg-white justify-between items-start gap-15 px-10 mb-5 border-t border-gray-300 pt-5">
+    <View className="flex-row bg-white justify-between items-start gap-15 px-10 pb-5 border-t border-gray-300 pt-5">
         <View className="flex-col justify-between items-center">
             <TouchableOpacity className='justify-center items-center' 
                 onPress={()=> {
@@ -40,7 +40,7 @@ export default function Navbar() {
         <View className="flex-col justify-between items-center">
             <TouchableOpacity className='justify-center items-center' 
                 onPress={()=> {
-                    router.push("/home");
+                    router.push("/forget_password");
             }}>
                 <Ionicons name="newspaper-outline" size={24} color ={activeTab === "manage"? "#000000" : "#638782"}/>
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', color: activeTab === "manage"? "#000000" : "#638782"}}>Manage</Text>

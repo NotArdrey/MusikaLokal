@@ -1,9 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function LoginScreen() {
+
+  useEffect(() => {
+    router.replace('/find_talent_and_spaces');
+  }, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -57,7 +61,7 @@ export default function LoginScreen() {
         <Text className="text-teal-500 text-sm" style={{ fontFamily: 'Poppins_400Regular' }}>Forget Password</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={() => router.push('home' as any)} className="bg-teal-500 rounded-lg py-4 mb-4">
+      <TouchableOpacity className="bg-teal-500 rounded-lg py-4 mb-4">
         <Text className="text-white text-center text-base font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Login</Text>
       </TouchableOpacity>
   
