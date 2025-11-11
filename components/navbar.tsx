@@ -40,14 +40,12 @@ export default function Navbar() {
         <View className="flex-col justify-between items-center">
             <TouchableOpacity className='justify-center items-center' 
                 onPress={()=> {
-                    router.push("/forget_password");
+                    router.push("/my_studio");
             }}>
                 <Ionicons name="newspaper-outline" size={24} color ={activeTab === "manage"? "#000000" : "#638782"}/>
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', color: activeTab === "manage"? "#000000" : "#638782"}}>Manage</Text>
             </TouchableOpacity>
         </View>
-
-        
     </View>
     
     );
