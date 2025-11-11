@@ -10,10 +10,7 @@ export default function findAGigScreen() {
     <View className="flex-1 bg-white px-6">
       <Header title ="Find Talent & Spaces"/>
 
-
-
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 12, paddingBottom: 100 }}>
-      
       <View className ="mt-5 mb-3">
         <Ionicons
           name="search"
@@ -27,9 +24,8 @@ export default function findAGigScreen() {
           placeholderTextColor="#888"
           autoCapitalize="none"
           style={{ fontFamily: 'Poppins_400Regular' }}/>
-
       </View>
-        
+      
         {/*Studio/Venue Card*/}
         <View className="flex-1 flex-col bg-white rounded-3xl overflow-hidden" style={{
           shadowColor: '#000',
