@@ -11,6 +11,7 @@ export default function Header({title}) {
     const [backVisible, setBackVisible] = useState(false);
     const [profileVisible, setProfileVisible] = useState(false);
     const [notifVisible, setnotifVisible] = useState(false);
+    const [addbtnvisible, setaddbtnvisible] = useState(false);
     const [showDrawer, setShowDrawer] = useState(false);
     const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
 
@@ -18,11 +19,18 @@ export default function Header({title}) {
         if (pathname === "/explore" || pathname === "/home" || pathname === "/manage" ){
             setProfileVisible(true)
             setnotifVisible(true)
-            setBackVisible(false)           
+            setBackVisible(false)     
+            setaddbtnvisible(false)      
+        }else if(pathname === "/my_group"|| pathname === "/my_gig" || pathname === "/my_studio"){
+            setProfileVisible(true)
+            setnotifVisible(false)
+            setBackVisible(false)   
+            setaddbtnvisible(true) 
         }else{
             setBackVisible(true)
             setProfileVisible(false)
-            setnotifVisible(false)           
+            setnotifVisible(false)     
+            setaddbtnvisible(false)       
         }
     }, [pathname]);
 
@@ -44,6 +52,7 @@ export default function Header({title}) {
             setShowDrawer(false);
         });
     };
+
 
     return (
     <>
@@ -94,11 +103,16 @@ export default function Header({title}) {
 
         <View className="w-12 justify-center items-end">
             {/*notification icon. Conditional. navigation not yet set*/}
-            {notifVisible&&(
+            {notifVisible ? (
                 <TouchableOpacity onPress={() => router.push('notifications')}>
                       <MaterialIcons name="notifications-none" size={33} color="black" />
                 </TouchableOpacity>
-            )}
+            ):addbtnvisible ? (
+                <TouchableOpacity onPress={openDrawer}>
+                    <Ionicons name="add-circle-outline" size={33} color="black" />
+                </TouchableOpacity>
+            ):null}
+
         </View>
 
     </View>

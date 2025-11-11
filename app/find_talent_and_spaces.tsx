@@ -1,11 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { Image, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../components/header';
 import Navbar from '../components/navbar';
 
 
 
 export default function findAGigScreen() {
+    const [selectedType, setSelectedType] = useState('All');
+    const [selectedGenre, setSelectedGenre] = useState('All');
+    const [sortBy, setSortBy] = useState('Relevance');
+    const [showSortModal, setShowSortModal] = useState(false);
+
+    const sortOptions = ['Relevance', 'Distance', 'Rating', 'Price: Low to High', 'Price: High to Low'];
+
     return (
     <View className="flex-1 bg-white px-6">
       <Header title ="Find Talent & Spaces"/>
@@ -25,6 +33,134 @@ export default function findAGigScreen() {
           autoCapitalize="none"
           style={{ fontFamily: 'Poppins_400Regular' }}/>
       </View>
+
+      {/* Filter Section */}
+      <View className="mb-4">
+        {/* Type Filter */}
+        <View className="mb-3">
+          <Text className="text-xs text-gray-600 mb-2" style={{ fontFamily: 'Poppins_500Medium' }}>Type</Text>
+          <View style={{ marginHorizontal: -8 }}>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              nestedScrollEnabled={true}
+              contentContainerStyle={{ paddingHorizontal: 8, paddingRight: 24 }}
+            >
+              <View className="flex-row gap-2">
+                {['All', 'Venue', 'Studio', 'Music Group', 'Solo Artist'].map((type) => (
+                  <TouchableOpacity
+                    key={type}
+                    onPress={() => setSelectedType(type)}
+                    className={`px-4 py-2 rounded-full ${selectedType === type ? 'bg-[#0D9488]' : 'bg-gray-100'}`}
+                  >
+                    <Text className={`text-xs ${selectedType === type ? 'text-white' : 'text-gray-700'}`} style={{ fontFamily: 'Poppins_500Medium' }}>
+                      {type}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+
+        {/* Genre Filter */}
+        <View className="mb-3">
+          <Text className="text-xs text-gray-600 mb-2" style={{ fontFamily: 'Poppins_500Medium' }}>Genre</Text>
+          <View>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              nestedScrollEnabled={true}
+              contentContainerStyle={{ paddingHorizontal: 1, paddingRight: 10 }}
+            >
+              <View className="flex-row gap-2 ">
+                {['All', 'Rock', 'Jazz', 'Pop', 'Hip-hop', 'Classical', 'Electronic', 'R&B'].map((genre) => (
+                  <TouchableOpacity
+                    key={genre}
+                    onPress={() => setSelectedGenre(genre)}
+                    className={`px-4 py-2 rounded-full ${selectedGenre === genre ? 'bg-[#0D9488]' : 'bg-gray-100'}`}
+                  >
+                    <Text className={`text-xs ${selectedGenre === genre ? 'text-white' : 'text-gray-700'}`} style={{ fontFamily: 'Poppins_500Medium' }}>
+                      {genre}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+
+        {/* Sort and Filter Row */}
+        <View className="flex-row items-center justify-between mt-3">
+          <View className="flex-row items-center gap-2">
+            <Text className="text-xs text-gray-600" style={{ fontFamily: 'Poppins_500Medium' }}>Sort by:</Text>
+            <TouchableOpacity
+              onPress={() => setShowSortModal(true)}
+              className="flex-row items-center gap-1 px-3 py-1.5 bg-gray-100 rounded-lg"
+            >
+              <Text className="text-xs text-gray-700" style={{ fontFamily: 'Poppins_500Medium' }}>{sortBy}</Text>
+              <Ionicons name="chevron-down" size={14} color="#374151" />
+            </TouchableOpacity>
+          </View>
+        
+        </View>
+      </View>
+
+      {/* Sort Modal */}
+      <Modal
+        visible={showSortModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowSortModal(false)}
+      >
+        <TouchableOpacity 
+          className="flex-1 bg-black/50 justify-center items-center"
+          activeOpacity={1}
+          onPress={() => setShowSortModal(false)}
+        >
+          <View className="bg-white rounded-2xl w-4/5 max-w-sm" style={{ marginHorizontal: 20 }}>
+            <View className="border-b border-gray-200 px-6 py-4">
+              <Text className="text-base font-semibold text-gray-800" style={{ fontFamily: 'Poppins_600SemiBold' }}>
+                Sort by
+              </Text>
+            </View>
+            <View className="py-2">
+              {sortOptions.map((option, index) => (
+                <TouchableOpacity
+                  key={option}
+                  onPress={() => {
+                    setSortBy(option);
+                    setShowSortModal(false);
+                  }}
+                  className={`px-6 py-3 flex-row items-center justify-between ${
+                    index !== sortOptions.length - 1 ? 'border-b border-gray-100' : ''
+                  }`}
+                >
+                  <Text 
+                    className={`text-sm ${sortBy === option ? 'text-[#0D9488] font-semibold' : 'text-gray-700'}`}
+                    style={{ fontFamily: sortBy === option ? 'Poppins_600SemiBold' : 'Poppins_400Regular' }}
+                  >
+                    {option}
+                  </Text>
+                  {sortBy === option && (
+                    <Ionicons name="checkmark" size={20} color="#0D9488" />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View className="border-t border-gray-200 px-6 py-3">
+              <TouchableOpacity
+                onPress={() => setShowSortModal(false)}
+                className="py-2 items-center"
+              >
+                <Text className="text-sm text-gray-500" style={{ fontFamily: 'Poppins_500Medium' }}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
       
         {/*Studio/Venue Card*/}
         <View className="flex-1 flex-col bg-white rounded-3xl overflow-hidden" style={{
@@ -36,7 +172,12 @@ export default function findAGigScreen() {
           marginHorizontal: 4,
           marginVertical: 8
         }}>
-          <View className="bg-gray-300 border-gray-100" style={{height: 200}}>
+          <View className="border-gray-100" style={{height: 200}}>
+            <Image 
+              source={{uri: 'https://picsum.photos/400/200?random=4'}} 
+              style={{height: 200, width: '100%'}}
+              resizeMode="cover"
+            />
             <View className="absolute top-3 left-3 rounded-lg px-3 py-1.5" style={{backgroundColor: '#0D9488'}}>
               <Text className="text-white text-[10px] font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>VENUE</Text>
             </View>
@@ -88,9 +229,6 @@ export default function findAGigScreen() {
 
 
 
-
-
-
       {/*Bands Card*/}
         <View className="flex-1 flex-col bg-white rounded-3xl overflow-hidden" 
         style={{
@@ -102,7 +240,12 @@ export default function findAGigScreen() {
           marginHorizontal: 4,
           marginVertical: 8
         }}>
-          <View className="bg-gray-300 border-gray-100" style={{height: 200}}>
+          <View className="border-gray-100" style={{height: 200}}>
+            <Image 
+              source={{uri: 'https://picsum.photos/400/200?random=5'}} 
+              style={{height: 200, width: '100%'}}
+              resizeMode="cover"
+            />
             <View className="absolute top-3 left-3 rounded-lg px-3 py-1.5" style={{backgroundColor: '#0D9488'}}>
               <Text className="text-white text-[10px] font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>MUSIC GROUP</Text>
             </View>
