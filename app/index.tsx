@@ -6,7 +6,7 @@ import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 export default function LoginScreen() {
 
   useEffect(() => {
-    router.replace('/my_studio');
+    router.replace('/ongoing');
   }, []);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
