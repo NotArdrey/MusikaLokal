@@ -99,7 +99,6 @@ export default function HomeScreen() {
                     </View>
                   </View>
 
-                  
                   <View className ="flex-row flex justify-between items-center">
                     <Text className ="px-3 mt-3" numberOfLines={2}    ellipsizeMode="clip" style={{fontFamily: 'Poppins_400Regular', fontSize: 12 }}>Juan Dela Cruz Band</Text>
                   </View>

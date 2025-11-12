@@ -147,10 +147,10 @@ function DrawerContent({ closeDrawer }) {
                 {/* Menu Items. No route yet */}
                 <DrawerMenuItem 
                     icon="check" 
-                    label="To Confirm" 
+                    label="Pending" 
                     onPress={() => {
                         closeDrawer();
-                        router.push('/');
+                        router.push('/pending ');
                     }} 
                 />
                 <DrawerMenuItem 
@@ -158,7 +158,7 @@ function DrawerContent({ closeDrawer }) {
                     label="Upcoming" 
                     onPress={() => {
                         closeDrawer();
-                        router.push('/');
+                        router.push('/upcoming');
                     }} 
                 />
                 <DrawerMenuItem 
@@ -166,7 +166,7 @@ function DrawerContent({ closeDrawer }) {
                     label="Ongoing" 
                     onPress={() => {
                         closeDrawer();
-                        router.push('/');
+                        router.push('/ongoing');
                     }} 
                 />
                 <DrawerMenuItem 

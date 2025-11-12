@@ -14,7 +14,7 @@ export default function ExploreScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false}>
         <View className="pt-10">
-          <Text style ={{fontFamily:'Poppins_600semibold', fontSize: 15 }}>What are you looking for?</Text>
+          <Text style ={{fontFamily:'Poppins_600SemiBold', fontSize: 15 }}>What are you looking for?</Text>
         </View>
         <View className="pt-2 flex flex-col gap-4">
           <TouchableOpacity onPress={() => router.push('/find_talent_and_spaces')}>
@@ -86,7 +86,7 @@ export default function ExploreScreen() {
 
         {/*Title of this section-Studio*/}
         <View className="pt-10">
-          <Text className="" style={{ fontFamily: 'Poppins_600SemiBold' }}>Recommendations</Text>
+          <Text className="" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 17 }}>Recommendations</Text>
         </View>
         {/*studio Sample Card. redirection not yet set*/}
         <View className="pt-2 justify-between items-start gap-3">
