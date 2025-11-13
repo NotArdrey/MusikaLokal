@@ -1,5 +1,6 @@
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, View, TouchableOpacity } from 'react-native';
+import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../components/header';
 import Navbar from '../components/navbar';
 
@@ -13,15 +14,10 @@ export default function OngoingScreen() {
 
     return (
     <View className="flex-1 bg-white px-6">
-      <Header title ="Ongoing"></Header>
-
+      <Header title ="To Review"></Header>
 
 
       <ScrollView showsHorizontalScrollIndicator={false} className ="pb-24">
-
-      <View className="mt-10">
-        <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 18}}>Ongoing Bookings</Text>
-      </View>
         <View className="flex flex-1 flex-col justify-between gap-1 mt-3">
           <View className="flex flex-1 flex-row justify-between items-center px-3 rounded-xl" style={{
             shadowColor: '#000',
@@ -35,7 +31,7 @@ export default function OngoingScreen() {
             minWidth: 100
           }}>
             <View className="flex justify-between gap-2 py-4"> 
-              <Text className="text-green-600"style={{fontFamily: 'Poppins_400Regular', fontSize: 12}}>Active</Text>
+              <Text className="text-green-600"style={{fontFamily: 'Poppins_400Regular', fontSize: 12}}>Completed</Text>
               <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>SoundWave Studio Malolos</Text>
               <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>Sat, Nov 16 - 2:00 PM - 3:00 PM</Text>
             </View>
@@ -70,9 +66,13 @@ export default function OngoingScreen() {
             minWidth: 100
           }}>
             <View className="flex justify-between gap-2"> 
-              <Text className="text-green-600"style={{fontFamily: 'Poppins_400Regular', fontSize: 12}}>Active</Text>
+              <Text className="text-green-600"style={{fontFamily: 'Poppins_400Regular', fontSize: 12}}>Completed</Text>
               <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>Echo Music Hub San Jose</Text>
               <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>Sun, Nov 17 - 4:30 PM - 5:30 PM</Text>
+              <TouchableOpacity className="flex flex-1 flex-row gap-2 rounded-xl bg-gray-200 items-center justify-center px-3 py-1">
+                <Text>Leave a Review</Text>
+                <Ionicons name="star" size={16} color="#FFA500" />
+              </TouchableOpacity>
             </View>
             
             <View className="rounded-xl" style={{
@@ -94,40 +94,7 @@ export default function OngoingScreen() {
           </View>
         </View>
 
-
-      <View>
-        <Text className="pt-6" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 18}}>Before Event</Text>
-      </View>
-
-
-            <View className ="justify-center items-center border border-dashed border-gray-300 rounded-lg p-6 mt-3" style={{minHeight: 150, width: '100%'}}>
-                <TouchableOpacity  className='justify-center items-center'>
-                  <Text className ="text-gray-500" style={{ fontFamily: 'Poppins_400Regular' }}>Tap to capture your proof before the event at the venue</Text>
-                </TouchableOpacity>
-            </View>
-
-      <View>
-        <Text className="pt-6" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 18}}>After Event</Text>
-      </View>
-
-
-            <View className ="justify-center items-center border border-dashed border-gray-300 rounded-lg p-6 mt-3 mb-3" style={{minHeight: 150, width: '100%'}}>
-                <TouchableOpacity className='justify-center items-center'>
-                  <Text className ="text-gray-500" style={{ fontFamily: 'Poppins_400Regular' }}>Tap to capture your proof after the event at the venue</Text>
-                </TouchableOpacity>
-            </View>
-
-
       </ScrollView>
-
-
-
-
-
-
-
-
-
 
 
         <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>

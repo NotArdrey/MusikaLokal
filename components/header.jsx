@@ -81,7 +81,7 @@ export default function Header({title}) {
     </Modal>
 
     {/* Header */}
-    <View className="flex-row bg-white justify-between items-center pt-8 gap-2">
+    <View className="flex-row bg-white justify-between items-center pt-8 gap-2 pb-3">
         {/*back button. Conditional of visibility*/}
         {/*profile icon. Conditional. navigation still not yet set*/}
         <View className="w-12 justify-center items-start">
@@ -109,7 +109,7 @@ export default function Header({title}) {
                 </TouchableOpacity>
             ):addbtnvisible ? (
                 <TouchableOpacity onPress={openDrawer}>
-                    <Ionicons name="add-circle-outline" size={33} color="black" />
+                    <Ionicons name="add-circle-outline" size={30} color="black" />
                 </TouchableOpacity>
             ):null}
 

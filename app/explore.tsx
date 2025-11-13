@@ -9,12 +9,12 @@ export default function ExploreScreen() {
 
   {/*const [email, setEmail] = useState(''); sample*/}
   return (
-    <View className="flex-1 bg-white px-6">
+    <View className="flex-1 bg-white px-6" >
       <Header title ="Explore"/>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView showsVerticalScrollIndicator={false} >
         <View className="pt-10">
-          <Text style ={{fontFamily:'Poppins_600SemiBold', fontSize: 15 }}>What are you looking for?</Text>
+          <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 18}}>What are you looking for?</Text>
         </View>
         <View className="pt-2 flex flex-col gap-4">
           <TouchableOpacity onPress={() => router.push('/find_talent_and_spaces')}>

@@ -9,9 +9,9 @@ export default function myStudioScreen() {
 
     return (
     <View className="flex-1 bg-white px-6">
-      <Header title ="My Studio" ></Header>
+      <Header title ="My Studio" />
 
-      <ScrollView showsHorizontalScrollIndicator ={false} style ={{marginLeft: 20, marginRight: 20, paddingTop: 20}} className="pb-24">
+      <ScrollView showsHorizontalScrollIndicator ={false}  className="pb-24">
         <View className ="flex flex-col rounded-xl gap-2" style={{
             shadowColor: '#000',
             shadowOffset: { width: 0, height: 4 },
@@ -104,53 +104,8 @@ export default function myStudioScreen() {
                     <Text style={{fontFamily: 'Poppins_500Medium', color: '#ffffff'}}>Remove</Text>
                 </TouchableOpacity>
             </View>
-        </View>
 
-        <View className ="flex flex-col rounded-xl gap-2" style={{
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.1,
-            shadowRadius: 6,
-            elevation: 8,
-            marginHorizontal: 4,
-            marginVertical: 8,
-            minHeight: 130,
-            minWidth:100
-        }}>
-            <View className ="rounded-t-xl bg-gray-200" style={{ minHeight: 130, minWidth:100}}>
-                <Image className ="rounded-t-xl "
-                    source={{uri: 'https://images.unsplash.com/photo-1478737270239-2f02b77fc618?w=400&h=130&fit=crop'}} 
-                    style={{ minHeight: 130, minWidth:100}}
-                    resizeMode="cover"
-                />
-            </View>
-            <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>Melodia Production House</Text>
-            </View>
-
-            <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>Modern production studio with mixing and mastering facilities. Complete with MIDI controllers, synthesizers, and audio interfaces.</Text>
-            </View>
-
-            <View className ="border-gray-200 border-t-2 mx-3"></View>
-
-            <View className="px-3 justify-center">
-                <TouchableOpacity className ="rounded-lg bg-teal-600 items-center justify-center" style={{height:30}}>
-                    <Text style={{fontFamily: 'Poppins_500Medium', color: '#ffffff'}}>View Details</Text>
-                </TouchableOpacity>
-            </View>
-
-            <View className="px-3 justify-center">
-                <TouchableOpacity className ="rounded-lg bg-cyan-600 items-center justify-center" style={{height:30}}>
-                    <Text style={{fontFamily: 'Poppins_500Medium', color: '#ffffff'}}>Edit Details</Text>
-                </TouchableOpacity>
-            </View>
-
-            <View className="px-3 justify-center">
-                <TouchableOpacity className ="rounded-lg bg-red-700 items-center justify-center mb-5" style={{height:30}}>
-                    <Text style={{fontFamily: 'Poppins_500Medium', color: '#ffffff'}}>Remove</Text>
-                </TouchableOpacity>
-            </View>
+         
         </View>
 
 
