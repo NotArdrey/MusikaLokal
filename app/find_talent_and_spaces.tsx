@@ -6,7 +6,7 @@ import Navbar from '../components/navbar';
 
 
 
-export default function findAGigScreen() {
+export default function FindAGigScreen() {
     const [selectedType, setSelectedType] = useState('All');
     const [selectedGenre, setSelectedGenre] = useState('All');
     const [sortBy, setSortBy] = useState('Relevance');

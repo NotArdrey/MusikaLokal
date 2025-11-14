@@ -5,8 +5,8 @@ import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function LoginScreen() {
 
-  //  useEffect(() => {
-  //    router.replace('/to_review');
+  // useEffect(() => {
+  //   router.replace('/gig_details');
   // }, []);
 
 
@@ -31,7 +31,7 @@ export default function LoginScreen() {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
-          style={{ fontFamily: 'Poppins_400Regular' }}
+          style={{ fontFamily: 'Poppins_400Regular' , outline: '0'}}
         />
       </View>
 
@@ -44,7 +44,7 @@ export default function LoginScreen() {
           onChangeText={setPassword}
           secureTextEntry={!showPassword}
           autoCapitalize="none"
-          style={{ fontFamily: 'Poppins_400Regular' }}
+          style={{ fontFamily: 'Poppins_400Regular', outline: '0' }}
         />
         <TouchableOpacity 
           className="absolute right-4 top-3.5"

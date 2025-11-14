@@ -5,7 +5,7 @@ import Header from '../components/header';
 import Navbar from '../components/navbar';
 
 
-export default function OngoingScreen() {
+export default function ToReviewScreen() {
 
 
   const [afterImage, setAfterImage] = useState('');
@@ -65,11 +65,13 @@ export default function OngoingScreen() {
             minHeight: 130,
             minWidth: 100
           }}>
+
+            
             <View className="flex justify-between gap-2"> 
               <Text className="text-green-600"style={{fontFamily: 'Poppins_400Regular', fontSize: 12}}>Completed</Text>
               <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>Echo Music Hub San Jose</Text>
               <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>Sun, Nov 17 - 4:30 PM - 5:30 PM</Text>
-              <TouchableOpacity className="flex flex-1 flex-row gap-2 rounded-xl bg-gray-200 items-center justify-center px-3 py-1">
+              <TouchableOpacity className="flex flex-1 flex-row gap-2 rounded-xl bg-gray-200 items-center justify-center px-3 py-1.5">
                 <Text>Leave a Review</Text>
                 <Ionicons name="star" size={16} color="#FFA500" />
               </TouchableOpacity>

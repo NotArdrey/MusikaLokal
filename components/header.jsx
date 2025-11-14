@@ -102,7 +102,7 @@ export default function Header({title}) {
         </View>
 
         <View className="w-12 justify-center items-end">
-            {/*notification icon. Conditional. navigation not yet set*/}
+
             {notifVisible ? (
                 <TouchableOpacity onPress={() => router.push('notifications')}>
                       <MaterialIcons name="notifications-none" size={33} color="black" />

@@ -73,7 +73,7 @@ export default function RegisterScreen() {
           value ={email}
           onChangeText={setEmail}
           keyboardType ="email-address"
-          style={{ fontFamily: 'Poppins_400Regular' }}
+          style={{ fontFamily: 'Poppins_400Regular', outline: '0' }}
         />
       </View>
 
@@ -90,7 +90,7 @@ export default function RegisterScreen() {
           onChangeText ={setPassword}
           secureTextEntry={!showPassword}
           autoCapitalize='none'
-          style={{ fontFamily: 'Poppins_400Regular' }}
+          style={{ fontFamily: 'Poppins_400Regular', outline: '0' }}
         />
 
         <TouchableOpacity 
@@ -114,7 +114,7 @@ export default function RegisterScreen() {
           onChangeText ={setConfirmPassword}
           secureTextEntry={!showConfirmPassword}
           autoCapitalize='none'
-          style={{ fontFamily: 'Poppins_400Regular' }}
+          style={{ fontFamily: 'Poppins_400Regular', outline: '0' }}
         />
 
         <TouchableOpacity 
@@ -141,6 +141,7 @@ export default function RegisterScreen() {
             height: 56,
             color: '#4D998C',
             fontFamily: 'Poppins_400Regular'
+            , outline: '0'
           }}
         >
           <Picker.Item label="Select a role..." value="" color="#9CA3AF" />

@@ -29,8 +29,6 @@ export default function RootLayout() {
     <Stack 
       screenOptions={{ 
         headerShown: false,
-        // Prevent automatic navigation on reload
-        animation: 'none'
       }} 
     />
   );
