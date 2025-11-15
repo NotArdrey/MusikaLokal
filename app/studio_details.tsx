@@ -6,13 +6,13 @@ import Navbar from '../components/navbar';
 
 
 
-export default function GigDetailsScreen() {
+export default function StudioDetailsScreen() {
   const [activeTab, setActiveTab] = useState('About');
 
   return (
     <View className="flex-1 bg-white">
       <View className="px-6">
-        <Header title="Gig Details"></Header>
+        <Header title="Studio Details"></Header>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} className="px-6" contentContainerStyle={{ paddingBottom: 20 }}>
@@ -34,7 +34,7 @@ export default function GigDetailsScreen() {
             >
               <Image
                 className="rounded-xl flex flex-1"
-                source={{uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=130&fit=crop'}}
+                source={{uri: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=400&h=130&fit=crop'}}
                 style={{
                   flex: 1,
                   height: 200,
@@ -44,9 +44,9 @@ export default function GigDetailsScreen() {
               />
             </View>
             
-            <Text className="mt-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Junction 88 Music Bar</Text>
-            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Live Music Venue</Text>
-            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>Plaridel, Bulacan, Philippines</Text>
+            <Text className="mt-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>SoundWave Recording Studio</Text>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Professional Recording Studio</Text>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>Malolos City, Bulacan, Philippines</Text>
           </View>
 
           <View className="flex flex-row gap-5 mt-8 border-b border-gray-300  justify-center">
@@ -54,8 +54,8 @@ export default function GigDetailsScreen() {
               <Text className ="border-b border-gray-300 pb-2" style={{ fontFamily: activeTab === 'About'? 'Poppins_600SemiBold': 'Poppins_500Medium', fontSize: 15 }}>About</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => {setActiveTab('Apply')}}>
-              <Text className ="border-b border-gray-300 pb-2" style={{ fontFamily: activeTab === 'Apply'? 'Poppins_600SemiBold': 'Poppins_500Medium', fontSize: 15  }}>Apply</Text>
+            <TouchableOpacity onPress={() => {setActiveTab('Book')}}>
+              <Text className ="border-b border-gray-300 pb-2" style={{ fontFamily: activeTab === 'Book'? 'Poppins_600SemiBold': 'Poppins_500Medium', fontSize: 15  }}>Book</Text>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => {setActiveTab('Review')}}>
@@ -66,18 +66,18 @@ export default function GigDetailsScreen() {
           {activeTab ==='About'? (
             <View className="flex flex-1 flex-col mt-4">
               <View>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>The Junction 88 Music Bar is a premier live music venue in Plaridel, Bulacan, Philippines, known for its intimate atmosphere and diverse lineup of artists. We offer a full bar, stage lighting, and sound equipment for performers.</Text>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>SoundWave Recording Studio is a professional recording facility located in Malolos City, Bulacan. We offer state-of-the-art equipment including condenser microphones, acoustic treatment, mixing console, and monitoring systems. Perfect for musicians, bands, podcasters, and voice-over artists looking for quality recordings.</Text>
               </View>
 
               <View className='flex flex-row mt-2 gap-4 mt-5'>
                 <View className="justify-start items-center">
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }} >Capacity</Text>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }} >69</Text>
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }} >Size</Text>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }} >30 sqm</Text>
                 </View>
 
                 <View>
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>Services</Text>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>Sound System, Stage Lighting</Text>
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>Equipment</Text>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>Full Recording Suite, Mixing Board</Text>
                 </View>
               </View>
 
@@ -102,7 +102,7 @@ export default function GigDetailsScreen() {
                     >
                       <Image
                         className="rounded-xl"
-                        source={{uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=130&fit=crop'}}
+                        source={{uri: 'https://images.unsplash.com/photo-1519892300165-cb5542fb47c7?w=400&h=130&fit=crop'}}
                         style={{
                           flex: 1,
                           height: 200,
@@ -127,7 +127,7 @@ export default function GigDetailsScreen() {
                     >
                       <Image
                         className="rounded-xl"
-                        source={{uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=130&fit=crop'}}
+                        source={{uri: 'https://images.unsplash.com/photo-1563330232-57114bb0823c?w=400&h=130&fit=crop'}}
                         style={{
                           flex: 1,
                           height: 200,
@@ -152,7 +152,7 @@ export default function GigDetailsScreen() {
                     >
                       <Image
                         className="rounded-xl"
-                        source={{uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=130&fit=crop'}}
+                        source={{uri: 'https://images.unsplash.com/photo-1590602847861-f357a9332bbc?w=400&h=130&fit=crop'}}
                         style={{
                           flex: 1,
                           height: 200,
@@ -165,28 +165,48 @@ export default function GigDetailsScreen() {
               </View>
             </View>
 
-          ): activeTab === 'Apply'? (
+          ): activeTab === 'Book'? (
             <View className="flex flex-1 flex-col mt-4">
               <View>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Message to event owner</Text>
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Booking Information</Text>
               </View>
 
-              <View className="border border-gray-300 rounded-xl px-3 py-2 justify-start items-start mt-3">
-                <TextInput className ="justify-start items-start" placeholder='Enter your message' multiline={true} style={{height: 200, width: '100%', outline: '0', fontFamily: 'Poppins_400Regular', fontSize: 14}}>
-                </TextInput>
-              </View>
-
-              <View className="mt-5">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Upload Sample Video</Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280', marginTop: 4 }}>Share a video of your performance to showcase your talent</Text>
-              </View>
-
-              <View className="justify-center items-center border border-dashed border-gray-300 rounded-xl p-6 mt-3" style={{ minHeight: 150, width: '100%' }}>
-                <TouchableOpacity className="justify-center items-center">
-                  <Ionicons name="cloud-upload-outline" size={48} color="#9CA3AF" />
-                  <Text className="text-gray-500 mt-2" style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Upload Video</Text>
-                  <Text className="text-gray-400 mt-1" style={{ fontFamily: 'Poppins_400Regular', fontSize: 12 }}>MP4, MOV (Max 50MB)</Text>
+              <View className="mt-4">
+                <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Date</Text>
+                <TouchableOpacity className="border border-gray-300 rounded-xl px-3 py-3 mt-2 flex-row items-center justify-between">
+                  <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 14, color: '#9ca3af'}}>Select date</Text>
+                  <Ionicons name="calendar-outline" size={20} color="#9ca3af" />
                 </TouchableOpacity>
+              </View>
+
+              <View className="mt-4">
+                <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Time</Text>
+                <View className="flex flex-row gap-3 mt-2">
+                  <View className="border border-gray-300 rounded-xl px-3 py-3 flex-1">
+                    <TextInput placeholder='Start time' style={{fontFamily: 'Poppins_400Regular', fontSize: 14, outline: '0'}}>
+                    </TextInput>
+                  </View>
+                  <View className="border border-gray-300 rounded-xl px-3 py-3 flex-1">
+                    <TextInput placeholder='End time' style={{fontFamily: 'Poppins_400Regular', fontSize: 14, outline: '0'}}>
+                    </TextInput>
+                  </View>
+                </View>
+              </View>
+
+              <View className="mt-4">
+                <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Number of Hours</Text>
+                <View className="border border-gray-300 rounded-xl px-3 py-3 mt-2">
+                  <TextInput placeholder='Enter number of hours' keyboardType='numeric' style={{fontFamily: 'Poppins_400Regular', fontSize: 14, outline: '0'}}>
+                  </TextInput>
+                </View>
+              </View>
+
+              <View className="mt-4">
+                <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Additional Message</Text>
+                <View className="border border-gray-300 rounded-xl px-3 py-2 justify-start items-start mt-2">
+                  <TextInput className="justify-start items-start" placeholder='Enter your message (optional)' multiline={true} style={{height: 100, width: '100%', outline: '0', fontFamily: 'Poppins_400Regular', fontSize: 14}}>
+                  </TextInput>
+                </View>
               </View>
 
               <TouchableOpacity className="mt-5 rounded-xl" style={{
@@ -198,28 +218,40 @@ export default function GigDetailsScreen() {
                   marginHorizontal: 4,
                   marginVertical: 8,
                 }}>
-
-
-                <View className=" justify-center items-center flex flex-row gap-4 pl-3 bg-gray-200 rounded-xl mt-5">
-                      
-                    <View className="flex flex-col justify-center items-center" style={{width: '40%'}}>
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Contract of the Gig</Text>
-                      <Text className="text-teal-500" style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>View Contract</Text>
-                    </View>
-
-                    <Image
-                        className="rounded-r-xl flex flex-1"
-                        source={{uri: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=400&h=200&fit=crop'}}
-                        style={{
-                          height: 120
-                        }}
-                        resizeMode="contain"
-                      />                  
+                <View className="justify-center items-center flex flex-row gap-4 pl-3 bg-gray-200 rounded-xl">
+                  <View className="flex flex-col justify-center items-center" style={{width: '40%'}}>
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Contract of the Gig</Text>
+                    <Text className="text-teal-500" style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>View Contract</Text>
+                  </View>
+                  <Image
+                    className="rounded-r-xl flex flex-1"
+                    source={{uri: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=400&h=200&fit=crop'}}
+                    style={{
+                      height: 120
+                    }}
+                    resizeMode="contain"
+                  />                  
                 </View>
               </TouchableOpacity>
 
-              <TouchableOpacity className="rounded-xl bg-gray-300 mt-3 justify-center items-center py-3 bg-teal-500">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Submit</Text>
+              <View className="mt-5 bg-gray-100 rounded-xl p-4">
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Booking Summary</Text>
+                <View className="flex flex-row justify-between mt-3">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Hourly Rate</Text>
+                  <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>₱500.00</Text>
+                </View>
+                <View className="flex flex-row justify-between mt-2">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Service Fee</Text>
+                  <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>₱50.00</Text>
+                </View>
+                <View className="border-t border-gray-300 mt-3 pt-3 flex flex-row justify-between">
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Total Cost</Text>
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#14b8a6' }}>₱550.00</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity className="rounded-xl mt-5 justify-center items-center py-3 bg-teal-500">
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: '#fff' }}>Confirm Booking</Text>
               </TouchableOpacity>
             </View>
           ) : activeTab ==="Review" ? (
@@ -309,7 +341,7 @@ export default function GigDetailsScreen() {
 
 
                 <View className="flex-1 mt-2">
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Amazing venue! The sound system was top-notch and the staff was incredibly professional. The crowd was great and we had an unforgettable night performing here. Highly recommend for any musician looking for a quality gig.</Text>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Excellent studio! The acoustic treatment is superb and the equipment is professional-grade. The engineer was very helpful and knowledgeable. We recorded our EP here and the quality exceeded our expectations. Highly recommend for serious recording projects.</Text>
                 </View>
 
 

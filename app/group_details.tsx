@@ -6,13 +6,13 @@ import Navbar from '../components/navbar';
 
 
 
-export default function GigDetailsScreen() {
+export default function GroupDetailsScreen() {
   const [activeTab, setActiveTab] = useState('About');
 
   return (
     <View className="flex-1 bg-white">
       <View className="px-6">
-        <Header title="Gig Details"></Header>
+        <Header title="Group Details"></Header>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} className="px-6" contentContainerStyle={{ paddingBottom: 20 }}>
@@ -162,6 +162,48 @@ export default function GigDetailsScreen() {
                     </View>
                   </View>
                 </ScrollView>
+              </View>
+
+              <View className="mt-5 flex gap-2 border-t border-gray-300 pt-3">
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Completion Rate</Text>
+                <View className="flex flex-row gap-2 items-center">
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 20, color: '#10b981' }}>98%</Text>
+                  <View className="flex-1 h-2 bg-gray-300 rounded-full overflow-hidden">
+                    <View className="h-full bg-green-500 rounded-full" style={{ width: '98%' }} />
+                  </View>
+                </View>
+              </View>
+
+              <View className="mt-5 flex border-t border-gray-300 pt-3">
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Manager</Text>
+                
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-col">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>Jared Cariaso</Text>
+                    <View className="flex-row gap-2 items-center">
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#10b981' }}>98%</Text>
+                      <View className="w-48 h-2 bg-gray-300 rounded-full overflow-hidden">
+                        <View className="h-full bg-green-500 rounded-full" style={{ width: '98%' }} />
+                      </View>
+                    </View>
+
+                    <TouchableOpacity>
+                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#14b8a6', textDecorationLine: 'underline' }}>View Profile</Text>
+                    </TouchableOpacity>
+           
+                  </View>
+
+                  <View className="rounded-2xl overflow-hidden" style={{height: 80, width: 80}}>
+                    <Image
+                      source={{uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'}}
+                      style={{
+                        height: 80,
+                        width: 80,
+                      }}
+                      resizeMode="cover"
+                    />
+                  </View>
+                </View>
               </View>
             </View>
 
