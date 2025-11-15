@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../components/header';
@@ -7,24 +8,14 @@ import Navbar from '../components/navbar';
 
 export default function GigDetailsScreen() {
   const [activeTab, setActiveTab] = useState('About');
-  const [aboutVisible, setAboutVisible] = useState(false);
-  const [applyVisible, setApplyVisible] = useState(false);
-  const [reviewVisible, setReviewVisible] = useState(false);
-
-  const renderTabContent = () => {
-    if (activeTab === 'Apply') {
-      return (
-        <View>
-        </View>
-      )
-    }
-  }
 
   return (
-    <View className="flex-1 bg-white px-6">
-      <Header title="Gig Details"></Header>
+    <View className="flex-1 bg-white">
+      <View className="px-6">
+        <Header title="Gig Details"></Header>
+      </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
+      <ScrollView showsVerticalScrollIndicator={false} className="px-6" contentContainerStyle={{ paddingBottom: 20 }}>
         <View className="flex flex-1 mt-3 flex-col">
           <View className="justify-center items-center gap-1">
             <View
@@ -59,21 +50,21 @@ export default function GigDetailsScreen() {
           </View>
 
           <View className="flex flex-row gap-5 mt-8 border-b border-gray-300  justify-center">
-            <TouchableOpacity onPress={() => {setActiveTab('About'); setAboutVisible(true)}}>
+            <TouchableOpacity onPress={() => {setActiveTab('About')}}>
               <Text className ="border-b border-gray-300 pb-2" style={{ fontFamily: 'Poppins_500Medium', fontSize: 15 }}>About</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => {setActiveTab('Apply'); setApplyVisible(true)}}>
+            <TouchableOpacity onPress={() => {setActiveTab('Apply')}}>
               <Text className ="border-b border-gray-300 pb-2" style={{ fontFamily: 'Poppins_500Medium', fontSize: 15 }}>Apply</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => {setActiveTab('Review'); setReviewVisible(true)}}>
+            <TouchableOpacity onPress={() => {setActiveTab('Review')}}>
               <Text className ="border-b border-gray-300 pb-2" style={{ fontFamily: 'Poppins_500Medium', fontSize: 15 }}>Review</Text>
             </TouchableOpacity>
           </View>
 
-          {aboutVisible ? (
-            <View className="flex flex-1 flex-col mt-3">
+          {activeTab ==='About'? (
+            <View className="flex flex-1 flex-col mt-4">
               <View>
                 <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>The Junction 88 Music Bar is a premier live music venue in Plaridel, Bulacan, Philippines, known for its intimate atmosphere and diverse lineup of artists. We offer a full bar, stage lighting, and sound equipment for performers.</Text>
               </View>
@@ -174,13 +165,13 @@ export default function GigDetailsScreen() {
               </View>
             </View>
 
-          ) : applyVisible ? (
-            <View className="flex flex-1 flex-col mt-3">
+          ): activeTab === 'Apply'? (
+            <View className="flex flex-1 flex-col mt-4">
               <View>
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Message to event owner</Text>
               </View>
 
-              <View className="border border-gray-300 rounded-xl px-3 py-2 justify-start items-start mt-2">
+              <View className="border border-gray-300 rounded-xl px-3 py-2 justify-start items-start mt-3">
                 <TextInput className ="justify-start items-start" placeholder='Enter your message' multiline={true} style={{height: 200, width: '100%', outline: '0', fontFamily: 'Poppins_400Regular', fontSize: 14}}>
                 </TextInput>
               </View>
@@ -196,7 +187,7 @@ export default function GigDetailsScreen() {
                 }}>
 
 
-                <View className=" justify-center items-center flex flex-row gap-4 pl-3 bg-gray-200 rounded-xl">
+                <View className=" justify-center items-center flex flex-row gap-4 pl-3 bg-gray-200 rounded-xl mt-5">
                       
                     <View className="flex flex-col justify-center items-center" style={{width: '40%'}}>
                       <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Contract of the Gig</Text>
@@ -204,13 +195,12 @@ export default function GigDetailsScreen() {
                     </View>
 
                     <Image
-                        className="rounded-r-xl flex-1"
-                        source={{uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=130&fit=crop'}}
+                        className="rounded-r-xl flex flex-1"
+                        source={{uri: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=400&h=200&fit=crop'}}
                         style={{
-                          height: 200,
-                          width: '50%',
+                          height: 120
                         }}
-                        resizeMode="cover"
+                        resizeMode="contain"
                       />                  
                 </View>
               </TouchableOpacity>
@@ -219,30 +209,117 @@ export default function GigDetailsScreen() {
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Submit</Text>
               </TouchableOpacity>
             </View>
-          ) : reviewVisible ? (
-            <View className="flex flex-1 flex-col mt-3">
-              aafafa
+          ) : activeTab ==="Review" ? (
+            <View className="flex flex-1 flex-col mt-4">
+              <View>
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>User Reviews</Text>
+              </View>
+
+              <View className ="justify-center items-center flex flex-row gap-10 mt-4">
+
+                <View className="w-1/4 items-center">
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 32 }}>4.5</Text>
+                  <View className="flex-row">
+                    <Ionicons name="star" size={16} color="#14b8a6" />
+                    <Ionicons name="star" size={16} color="#14b8a6" />
+                    <Ionicons name="star" size={16} color="#14b8a6" />
+                    <Ionicons name="star" size={16} color="#14b8a6" />
+                    <Ionicons name="star-half" size={16} color="#14b8a6" />
+                  </View>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>25 Reviews</Text>
+                </View>
+
+                <View className="flex-1">
+                  <View className="flex flex-row items-center gap-2">
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12 }}>5</Text>
+                    <View className="flex-1 h-3 bg-gray-300 rounded-xl overflow-hidden">
+                      <View className="h-full bg-teal-500 w-full rounded-xl" />
+                    </View>                  
+                  </View>
+
+                  <View className="flex flex-row items-center gap-2">
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12 }}>4</Text>
+                    <View className="flex-1 h-3 bg-gray-300 rounded-xl overflow-hidden">
+                      <View className="h-full bg-teal-500 w-4/5 rounded-xl" />
+                    </View>                  
+                  </View>
+          
+                  <View className="flex flex-row items-center gap-2">
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12 }}>3</Text>
+                    <View className="flex-1 h-3 bg-gray-300 rounded-xl overflow-hidden">
+                      <View className="h-full bg-teal-500 w-3/5 rounded-xl" />
+                    </View>                  
+                  </View>
+
+                  <View className="flex flex-row items-center gap-2">
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12 }}>2</Text>
+                    <View className="flex-1 h-3 bg-gray-300 rounded-xl overflow-hidden">
+                      <View className="h-full bg-teal-500 w-2/5 rounded-xl" />
+                    </View>                  
+                  </View>
+
+                  <View className="flex flex-row items-center gap-2">
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12 }}>1</Text>
+                    <View className="flex-1 h-3 bg-gray-300 rounded-xl overflow-hidden">
+                      <View className="h-full bg-teal-500 w-1/5 rounded-xl" />
+                    </View>                  
+                  </View>
+                </View>
+              </View>
+
+              <View className="mt-5">
+                <View className="flex-row gap-2 items-center">
+                  <View className="rounded-3xl border border-gray-300 overflow-hidden" style={{height: 50, width: 50}}>
+                    <Image
+                      source={{uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'}}
+                      style={{
+                        height: 50,
+                        width: 50,
+                      }}
+                      resizeMode="cover"
+                    />
+                  </View>
+
+                  <View className="flex-col">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Jared Cariaso</Text>
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6b7280' }}>1 month ago</Text>
+                  </View>
+                </View>
+
+                <View className="flex-row mt-2">
+                  <Ionicons name="star" size={16} color="#14b8a6" />
+                  <Ionicons name="star" size={16} color="#14b8a6" />
+                  <Ionicons name="star" size={16} color="#14b8a6" />
+                  <Ionicons name="star" size={16} color="#14b8a6" />
+                  <Ionicons name="star-half" size={16} color="#14b8a6" />
+                </View>
+
+
+                <View className="flex-1 mt-2">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Amazing venue! The sound system was top-notch and the staff was incredibly professional. The crowd was great and we had an unforgettable night performing here. Highly recommend for any musician looking for a quality gig.</Text>
+                </View>
+
+
+                <View className ="flex-row items-center gap-4 mt-3">
+                  <TouchableOpacity className="flex-row items-center gap-1">
+                    <Ionicons name="heart-outline" size={24} color="#262626" />
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: '#262626' }}>8</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="flex-row items-center gap-1">
+                    <Ionicons name="chatbubble-outline" size={22} color="#262626" />
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: '#262626' }}>1</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
             </View>
           ) : null}
 
 
-
-
-
-
-
-
-
-
-
-
         </View>
       </ScrollView>
 
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-        <Navbar/>
-      </View>
+      <Navbar/>
     </View>
   );
 }
