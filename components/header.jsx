@@ -135,7 +135,7 @@ function DrawerContent({ closeDrawer }) {
                         </Text>
                         <TouchableOpacity onPress={() => {
                             closeDrawer();
-                            router.push('/');
+                            router.push('/profile');
                         }}>
                             <Text className="text-[#5E8C87] text-sm font-normal">
                                 View Profile
@@ -174,7 +174,7 @@ function DrawerContent({ closeDrawer }) {
                     label="To Review" 
                     onPress={() => {
                         closeDrawer();
-                        router.push('/');
+                        router.push('/to_review');
                     }} 
                 />
                 <DrawerMenuItem 
