@@ -182,7 +182,7 @@ function DrawerContent({ closeDrawer }) {
                     label="Payments" 
                     onPress={() => {
                         closeDrawer();
-                        router.push('/');
+                        router.push('/wallet');
                     }} 
                 />
                 <DrawerMenuItem 
@@ -190,7 +190,7 @@ function DrawerContent({ closeDrawer }) {
                     label="Settings" 
                     onPress={() => {
                         closeDrawer();
-                        router.push('/');
+                        router.push('/settings');
                     }} 
                 />
 

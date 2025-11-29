@@ -2,7 +2,7 @@ import React from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../components/header';
 import Navbar from '../components/navbar';
-
+import { router } from 'expo-router';
 
 
 export default function myStudioScreen() {
@@ -41,7 +41,7 @@ export default function myStudioScreen() {
             <View className ="border-gray-200 border-t-2 mx-3"></View>
 
             <View className="px-3 justify-center">
-                <TouchableOpacity className ="rounded-lg bg-teal-600 items-center justify-center" style={{height:30}}>
+                <TouchableOpacity className ="rounded-lg bg-teal-600 items-center justify-center" style={{height:30}} onPress={()=> router.push('/edit_gig')}>
                     <Text style={{fontFamily: 'Poppins_500Medium', color: '#ffffff'}}>View Details</Text>
                 </TouchableOpacity>
             </View>
