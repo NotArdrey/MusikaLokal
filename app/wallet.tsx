@@ -44,10 +44,9 @@ export default function WalletScreen() {
         </View>
 
         <TouchableOpacity 
-          className="mt-6 rounded-lg items-center justify-center py-3"
-          style={{ backgroundColor: '#00CEC9' }}
+          className="mt-6 rounded-xl bg-teal-500 items-center justify-center py-3"
         >
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#FFF' }}>
+          <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>
             Withdraw
           </Text>
         </TouchableOpacity>

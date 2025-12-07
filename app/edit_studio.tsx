@@ -179,11 +179,10 @@ export default function EditStudioScreen() {
           </View>
 
           <TouchableOpacity 
-            className="rounded-lg items-center justify-center py-3 mb-6"
-            style={{ backgroundColor: '#00CEC9' }}
+            className="rounded-xl bg-teal-500 items-center justify-center py-3 mb-6"
             onPress={() => router.back()}
           >
-            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: '#FFF' }}>
+            <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>
               Save Studio Profile
             </Text>
           </TouchableOpacity>

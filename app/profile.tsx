@@ -13,7 +13,7 @@ export default function ProfileScreen() {
     <View className="flex-1 bg-white px-6">
       <Header title="My Profile"></Header>
 
-      <View className="flex-row justify-between gap-5 pt-5">
+      <View className="flex-row flex justify-center gap-5 pt-5 items-center">
         <View style={{ width: 96, height: 96, borderRadius: 48, overflow: 'hidden', backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}>
           <Image
             source={{ uri: 'https://via.placeholder.com/150' }}
@@ -21,14 +21,13 @@ export default function ProfileScreen() {
             resizeMode="cover"
           />
         </View>
-        <View className="flex-col flex-1">
-
+        <View className="flex-col justify-center items-start" >
 
           <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 18 }}>Jared Lopez Bagtas</Text>
           <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Drummer</Text>
           <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Rock, Indie, Folk</Text>
           {showEdit ? (
-            <TouchableOpacity onPress={() => router.push('/edit_profile')} className="rounded-xl border border-gray-300 items-center justify-center py-2 px-3 flex-row gap-2 mt-2" style={{ width: '40%' }}>
+            <TouchableOpacity onPress={() => router.push('/edit_profile')} className="rounded-xl border border-gray-300 items-center justify-center py-2 px-3 flex-row gap-2 mt-2" style={{ width: '100%' }}>
               <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Edit Profile</Text>
               <Ionicons name="pencil" size={16} color="#000" />
             </TouchableOpacity>

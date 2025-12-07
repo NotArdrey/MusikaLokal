@@ -251,7 +251,7 @@ export default function StudioDetailsScreen() {
               </View>
 
               <TouchableOpacity className="rounded-xl mt-5 justify-center items-center py-3 bg-teal-500">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: '#fff' }}>Confirm Booking</Text>
+                <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Confirm Booking</Text>
               </TouchableOpacity>
             </View>
           ) : activeTab ==="Review" ? (

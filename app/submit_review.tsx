@@ -48,8 +48,8 @@ export default function ToReviewScreen() {
           <TextInput className="justify-start rounded-xl border border-gray-300 py-5 px-5"
           placeholder='Enter Your Feedback!' style={{height:200, width: '100%'}} multiline={true}>
           </TextInput>
-          <TouchableOpacity className ="mt-5 rounded-lg bg-cyan-200 px-5 py-5 items-center" style ={{width: 300}}>
-            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Submit</Text>
+          <TouchableOpacity className ="mt-5 rounded-xl bg-teal-500 px-5 py-5 items-center" style ={{width: 300}}>
+            <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Submit</Text>
           </TouchableOpacity>
       </View>
         <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>

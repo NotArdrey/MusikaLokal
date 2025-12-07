@@ -160,10 +160,10 @@ export default function EditProfileScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity 
-              className="flex-1 bg-blue-500 rounded-xl items-center justify-center py-3"
+              className="flex-1 bg-teal-500 rounded-xl items-center justify-center py-3"
               onPress={handleSave}
             >
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: 'white' }}>Save Changes</Text>
+              <Text className="text-white" style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Save Changes</Text>
             </TouchableOpacity>
           </View>
         </View>

@@ -33,8 +33,8 @@ export default function PendingScreen() {
             <View className="flex justify-between gap-2 py-4"> 
               <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>SoundWave Studio Malolos</Text>
               <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>Sat, Nov 16 - 2:00 PM - 3:00 PM</Text>
-              <TouchableOpacity className="bg-green-600 rounded-lg px-4 py-2 flex-1 flex-row gap-1 justify-center items-center"  onPress={()=> router.push('/submit_review')}>
-                <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: '#fff'}}>Leave Review</Text>
+              <TouchableOpacity className="bg-teal-500 rounded-xl px-4 py-2 flex-1 flex-row gap-1 justify-center items-center"  onPress={()=> router.push('/submit_review')}>
+                <Text className="text-white" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 12}}>Leave Review</Text>
               </TouchableOpacity>
             </View>
             
@@ -70,8 +70,8 @@ export default function PendingScreen() {
             <View className="flex justify-between gap-2 py-4"> 
               <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>Echo Music Hub San Jose</Text>
               <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>Sun, Nov 17 - 4:30 PM - 5:30 PM</Text>
-              <TouchableOpacity className="bg-green-600 rounded-lg px-4 py-2 flex-1 flex-row gap-1 justify-center items-center"  onPress={()=> router.push('/submit_review')}>
-                <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: '#fff'}}>Leave Review</Text>
+              <TouchableOpacity className="bg-teal-500 rounded-xl px-4 py-2 flex-1 flex-row gap-1 justify-center items-center"  onPress={()=> router.push('/submit_review')}>
+                <Text className="text-white" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 12}}>Leave Review</Text>
               </TouchableOpacity>
             </View>
             

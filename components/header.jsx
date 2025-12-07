@@ -91,7 +91,11 @@ export default function Header({title}) {
             </TouchableOpacity>
         ):profileVisible ? (
             <TouchableOpacity onPress={openDrawer}>
-                <FontAwesome name="user-circle" size={28} color="black" />
+                <Image 
+                    source={{ uri: 'https://i.pravatar.cc/28' }} 
+                    className="rounded-full"
+                    style={{ height: 40, width: 40 }}
+                />
             </TouchableOpacity>
         ):null}
         </View>
@@ -126,8 +130,9 @@ function DrawerContent({ closeDrawer }) {
             <View className="pt-12 px-4">
                 <View className="flex-row items-center pb-6 border-b border-gray-200 mb-4">
                     <Image 
-                        source={{ uri: 'https://via.placeholder.com/60' }} 
-                        className="rounded-full border h-[60px] w-[60px]"
+                        source={{ uri: 'https://i.pravatar.cc/60' }} 
+                        className="rounded-full"
+                        style={{ height: 60, width: 60 }}
                     />
                     <View className="ml-3 flex-1">
                         <Text className="text-lg font-semibold">
