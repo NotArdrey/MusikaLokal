@@ -6,7 +6,7 @@ import Navbar from '../components/navbar';
 
 
 
-export default function findAGigScreen() {
+export default function FindAGigScreen() {
     const [selectedType, setSelectedType] = useState('All');
     const [selectedGenre, setSelectedGenre] = useState('All');
     const [sortBy, setSortBy] = useState('Relevance');
@@ -222,7 +222,7 @@ export default function findAGigScreen() {
 
           <View className="flex-1  mt-5 mb-5 mx-5">
             <TouchableOpacity className =" rounded-xl justify-center items-center bg-[#12D4B5] shadow" style={{height:40}}>
-              <Text style={{ fontFamily: 'Poppins_600semibold'}}>Apply to Play</Text>
+              <Text className ="text-white" style={{ fontFamily: 'Poppins_600SemiBold'}}>Apply to Play</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -286,11 +286,13 @@ export default function findAGigScreen() {
 
           <View className="flex-1  mt-5 mb-5 mx-5">
             <TouchableOpacity className =" rounded-xl justify-center items-center bg-[#12D4B5] shadow" style={{height:40}}>
-              <Text style={{ fontFamily: 'Poppins_600semibold'}}>Apply to Play</Text>
+              <Text className ="text-white" style={{ fontFamily: 'Poppins_600semibold'}}>Apply to Play</Text>
             </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
+
+
 
 
       <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>

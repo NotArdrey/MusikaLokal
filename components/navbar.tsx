@@ -7,12 +7,14 @@ import { Text, TouchableOpacity, View } from 'react-native';
 
 export default function Navbar() {
     const pathname = usePathname();
-    let activeTab = 'manage'; 
+    let activeTab = ''; 
 
     if (pathname.includes('explore')) {
-    activeTab = 'explore';
+        activeTab = 'explore';
     } else if (pathname.includes('home')) {
-    activeTab = 'home';
+        activeTab = 'home';
+    } else if (pathname.includes('my_studio') || pathname.includes('my_gig') || pathname.includes('my_group')) {
+        activeTab = 'manage';
     }
     
     return (

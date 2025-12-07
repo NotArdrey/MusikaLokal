@@ -99,17 +99,6 @@ export default function UpcomingScreen() {
 
         </View>
       </ScrollView>
-
-
-
-
-
-
-
-
-
-
-
         <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
               <Navbar/>
         </View>

@@ -1,23 +1,23 @@
-import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../components/header';
 import Navbar from '../components/navbar';
+import { router, usePathname } from "expo-router";
 
 
-export default function OngoingScreen() {
 
 
-  const [afterImage, setAfterImage] = useState('');
-  const [beforeImage, setBeforeImage] = useState('');
-
+export default function PendingScreen() {
 
     return (
     <View className="flex-1 bg-white px-6">
-      <Header title ="To Review"></Header>
+      <Header title ="Pendings"></Header>
 
+      <View className="mt-10">
+        <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 18}}>To Review</Text>
+      </View>
 
-      <ScrollView showsHorizontalScrollIndicator={false} className ="pb-24">
+      <ScrollView showsHorizontalScrollIndicator={false}>
         <View className="flex flex-1 flex-col justify-between gap-1 mt-3">
           <View className="flex flex-1 flex-row justify-between items-center px-3 rounded-xl" style={{
             shadowColor: '#000',
@@ -31,9 +31,11 @@ export default function OngoingScreen() {
             minWidth: 100
           }}>
             <View className="flex justify-between gap-2 py-4"> 
-              <Text className="text-green-600"style={{fontFamily: 'Poppins_400Regular', fontSize: 12}}>Completed</Text>
               <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>SoundWave Studio Malolos</Text>
               <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>Sat, Nov 16 - 2:00 PM - 3:00 PM</Text>
+              <TouchableOpacity className="bg-teal-500 rounded-xl px-4 py-2 flex-1 flex-row gap-1 justify-center items-center"  onPress={()=> router.push('/submit_review')}>
+                <Text className="text-white" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 12}}>Leave Review</Text>
+              </TouchableOpacity>
             </View>
             
             <View className="rounded-xl" style={{
@@ -65,13 +67,11 @@ export default function OngoingScreen() {
             minHeight: 130,
             minWidth: 100
           }}>
-            <View className="flex justify-between gap-2"> 
-              <Text className="text-green-600"style={{fontFamily: 'Poppins_400Regular', fontSize: 12}}>Completed</Text>
+            <View className="flex justify-between gap-2 py-4"> 
               <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>Echo Music Hub San Jose</Text>
               <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>Sun, Nov 17 - 4:30 PM - 5:30 PM</Text>
-              <TouchableOpacity className="flex flex-1 flex-row gap-2 rounded-xl bg-gray-200 items-center justify-center px-3 py-1">
-                <Text>Leave a Review</Text>
-                <Ionicons name="star" size={16} color="#FFA500" />
+              <TouchableOpacity className="bg-teal-500 rounded-xl px-4 py-2 flex-1 flex-row gap-1 justify-center items-center"  onPress={()=> router.push('/submit_review')}>
+                <Text className="text-white" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 12}}>Leave Review</Text>
               </TouchableOpacity>
             </View>
             
@@ -92,9 +92,18 @@ export default function OngoingScreen() {
               />
             </View>  
           </View>
-        </View>
 
+        </View>
       </ScrollView>
+
+
+
+
+
+
+
+
+
 
 
         <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>

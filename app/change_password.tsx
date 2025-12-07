@@ -89,7 +89,7 @@ export default function ChangePasswordScreen() {
         </View>
 
         <View className ="pt-3">
-            <TouchableOpacity className ="border border-black rounded-lg pt-4 pb-4 justify-center items-center bg-blue-600"
+            <TouchableOpacity className ="border border-black rounded-xl bg-teal-500 pt-4 pb-4 justify-center items-center"
             onPress={() => router.push('./')}>
                 <Text className ="text-white" style={{ fontFamily: 'Poppins_400Regular' }}>Submit</Text>
             </TouchableOpacity>     

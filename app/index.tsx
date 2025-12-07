@@ -1,12 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Image, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function LoginScreen() {
 
-  //  useEffect(() => {
-  //    router.replace('/to_review');
+  // useEffect(() => {
+  //   router.replace('/gig_details');
   // }, []);
 
 
@@ -17,9 +17,11 @@ export default function LoginScreen() {
   return (
     <View className="flex-1 bg-white px-6 justify-center">
       <View className="items-center mb-16">
-        <View className="w-48 h-24 bg-gray-100 rounded-lg items-center justify-center">
-          <Text className="text-gray-400 text-sm" style={{ fontFamily: 'Poppins_400Regular' }}>Logo Space</Text>
-        </View>
+        <Image 
+          source={require('../assets/images/Musika-lokal-logo.png')} 
+          style={{ width: 400, height: 200 }}
+          resizeMode="contain"
+        />
       </View>
       
       <View className="mb-4">
@@ -31,7 +33,7 @@ export default function LoginScreen() {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
-          style={{ fontFamily: 'Poppins_400Regular' }}
+          style={{ fontFamily: 'Poppins_400Regular' , outline: '0'}}
         />
       </View>
 
@@ -44,7 +46,7 @@ export default function LoginScreen() {
           onChangeText={setPassword}
           secureTextEntry={!showPassword}
           autoCapitalize="none"
-          style={{ fontFamily: 'Poppins_400Regular' }}
+          style={{ fontFamily: 'Poppins_400Regular', outline: '0' }}
         />
         <TouchableOpacity 
           className="absolute right-4 top-3.5"
@@ -63,7 +65,7 @@ export default function LoginScreen() {
         <Text className="text-teal-500 text-sm" style={{ fontFamily: 'Poppins_400Regular' }}>Forget Password</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={()=> router.push('home' as any)}className="bg-teal-500 rounded-lg py-4 mb-4">
+      <TouchableOpacity onPress={()=> router.push('home' as any)}className="bg-teal-500 rounded-xl py-4 mb-4">
         <Text className="text-white text-center text-base font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Login</Text>
       </TouchableOpacity>
   

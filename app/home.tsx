@@ -29,7 +29,7 @@ export default function HomeScreen() {
                 minHeight: 100,
                 minWidth:200
               }}>
-                <TouchableOpacity className="flex-col items-start justify-between"  onPress={() => router.push('/')}>
+                <TouchableOpacity className="flex-col items-start justify-between"  onPress={() => router.push('/gig_details')}>
 
                   <View style={{height: 150, width:200}}>
                     <Image 
@@ -85,7 +85,7 @@ export default function HomeScreen() {
                 minHeight: 100,
                 minWidth:200
               }}>
-                <TouchableOpacity className="flex-col items-start justify-between"  onPress={() => router.push('/')}>
+                <TouchableOpacity className="flex-col items-start justify-between"  onPress={() => router.push('/group_details')}>
 
                   <View style={{height: 150, width:200}}>
                     <Image 
@@ -139,7 +139,7 @@ export default function HomeScreen() {
                 minHeight: 100,
                 minWidth:200
               }}>
-                <TouchableOpacity className="flex-col items-start justify-between"  onPress={() => router.push('/')}>
+                <TouchableOpacity className="flex-col items-start justify-between"  onPress={() => router.push('/studio_details')}>
 
                   <View style={{height: 150, width:200}}>
                     <Image 
