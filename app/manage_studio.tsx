@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../components/header';
 import Navbar from '../components/navbar';
 
@@ -168,91 +168,147 @@ export default function StudioDetailsScreen() {
           ): activeTab === 'Bookings'? (
             <View className="flex flex-1 flex-col mt-4">
               <View>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Booking Information</Text>
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Booking Requests</Text>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280', marginTop: 4 }}>Review and manage booking requests for your studio</Text>
               </View>
 
-              <View className="mt-4">
-                <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Date</Text>
-                <TouchableOpacity className="border border-gray-300 rounded-xl px-3 py-3 mt-2 flex-row items-center justify-between">
-                  <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 14, color: '#9ca3af'}}>Select date</Text>
-                  <Ionicons name="calendar-outline" size={20} color="#9ca3af" />
-                </TouchableOpacity>
-              </View>
-
-              <View className="mt-4">
-                <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Time</Text>
-                <View className="flex flex-row gap-3 mt-2">
-                  <View className="border border-gray-300 rounded-xl px-3 py-3 flex-1">
-                    <TextInput placeholder='Start time' style={{fontFamily: 'Poppins_400Regular', fontSize: 14, outline: '0'}}>
-                    </TextInput>
+              {/* Booking Request 1 */}
+              <View className="border border-gray-300 rounded-xl p-4 mt-4">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-3 flex-1">
+                    <View className="rounded-full border border-gray-300 overflow-hidden" style={{height: 60, width: 60}}>
+                      <Image
+                        source={{uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'}}
+                        style={{ height: 60, width: 60 }}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Marcus Rivera</Text>
+                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280' }}>Solo Artist • Singer-Songwriter</Text>
+                      <View className="flex-row items-center mt-1">
+                        <Ionicons name="calendar-outline" size={14} color="#14b8a6" />
+                        <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, marginLeft: 4 }}>Dec 15, 2025 • 2:00 PM - 6:00 PM</Text>
+                      </View>
+                    </View>
                   </View>
-                  <View className="border border-gray-300 rounded-xl px-3 py-3 flex-1">
-                    <TextInput placeholder='End time' style={{fontFamily: 'Poppins_400Regular', fontSize: 14, outline: '0'}}>
-                    </TextInput>
+                </View>
+                
+                <View className="mt-3 bg-gray-100 rounded-lg p-3">
+                  <View className="flex-row justify-between">
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151' }}>Duration: 4 hours</Text>
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#14b8a6' }}>₱2,000.00</Text>
                   </View>
                 </View>
-              </View>
 
-              <View className="mt-4">
-                <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Number of Hours</Text>
-                <View className="border border-gray-300 rounded-xl px-3 py-3 mt-2">
-                  <TextInput placeholder='Enter number of hours' keyboardType='numeric' style={{fontFamily: 'Poppins_400Regular', fontSize: 14, outline: '0'}}>
-                  </TextInput>
+                <View className="mt-3">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151' }}>"I'd like to record my upcoming EP. I have 5 songs ready and need professional mixing as well."</Text>
+                </View>
+
+                <View className="flex-row gap-2 mt-3">
+                  <TouchableOpacity className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' }}>Accept</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#374151' }}>Decline</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="border border-gray-300 rounded-lg px-3 items-center justify-center">
+                    <Ionicons name="chatbubble-outline" size={20} color="#374151" />
+                  </TouchableOpacity>
                 </View>
               </View>
 
-              <View className="mt-4">
-                <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Additional Message</Text>
-                <View className="border border-gray-300 rounded-xl px-3 py-2 justify-start items-start mt-2">
-                  <TextInput className="justify-start items-start" placeholder='Enter your message (optional)' multiline={true} style={{height: 100, width: '100%', outline: '0', fontFamily: 'Poppins_400Regular', fontSize: 14}}>
-                  </TextInput>
-                </View>
-              </View>
-
-              <TouchableOpacity className="mt-5 rounded-xl" style={{
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.1,
-                  shadowRadius: 6,
-                  elevation: 8,
-                  marginHorizontal: 4,
-                  marginVertical: 8,
-                }}>
-                <View className="justify-center items-center flex flex-row gap-4 pl-3 bg-gray-200 rounded-xl">
-                  <View className="flex flex-col justify-center items-center" style={{width: '40%'}}>
-                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Contract of the Gig</Text>
-                    <Text className="text-teal-500" style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>View Contract</Text>
+              {/* Booking Request 2 */}
+              <View className="border border-gray-300 rounded-xl p-4 mt-3">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-3 flex-1">
+                    <View className="rounded-full border border-gray-300 overflow-hidden" style={{height: 60, width: 60}}>
+                      <Image
+                        source={{uri: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop'}}
+                        style={{ height: 60, width: 60 }}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>The Midnight Echoes</Text>
+                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280' }}>Band • Indie Rock • 4 members</Text>
+                      <View className="flex-row items-center mt-1">
+                        <Ionicons name="calendar-outline" size={14} color="#14b8a6" />
+                        <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, marginLeft: 4 }}>Dec 18, 2025 • 10:00 AM - 4:00 PM</Text>
+                      </View>
+                    </View>
                   </View>
-                  <Image
-                    className="rounded-r-xl flex flex-1"
-                    source={{uri: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=400&h=200&fit=crop'}}
-                    style={{
-                      height: 120
-                    }}
-                    resizeMode="contain"
-                  />                  
                 </View>
-              </TouchableOpacity>
+                
+                <View className="mt-3 bg-gray-100 rounded-lg p-3">
+                  <View className="flex-row justify-between">
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151' }}>Duration: 6 hours</Text>
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#14b8a6' }}>₱3,000.00</Text>
+                  </View>
+                </View>
 
-              <View className="mt-5 bg-gray-100 rounded-xl p-4">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Booking Summary</Text>
-                <View className="flex flex-row justify-between mt-3">
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Hourly Rate</Text>
-                  <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>₱500.00</Text>
+                <View className="mt-3">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151' }}>"We're recording our debut single. We'll bring our own instruments but will need the full recording suite and mixing services."</Text>
                 </View>
-                <View className="flex flex-row justify-between mt-2">
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Service Fee</Text>
-                  <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>₱50.00</Text>
-                </View>
-                <View className="border-t border-gray-300 mt-3 pt-3 flex flex-row justify-between">
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Total Cost</Text>
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#14b8a6' }}>₱550.00</Text>
+
+                <View className="flex-row gap-2 mt-3">
+                  <TouchableOpacity className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' }}>Accept</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#374151' }}>Decline</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="border border-gray-300 rounded-lg px-3 items-center justify-center">
+                    <Ionicons name="chatbubble-outline" size={20} color="#374151" />
+                  </TouchableOpacity>
                 </View>
               </View>
 
-              <TouchableOpacity className="rounded-xl mt-5 justify-center items-center py-3 bg-teal-500">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: '#fff' }}>Confirm Booking</Text>
-              </TouchableOpacity>
+              {/* Booking Request 3 */}
+              <View className="border border-gray-300 rounded-xl p-4 mt-3">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-3 flex-1">
+                    <View className="rounded-full border border-gray-300 overflow-hidden" style={{height: 60, width: 60}}>
+                      <Image
+                        source={{uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop'}}
+                        style={{ height: 60, width: 60 }}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>DJ Beats Production</Text>
+                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280' }}>Producer • Electronic Music</Text>
+                      <View className="flex-row items-center mt-1">
+                        <Ionicons name="calendar-outline" size={14} color="#14b8a6" />
+                        <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, marginLeft: 4 }}>Dec 20, 2025 • 8:00 PM - 12:00 AM</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+                
+                <View className="mt-3 bg-gray-100 rounded-lg p-3">
+                  <View className="flex-row justify-between">
+                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151' }}>Duration: 4 hours</Text>
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#14b8a6' }}>₱2,000.00</Text>
+                  </View>
+                </View>
+
+                <View className="mt-3">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151' }}>"Looking to use your mixing board for mastering my latest tracks. Will need access to monitoring systems."</Text>
+                </View>
+
+                <View className="flex-row gap-2 mt-3">
+                  <TouchableOpacity className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' }}>Accept</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#374151' }}>Decline</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="border border-gray-300 rounded-lg px-3 items-center justify-center">
+                    <Ionicons name="chatbubble-outline" size={20} color="#374151" />
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
           ) : activeTab ==="Review" ? (
             <View className="flex flex-1 flex-col mt-4">

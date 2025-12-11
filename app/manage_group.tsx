@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../components/header';
 import Navbar from '../components/navbar';
 
@@ -210,59 +210,159 @@ export default function GroupDetailsScreen() {
           ): activeTab === 'Gigs'? (
             <View className="flex flex-1 flex-col mt-4">
               <View>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Message to event owner</Text>
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Gig Invitations</Text>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280', marginTop: 4 }}>Venues and event organizers inviting your group to perform</Text>
               </View>
 
-              <View className="border border-gray-300 rounded-xl px-3 py-2 justify-start items-start mt-3">
-                <TextInput className ="justify-start items-start" placeholder='Enter your message' multiline={true} style={{height: 200, width: '100%', outline: '0', fontFamily: 'Poppins_400Regular', fontSize: 14}}>
-                </TextInput>
-              </View>
-
-              <View className="mt-5">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Upload Sample Video</Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280', marginTop: 4 }}>Share a video of your performance to showcase your talent</Text>
-              </View>
-
-              <View className="justify-center items-center border border-dashed border-gray-300 rounded-xl p-6 mt-3" style={{ minHeight: 150, width: '100%' }}>
-                <TouchableOpacity className="justify-center items-center">
-                  <Ionicons name="cloud-upload-outline" size={48} color="#9CA3AF" />
-                  <Text className="text-gray-500 mt-2" style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}>Upload Video</Text>
-                  <Text className="text-gray-400 mt-1" style={{ fontFamily: 'Poppins_400Regular', fontSize: 12 }}>MP4, MOV (Max 50MB)</Text>
-                </TouchableOpacity>
-              </View>
-
-              <TouchableOpacity className="mt-5 rounded-xl" style={{
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.1,
-                  shadowRadius: 6,
-                  elevation: 8,
-                  marginHorizontal: 4,
-                  marginVertical: 8,
-                }}>
-
-
-                <View className=" justify-center items-center flex flex-row gap-4 pl-3 bg-gray-200 rounded-xl mt-5">
-                      
-                    <View className="flex flex-col justify-center items-center" style={{width: '40%'}}>
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Contract of the Gig</Text>
-                      <Text className="text-teal-500" style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>View Contract</Text>
+              {/* Invitation Card 1 */}
+              <View className="border border-gray-300 rounded-xl p-4 mt-4">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-3 flex-1">
+                    <View className="rounded-xl border border-gray-300 overflow-hidden" style={{height: 60, width: 60}}>
+                      <Image
+                        source={{uri: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100&h=100&fit=crop'}}
+                        style={{ height: 60, width: 60 }}
+                        resizeMode="cover"
+                      />
                     </View>
-
-                    <Image
-                        className="rounded-r-xl flex flex-1"
-                        source={{uri: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=400&h=200&fit=crop'}}
-                        style={{
-                          height: 120
-                        }}
-                        resizeMode="contain"
-                      />                  
+                    <View className="flex-1">
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>The Blue Note Bar</Text>
+                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280' }}>Live Music Venue • Makati City</Text>
+                      <View className="flex-row items-center mt-1">
+                        <Ionicons name="star" size={14} color="#14b8a6" />
+                        <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, marginLeft: 4 }}>4.9 (156 reviews)</Text>
+                      </View>
+                    </View>
+                  </View>
                 </View>
-              </TouchableOpacity>
 
-              <TouchableOpacity className="rounded-xl bg-gray-300 mt-3 justify-center items-center py-3 bg-teal-500">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Submit</Text>
-              </TouchableOpacity>
+                <View className="mt-3 bg-teal-50 rounded-lg p-3">
+                  <View className="flex-row items-center gap-2">
+                    <Ionicons name="calendar" size={16} color="#14b8a6" />
+                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: '#14b8a6' }}>Dec 22, 2025 • 8:00 PM - 11:00 PM</Text>
+                  </View>
+                  <View className="flex-row items-center gap-2 mt-1">
+                    <Ionicons name="cash-outline" size={16} color="#14b8a6" />
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#14b8a6' }}>₱8,000.00</Text>
+                  </View>
+                </View>
+                
+                <View className="mt-3">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151' }}>"We loved your performance at our sister venue! Would you be interested in a 3-hour set for our Christmas event? We'll provide all sound equipment."</Text>
+                </View>
+
+                <View className="flex-row gap-2 mt-3">
+                  <TouchableOpacity className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' }}>Accept</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#374151' }}>Decline</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="border border-gray-300 rounded-lg px-3 items-center justify-center">
+                    <Ionicons name="eye-outline" size={20} color="#374151" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Invitation Card 2 */}
+              <View className="border border-gray-300 rounded-xl p-4 mt-3">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-3 flex-1">
+                    <View className="rounded-xl border border-gray-300 overflow-hidden" style={{height: 60, width: 60}}>
+                      <Image
+                        source={{uri: 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=100&h=100&fit=crop'}}
+                        style={{ height: 60, width: 60 }}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Sunset Beach Resort</Text>
+                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280' }}>Resort • Batangas</Text>
+                      <View className="flex-row items-center mt-1">
+                        <Ionicons name="star" size={14} color="#14b8a6" />
+                        <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, marginLeft: 4 }}>4.7 (89 reviews)</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+
+                <View className="mt-3 bg-teal-50 rounded-lg p-3">
+                  <View className="flex-row items-center gap-2">
+                    <Ionicons name="calendar" size={16} color="#14b8a6" />
+                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: '#14b8a6' }}>Dec 31, 2025 • 9:00 PM - 1:00 AM</Text>
+                  </View>
+                  <View className="flex-row items-center gap-2 mt-1">
+                    <Ionicons name="cash-outline" size={16} color="#14b8a6" />
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#14b8a6' }}>₱15,000.00</Text>
+                  </View>
+                </View>
+                
+                <View className="mt-3">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151' }}>"We're hosting a New Year's Eve countdown party and would love to have your band headline the event. Accommodation and meals included!"</Text>
+                </View>
+
+                <View className="flex-row gap-2 mt-3">
+                  <TouchableOpacity className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' }}>Accept</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#374151' }}>Decline</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="border border-gray-300 rounded-lg px-3 items-center justify-center">
+                    <Ionicons name="eye-outline" size={20} color="#374151" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Invitation Card 3 */}
+              <View className="border border-gray-300 rounded-xl p-4 mt-3">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-3 flex-1">
+                    <View className="rounded-xl border border-gray-300 overflow-hidden" style={{height: 60, width: 60}}>
+                      <Image
+                        source={{uri: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=100&h=100&fit=crop'}}
+                        style={{ height: 60, width: 60 }}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <View className="flex-1">
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Corporate Events PH</Text>
+                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6b7280' }}>Event Organizer • BGC, Taguig</Text>
+                      <View className="flex-row items-center mt-1">
+                        <Ionicons name="star" size={14} color="#14b8a6" />
+                        <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, marginLeft: 4 }}>4.8 (67 reviews)</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+
+                <View className="mt-3 bg-teal-50 rounded-lg p-3">
+                  <View className="flex-row items-center gap-2">
+                    <Ionicons name="calendar" size={16} color="#14b8a6" />
+                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: '#14b8a6' }}>Jan 15, 2026 • 6:00 PM - 9:00 PM</Text>
+                  </View>
+                  <View className="flex-row items-center gap-2 mt-1">
+                    <Ionicons name="cash-outline" size={16} color="#14b8a6" />
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#14b8a6' }}>₱12,000.00</Text>
+                  </View>
+                </View>
+                
+                <View className="mt-3">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151' }}>"We're organizing an annual company dinner for 300 guests and are looking for live entertainment. Interested in a 3-hour acoustic set?"</Text>
+                </View>
+
+                <View className="flex-row gap-2 mt-3">
+                  <TouchableOpacity className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' }}>Accept</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#374151' }}>Decline</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className="border border-gray-300 rounded-lg px-3 items-center justify-center">
+                    <Ionicons name="eye-outline" size={20} color="#374151" />
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
           ) : activeTab ==="Review" ? (
             <View className="flex flex-1 flex-col mt-4">

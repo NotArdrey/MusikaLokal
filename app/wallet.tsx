@@ -1,7 +1,5 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../components/header';
 import Navbar from '../components/navbar';
 
@@ -50,6 +48,30 @@ export default function WalletScreen() {
             Withdraw
           </Text>
         </TouchableOpacity>
+
+        <View className="mt-6 bg-gray-50 rounded-xl p-4 border border-gray-200">
+          <View className="flex-row justify-between items-center mb-2">
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#000' }}>
+              Subscription Status
+            </Text>
+            <View className="bg-teal-500 px-3 py-1 rounded-full">
+              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: '#FFF' }}>
+                Active
+              </Text>
+            </View>
+          </View>
+          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 4 }}>
+            Premium Plan
+          </Text>
+          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+            Renews on July 15, 2024
+          </Text>
+          <TouchableOpacity className="mt-4 border border-teal-500 rounded-lg items-center justify-center py-2">
+            <Text className="text-teal-500" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>
+              Manage Subscription
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <View className="mt-8 border-t border-gray-200 pt-6">
           <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 17, color: '#000' }}>

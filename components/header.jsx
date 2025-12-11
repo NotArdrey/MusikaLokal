@@ -14,13 +14,15 @@ export default function Header({title}) {
     const [addbtnvisible, setaddbtnvisible] = useState(false);
     const [showDrawer, setShowDrawer] = useState(false);
     const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+    const addPath = usePathname();
+    const [btn, setBtn] = useState('/');
 
     useEffect(() => {
         if (pathname === "/explore" || pathname === "/home" || pathname === "/manage" ){
             setProfileVisible(true)
             setnotifVisible(true)
             setBackVisible(false)     
-            setaddbtnvisible(false)      
+            setaddbtnvisible(false)   
         }else if(pathname === "/my_group"|| pathname === "/my_gig" || pathname === "/my_studio"){
             setProfileVisible(true)
             setnotifVisible(false)
@@ -33,6 +35,21 @@ export default function Header({title}) {
             setaddbtnvisible(false)       
         }
     }, [pathname]);
+
+
+    useEffect(()=> {
+
+        if(addPath === "/my_gig"){
+            setBtn("/add_gig")
+        }else if(addPath === "/my_studio"){
+            setBtn("/add_studio")
+        }else if(addPath === "/my_group"){
+            setBtn("/add_group")
+        }
+
+    }, [addPath])
+
+
 
     const openDrawer = () => {
         setShowDrawer(true);
@@ -112,7 +129,7 @@ export default function Header({title}) {
                       <MaterialIcons name="notifications-none" size={33} color="black" />
                 </TouchableOpacity>
             ):addbtnvisible ? (
-                <TouchableOpacity onPress={openDrawer}>
+                <TouchableOpacity onPress={() => router.push(btn)}>
                     <Ionicons name="add-circle-outline" size={30} color="black" />
                 </TouchableOpacity>
             ):null}

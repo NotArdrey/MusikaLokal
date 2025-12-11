@@ -80,6 +80,5 @@ export default function OngoingScreen() {
         <Navbar/>
       </View>
     </View>
-    
     );
 }
