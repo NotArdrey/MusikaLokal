@@ -12,7 +12,7 @@ export default function ExploreScreen() {
     <View className="flex-1 bg-white px-6" >
       <Header title ="Explore"/>
 
-      <ScrollView showsVerticalScrollIndicator={false} >
+      <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
         <View className="pt-10">
           <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 18}}>What are you looking for?</Text>
         </View>
