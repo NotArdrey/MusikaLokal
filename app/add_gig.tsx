@@ -2,8 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import Header from '../components/header';
-import Navbar from '../components/navbar';
+import Header from '../src/components/header';
+import Navbar from '../src/components/navbar';
 
 
 
@@ -114,6 +114,26 @@ export default function AddGigScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+          
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+            Upload SEC or DTI Document
+          </Text>
+          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
+            Upload your SEC or DTI registration for business verification
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
+            <View className="flex-row gap-2">
+              <TouchableOpacity 
+                className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg items-center justify-center"
+                style={{ width: 100, height: 100 }}
+              >
+                <Ionicons name="document-outline" size={32} color="#9CA3AF" />
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 10, color: '#6B7280', marginTop: 4 }}>
+                  Upload
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
 
           <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
             Talent Needs

@@ -1,9 +1,7 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import Header from '../components/header';
-import Navbar from '../components/navbar';
+import { ScrollView, Text, View } from 'react-native';
+import Header from '../src/components/header';
+import Navbar from '../src/components/navbar';
 
 
 
@@ -16,9 +14,6 @@ export default function PrivacyPolicyScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
         <View className="pt-6">
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 18, color: '#000', marginBottom: 12 }}>
-            Privacy Policy
-          </Text>
           
           <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: '#374151', lineHeight: 22, textAlign: 'justify' }}>
             Musika Lokal respects your privacy and is committed to protecting your personal data. When you sign up, we may collect your name, email, phone number, password, and verification details such as uploaded ID, face scan, or profile photo. We also collect information related to wallet transactions, booking history, and device usage such as IP address and location if enabled.
@@ -46,6 +41,6 @@ export default function PrivacyPolicyScreen() {
         <Navbar/>
       </View>
     </View>
-    
+
     );
 }

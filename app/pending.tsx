@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Dimensions, Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import Header from '../components/header';
-import Navbar from '../components/navbar';
+import Header from '../src/components/header';
+import Navbar from '../src/components/navbar';
 
 const { width: screenWidth } = Dimensions.get('window');
 const imageWidth = screenWidth * 0.35;
@@ -22,11 +22,7 @@ export default function PendingScreen() {
 
     return (
     <View className="flex-1 bg-white px-4">
-      <Header title="Pendings"></Header>
-
-      <View className="mt-10">
-        <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 18}}>Pending Confirmation</Text>
-      </View>
+      <Header title="Pending"></Header>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 100}}>
         <View className="flex flex-col gap-2 mt-3">

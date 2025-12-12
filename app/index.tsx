@@ -65,8 +65,12 @@ export default function LoginScreen() {
         <Text className="text-teal-500 text-sm" style={{ fontFamily: 'Poppins_400Regular' }}>Forget Password</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={()=> router.push('home' as any)}className="bg-teal-500 rounded-xl py-4 mb-4">
+      <TouchableOpacity onPress={()=> router.push('home' as any)} className="bg-teal-500 rounded-xl py-4 mb-4">
         <Text className="text-white text-center text-base font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Login</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={()=> router.push('home' as any)} className="border border-gray-300 rounded-xl py-4 mb-6 items-center justify-center">
+        <Text className="text-gray-600 text-base" style={{ fontFamily: 'Poppins_500Medium' }}>Continue as Guest</Text>
       </TouchableOpacity>
   
       <View className="flex-row justify-center">

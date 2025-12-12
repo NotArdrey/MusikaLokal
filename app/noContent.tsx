@@ -1,9 +1,7 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import Header from '../components/header';
-import Navbar from '../components/navbar';
+import { View } from 'react-native';
+import Header from '../src/components/header';
+import Navbar from '../src/components/navbar';
 
 
 

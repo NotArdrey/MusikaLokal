@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
-import { Image, ScrollView, Text, TextInput, Touchable, TouchableOpacity, View } from 'react-native';
-import Header from '../components/header';
-import Navbar from '../components/navbar';
 import { router } from 'expo-router';
+import React, { useState } from 'react';
+import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Header from '../src/components/header';
+import Navbar from '../src/components/navbar';
 
 
 export default function GroupDetailsScreen() {

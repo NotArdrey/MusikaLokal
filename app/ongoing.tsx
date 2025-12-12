@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Dimensions, Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import Header from '../components/header';
-import Navbar from '../components/navbar';
+import Header from '../src/components/header';
+import Navbar from '../src/components/navbar';
 
 const { width: screenWidth } = Dimensions.get('window');
 const imageWidth = screenWidth * 0.35;
@@ -27,10 +27,7 @@ export default function OngoingScreen() {
       <Header title="Ongoing"></Header>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 100}}>
-
-        <View className="mt-10">
-          <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 18}}>Ongoing Bookings</Text>
-        </View>
+        
         <View className="flex flex-col gap-2 mt-3">
 
           <View className="flex flex-row items-stretch p-3 rounded-xl" style={cardStyle}>

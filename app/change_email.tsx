@@ -1,8 +1,7 @@
-import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Text, TextInput, TouchableOpacity, View} from 'react-native';
-import Header from '../components/header';
+import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Header from '../src/components/header';
 
 
 export default function ForgetPasswordScreen() {

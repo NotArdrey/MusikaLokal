@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, Text, TouchableOpacity, View } from 'react-native';
-import Header from '../components/header';
-import Navbar from '../components/navbar'
-import { router } from 'expo-router';
+import Header from '../src/components/header';
+import Navbar from '../src/components/navbar';
 
 
 export default function ProfileScreen() {

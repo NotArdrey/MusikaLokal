@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import Header from '../components/header';
-import Navbar from '../components/navbar';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import Header from '../src/components/header';
+import Navbar from '../src/components/navbar';
 
 
 
@@ -16,9 +16,7 @@ export default function AccountDetailsScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
         <View className="pt-6">
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 18, color: '#000', marginBottom: 16 }}>
-            Account details
-          </Text>
+   
 
           <View className="mb-4">
             <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 4 }}>

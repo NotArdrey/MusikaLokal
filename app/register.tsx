@@ -183,8 +183,8 @@ export default function RegisterScreen() {
           </TouchableOpacity>
       </View>
 
-      <View className='justify-center items-center mt-2 mb-2'>
-        <Text className ="text-teal-500 text-sm font-normal" style={{ fontFamily: 'Poppins_400Regular' }}>Already have an account?<TouchableOpacity> <Text onPress ={() => router.push('/')} style={{ fontFamily: 'Poppins_400Regular' }}> Login</Text></TouchableOpacity></Text>
+      <View className='justify-center items-center mt-5 mb-2'>
+        <Text className ="text-sm font-normal" style={{ fontFamily: 'Poppins_400Regular' }}>Already have an account?<TouchableOpacity> <Text  className ='text-teal-500'onPress ={() => router.push('/')} style={{ fontFamily: 'Poppins_400Regular' }}> Login</Text></TouchableOpacity></Text>
       </View>
 
   </ScrollView>
