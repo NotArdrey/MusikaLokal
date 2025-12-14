@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Dimensions, Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -18,8 +19,10 @@ const cardStyle = {
 };
 
 export default function UpcomingScreen() {
+  const [modalVisible, setModalVisible] = useState(false);
 
     return (
+    <>
     <View className="flex-1 bg-white px-4">
       <Header title="Upcoming"></Header>
 
@@ -33,7 +36,7 @@ export default function UpcomingScreen() {
               <TouchableOpacity className="bg-[#009c8d] rounded-lg px-3 py-2 justify-center items-center">
                 <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 11, color: '#fff'}}>View Details</Text>
               </TouchableOpacity>
-              <TouchableOpacity className="bg-red-700 rounded-lg px-3 py-2 justify-center items-center">
+              <TouchableOpacity onPress={() => setModalVisible(true)} className="bg-red-700 rounded-lg px-3 py-2 justify-center items-center">
                 <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 11, color: '#fff'}}>Cancel</Text>
               </TouchableOpacity>
             </View>
@@ -74,6 +77,14 @@ export default function UpcomingScreen() {
         <Navbar/>
       </View>
     </View>
-    
+    <Modal
+        isVisible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Cancel Booking"
+        message="Are you sure you want to cancel this booking?"
+        buttonText="Cancel Booking"
+        onConfirm={() => setModalVisible(false)}
+    />
+    </>
     );
 }

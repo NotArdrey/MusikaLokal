@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
@@ -24,6 +24,7 @@ export default function EditStudioScreen() {
         'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=300&h=200&fit=crop',
         'https://images.unsplash.com/photo-1563330232-57114bb0823c?w=300&h=200&fit=crop'
     ]);
+    const [modalVisible, setModalVisible] = useState(false);
 
     const removeAmenity = (index: number) => {
         setAmenities(amenities.filter((_, i) => i !== index));
@@ -34,6 +35,7 @@ export default function EditStudioScreen() {
     };
 
     return (
+    <>
     <View className="flex-1 bg-white px-6">
       <Header title="Edit Studio"></Header>
 
@@ -180,7 +182,7 @@ export default function EditStudioScreen() {
 
           <TouchableOpacity 
             className="rounded-xl bg-teal-500 items-center justify-center py-3 mb-6"
-            onPress={() => router.back()}
+            onPress={() => setModalVisible(true)}
           >
             <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>
               Save Studio Profile
@@ -194,5 +196,13 @@ export default function EditStudioScreen() {
       </View>
     </View>
     
+    <Modal
+    visible = {modalVisible}
+    onClose={() => setModalVisible(false)}
+    title="Confirm Changes"
+    message="Are you sure you want to save these changes?"
+    buttonText="Save">
+    </Modal>
+    </>
     );
 }

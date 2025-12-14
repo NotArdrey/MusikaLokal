@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
@@ -10,12 +11,14 @@ export default function ToReviewScreen() {
 
   const [selectedValue, setSelectedValue] = useState<number | null>(null);
   const ratingOptions = [1, 2, 3, 4, 5];
+  const [modalVisible, setModalVisible] = useState(false);
   const handleSelection = (value: number) =>{
     setSelectedValue(value);
   }
 
 
     return (
+    <>
     <View className="flex-1 bg-white px-6">
       <Header title ="Submit Feedback"></Header>
 
@@ -48,7 +51,7 @@ export default function ToReviewScreen() {
           <TextInput className="justify-start rounded-xl border border-gray-300 py-5 px-5"
           placeholder='Enter Your Feedback!' style={{height:200, width: '100%'}} multiline={true}>
           </TextInput>
-          <TouchableOpacity className ="mt-5 rounded-xl bg-teal-500 px-5 py-5 items-center" style ={{width: 300}}>
+          <TouchableOpacity className ="mt-5 rounded-xl bg-teal-500 px-5 py-5 items-center" style ={{width: 300}} onPress={() => setModalVisible(true)}>
             <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Submit</Text>
           </TouchableOpacity>
       </View>
@@ -57,5 +60,13 @@ export default function ToReviewScreen() {
         </View>
     </View>
     
+    <Modal
+    visible = {modalVisible}
+    onClose={() => setModalVisible(false)}
+    title="Confirm Feedback"
+    message="Are you sure you want to submit this feedback?"
+    buttonText="Submit">
+    </Modal>
+    </>
     );
 }

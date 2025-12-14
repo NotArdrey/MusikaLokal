@@ -1,15 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
 
 export default function MyGroupScreen() {
+  const [modalVisible, setModalVisible] = useState(false);
 
     return (
+    <>
     <View className="flex-1 bg-white px-6">
       <Header title ="My Group" />
 
@@ -61,6 +64,7 @@ export default function MyGroupScreen() {
                 <TouchableOpacity 
                     className="rounded-lg bg-red-500 items-center justify-center" 
                     style={{height: 36, width: 36}}
+                    onPress={() => setModalVisible(true)}
                 >
                     <Ionicons name="trash" size={20} color="#ffffff" />
                 </TouchableOpacity>
@@ -115,6 +119,7 @@ export default function MyGroupScreen() {
                 <TouchableOpacity 
                     className="rounded-lg bg-red-500 items-center justify-center" 
                     style={{height: 36, width: 36}}
+                    onPress={() => setModalVisible(true)}
                 >
                     <Ionicons name="trash" size={20} color="#ffffff" />
                 </TouchableOpacity>

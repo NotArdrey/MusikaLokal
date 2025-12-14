@@ -2,14 +2,17 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
 
 export default function StudioDetailsScreen() {
   const [activeTab, setActiveTab] = useState('About');
+  const [modalVisible, setModalVisible] = useState(false);
 
   return (
+    <>
     <View className="flex-1 bg-white">
       <View className="px-6">
         <Header title="Studio Details"></Header>
@@ -250,7 +253,7 @@ export default function StudioDetailsScreen() {
                 </View>
               </View>
 
-              <TouchableOpacity className="rounded-xl mt-5 justify-center items-center py-3 bg-teal-500">
+              <TouchableOpacity className="rounded-xl mt-5 justify-center items-center py-3 bg-teal-500" onPress={() => setModalVisible(true)}>
                 <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Confirm Booking</Text>
               </TouchableOpacity>
             </View>
@@ -366,5 +369,14 @@ export default function StudioDetailsScreen() {
 
       <Navbar/>
     </View>
+    
+    <Modal
+    visible = {modalVisible}
+    onClose={() => setModalVisible(false)}
+    title="Confirm Booking"
+    message="Are you sure you want to confirm this booking?"
+    buttonText="Confirm">
+    </Modal>
+    </>
   );
 }

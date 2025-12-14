@@ -2,14 +2,17 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
 
 export default function GigDetailsScreen() {
   const [activeTab, setActiveTab] = useState('About');
+  const [modalVisible, setModalVisible] = useState(false);
 
   return (
+    <>
     <View className="flex-1 bg-white">
       <View className="px-6">
         <Header title="Gig Details"></Header>
@@ -218,7 +221,7 @@ export default function GigDetailsScreen() {
                 </View>
               </TouchableOpacity>
 
-              <TouchableOpacity className="rounded-xl bg-gray-300 mt-3 justify-center items-center py-3 bg-teal-500">
+              <TouchableOpacity className="rounded-xl bg-gray-300 mt-3 justify-center items-center py-3 bg-teal-500" onPress={() => setModalVisible(true)}>
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Submit</Text>
               </TouchableOpacity>
             </View>
@@ -334,5 +337,14 @@ export default function GigDetailsScreen() {
 
       <Navbar/>
     </View>
+    
+    <Modal
+    visible = {modalVisible}
+    onClose={() => setModalVisible(false)}
+    title="Confirm Application"
+    message="Are you sure you want to submit your application for this gig?"
+    buttonText="Submit">
+    </Modal>
+    </>
   );
 }

@@ -2,14 +2,33 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
 
 export default function StudioDetailsScreen() {
   const [activeTab, setActiveTab] = useState('About');
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalTitle, setModalTitle] = useState('');
+  const [modalMessage, setModalMessage] = useState('');
+  const [modalButtonText, setModalButtonText] = useState('');
+
+  const handleAction = (action: string) => {
+      if (action === 'accept') {
+          setModalTitle('Accept Booking');
+          setModalMessage('Are you sure you want to accept this booking request?');
+          setModalButtonText('Accept');
+      } else {
+          setModalTitle('Decline Booking');
+          setModalMessage('Are you sure you want to decline this booking request?');
+          setModalButtonText('Decline');
+      }
+      setModalVisible(true);
+  }
 
   return (
+    <>
     <View className="flex-1 bg-white">
       <View className="px-6">
         <Header title="Studio Details"></Header>
@@ -206,10 +225,10 @@ export default function StudioDetailsScreen() {
                 </View>
 
                 <View className="flex-row gap-2 mt-3">
-                  <TouchableOpacity className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
+                  <TouchableOpacity onPress={() => handleAction('accept')} className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
                     <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' }}>Accept</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
+                  <TouchableOpacity onPress={() => handleAction('decline')} className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
                     <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#374151' }}>Decline</Text>
                   </TouchableOpacity>
                   <TouchableOpacity className="border border-gray-300 rounded-lg px-3 items-center justify-center">
@@ -252,10 +271,10 @@ export default function StudioDetailsScreen() {
                 </View>
 
                 <View className="flex-row gap-2 mt-3">
-                  <TouchableOpacity className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
+                  <TouchableOpacity onPress={() => handleAction('accept')} className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
                     <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' }}>Accept</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
+                  <TouchableOpacity onPress={() => handleAction('decline')} className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
                     <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#374151' }}>Decline</Text>
                   </TouchableOpacity>
                   <TouchableOpacity className="border border-gray-300 rounded-lg px-3 items-center justify-center">
@@ -298,10 +317,10 @@ export default function StudioDetailsScreen() {
                 </View>
 
                 <View className="flex-row gap-2 mt-3">
-                  <TouchableOpacity className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
+                  <TouchableOpacity onPress={() => handleAction('accept')} className="flex-1 bg-teal-500 rounded-lg py-2 items-center">
                     <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' }}>Accept</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
+                  <TouchableOpacity onPress={() => handleAction('decline')} className="flex-1 border border-gray-300 rounded-lg py-2 items-center">
                     <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#374151' }}>Decline</Text>
                   </TouchableOpacity>
                   <TouchableOpacity className="border border-gray-300 rounded-lg px-3 items-center justify-center">
@@ -422,5 +441,14 @@ export default function StudioDetailsScreen() {
 
       <Navbar/>
     </View>
+    <Modal
+        isVisible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title={modalTitle}
+        message={modalMessage}
+        buttonText={modalButtonText}
+        onConfirm={() => setModalVisible(false)}
+    />
+    </>
   );
 }

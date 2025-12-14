@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
@@ -12,6 +13,7 @@ export default function EditProfileScreen() {
   const [selectedRoles, setSelectedRoles] = useState(['Drummer']);
   const [genres, setGenres] = useState('Rock, Indie, Folk');
   const [bio, setBio] = useState('');
+  const [modalVisible, setModalVisible] = useState(false);
 
   const availableRoles = [
     'Vocalist',
@@ -38,6 +40,7 @@ export default function EditProfileScreen() {
   };
 
   return (
+    <>
     <View className="flex-1 bg-white">
       <View className="px-6">
         <Header title="Edit Profile"></Header>
@@ -161,7 +164,7 @@ export default function EditProfileScreen() {
 
             <TouchableOpacity 
               className="flex-1 bg-teal-500 rounded-xl items-center justify-center py-3"
-              onPress={handleSave}
+              onPress={() => setModalVisible(true)}
             >
               <Text className="text-white" style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Save Changes</Text>
             </TouchableOpacity>
@@ -173,5 +176,14 @@ export default function EditProfileScreen() {
         <Navbar />
       </View>
     </View>
+    
+    <Modal
+    visible = {modalVisible}
+    onClose={() => setModalVisible(false)}
+    title="Confirm Changes"
+    message="Are you sure you want to save these changes?"
+    buttonText="Save">
+    </Modal>
+    </>
   );
 }

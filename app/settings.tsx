@@ -1,16 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
 
 
 export default function SettingsScreen() {
+  const [modalVisible, setModalVisible] = useState(false);
 
     return (
+    <>
     <View className="flex-1 bg-white px-6">
       <Header title="Settings"></Header>
 
@@ -81,7 +84,7 @@ export default function SettingsScreen() {
         <TouchableOpacity 
           className="mt-8 mx-4 mb-6 rounded-lg items-center justify-center py-3"
           style={{ backgroundColor: '#DC2626' }}
-          onPress={() => router.push('/')}
+          onPress={() => setModalVisible(true)}
         >
           <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: '#FFF' }}>
             Logout
@@ -93,6 +96,14 @@ export default function SettingsScreen() {
         <Navbar/>
       </View>
     </View>
-    
+    <Modal
+        isVisible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Logout"
+        message="Are you sure you want to logout?"
+        buttonText="Logout"
+        onConfirm={() => router.push('/')}
+    />
+    </>
     );
 } 

@@ -1,16 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
 
 
 export default function AccountDetailsScreen() {
+  const [modalVisible, setModalVisible] = useState(false);
 
     return (
+    <>
     <View className="flex-1 bg-white px-6">
       <Header title="Account Details"></Header>
 
@@ -66,6 +69,7 @@ export default function AccountDetailsScreen() {
 
           <TouchableOpacity 
             className="flex-row items-center justify-between py-4"
+            onPress={() => setModalVisible(true)}
           >
             <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: '#000' }}>
               Close account
@@ -79,6 +83,14 @@ export default function AccountDetailsScreen() {
         <Navbar/>
       </View>
     </View>
-    
+    <Modal
+        isVisible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Close Account"
+        message="Are you sure you want to close your account? This action cannot be undone."
+        buttonText="Close Account"
+        onConfirm={() => setModalVisible(false)}
+    />
+    </>
     );
 }

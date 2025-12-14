@@ -1,11 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
-
-
 
 
 export default function AddGigScreen() {
@@ -16,6 +14,7 @@ export default function AddGigScreen() {
     const [cost, setCost] = useState('');
     const [availabilitySlots, setAvailabilitySlots] = useState<Array<{date: string, time: string}>>([]);
     const [selectedImages, setSelectedImages] = useState<string[]>([]);
+    const [modalVisible, setModalVisible] = useState(false);
 
     const removeTalent = (index: number) => {
         setTalentNeeds(talentNeeds.filter((_, i) => i !== index));
@@ -26,21 +25,22 @@ export default function AddGigScreen() {
     };
 
     return (
-    <View className="flex-1 bg-white px-6">
-      <Header title="Add Gig"></Header>
+    <>
+      <View className="flex-1 bg-white px-6">
+        <Header title="Add Gig"></Header>
 
-      <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
-        <View className="pt-6">
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
-            Gig Name
-          </Text>
-          <TextInput
-            value={gigName}
-            onChangeText={setGigName}
-            className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}
-            placeholder="Enter gig name"
-          />
+        <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
+          <View className="pt-6">
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+              Gig Name
+            </Text>
+            <TextInput
+              value={gigName}
+              onChangeText={setGigName}
+              className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
+              style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}
+              placeholder="Enter gig name"
+            />
 
           <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
             Description
@@ -69,31 +69,22 @@ export default function AddGigScreen() {
           <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
             Upload Photos
           </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
-            <View className="flex-row gap-2">
-              {selectedImages.length > 0 && selectedImages.map((uri, index) => (
-                <View key={index} className="relative">
-                  <Image 
-                    source={{ uri }}
-                    style={{ width: 100, height: 100, borderRadius: 8 }}
-                    resizeMode="cover"
-                  />
-                  <TouchableOpacity 
-                    className="absolute top-1 right-1 bg-red-500 rounded-full w-6 h-6 items-center justify-center"
-                    onPress={() => setSelectedImages(selectedImages.filter((_, i) => i !== index))}
-                  >
-                    <Ionicons name="close" size={16} color="#FFF" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-              <TouchableOpacity 
-                className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg items-center justify-center"
-                style={{ width: 100, height: 100 }}
-              >
-                <Ionicons name="add" size={32} color="#9CA3AF" />
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
+          <View className="border-2 border-dashed border-gray-300 rounded-lg p-6 items-center justify-center mb-4">
+            <Ionicons name="image-outline" size={40} color="#9CA3AF" />
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginTop: 8 }}>
+              Upload Photos
+            </Text>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 4 }}>
+              Tap to upload your photos.
+            </Text>
+            <TouchableOpacity 
+              className="mt-4 px-6 py-2 border border-gray-300 rounded-lg"
+            >
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: '#000' }}>
+                Upload
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
             Upload Contract
@@ -121,19 +112,22 @@ export default function AddGigScreen() {
           <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
             Upload your SEC or DTI registration for business verification
           </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
-            <View className="flex-row gap-2">
-              <TouchableOpacity 
-                className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg items-center justify-center"
-                style={{ width: 100, height: 100 }}
-              >
-                <Ionicons name="document-outline" size={32} color="#9CA3AF" />
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 10, color: '#6B7280', marginTop: 4 }}>
-                  Upload
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
+          <View className="border-2 border-dashed border-gray-300 rounded-lg p-6 items-center justify-center mb-4">
+            <Ionicons name="document-outline" size={40} color="#9CA3AF" />
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginTop: 8 }}>
+              Upload Document
+            </Text>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 4 }}>
+              Tap to upload your SEC or DTI document.
+            </Text>
+            <TouchableOpacity 
+              className="mt-4 px-6 py-2 border border-gray-300 rounded-lg"
+            >
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: '#000' }}>
+                Upload
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
             Talent Needs
@@ -203,13 +197,13 @@ export default function AddGigScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity 
-            className="rounded-xl bg-teal-500 items-center justify-center py-3 mb-6"
-            onPress={() => router.back()}
-          >
-            <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>
-              Create Gig Profile
-            </Text>
+            <TouchableOpacity 
+              className="rounded-xl bg-teal-500 items-center justify-center py-3 mb-6"
+              onPress={() => setModalVisible(true)}
+            >
+              <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>
+                Create Gig Profile
+              </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -219,5 +213,14 @@ export default function AddGigScreen() {
       </View>
     </View>
     
+    <Modal
+    visible = {modalVisible}
+    onClose={() => setModalVisible(false)}
+    title="Confirm Gig"
+    message="Are you ready to post this gig?"
+    buttonText="Confirm">
+    </Modal>
+    </>
     );
+    
 }

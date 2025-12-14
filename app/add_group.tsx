@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
@@ -13,8 +13,10 @@ export default function AddGroupScreen() {
     const [genre, setGenre] = useState('');
     const [description, setDescription] = useState('');
     const [selectedImage, setSelectedImage] = useState('');
+    const [modalVisible, setModalVisible] = useState(false);
 
     return (
+    <>
     <View className="flex-1 bg-white px-6">
       <Header title="Add Group"></Header>
 
@@ -57,44 +59,26 @@ export default function AddGroupScreen() {
           <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
             Upload Logo/Cover
           </Text>
-          <View className="border-2 border-dashed border-gray-300 rounded-lg p-8 items-center justify-center mb-6">
-            {selectedImage ? (
-              <View className="relative w-full">
-                <Image 
-                  source={{ uri: selectedImage }}
-                  style={{ width: '100%', height: 150, borderRadius: 8 }}
-                  resizeMode="cover"
-                />
-                <TouchableOpacity 
-                  className="absolute top-2 right-2 bg-red-500 rounded-full w-7 h-7 items-center justify-center"
-                  onPress={() => setSelectedImage('')}
-                >
-                  <Ionicons name="close" size={18} color="#FFF" />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <>
-                <Ionicons name="cloud-upload-outline" size={48} color="#9CA3AF" />
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginTop: 12 }}>
-                  Upload Image
-                </Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 4, textAlign: 'center' }}>
-                  Tap to upload your group's logo or cover image.
-                </Text>
-                <TouchableOpacity 
-                  className="mt-4 px-6 py-2 border border-gray-300 rounded-lg"
-                >
-                  <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: '#000' }}>
-                    Upload
-                  </Text>
-                </TouchableOpacity>
-              </>
-            )}
+          <View className="border-2 border-dashed border-gray-300 rounded-lg p-6 items-center justify-center mb-4">
+            <Ionicons name="image-outline" size={40} color="#9CA3AF" />
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginTop: 8 }}>
+              Upload Logo/Cover
+            </Text>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 4 }}>
+              Tap to upload your group's logo or cover image.
+            </Text>
+            <TouchableOpacity 
+              className="mt-4 px-6 py-2 border border-gray-300 rounded-lg"
+            >
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: '#000' }}>
+                Upload
+              </Text>
+            </TouchableOpacity>
           </View>
 
           <TouchableOpacity 
             className="rounded-xl bg-teal-500 items-center justify-center py-3 mb-6"
-            onPress={() => router.back()}
+            onPress={() => setModalVisible(true)}
           >
             <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>
               Create Group Profile
@@ -108,5 +92,13 @@ export default function AddGroupScreen() {
       </View>
     </View>
     
+    <Modal
+    visible = {modalVisible}
+    onClose={() => setModalVisible(false)}
+    title="Confirm Group"
+    message="Are you ready to create this group profile?"
+    buttonText="Confirm">
+    </Modal>
+    </>
     );
 }

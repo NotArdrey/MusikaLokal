@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { useState } from 'react';
 import { Dimensions, Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -19,8 +20,10 @@ const cardStyle = {
 };
 
 export default function PendingScreen() {
+  const [modalVisible, setModalVisible] = useState(false);
 
     return (
+    <>
     <View className="flex-1 bg-white px-4">
       <Header title="Pending"></Header>
 
@@ -50,7 +53,7 @@ export default function PendingScreen() {
             <View className="flex-1 flex justify-between gap-2 py-2 pr-3"> 
               <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 14}} numberOfLines={2}>Echo Music Hub San Jose</Text>
               <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#666'}} numberOfLines={1}>Sun, Nov 17 - 4:30 PM - 5:30 PM</Text>
-              <TouchableOpacity className="bg-green-600 rounded-lg px-3 py-2 flex-row gap-1 justify-center items-center">
+              <TouchableOpacity onPress={() => setModalVisible(true)} className="bg-green-600 rounded-lg px-3 py-2 flex-row gap-1 justify-center items-center">
                 <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 11, color: '#fff'}}>Confirm</Text>
                 <Ionicons name="checkmark-sharp" size={14} color="#fff" />
               </TouchableOpacity>
@@ -72,6 +75,14 @@ export default function PendingScreen() {
         <Navbar/>
       </View>
     </View>
-    
+    <Modal
+        isVisible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Confirm Booking"
+        message="Are you sure you want to confirm this booking?"
+        buttonText="Confirm"
+        onConfirm={() => setModalVisible(false)}
+    />
+    </>
     );
 }

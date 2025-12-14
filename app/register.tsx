@@ -4,6 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Modal from '../src/components/modal';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -14,6 +15,7 @@ export default function RegisterScreen() {
   const [role, setRole] = useState('');
   const [imageID, setImageID] = useState('null');
   const [userImage, setUserImage] = useState('null');
+  const [modalVisible, setModalVisible] = useState(false);
 
   const pickImageID = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -54,6 +56,7 @@ export default function RegisterScreen() {
   };
 
   return (
+      <>
       <ScrollView className="bg-white" contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingVertical: 16 }}>
       <View className="items-center mb-16 pt-20">
         <Image 
@@ -178,7 +181,7 @@ export default function RegisterScreen() {
       </View>
 
       <View className="justify-center items-center mt-1">
-          <TouchableOpacity className="bg-teal-500 rounded-xl py-4 mt-6 justify-center items-center" style={{width: '100%'}}>
+          <TouchableOpacity className="bg-teal-500 rounded-xl py-4 mt-6 justify-center items-center" style={{width: '100%'}} onPress={() => setModalVisible(true)}>
             <Text className='text-white font-semibold' style={{ fontFamily: 'Poppins_600SemiBold' }}>Create Account</Text>
           </TouchableOpacity>
       </View>
@@ -188,6 +191,15 @@ export default function RegisterScreen() {
       </View>
 
   </ScrollView>
+  
+    <Modal
+    visible = {modalVisible}
+    onClose={() => setModalVisible(false)}
+    title="Confirm Registration"
+    message="Are you sure you want to create this account?"
+    buttonText="Register">
+    </Modal>
+  </>
   );
 }
 

@@ -1,14 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
 
 
 export default function WalletScreen() {
+  const [modalVisible, setModalVisible] = useState(false);
 
     return (
+    <>
     <View className="flex-1 bg-white px-6">
       <Header title="Wallet"></Header>
 
@@ -43,6 +46,7 @@ export default function WalletScreen() {
 
         <TouchableOpacity 
           className="mt-6 rounded-xl bg-teal-500 items-center justify-center py-3"
+          onPress={() => setModalVisible(true)}
         >
           <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>
             Withdraw
@@ -142,6 +146,14 @@ export default function WalletScreen() {
         <Navbar/>
       </View>
     </View>
-    
+    <Modal
+        isVisible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Withdraw Funds"
+        message="Are you sure you want to withdraw your funds?"
+        buttonText="Withdraw"
+        onConfirm={() => setModalVisible(false)}
+    />
+    </>
     );
 }

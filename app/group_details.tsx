@@ -3,13 +3,16 @@ import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
 
 export default function GroupDetailsScreen() {
   const [activeTab, setActiveTab] = useState('About');
+  const [modalVisible, setModalVisible] = useState(false);
 
   return (
+    <>
     <View className="flex-1 bg-white">
       <View className="px-6">
         <Header title="Group Details"></Header>
@@ -272,7 +275,7 @@ export default function GroupDetailsScreen() {
                 </View>
               </TouchableOpacity>
 
-              <TouchableOpacity className="rounded-xl bg-gray-300 mt-3 justify-center items-center py-3 bg-teal-500">
+              <TouchableOpacity className="rounded-xl bg-gray-300 mt-3 justify-center items-center py-3 bg-teal-500" onPress={() => setModalVisible(true)}>
                 <Text className="text-white"style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Submit Booking Request</Text>
               </TouchableOpacity>
             </View>
@@ -388,5 +391,14 @@ export default function GroupDetailsScreen() {
 
       <Navbar/>
     </View>
+    
+    <Modal
+    visible = {modalVisible}
+    onClose={() => setModalVisible(false)}
+    title="Confirm Booking"
+    message="Are you sure you want to submit this booking request?"
+    buttonText="Submit">
+    </Modal>
+    </>
   );
 }
