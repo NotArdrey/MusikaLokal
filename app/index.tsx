@@ -10,9 +10,11 @@ export default function LoginScreen() {
   // }, []);
 
 
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
 
   return (
     <View className="flex-1 bg-white px-6 justify-center">
@@ -65,7 +67,10 @@ export default function LoginScreen() {
         <Text className="text-teal-500 text-sm" style={{ fontFamily: 'Poppins_400Regular' }}>Forget Password</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={()=> router.push('home' as any)} className="bg-teal-500 rounded-xl py-4 mb-4">
+
+      {error &&<Text className="text-red-500 mb-4" style={{ fontFamily: 'Poppins_400Regular' }}>{error}</Text>}
+
+      <TouchableOpacity onPress={()=> router.push('home' as any)}className="bg-teal-500 rounded-xl py-4 mb-4">
         <Text className="text-white text-center text-base font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Login</Text>
       </TouchableOpacity>
 
