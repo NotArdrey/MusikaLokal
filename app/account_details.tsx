@@ -84,12 +84,11 @@ export default function AccountDetailsScreen() {
       </View>
     </View>
     <Modal
-        isVisible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Close Account"
-        message="Are you sure you want to close your account? This action cannot be undone."
-        buttonText="Close Account"
-        onConfirm={() => setModalVisible(false)}
+      visible={modalVisible}
+      onClose={() => setModalVisible(false)}
+      title="Close Account"
+      message="Are you sure you want to close your account? This action cannot be undone."
+      buttonText="Close Account"
     />
     </>
     );

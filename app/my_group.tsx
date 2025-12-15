@@ -130,6 +130,13 @@ export default function MyGroupScreen() {
               <Navbar/>
         </View>
     </View>
-    
+    <Modal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Delete Group"
+        message="Are you sure you want to delete this group?"
+        buttonText="Delete"
+    />
+    </>
     );
 }

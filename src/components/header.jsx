@@ -1,7 +1,7 @@
 import { FontAwesome, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { router, usePathname } from "expo-router";
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, Modal, ScrollView, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { Animated, Image, ScrollView, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 
 const DRAWER_WIDTH = 280;
 
@@ -73,13 +73,11 @@ export default function Header({title}) {
 
     return (
     <>
-    <Modal
-        visible={showDrawer}
-        transparent={true}
-        animationType="none"
-        onRequestClose={closeDrawer}
-    >
-        <View className="flex-1 flex-row bg-black/50">
+    {showDrawer && (
+        <View
+            className="flex-1 flex-row bg-black/50"
+            style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 50 }}
+        >
             <Animated.View 
                 className="bg-white shadow-lg"
                 style={{ 
@@ -95,7 +93,7 @@ export default function Header({title}) {
                 <View className="flex-1" />
             </TouchableWithoutFeedback>
         </View>
-    </Modal>
+    )}
 
     {/* Header */}
     <View className="flex-row bg-white justify-between items-center pt-8 gap-2 pb-3">

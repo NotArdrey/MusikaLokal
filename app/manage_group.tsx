@@ -496,12 +496,11 @@ export default function GroupDetailsScreen() {
       <Navbar/>
     </View>
     <Modal
-        isVisible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title={modalTitle}
-        message={modalMessage}
-        buttonText={modalButtonText}
-        onConfirm={() => setModalVisible(false)}
+      visible={modalVisible}
+      onClose={() => setModalVisible(false)}
+      title={modalTitle}
+      message={modalMessage}
+      buttonText={modalButtonText}
     />
     </>
   );

@@ -147,12 +147,11 @@ export default function WalletScreen() {
       </View>
     </View>
     <Modal
-        isVisible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Withdraw Funds"
-        message="Are you sure you want to withdraw your funds?"
-        buttonText="Withdraw"
-        onConfirm={() => setModalVisible(false)}
+      visible={modalVisible}
+      onClose={() => setModalVisible(false)}
+      title="Withdraw Funds"
+      message="Are you sure you want to withdraw your funds?"
+      buttonText="Withdraw"
     />
     </>
     );

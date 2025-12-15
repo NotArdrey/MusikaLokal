@@ -130,12 +130,11 @@ export default function MyStudioScreen() {
         </View>
     </View>
     <Modal
-        isVisible={modalVisible}
+        visible={modalVisible}
         onClose={() => setModalVisible(false)}
         title="Delete Studio"
         message="Are you sure you want to delete this studio?"
         buttonText="Delete"
-        onConfirm={() => setModalVisible(false)}
     />
     </>
     );

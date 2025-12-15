@@ -1,88 +1,95 @@
-import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Dimensions, Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 
-const { width: screenWidth } = Dimensions.get('window');
-const imageWidth = screenWidth * 0.35;
-
-const cardStyle = {
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.1,
-  shadowRadius: 6,
-  elevation: 8,
-  marginHorizontal: 4,
-  marginVertical: 8,
-  backgroundColor: '#fff',
-};
-
 export default function PendingScreen() {
   const [modalVisible, setModalVisible] = useState(false);
+  const { width } = useWindowDimensions();
+  const isNarrow = width < 360;
+  const imageWidth = Math.min(Math.max(width * 0.38, 130), 170);
 
-    return (
+  return (
     <>
-    <View className="flex-1 bg-white px-4">
-      <Header title="Pending"></Header>
+      <View className="flex-1 bg-white px-4">
+        <Header title="Pending" />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom: 100}}>
-        <View className="flex flex-col gap-2 mt-3">
-          <View className="flex flex-row items-stretch p-3 rounded-xl" style={cardStyle}>
-            <View className="flex-1 flex justify-between gap-2 py-2 pr-3"> 
-              <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 14}} numberOfLines={2}>SoundWave Studio Malolos</Text>
-              <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#666'}} numberOfLines={1}>Sat, Nov 16 - 2:00 PM - 3:00 PM</Text>
-              <TouchableOpacity className="bg-gray-200 rounded-lg px-3 py-2 flex-row gap-1 justify-center items-center">
-                <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 11}}>Awaiting Confirmation</Text>
-                <Ionicons name="hourglass-outline" size={14} color="#666" />
-              </TouchableOpacity>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+          <View className="flex flex-col gap-2 mt-3">
+            {/* Card 1 */}
+            <View
+              className={`p-3 rounded-xl bg-white mx-1 my-2 shadow-md ${isNarrow ? 'flex-col' : 'flex-row items-stretch'}`}
+            >
+              <View className="flex-1 flex justify-between gap-2 py-2 pr-3">
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }} numberOfLines={2}>
+                  SoundWave Studio Malolos
+                </Text>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#666' }} numberOfLines={1}>
+                  Sat, Nov 16 - 2:00 PM - 3:00 PM
+                </Text>
+                <TouchableOpacity className="bg-gray-200 rounded-lg px-3 py-2 justify-center items-center">
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 11 }}>Awaiting Confirmation</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View
+                className={`rounded-xl overflow-hidden ${isNarrow ? 'w-full mt-3' : ''}`}
+                style={isNarrow ? { aspectRatio: 16 / 9 } : { width: imageWidth, aspectRatio: 16 / 9 }}
+              >
+                <Image
+                  className="rounded-xl h-full w-full"
+                  source={{ uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=130&fit=crop' }}
+                  resizeMode="cover"
+                />
+              </View>
             </View>
-            
-            <View className="rounded-xl overflow-hidden" style={{width: imageWidth}}>
-              <Image 
-                className="rounded-xl"
-                source={{uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=130&fit=crop'}}
-                style={{height: '100%', width: '100%'}}
-                resizeMode="cover"
-              />
-            </View>  
-          </View>
 
-          <View className="flex flex-row items-stretch p-3 rounded-xl" style={cardStyle}>
-            <View className="flex-1 flex justify-between gap-2 py-2 pr-3"> 
-              <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 14}} numberOfLines={2}>Echo Music Hub San Jose</Text>
-              <Text style={{fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#666'}} numberOfLines={1}>Sun, Nov 17 - 4:30 PM - 5:30 PM</Text>
-              <TouchableOpacity onPress={() => setModalVisible(true)} className="bg-green-600 rounded-lg px-3 py-2 flex-row gap-1 justify-center items-center">
-                <Text style={{fontFamily: 'Poppins_600SemiBold', fontSize: 11, color: '#fff'}}>Confirm</Text>
-                <Ionicons name="checkmark-sharp" size={14} color="#fff" />
-              </TouchableOpacity>
+            {/* Card 2 */}
+            <View
+              className={`p-3 rounded-xl bg-white mx-1 my-2 shadow-md ${isNarrow ? 'flex-col' : 'flex-row items-stretch'}`}
+            >
+              <View className="flex-1 flex justify-between gap-2 py-2 pr-3">
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }} numberOfLines={2}>
+                  Echo Music Hub San Jose
+                </Text>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#666' }} numberOfLines={1}>
+                  Sun, Nov 17 - 4:30 PM - 5:30 PM
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setModalVisible(true)}
+                  className="bg-green-600 rounded-lg px-3 py-2 justify-center items-center"
+                >
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 11, color: '#fff' }}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View
+                className={`rounded-xl overflow-hidden ${isNarrow ? 'w-full mt-3' : ''}`}
+                style={isNarrow ? { aspectRatio: 16 / 9 } : { width: imageWidth, aspectRatio: 16 / 9 }}
+              >
+                <Image
+                  className="rounded-xl h-full w-full"
+                  source={{ uri: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=400&h=130&fit=crop' }}
+                  resizeMode="cover"
+                />
+              </View>
             </View>
-            
-            <View className="rounded-xl overflow-hidden" style={{width: imageWidth}}>
-              <Image 
-                className="rounded-xl"
-                source={{uri: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=400&h=130&fit=crop'}}
-                style={{height: '100%', width: '100%'}}
-                resizeMode="cover"
-              />
-            </View>  
           </View>
+        </ScrollView>
 
+        <View className="absolute bottom-0 left-0 right-0">
+          <Navbar />
         </View>
-      </ScrollView>
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-        <Navbar/>
       </View>
-    </View>
-    <Modal
-        isVisible={modalVisible}
+
+      <Modal
+        visible={modalVisible}
         onClose={() => setModalVisible(false)}
         title="Confirm Booking"
         message="Are you sure you want to confirm this booking?"
         buttonText="Confirm"
-        onConfirm={() => setModalVisible(false)}
-    />
+      />
     </>
-    );
+  );
 }

@@ -97,12 +97,11 @@ export default function SettingsScreen() {
       </View>
     </View>
     <Modal
-        isVisible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Logout"
-        message="Are you sure you want to logout?"
-        buttonText="Logout"
-        onConfirm={() => router.push('/')}
+      visible={modalVisible}
+      onClose={() => setModalVisible(false)}
+      title="Logout"
+      message="Are you sure you want to logout?"
+      buttonText="Logout"
     />
     </>
     );

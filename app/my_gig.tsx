@@ -132,12 +132,11 @@ export default function MyGigScreen() {
         </View>
     </View>
     <Modal
-        isVisible={modalVisible}
+        visible={modalVisible}
         onClose={() => setModalVisible(false)}
         title="Delete Gig"
         message="Are you sure you want to delete this gig?"
         buttonText="Delete"
-        onConfirm={() => setModalVisible(false)}
     />
     </>
     );

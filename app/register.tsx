@@ -176,7 +176,7 @@ export default function RegisterScreen() {
 
       <View className ="justify-center items-center border border-dashed border-gray-300 rounded-lg p-6 mt-3" style={{minHeight: 150, width: '100%'}}>
           <TouchableOpacity onPress={pickUserImage} className='justify-center items-center'>
-            <Text className ="text-gray-500" style={{ fontFamily: 'Poppins_400Regular' }}>Selfie ka na Pogi</Text>
+            <Text className ="text-gray-500" style={{ fontFamily: 'Poppins_400Regular' }}>Capture Your Selfie</Text>
           </TouchableOpacity>
       </View>
 
