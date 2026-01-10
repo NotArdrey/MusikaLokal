@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import '../global.css';
+import { ThemeProvider } from '../src/context/ThemeContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -26,10 +27,12 @@ export default function RootLayout() {
   }
 
   return (
-    <Stack 
-      screenOptions={{ 
-        headerShown: false,
-      }} 
-    />
+    <ThemeProvider>
+      <Stack 
+        screenOptions={{ 
+          headerShown: false,
+        }} 
+      />
+    </ThemeProvider>
   );
 }

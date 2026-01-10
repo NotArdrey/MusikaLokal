@@ -5,15 +5,17 @@ import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useTheme } from '../src/context/ThemeContext';
 
 
 
 export default function MyGroupScreen() {
+  const { colors, isDark } = useTheme();
   const [modalVisible, setModalVisible] = useState(false);
 
     return (
     <>
-    <View className="flex-1 bg-white px-6">
+    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
       <Header title ="My Group" />
 
       <ScrollView showsHorizontalScrollIndicator ={false}  className="pb-24">
@@ -26,7 +28,10 @@ export default function MyGroupScreen() {
             marginHorizontal: 4,
             marginVertical: 8,
             minHeight: 130,
-            minWidth:100
+            minWidth:100,
+            backgroundColor: colors.card,
+            borderWidth: isDark ? 1 : 0,
+            borderColor: colors.border
         }}>
             <View className ="rounded-t-xl bg-gray-200" style={{ minHeight: 130, minWidth:100}}>
                 <Image className ="rounded-t-xl "
@@ -36,17 +41,17 @@ export default function MyGroupScreen() {
                 />
             </View>
             <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>The Manila Sound Collective</Text>
+                <Text className="px-3" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text}}>The Manila Sound Collective</Text>
             </View>
 
             <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>5-piece OPM band specializing in classic hits and modern Filipino rock. Available for weddings, corporate events, and private parties.</Text>
+                <Text className="px-3" style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary}}>5-piece OPM band specializing in classic hits and modern Filipino rock. Available for weddings, corporate events, and private parties.</Text>
             </View>
 
 
             <View className="px-3 pb-3 flex-row justify-end gap-2">
                 <TouchableOpacity 
-                    className="rounded-lg bg-teal-500 items-center justify-center" 
+                    className="rounded-lg bg-primary-500 items-center justify-center" 
                     style={{height: 36, width: 36}}
                     onPress={() => router.push('/manage_group')}
                 >
@@ -54,7 +59,7 @@ export default function MyGroupScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity 
-                    className="rounded-lg bg-cyan-500 items-center justify-center" 
+                    className="rounded-lg bg-accent-500 items-center justify-center" 
                     style={{height: 36, width: 36}}
                     onPress={() => router.push('/edit_group')}
                 >
@@ -80,7 +85,10 @@ export default function MyGroupScreen() {
             marginHorizontal: 4,
             marginVertical: 8,
             minHeight: 130,
-            minWidth: 100
+            minWidth: 100,
+            backgroundColor: colors.card,
+            borderWidth: isDark ? 1 : 0,
+            borderColor: colors.border
         }}>
             <View className="rounded-t-xl bg-gray-200" style={{ minHeight: 130, minWidth: 100}}>
                 <Image className="rounded-t-xl"
@@ -90,18 +98,18 @@ export default function MyGroupScreen() {
                 />
             </View>
             <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16}}>Indie Pinoy Acoustic Trio</Text>
+                <Text className="px-3" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text}}>Indie Pinoy Acoustic Trio</Text>
             </View>
 
             <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#666'}}>Acoustic trio performing indie Filipino music, folk, and pop ballads. Perfect for intimate gigs, cafes, and chill venues around Metro Manila.</Text>
+                <Text className="px-3" style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary}}>Acoustic trio performing indie Filipino music, folk, and pop ballads. Perfect for intimate gigs, cafes, and chill venues around Metro Manila.</Text>
             </View>
 
-            <View className="border-gray-200 border-t-2 mx-3"></View>
+            <View className="mx-3" style={{ borderTopWidth: 2, borderTopColor: colors.border }}></View>
 
             <View className="px-3 pb-3 flex-row justify-end gap-2">
                 <TouchableOpacity 
-                    className="rounded-lg bg-teal-500 items-center justify-center" 
+                    className="rounded-lg bg-primary-500 items-center justify-center" 
                     style={{height: 36, width: 36}}
                     onPress={() => router.push('/manage_group')}
                 >
@@ -109,7 +117,7 @@ export default function MyGroupScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity 
-                    className="rounded-lg bg-cyan-500 items-center justify-center" 
+                    className="rounded-lg bg-accent-500 items-center justify-center" 
                     style={{height: 36, width: 36}}
                     onPress={() => router.push('/edit_group')}
                 >
@@ -140,3 +148,4 @@ export default function MyGroupScreen() {
     </>
     );
 }
+

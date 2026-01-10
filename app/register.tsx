@@ -5,8 +5,10 @@ import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Modal from '../src/components/modal';
+import { useTheme } from '../src/context/ThemeContext';
 
 export default function RegisterScreen() {
+  const { colors } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -57,24 +59,24 @@ export default function RegisterScreen() {
 
   return (
       <>
-      <ScrollView className="bg-white" contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingVertical: 16 }}>
+      <ScrollView style={{ backgroundColor: colors.background }} contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingVertical: 16 }}>
       <View className="items-center mb-16 pt-20">
         <Image 
-          source={require('../assets/images/Musika-lokal-logo.png')} 
+          source={require('../assets/images/green-logo.png')} 
           style={{ width: 400, height: 200 }}
           resizeMode="contain"
         />
       </View>
 
       <View className ="mb-2">
-        <Text className = "text-black text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Email</Text>
+        <Text className = "text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Email</Text>
       </View>
 
       <View className= "mb-4">
         <TextInput
-          className ="border border-gray-300 rounded-lg pt-4 pb-4 text-base px-4 text-[#4D998C]"
+          className ="border border-gray-300 rounded-lg pt-4 pb-4 text-base px-4 text-[#169C46]"
           placeholder ="Email"
-          placeholderTextColor ="#4D998C"
+          placeholderTextColor="#9CA3AF"
           value ={email}
           onChangeText={setEmail}
           keyboardType ="email-address"
@@ -83,14 +85,14 @@ export default function RegisterScreen() {
       </View>
 
       <View className ="mb-2">
-        <Text className ="text-black text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Password</Text>
+        <Text className ="text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Password</Text>
       </View>
 
       <View className = "mb-4">
         <TextInput
-          className ="border border-gray-300 rounded-lg pt-4 pb-4 text-base px-4 text-[#4D998C]"
+          className ="border border-gray-300 rounded-lg pt-4 pb-4 text-base px-4 text-[#169C46]"
           placeholder = "Create Password"
-          placeholderTextColor ="#4D998C"
+          placeholderTextColor="#9CA3AF"
           value ={password}
           onChangeText ={setPassword}
           secureTextEntry={!showPassword}
@@ -112,9 +114,9 @@ export default function RegisterScreen() {
 
       <View className = "mb-4">
         <TextInput
-          className ="border border-gray-300 rounded-lg pt-4 pb-4 text-base px-4 text-[#4D998C]"
+          className ="border border-gray-300 rounded-lg pt-4 pb-4 text-base px-4 text-[#169C46]"
           placeholder = "Confirm Password"
-          placeholderTextColor ="#4D998C"
+          placeholderTextColor="#9CA3AF"
           value ={confirmPassword}
           onChangeText ={setConfirmPassword}
           secureTextEntry={!showConfirmPassword}
@@ -135,7 +137,7 @@ export default function RegisterScreen() {
       </View>
 
       <View className="mb-2">
-        <Text className="text-black text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Select Role</Text>
+        <Text className="text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Select Role</Text>
       </View>
 
       <View className="border border-gray-300 rounded-lg mb-4 overflow-hidden bg-gray px-3">
@@ -144,25 +146,25 @@ export default function RegisterScreen() {
           onValueChange={(itemValue) => setRole(itemValue)}
           style={{ 
             height: 56,
-            color: '#4D998C',
+            color: '#169C46',
             fontFamily: 'Poppins_400Regular'
             , outline: '0'
           }}
         >
           <Picker.Item label="Select a role..." value="" color="#9CA3AF" />
-          <Picker.Item label="Artist" value="artist" color="#4D998C" />
-          <Picker.Item label="Studio" value="studio" color="#4D998C" />
-          <Picker.Item label="Organizer" value="organizer" color="#4D998C" />
+          <Picker.Item label="Artist" value="artist" color="#169C46" />
+          <Picker.Item label="Studio" value="studio" color="#169C46" />
+          <Picker.Item label="Organizer" value="organizer" color="#169C46" />
         </Picker>
       </View>
 
       <View>
-        <Text className = "text-black text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>Verify Your Identity</Text>
+        <Text className = "text-xl font-semibold" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Verify Your Identity</Text>
       </View>
 
       <View>
-        <Text className ="text-black text-l font-light pt-2.5" style={{ fontFamily: 'Poppins_300Light' }}>To ensure the safety of our community, we require all users to verify their identity by uploading a valid government-issued ID.</Text>
-        <Text className ="text-gray-500 text-sm pt-2" style={{ fontFamily: 'Poppins_300Light' }}>Accepted IDs: Philippine National ID, Driver's License, Passport, SSS ID, PhilHealth ID, Postal ID, Voter's ID, or PRC ID.</Text>
+        <Text className ="text-l font-light pt-2.5" style={{ fontFamily: 'Poppins_300Light', color: colors.text }}>To ensure the safety of our community, we require all users to verify their identity by uploading a valid government-issued ID.</Text>
+        <Text className ="text-sm pt-2" style={{ fontFamily: 'Poppins_300Light', color: colors.textSecondary }}>Accepted IDs: Philippine National ID, Driver's License, Passport, SSS ID, PhilHealth ID, Postal ID, Voter's ID, or PRC ID.</Text>
       </View>
 
       <View className="justify-center items-center border border-dashed border-gray-300 rounded-lg p-6 mt-3" style={{ minHeight: 150, width: '100%' }}>
@@ -170,24 +172,24 @@ export default function RegisterScreen() {
           onPress={pickImageID}
           className="justify-center items-center"
         >
-          <Text className="text-gray-500" style={{ fontFamily: 'Poppins_400Regular' }}>Upload Your Government ID</Text>
+          <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Upload Your Government ID</Text>
         </TouchableOpacity>
       </View>
 
       <View className ="justify-center items-center border border-dashed border-gray-300 rounded-lg p-6 mt-3" style={{minHeight: 150, width: '100%'}}>
           <TouchableOpacity onPress={pickUserImage} className='justify-center items-center'>
-            <Text className ="text-gray-500" style={{ fontFamily: 'Poppins_400Regular' }}>Capture Your Selfie</Text>
+            <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Capture Your Selfie</Text>
           </TouchableOpacity>
       </View>
 
       <View className="justify-center items-center mt-1">
-          <TouchableOpacity className="bg-teal-500 rounded-xl py-4 mt-6 justify-center items-center" style={{width: '100%'}} onPress={() => setModalVisible(true)}>
+          <TouchableOpacity className="bg-primary-500 rounded-xl py-4 mt-6 justify-center items-center" style={{width: '100%'}} onPress={() => setModalVisible(true)}>
             <Text className='text-white font-semibold' style={{ fontFamily: 'Poppins_600SemiBold' }}>Create Account</Text>
           </TouchableOpacity>
       </View>
 
       <View className='justify-center items-center mt-5 mb-2'>
-        <Text className ="text-sm font-normal" style={{ fontFamily: 'Poppins_400Regular' }}>Already have an account?<TouchableOpacity> <Text  className ='text-teal-500'onPress ={() => router.push('/')} style={{ fontFamily: 'Poppins_400Regular' }}> Login</Text></TouchableOpacity></Text>
+        <Text className ="text-sm font-normal" style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}>Already have an account?<TouchableOpacity> <Text  className ='text-primary-500'onPress ={() => router.push('/')} style={{ fontFamily: 'Poppins_400Regular' }}> Login</Text></TouchableOpacity></Text>
       </View>
 
   </ScrollView>
@@ -202,4 +204,5 @@ export default function RegisterScreen() {
   </>
   );
 }
+
 

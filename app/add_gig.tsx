@@ -4,9 +4,11 @@ import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-nativ
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useTheme } from '../src/context/ThemeContext';
 
 
 export default function AddGigScreen() {
+    const { colors } = useTheme();
     const [gigName, setGigName] = useState('');
     const [description, setDescription] = useState('');
     const [address, setAddress] = useState('');
@@ -26,12 +28,12 @@ export default function AddGigScreen() {
 
     return (
     <>
-      <View className="flex-1 bg-white px-6">
+      <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
         <Header title="Add Gig"></Header>
 
         <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
           <View className="pt-6">
-            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
               Gig Name
             </Text>
             <TextInput
@@ -42,7 +44,7 @@ export default function AddGigScreen() {
               placeholder="Enter gig name"
             />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Description
           </Text>
           <TextInput
@@ -55,7 +57,7 @@ export default function AddGigScreen() {
             textAlignVertical="top"
           />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Address
           </Text>
           <TextInput
@@ -66,76 +68,76 @@ export default function AddGigScreen() {
             placeholder="Enter address (e.g., Malolos, Bulacan)"
           />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Upload Photos
           </Text>
           <View className="border-2 border-dashed border-gray-300 rounded-lg p-6 items-center justify-center mb-4">
             <Ionicons name="image-outline" size={40} color="#9CA3AF" />
-            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginTop: 8 }}>
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginTop: 8 }}>
               Upload Photos
             </Text>
-            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 4 }}>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>
               Tap to upload your photos.
             </Text>
             <TouchableOpacity 
               className="mt-4 px-6 py-2 border border-gray-300 rounded-lg"
             >
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: '#000' }}>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }}>
                 Upload
               </Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Upload Contract
           </Text>
           <View className="border-2 border-dashed border-gray-300 rounded-lg p-6 items-center justify-center mb-4">
             <Ionicons name="document-outline" size={40} color="#9CA3AF" />
-            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginTop: 8 }}>
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginTop: 8 }}>
               Upload Contract
             </Text>
-            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 4 }}>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>
               Tap to upload your contract.
             </Text>
             <TouchableOpacity 
               className="mt-4 px-6 py-2 border border-gray-300 rounded-lg"
             >
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: '#000' }}>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }}>
                 Upload
               </Text>
             </TouchableOpacity>
           </View>
           
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Upload SEC or DTI Document
           </Text>
-          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
+          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginBottom: 12 }}>
             Upload your SEC or DTI registration for business verification
           </Text>
           <View className="border-2 border-dashed border-gray-300 rounded-lg p-6 items-center justify-center mb-4">
             <Ionicons name="document-outline" size={40} color="#9CA3AF" />
-            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginTop: 8 }}>
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginTop: 8 }}>
               Upload Document
             </Text>
-            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 4 }}>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>
               Tap to upload your SEC or DTI document.
             </Text>
             <TouchableOpacity 
               className="mt-4 px-6 py-2 border border-gray-300 rounded-lg"
             >
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: '#000' }}>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }}>
                 Upload
               </Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Talent Needs
           </Text>
           <View className="flex-row flex-wrap gap-2 mb-4">
             {talentNeeds.map((talent, index) => (
               <View key={index} className="flex-row items-center bg-gray-100 rounded-full px-4 py-2">
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#000' }}>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.text }}>
                   {talent}
                 </Text>
                 <TouchableOpacity onPress={() => removeTalent(index)} className="ml-2">
@@ -144,13 +146,13 @@ export default function AddGigScreen() {
               </View>
             ))}
             <TouchableOpacity className="border border-dashed border-gray-400 rounded-full px-4 py-2">
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6B7280' }}>
+              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }}>
                 + Add
               </Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Cost
           </Text>
           <TextInput
@@ -162,14 +164,14 @@ export default function AddGigScreen() {
             keyboardType="numeric"
           />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Availability
           </Text>
           <View className="gap-3 mb-4">
             {availabilitySlots.length > 0 && availabilitySlots.map((slot, index) => (
               <View key={index} className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                 <View className="flex-row items-center justify-between mb-2">
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#000' }}>
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: colors.text }}>
                     Slot {index + 1}
                   </Text>
                   <TouchableOpacity onPress={() => removeSlot(index)}>
@@ -178,27 +180,27 @@ export default function AddGigScreen() {
                 </View>
                 <View className="flex-row items-center mb-2">
                   <Ionicons name="calendar-outline" size={16} color="#6B7280" />
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151', marginLeft: 8 }}>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginLeft: 8 }}>
                     {slot.date}
                   </Text>
                 </View>
                 <View className="flex-row items-center">
                   <Ionicons name="time-outline" size={16} color="#6B7280" />
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151', marginLeft: 8 }}>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginLeft: 8 }}>
                     {slot.time}
                   </Text>
                 </View>
               </View>
             ))}
             <TouchableOpacity className="border border-dashed border-gray-400 rounded-lg px-4 py-3 items-center">
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6B7280' }}>
+              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }}>
                 + Add Time Slot
               </Text>
             </TouchableOpacity>
           </View>
 
             <TouchableOpacity 
-              className="rounded-xl bg-teal-500 items-center justify-center py-3 mb-6"
+              className="rounded-xl bg-primary-500 items-center justify-center py-3 mb-6"
               onPress={() => setModalVisible(true)}
             >
               <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>
@@ -224,3 +226,4 @@ export default function AddGigScreen() {
     );
     
 }
+

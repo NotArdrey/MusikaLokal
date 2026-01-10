@@ -4,11 +4,13 @@ import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'reac
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useTheme } from '../src/context/ThemeContext';
 
 
 
 
 export default function EditStudioScreen() {
+    const { colors, isDark } = useTheme();
     const [studioName, setStudioName] = useState('SoundWave Recording Studio');
     const [description, setDescription] = useState('Professional recording studio equipped with state-of-the-art equipment and acoustic treatment for premium sound quality.');
     const [address, setAddress] = useState('Malolos, Bulacan');
@@ -36,39 +38,39 @@ export default function EditStudioScreen() {
 
     return (
     <>
-    <View className="flex-1 bg-white px-6">
+    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
       <Header title="Edit Studio"></Header>
 
       <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
         <View className="pt-6">
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Studio Name
           </Text>
           <TextInput
             value={studioName}
             onChangeText={setStudioName}
-            className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}
+            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
             placeholder="Enter studio name"
+            placeholderTextColor={colors.muted}
           />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Description
           </Text>
           <TextInput
             value={description}
             onChangeText={setDescription}
-            className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, minHeight: 100 }}
+            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, minHeight: 100, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
             placeholder="Enter description"
+            placeholderTextColor={colors.muted}
             multiline
             textAlignVertical="top"
           />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Address
           </Text>
-          <View className="border border-gray-300 rounded-lg mb-2 overflow-hidden">
+          <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 8, overflow: 'hidden' }}>
             <Image 
               source={{ uri: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?w=400&h=150&fit=crop' }}
               style={{ width: '100%', height: 120 }}
@@ -78,12 +80,12 @@ export default function EditStudioScreen() {
           <TextInput
             value={address}
             onChangeText={setAddress}
-            className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}
+            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
             placeholder="Enter address"
+            placeholderTextColor={colors.muted}
           />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Upload Photos
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
@@ -104,55 +106,54 @@ export default function EditStudioScreen() {
                 </View>
               ))}
               <TouchableOpacity 
-                className="w-24 h-24 border-2 border-dashed border-gray-300 rounded-lg items-center justify-center"
-                style={{ width: 100, height: 100 }}
+                style={{ width: 100, height: 100, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}
               >
-                <Ionicons name="add" size={32} color="#9CA3AF" />
+                <Ionicons name="add" size={32} color={colors.muted} />
               </TouchableOpacity>
             </View>
           </ScrollView>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Amenities
           </Text>
           <View className="flex-row flex-wrap gap-2 mb-4">
             {amenities.map((amenity, index) => (
-              <View key={index} className="flex-row items-center bg-gray-100 rounded-full px-4 py-2">
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#000' }}>
+              <View key={index} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? colors.inputBackground : '#F3F4F6', borderRadius: 9999, paddingHorizontal: 16, paddingVertical: 8 }}>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.text }}>
                   {amenity}
                 </Text>
-                <TouchableOpacity onPress={() => removeAmenity(index)} className="ml-2">
-                  <Ionicons name="close-circle" size={18} color="#6B7280" />
+                <TouchableOpacity onPress={() => removeAmenity(index)} style={{ marginLeft: 8 }}>
+                  <Ionicons name="close-circle" size={18} color={colors.muted} />
                 </TouchableOpacity>
               </View>
             ))}
-            <TouchableOpacity className="border border-dashed border-gray-400 rounded-full px-4 py-2">
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6B7280' }}>
+            <TouchableOpacity style={{ borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 9999, paddingHorizontal: 16, paddingVertical: 8 }}>
+              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }}>
                 + Add
               </Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Cost per Hour
           </Text>
           <TextInput
             value={cost}
             onChangeText={setCost}
-            className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}
+            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
             placeholder="Enter cost per hour"
+            placeholderTextColor={colors.muted}
             keyboardType="numeric"
           />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Availability
           </Text>
           <View className="gap-3 mb-4">
             {availabilitySlots.map((slot, index) => (
-              <View key={index} className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <View key={index} style={{ backgroundColor: isDark ? 'rgba(29, 185, 84, 0.1)' : '#EFF6FF', borderWidth: 1, borderColor: isDark ? 'rgba(29, 185, 84, 0.2)' : '#BFDBFE', borderRadius: 8, padding: 12 }}>
                 <View className="flex-row items-center justify-between mb-2">
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#000' }}>
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: colors.text }}>
                     Slot {index + 1}
                   </Text>
                   <TouchableOpacity onPress={() => removeSlot(index)}>
@@ -160,28 +161,28 @@ export default function EditStudioScreen() {
                   </TouchableOpacity>
                 </View>
                 <View className="flex-row items-center mb-2">
-                  <Ionicons name="calendar-outline" size={16} color="#6B7280" />
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151', marginLeft: 8 }}>
+                  <Ionicons name="calendar-outline" size={16} color={colors.muted} />
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginLeft: 8 }}>
                     {slot.date}
                   </Text>
                 </View>
                 <View className="flex-row items-center">
-                  <Ionicons name="time-outline" size={16} color="#6B7280" />
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#374151', marginLeft: 8 }}>
+                  <Ionicons name="time-outline" size={16} color={colors.muted} />
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginLeft: 8 }}>
                     {slot.time}
                   </Text>
                 </View>
               </View>
             ))}
-            <TouchableOpacity className="border border-dashed border-gray-400 rounded-lg px-4 py-3 items-center">
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: '#6B7280' }}>
+            <TouchableOpacity style={{ borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center' }}>
+              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }}>
                 + Add Time Slot
               </Text>
             </TouchableOpacity>
           </View>
 
           <TouchableOpacity 
-            className="rounded-xl bg-teal-500 items-center justify-center py-3 mb-6"
+            className="rounded-xl bg-primary-500 items-center justify-center py-3 mb-6"
             onPress={() => setModalVisible(true)}
           >
             <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>
@@ -206,3 +207,4 @@ export default function EditStudioScreen() {
     </>
     );
 }
+

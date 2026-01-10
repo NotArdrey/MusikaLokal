@@ -1,13 +1,17 @@
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
-
-
+import { useTheme } from '../context/ThemeContext';
 
 export default function Navbar() {
+    const { colors } = useTheme();
     const pathname = usePathname();
     let activeTab = ''; 
+
+    // Active/Inactive colors from theme
+    const ACTIVE_COLOR = colors.primary;
+    const INACTIVE_COLOR = colors.muted;
 
     if (pathname.includes('explore')) {
         activeTab = 'explore';
@@ -18,14 +22,14 @@ export default function Navbar() {
     }
     
     return (
-    <View className="flex-row bg-white justify-between items-start gap-15 px-10 pb-5 border-t border-gray-300 pt-5">
+    <View className="flex-row justify-between items-start gap-15 px-10 pb-5 pt-5" style={{ backgroundColor: colors.background, borderTopWidth: 1, borderTopColor: colors.border }}>
         <View className="flex-col justify-between items-center">
             <TouchableOpacity className='justify-center items-center' 
                 onPress={()=> {
                     router.push("/home");
             }}>
-                <Ionicons name="home-outline" size={24} color ={activeTab === "home"? "#000000" : "#638782"}/>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: activeTab === "home"? "#000000" : "#638782"}}>Home</Text>
+                <MaterialCommunityIcons name="music-note" size={24} color={activeTab === "home" ? ACTIVE_COLOR : INACTIVE_COLOR}/>
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: activeTab === "home" ? ACTIVE_COLOR : INACTIVE_COLOR}}>Home</Text>
             </TouchableOpacity>
         </View>
 
@@ -34,8 +38,8 @@ export default function Navbar() {
                 onPress={()=> {
                     router.push("/explore");
             }}>
-                <Ionicons name="search-outline" size={24} color ={activeTab === "explore"? "#000000" : "#638782"}/>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: activeTab === "explore"? "#000000" : "#638782"}}>Explore</Text>
+                <MaterialCommunityIcons name="compass-outline" size={24} color={activeTab === "explore" ? ACTIVE_COLOR : INACTIVE_COLOR}/>
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: activeTab === "explore" ? ACTIVE_COLOR : INACTIVE_COLOR}}>Explore</Text>
             </TouchableOpacity>
         </View>
 
@@ -44,8 +48,8 @@ export default function Navbar() {
                 onPress={()=> {
                     router.push("/my_studio");
             }}>
-                <Ionicons name="newspaper-outline" size={24} color ={activeTab === "manage"? "#000000" : "#638782"}/>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: activeTab === "manage"? "#000000" : "#638782"}}>Manage</Text>
+                <MaterialCommunityIcons name="music-box-multiple-outline" size={24} color={activeTab === "manage" ? ACTIVE_COLOR : INACTIVE_COLOR}/>
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: activeTab === "manage" ? ACTIVE_COLOR : INACTIVE_COLOR}}>Manage</Text>
             </TouchableOpacity>
         </View>
     </View>

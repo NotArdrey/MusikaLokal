@@ -3,8 +3,10 @@ import { ScrollView, Text, TextInput, TouchableOpacity, useWindowDimensions, Vie
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useTheme } from '../src/context/ThemeContext';
 
 export default function SubmitReviewScreen() {
+  const { colors } = useTheme();
   const { width } = useWindowDimensions();
   const isNarrow = width < 400;
   const ratingButtonSize = Math.min(Math.max((width - 80) / 5 - 8, 40), 60);
@@ -15,13 +17,13 @@ export default function SubmitReviewScreen() {
 
   return (
     <>
-      <View className="flex-1 bg-white px-6">
+      <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
         <Header title="Submit Feedback" />
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
           <View className="flex flex-col justify-center items-center">
             <View className="mt-6">
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: isNarrow ? 14 : 16, textAlign: 'center' }}>
+              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: isNarrow ? 14 : 16, textAlign: 'center', color: colors.text }}>
                 How was your experience with us?
               </Text>
             </View>
@@ -33,12 +35,12 @@ export default function SubmitReviewScreen() {
                   onPress={() => setSelectedValue(item)}
                   className="rounded-xl border border-gray-300 items-center justify-center"
                   style={{
-                    backgroundColor: item === selectedValue ? '#fde047' : '#ffffff',
+                    backgroundColor: item === selectedValue ? '#fde047' : colors.card,
                     width: ratingButtonSize,
                     height: ratingButtonSize,
                   }}
                 >
-                  <Text className="text-black" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: isNarrow ? 14 : 16 }}>
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: isNarrow ? 14 : 16, color: colors.text }}>
                     {item}
                   </Text>
                 </TouchableOpacity>
@@ -54,7 +56,7 @@ export default function SubmitReviewScreen() {
               multiline
             />
             <TouchableOpacity
-              className="mt-5 rounded-xl bg-teal-500 py-4 items-center w-full"
+              className="mt-5 rounded-xl bg-primary-500 py-4 items-center w-full"
               style={{ maxWidth: 300 }}
               onPress={() => setModalVisible(true)}
             >

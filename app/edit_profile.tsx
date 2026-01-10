@@ -4,11 +4,13 @@ import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'reac
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useTheme } from '../src/context/ThemeContext';
 
 
 
 
 export default function EditProfileScreen() {
+  const { colors, isDark } = useTheme();
   const name = 'Jared Lopez Bagtas'; // Non-editable
   const [selectedRoles, setSelectedRoles] = useState(['Drummer']);
   const [genres, setGenres] = useState('Rock, Indie, Folk');
@@ -41,7 +43,7 @@ export default function EditProfileScreen() {
 
   return (
     <>
-    <View className="flex-1 bg-white">
+    <View className="flex-1" style={{ backgroundColor: colors.background }}>
       <View className="px-6">
         <Header title="Edit Profile"></Header>
       </View>
@@ -50,7 +52,7 @@ export default function EditProfileScreen() {
         <View className="pt-5 pb-24">
           {/* Profile Picture Section */}
           <View className="items-center mb-6">
-            <View style={{ width: 120, height: 120, borderRadius: 60, overflow: 'hidden', backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 120, height: 120, borderRadius: 60, overflow: 'hidden', backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
               <Image
                 source={{ uri: 'https://via.placeholder.com/150' }}
                 style={{ width: '100%', height: '100%' }}
@@ -58,41 +60,56 @@ export default function EditProfileScreen() {
               />
             </View>
             <TouchableOpacity className="mt-3 flex-row items-center gap-2">
-              <Ionicons name="camera" size={20} color="#3b82f6" />
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: '#3b82f6' }}>Change Photo</Text>
+              <Ionicons name="camera" size={20} color={colors.primary} />
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.primary }}>Change Photo</Text>
             </TouchableOpacity>
           </View>
 
           <View className="gap-4">
             <View>
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8 }}>Full Name</Text>
-              <View className="border border-gray-300 rounded-xl px-4 py-3 bg-gray-50">
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: '#6b7280' }}>{name}</Text>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8, color: colors.text }}>Full Name</Text>
+              <View style={{ backgroundColor: colors.inputBackground, borderColor: colors.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12 }}>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.textSecondary }}>{name}</Text>
               </View>
             </View>
 
             <View>
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8 }}>Role/Instrument</Text>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8, color: colors.text }}>Role/Instrument</Text>
               <View className="flex-row flex-wrap gap-2">
                 {availableRoles.map((role) => (
                   <TouchableOpacity
                     key={role}
                     onPress={() => toggleRole(role)}
-                    className={`flex-row items-center gap-2 border rounded-full px-4 py-2 ${
-                      selectedRoles.includes(role) ? 'bg-blue-500 border-blue-500' : 'border-gray-300 bg-white'
-                    }`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                      borderWidth: 1,
+                      borderRadius: 9999,
+                      paddingHorizontal: 16,
+                      paddingVertical: 8,
+                      backgroundColor: selectedRoles.includes(role) ? colors.primary : colors.card,
+                      borderColor: selectedRoles.includes(role) ? colors.primary : colors.border
+                    }}
                   >
-                    <View className={`w-4 h-4 rounded border ${
-                      selectedRoles.includes(role) ? 'bg-white border-white' : 'border-gray-400'
-                    } items-center justify-center`}>
+                    <View style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: 4,
+                      borderWidth: 1,
+                      backgroundColor: selectedRoles.includes(role) ? '#fff' : 'transparent',
+                      borderColor: selectedRoles.includes(role) ? '#fff' : colors.muted,
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
                       {selectedRoles.includes(role) && (
-                        <Ionicons name="checkmark" size={12} color="#3b82f6" />
+                        <Ionicons name="checkmark" size={12} color={colors.primary} />
                       )}
                     </View>
                     <Text style={{
                       fontFamily: 'Poppins_400Regular',
                       fontSize: 13,
-                      color: selectedRoles.includes(role) ? '#ffffff' : '#000000'
+                      color: selectedRoles.includes(role) ? '#ffffff' : colors.text
                     }}>{role}</Text>
                   </TouchableOpacity>
                 ))}
@@ -101,25 +118,25 @@ export default function EditProfileScreen() {
 
             {/* Genres */}
             <View>
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8 }}>Genres</Text>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8, color: colors.text }}>Genres</Text>
               <TextInput
                 value={genres}
                 onChangeText={setGenres}
-                className="border border-gray-300 rounded-xl px-4 py-3"
-                style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}
+                style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.card, color: colors.text }}
                 placeholder="e.g., Rock, Jazz, Blues"
+                placeholderTextColor={colors.muted}
               />
             </View>
 
             {/* Bio */}
             <View>
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8 }}>Bio</Text>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8, color: colors.text }}>Bio</Text>
               <TextInput
                 value={bio}
                 onChangeText={setBio}
-                className="border border-gray-300 rounded-xl px-4 py-3"
-                style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, minHeight: 100, textAlignVertical: 'top' }}
+                style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, minHeight: 100, textAlignVertical: 'top', borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.card, color: colors.text }}
                 placeholder="Tell us about yourself..."
+                placeholderTextColor={colors.muted}
                 multiline
                 numberOfLines={4}
               />
@@ -127,9 +144,9 @@ export default function EditProfileScreen() {
 
             {/* My Sample Music */}
             <View className="mt-2">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, marginBottom: 12 }}>My Sample Music</Text>
+              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, marginBottom: 12, color: colors.text }}>My Sample Music</Text>
               <View className="flex-row gap-3">
-                <View className="border border-gray-300 rounded-xl overflow-hidden bg-gray-100 items-center justify-center" style={{ width: '48%', height: 150 }}>
+                <View style={{ width: '48%', height: 150, borderWidth: 1, borderColor: colors.border, borderRadius: 12, overflow: 'hidden', backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
                   <Image
                     source={{ uri: 'https://via.placeholder.com/300x200?text=Video+Preview' }}
                     className="w-full h-full"
@@ -145,9 +162,9 @@ export default function EditProfileScreen() {
                   </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity className="border-2 border-dashed border-gray-300 rounded-xl items-center justify-center" style={{ width: '48%', height: 150 }}>
-                  <Ionicons name="add-circle-outline" size={40} color="#9ca3af" />
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#9ca3af', marginTop: 8 }}>Add Video</Text>
+                <TouchableOpacity style={{ width: '48%', height: 150, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="add-circle-outline" size={40} color={colors.muted} />
+                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 8 }}>Add Video</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -156,14 +173,14 @@ export default function EditProfileScreen() {
           {/* Action Buttons */}
           <View className="flex-row gap-3 mt-8">
             <TouchableOpacity 
-              className="flex-1 border border-gray-300 rounded-xl items-center justify-center py-3"
+              style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 }}
               onPress={() => console.log('Cancel')}
             >
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Cancel</Text>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }}>Cancel</Text>
             </TouchableOpacity>
 
             <TouchableOpacity 
-              className="flex-1 bg-teal-500 rounded-xl items-center justify-center py-3"
+              className="flex-1 bg-primary-500 rounded-xl items-center justify-center py-3"
               onPress={() => setModalVisible(true)}
             >
               <Text className="text-white" style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Save Changes</Text>
@@ -187,3 +204,4 @@ export default function EditProfileScreen() {
     </>
   );
 }
+

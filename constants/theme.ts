@@ -1,12 +1,56 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * MusikaLokal - Music-Themed Color Palette
  */
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+// Music Stage Theme Color Palette
+export const ThemeColors = {
+  // Primary - Deep Purple (Stage Lights)
+  primary: {
+    50: '#F3E8FF',
+    100: '#E9D5FF',
+    200: '#D8B4FE',
+    300: '#C084FC',
+    400: '#A855F7',
+    500: '#7C3AED',  // Main primary button color
+    600: '#6D28D9',  // Hover/pressed state
+    700: '#5B21B6',  // Dark accent
+    800: '#4C1D95',
+    900: '#3B0764',
+  },
+  // Secondary - Rich Gold
+  secondary: {
+    50: '#FFFBEB',
+    100: '#FEF3C7',
+    200: '#FDE68A',
+    300: '#FCD34D',
+    400: '#FBBF24',
+    500: '#D97706',  // Gold accent
+    600: '#B45309',
+    700: '#92400E',
+    800: '#78350F',
+    900: '#451A03',
+  },
+  // Accent - Electric Blue
+  accent: {
+    50: '#EFF6FF',
+    100: '#DBEAFE',
+    200: '#BFDBFE',
+    300: '#93C5FD',
+    400: '#60A5FA',
+    500: '#3B82F6',  // Electric Blue
+    600: '#2563EB',
+    700: '#1D4ED8',
+    800: '#1E40AF',
+    900: '#1E3A8A',
+  },
+  // Muted text/icons
+  muted: '#64748B',
+};
+
+const tintColorLight = '#7C3AED';
+const tintColorDark = '#A855F7';
 
 export const Colors = {
   light: {

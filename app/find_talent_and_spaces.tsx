@@ -3,10 +3,12 @@ import { useState } from 'react';
 import { Image, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useTheme } from '../src/context/ThemeContext';
 
 
 
 export default function FindAGigScreen() {
+    const { colors, isDark } = useTheme();
     const [selectedType, setSelectedType] = useState('All');
     const [selectedGenre, setSelectedGenre] = useState('All');
     const [sortBy, setSortBy] = useState('Relevance');
@@ -15,7 +17,7 @@ export default function FindAGigScreen() {
     const sortOptions = ['Relevance', 'Distance', 'Rating', 'Price: Low to High', 'Price: High to Low'];
 
     return (
-    <View className="flex-1 bg-white px-6">
+    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
       <Header title ="Find Talent & Spaces"/>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 12, paddingBottom: 100 }}>
@@ -23,22 +25,22 @@ export default function FindAGigScreen() {
         <Ionicons
           name="search"
           size={20}
-          color="#888"
+          color={colors.muted}
           className="absolute left-2.5 top-3.5 z-10"
         />
         <TextInput          
-          className="border border-gray-300 bg-gray-100 rounded-lg px-4 py-3 text-base pl-10"
+          style={{ fontFamily: 'Poppins_400Regular', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.inputBackground, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, paddingLeft: 40, fontSize: 14, color: colors.text }}
           placeholder="Search for Venues, Studios, Bands"
-          placeholderTextColor="#888"
+          placeholderTextColor={colors.muted}
           autoCapitalize="none"
-          style={{ fontFamily: 'Poppins_400Regular' }}/>
+          />
       </View>
 
       {/* Filter Section */}
       <View className="mb-4">
         {/* Type Filter */}
         <View className="mb-3">
-          <Text className="text-xs text-gray-600 mb-2" style={{ fontFamily: 'Poppins_500Medium' }}>Type</Text>
+          <Text className="text-xs mb-2" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Type</Text>
           <View style={{ marginHorizontal: -8 }}>
             <ScrollView 
               horizontal 
@@ -51,9 +53,10 @@ export default function FindAGigScreen() {
                   <TouchableOpacity
                     key={type}
                     onPress={() => setSelectedType(type)}
-                    className={`px-4 py-2 rounded-full ${selectedType === type ? 'bg-[#0D9488]' : 'bg-gray-100'}`}
+                    className="px-4 py-2 rounded-full"
+                    style={{ backgroundColor: selectedType === type ? colors.primary : colors.inputBackground }}
                   >
-                    <Text className={`text-xs ${selectedType === type ? 'text-white' : 'text-gray-700'}`} style={{ fontFamily: 'Poppins_500Medium' }}>
+                    <Text className={`text-xs`} style={{ fontFamily: 'Poppins_500Medium', color: selectedType === type ? '#FFFFFF' : colors.text }}>
                       {type}
                     </Text>
                   </TouchableOpacity>
@@ -65,7 +68,7 @@ export default function FindAGigScreen() {
 
         {/* Genre Filter */}
         <View className="mb-3">
-          <Text className="text-xs text-gray-600 mb-2" style={{ fontFamily: 'Poppins_500Medium' }}>Genre</Text>
+          <Text className="text-xs mb-2" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Genre</Text>
           <View>
             <ScrollView 
               horizontal 
@@ -78,9 +81,10 @@ export default function FindAGigScreen() {
                   <TouchableOpacity
                     key={genre}
                     onPress={() => setSelectedGenre(genre)}
-                    className={`px-4 py-2 rounded-full ${selectedGenre === genre ? 'bg-[#0D9488]' : 'bg-gray-100'}`}
+                    className="px-4 py-2 rounded-full"
+                    style={{ backgroundColor: selectedGenre === genre ? colors.primary : colors.inputBackground }}
                   >
-                    <Text className={`text-xs ${selectedGenre === genre ? 'text-white' : 'text-gray-700'}`} style={{ fontFamily: 'Poppins_500Medium' }}>
+                    <Text className={`text-xs`} style={{ fontFamily: 'Poppins_500Medium', color: selectedGenre === genre ? '#FFFFFF' : colors.text }}>
                       {genre}
                     </Text>
                   </TouchableOpacity>
@@ -93,13 +97,14 @@ export default function FindAGigScreen() {
         {/* Sort and Filter Row */}
         <View className="flex-row items-center justify-between mt-3">
           <View className="flex-row items-center gap-2">
-            <Text className="text-xs text-gray-600" style={{ fontFamily: 'Poppins_500Medium' }}>Sort by:</Text>
+            <Text className="text-xs" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Sort by:</Text>
             <TouchableOpacity
               onPress={() => setShowSortModal(true)}
-              className="flex-row items-center gap-1 px-3 py-1.5 bg-gray-100 rounded-lg"
+              className="flex-row items-center gap-1 px-3 py-1.5 rounded-lg"
+              style={{ backgroundColor: colors.inputBackground }}
             >
-              <Text className="text-xs text-gray-700" style={{ fontFamily: 'Poppins_500Medium' }}>{sortBy}</Text>
-              <Ionicons name="chevron-down" size={14} color="#374151" />
+              <Text className="text-xs" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{sortBy}</Text>
+              <Ionicons name="chevron-down" size={14} color={colors.text} />
             </TouchableOpacity>
           </View>
         
@@ -118,9 +123,9 @@ export default function FindAGigScreen() {
           activeOpacity={1}
           onPress={() => setShowSortModal(false)}
         >
-          <View className="bg-white rounded-2xl w-4/5 max-w-sm" style={{ marginHorizontal: 20 }}>
-            <View className="border-b border-gray-200 px-6 py-4">
-              <Text className="text-base font-semibold text-gray-800" style={{ fontFamily: 'Poppins_600SemiBold' }}>
+          <View className="rounded-2xl w-4/5 max-w-sm" style={{ marginHorizontal: 20, backgroundColor: colors.card, borderWidth: isDark ? 1 : 0, borderColor: colors.border }}>
+            <View style={{ borderBottomWidth: 1, borderBottomColor: colors.border, paddingHorizontal: 24, paddingVertical: 16 }}>
+              <Text className="text-base font-semibold" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
                 Sort by
               </Text>
             </View>
@@ -132,28 +137,25 @@ export default function FindAGigScreen() {
                     setSortBy(option);
                     setShowSortModal(false);
                   }}
-                  className={`px-6 py-3 flex-row items-center justify-between ${
-                    index !== sortOptions.length - 1 ? 'border-b border-gray-100' : ''
-                  }`}
+                  style={{ paddingHorizontal: 24, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: index !== sortOptions.length - 1 ? 1 : 0, borderBottomColor: colors.border }}
                 >
                   <Text 
-                    className={`text-sm ${sortBy === option ? 'text-[#0D9488] font-semibold' : 'text-gray-700'}`}
-                    style={{ fontFamily: sortBy === option ? 'Poppins_600SemiBold' : 'Poppins_400Regular' }}
+                    style={{ fontFamily: sortBy === option ? 'Poppins_600SemiBold' : 'Poppins_400Regular', fontSize: 14, color: sortBy === option ? colors.primary : colors.textSecondary }}
                   >
                     {option}
                   </Text>
                   {sortBy === option && (
-                    <Ionicons name="checkmark" size={20} color="#0D9488" />
+                    <Ionicons name="checkmark" size={20} color={colors.primary} />
                   )}
                 </TouchableOpacity>
               ))}
             </View>
-            <View className="border-t border-gray-200 px-6 py-3">
+            <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingHorizontal: 24, paddingVertical: 12 }}>
               <TouchableOpacity
                 onPress={() => setShowSortModal(false)}
                 className="py-2 items-center"
               >
-                <Text className="text-sm text-gray-500" style={{ fontFamily: 'Poppins_500Medium' }}>
+                <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.textSecondary }}>
                   Cancel
                 </Text>
               </TouchableOpacity>
@@ -163,7 +165,10 @@ export default function FindAGigScreen() {
       </Modal>
       
         {/*Studio/Venue Card*/}
-        <View className="flex-1 flex-col bg-white rounded-3xl overflow-hidden" style={{
+        <View className="flex-1 flex-col rounded-3xl overflow-hidden" style={{
+          backgroundColor: colors.card,
+          borderWidth: isDark ? 1 : 0,
+          borderColor: colors.border,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 4 },
           shadowOpacity: 0.1,
@@ -178,50 +183,50 @@ export default function FindAGigScreen() {
               style={{height: 200, width: '100%'}}
               resizeMode="cover"
             />
-            <View className="absolute top-3 left-3 rounded-lg px-3 py-1.5" style={{backgroundColor: '#0D9488'}}>
+            <View className="absolute top-3 left-3 rounded-lg px-3 py-1.5" style={{backgroundColor: colors.primary}}>
               <Text className="text-white text-[10px] font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>VENUE</Text>
             </View>
           </View>
           <View>
             <View className="px-5 flex flex-row justify-between items-center">
-              <Text className ="mt-3"style={{ fontFamily: 'Poppins_700Bold'}}>Adonis Gay Bar</Text>
+              <Text className ="mt-3"style={{ fontFamily: 'Poppins_700Bold', color: colors.text}}>Adonis Gay Bar</Text>
               <View className="flex-row items-center bg-amber-50 rounded-full px-3 py-1 mt-3">
                 <Ionicons name="star" size={14} color="#FFB800" />
-                <Text className="ml-1 text-xs font-semibold text-black">4.8</Text>
+                <Text className="ml-1 text-xs font-semibold" style={{ color: colors.text }}>4.8</Text>
               </View>
             </View>
           </View>
           <View className="mt-1 px-5 flex flex-row ">
-             <Ionicons name="location-outline" size={14} color="#638782" />
-             <Text className =" px-0.5 text-[#638782]"style={{ fontFamily: 'Poppins_400Regular', fontSize: 12 }}>Plaridel Bulacan</Text>
+             <Ionicons name="location-outline" size={14} color="#808080" />
+             <Text className =" px-0.5 text-[#808080]"style={{ fontFamily: 'Poppins_400Regular', fontSize: 12 }}>Plaridel Bulacan</Text>
           </View>
 
           <View className="flex-row items-center gap-2 mb-3 px-5 mt-2">
-            <View className="flex-row items-center gap-1 bg-teal-100 rounded-md px-3 py-1.5">
-              <Text className="text-[11px] text-teal-700 font-medium">Gay</Text>
+            <View className="flex-row items-center gap-1 bg-primary-100 rounded-md px-3 py-1.5">
+              <Text className="text-[11px] text-primary-700 font-medium">Gay</Text>
             </View>
-            <View className="flex-row items-center gap-1 bg-cyan-100 rounded-md px-3 py-1.5">
-              <Text className="text-[11px] text-cyan-700 font-medium">homosapiens</Text>
+            <View className="flex-row items-center gap-1 bg-accent-100 rounded-md px-3 py-1.5">
+              <Text className="text-[11px] text-accent-700 font-medium">homosapiens</Text>
             </View>
           </View>
 
           <View className="flex-row items-center gap-4 border-b border-gray-100 pb-3 mb-3 px-6">
             <View className="flex-row items-center gap-1">
               <Ionicons name="cash-outline" size={16} color="#9CA3AF" />
-              <Text className="text-[12px] text-gray-500" style={{ fontFamily: 'Poppins_500Medium' }}>₱69,000</Text>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, color: colors.textSecondary }}>₱69,000</Text>
             </View>
             <View className="flex-row items-center gap-1">
               <Ionicons name="navigate-outline" size={16} color="#9CA3AF" />
-              <Text className="text-[12px] text-gray-500" style={{ fontFamily: 'Poppins_500Medium' }}>6.9 km</Text>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, color: colors.textSecondary }}>6.9 km</Text>
             </View>
           </View>
 
           <View className="px-5">
-            <Text className =" text-gray-500"style={{ fontFamily: 'Poppins_400Regular', fontSize: 12 }}>Owned by JARED CARIASO who is a gay specialist. Iconic jazz club in the heart of the city known for its intimate setting and world-class performances.</Text>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Owned by JARED CARIASO who is a gay specialist. Iconic jazz club in the heart of the city known for its intimate setting and world-class performances.</Text>
           </View>
 
           <View className="flex-1  mt-5 mb-5 mx-5">
-            <TouchableOpacity className =" rounded-xl justify-center items-center bg-[#12D4B5] shadow" style={{height:40}}>
+            <TouchableOpacity className="rounded-xl justify-center items-center bg-primary-500 shadow" style={{height:40}}>
               <Text className ="text-white" style={{ fontFamily: 'Poppins_600SemiBold'}}>Apply to Play</Text>
             </TouchableOpacity>
           </View>
@@ -230,8 +235,11 @@ export default function FindAGigScreen() {
 
 
       {/*Bands Card*/}
-        <View className="flex-1 flex-col bg-white rounded-3xl overflow-hidden" 
+        <View className="flex-1 flex-col rounded-3xl overflow-hidden" 
         style={{
+          backgroundColor: colors.card,
+          borderWidth: isDark ? 1 : 0,
+          borderColor: colors.border,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: 4 },
           shadowOpacity: 0.1,
@@ -246,47 +254,47 @@ export default function FindAGigScreen() {
               style={{height: 200, width: '100%'}}
               resizeMode="cover"
             />
-            <View className="absolute top-3 left-3 rounded-lg px-3 py-1.5" style={{backgroundColor: '#0D9488'}}>
+            <View className="absolute top-3 left-3 rounded-lg px-3 py-1.5" style={{backgroundColor: colors.primary}}>
               <Text className="text-white text-[10px] font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>MUSIC GROUP</Text>
             </View>
           </View>
           <View>
             <View className="px-5 flex flex-row justify-between items-center">
-              <Text className ="mt-3"style={{ fontFamily: 'Poppins_700Bold'}}>The Manila Groove</Text>
+              <Text className ="mt-3"style={{ fontFamily: 'Poppins_700Bold', color: colors.text}}>The Manila Groove</Text>
               <View className="flex-row items-center bg-amber-50 rounded-full px-3 py-1 mt-3">
                 <Ionicons name="star" size={14} color="#FFB800" />
-                <Text className="ml-1 text-xs font-semibold text-black">4.9</Text>
+                <Text className="ml-1 text-xs font-semibold" style={{ color: colors.text }}>4.9</Text>
               </View>
             </View>
           </View>
           <View className="mt-1 px-5 flex flex-row ">
-             <Ionicons name="location-outline" size={14} color="#638782" />
-             <Text className =" px-0.5 text-[#638782]"style={{ fontFamily: 'Poppins_400Regular', fontSize: 12 }}>Quezon City, Metro Manila</Text>
+             <Ionicons name="location-outline" size={14} color="#808080" />
+             <Text className =" px-0.5 text-[#808080]"style={{ fontFamily: 'Poppins_400Regular', fontSize: 12 }}>Quezon City, Metro Manila</Text>
           </View>
 
           <View className="flex-row items-center gap-2 mb-3 px-5 mt-2">
-            <View className="flex-row items-center gap-1 bg-teal-100 rounded-md px-3 py-1.5">
-              <Text className="text-[11px] text-teal-700 font-medium">Rock</Text>
+            <View className="flex-row items-center gap-1 bg-primary-100 rounded-md px-3 py-1.5">
+              <Text className="text-[11px] text-primary-700 font-medium">Rock</Text>
             </View>
-            <View className="flex-row items-center gap-1 bg-cyan-100 rounded-md px-3 py-1.5">
-              <Text className="text-[11px] text-cyan-700 font-medium">Jazz Fusion</Text>
+            <View className="flex-row items-center gap-1 bg-accent-100 rounded-md px-3 py-1.5">
+              <Text className="text-[11px] text-accent-700 font-medium">Jazz Fusion</Text>
             </View>
           </View>
 
           <View className="flex-row items-center gap-4 border-b border-gray-100 pb-3 mb-3 px-6">
             <View className="flex-row items-center gap-1">
               <Ionicons name="navigate-outline" size={16} color="#9CA3AF" />
-              <Text className="text-[12px] text-gray-500" style={{ fontFamily: 'Poppins_500Medium' }}>3.2 km</Text>
+              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, color: colors.textSecondary }}>3.2 km</Text>
             </View>
           </View>
 
           <View className="px-5">
-            <Text className =" text-gray-500"style={{ fontFamily: 'Poppins_400Regular', fontSize: 12 }}>5-piece band with 8 years of experience. Specializes in classic rock, jazz standards, and original compositions. Available for weddings, corporate events, and bar gigs.</Text>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>5-piece band with 8 years of experience. Specializes in classic rock, jazz standards, and original compositions. Available for weddings, corporate events, and bar gigs.</Text>
           </View>
 
           <View className="flex-1  mt-5 mb-5 mx-5">
-            <TouchableOpacity className =" rounded-xl justify-center items-center bg-[#12D4B5] shadow" style={{height:40}}>
-              <Text className ="text-white" style={{ fontFamily: 'Poppins_600semibold'}}>Apply to Play</Text>
+            <TouchableOpacity className="rounded-xl justify-center items-center bg-primary-500 shadow" style={{height:40}}>
+              <Text className ="text-white" style={{ fontFamily: 'Poppins_600SemiBold'}}>Apply to Play</Text>
             </TouchableOpacity>
           </View>
         </View>

@@ -4,11 +4,13 @@ import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'reac
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useTheme } from '../src/context/ThemeContext';
 
 
 
 
 export default function EditGroupScreen() {
+    const { colors, isDark } = useTheme();
     const [groupName, setGroupName] = useState('The Manila Beats');
     const [genre, setGenre] = useState('OPM Rock');
     const [description, setDescription] = useState('A dynamic music group specializing in contemporary Filipino music with a modern twist. We bring energy and passion to every performance.');
@@ -17,49 +19,49 @@ export default function EditGroupScreen() {
 
     return (
     <>
-    <View className="flex-1 bg-white px-6">
+    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
       <Header title="Edit Group"></Header>
 
       <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
         <View className="pt-6">
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Group Name
           </Text>
           <TextInput
             value={groupName}
             onChangeText={setGroupName}
-            className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14 }}
+            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
             placeholder="Enter Group name"
+            placeholderTextColor={colors.muted}
           />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Genre(s)
           </Text>
-          <TouchableOpacity className="border border-gray-300 rounded-lg px-4 py-3 mb-4 flex-row items-center justify-between">
-            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: genre ? '#000' : '#9CA3AF' }}>
+          <TouchableOpacity style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.card }}>
+            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: genre ? colors.text : colors.muted }}>
               {genre || 'Select Preferred genre'}
             </Text>
-            <Ionicons name="chevron-down" size={20} color="#9CA3AF" />
+            <Ionicons name="chevron-down" size={20} color={colors.muted} />
           </TouchableOpacity>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Description
           </Text>
           <TextInput
             value={description}
             onChangeText={setDescription}
-            className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, minHeight: 120 }}
+            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, minHeight: 120, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
             placeholder=""
+            placeholderTextColor={colors.muted}
             multiline
             textAlignVertical="top"
           />
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginBottom: 8 }}>
+          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
             Upload Logo/Cover
           </Text>
-          <View className="border-2 border-dashed border-gray-300 rounded-lg p-8 items-center justify-center mb-6">
+          <View style={{ borderWidth: 2, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 8, padding: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 24 }}>
             {selectedImage ? (
               <View className="relative w-full">
                 <Image 
@@ -76,17 +78,17 @@ export default function EditGroupScreen() {
               </View>
             ) : (
               <>
-                <Ionicons name="cloud-upload-outline" size={48} color="#9CA3AF" />
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#000', marginTop: 12 }}>
+                <Ionicons name="cloud-upload-outline" size={48} color={colors.muted} />
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginTop: 12 }}>
                   Upload Image
                 </Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', marginTop: 4, textAlign: 'center' }}>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 4, textAlign: 'center' }}>
                   Tap to upload your group's logo or cover image.
                 </Text>
                 <TouchableOpacity 
-                  className="mt-4 px-6 py-2 border border-gray-300 rounded-lg"
+                  style={{ marginTop: 16, paddingHorizontal: 24, paddingVertical: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 8 }}
                 >
-                  <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: '#000' }}>
+                  <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }}>
                     Upload
                   </Text>
                 </TouchableOpacity>
@@ -95,7 +97,7 @@ export default function EditGroupScreen() {
           </View>
 
           <TouchableOpacity 
-            className="rounded-xl bg-teal-500 items-center justify-center py-3 mb-6"
+            className="rounded-xl bg-primary-500 items-center justify-center py-3 mb-6"
             onPress={() => setModalVisible(true)}
           >
             <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>
@@ -120,3 +122,4 @@ export default function EditGroupScreen() {
     </>
     );
 }
+
