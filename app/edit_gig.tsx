@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
@@ -6,225 +7,147 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
-
-
-
 export default function EditGigScreen() {
-    const { colors, isDark } = useTheme();
-    const [gigName, setGigName] = useState('BarRocks Music Lounge');
-    const [description, setDescription] = useState('A vibrant music venue in the heart of downtown, known for its eclectic mix of genres and lively atmosphere.');
-    const [address, setAddress] = useState('Floridel, Bulacan');
-    const [talentNeeds, setTalentNeeds] = useState(['Band', '1950s Theme', 'Muko']);
-    const [cost, setCost] = useState('6,000');
-    const [availabilitySlots, setAvailabilitySlots] = useState([
-        { date: 'March 2, 2026', time: '12:00am - 4:00am' },
-        { date: 'March 9, 2026', time: '6:00pm - 10:00pm' },
-        { date: 'March 16, 2026', time: '8:00pm - 12:00am' }
-    ]);
-    const [selectedImages, setSelectedImages] = useState([
-        'https://images.unsplash.com/photo-1598387993441-a364f854c3e1?w=300&h=200&fit=crop',
-        'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=300&h=200&fit=crop',
-        'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=300&h=200&fit=crop'
-    ]);
-    const [modalVisible, setModalVisible] = useState(false);
+  const { colors, isDark } = useTheme();
+  const [gigName, setGigName] = useState('BarRocks Music Lounge');
+  const [description, setDescription] = useState('A vibrant music venue in the heart of downtown, known for its eclectic mix of genres and lively atmosphere.');
+  const [address, setAddress] = useState('Floridel, Bulacan');
+  const [cost, setCost] = useState('6000');
+  const [modalVisible, setModalVisible] = useState(false);
 
-    const removeTalent = (index: number) => {
-        setTalentNeeds(talentNeeds.filter((_, i) => i !== index));
-    };
+  // Mock Data
+  const [documents, setDocuments] = useState(['Contract.pdf', 'Rider_v2.pdf']);
+  const [images, setImages] = useState([
+    'https://images.unsplash.com/photo-1598387993441-a364f854c3e1?w=300&h=200&fit=crop',
+    'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=300&h=200&fit=crop',
+    'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=300&h=200&fit=crop'
+  ]);
 
-    const removeSlot = (index: number) => {
-        setAvailabilitySlots(availabilitySlots.filter((_, i) => i !== index));
-    };
+  const handleSave = () => {
+    setModalVisible(false);
+    console.log('Gig Updated');
+    router.back();
+  };
 
-    return (
+  const renderSectionHeader = (title: string, icon: string) => (
+    <View className="flex-row items-center gap-2 mb-4 mt-6">
+      <Ionicons name={icon as any} size={18} color={colors.primary} />
+      <Text className="text-base" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{title}</Text>
+    </View>
+  );
+
+  const renderInput = (label: string, value: string, setValue: (text: string) => void, multiline = false, numeric = false) => (
+    <View className="mb-4">
+      <Text className="mb-2 text-xs uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>{label}</Text>
+      <View className={`rounded-xl border ${isDark ? 'border-gray-700' : 'border-gray-200'} overflow-hidden`} style={{ backgroundColor: colors.inputBackground }}>
+        <TextInput
+          value={value}
+          onChangeText={setValue}
+          multiline={multiline}
+          numberOfLines={multiline ? 4 : 1}
+          keyboardType={numeric ? 'numeric' : 'default'}
+          className="p-4"
+          style={{
+            fontFamily: 'Poppins_400Regular',
+            color: colors.text,
+            height: multiline ? 120 : 'auto',
+            textAlignVertical: multiline ? 'top' : 'center'
+          }}
+        />
+      </View>
+    </View>
+  );
+
+  return (
     <>
-    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
-      <Header title="Edit Gig"></Header>
+      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+        <Header title="Edit Gig" />
 
-      <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
-        <View className="pt-6">
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
-            Gig Name
-          </Text>
-          <TextInput
-            value={gigName}
-            onChangeText={setGigName}
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
-            placeholder="Enter gig name"
-            placeholderTextColor={colors.muted}
-          />
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 24 }}>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
-            Description
-          </Text>
-          <TextInput
-            value={description}
-            onChangeText={setDescription}
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, minHeight: 100, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
-            placeholder="Enter description"
-            placeholderTextColor={colors.muted}
-            multiline
-            textAlignVertical="top"
-          />
+          {renderSectionHeader('Basic Details', 'information-circle')}
+          {renderInput('Gig Title', gigName, setGigName)}
+          {renderInput('Description', description, setDescription, true)}
+          {renderInput('Location', address, setAddress)}
+          {renderInput('Budget (₱)', cost, setCost, false, true)}
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
-            Address
-          </Text>
-          <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, marginBottom: 8, overflow: 'hidden' }}>
-            <Image 
-              source={{ uri: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?w=400&h=150&fit=crop' }}
-              style={{ width: '100%', height: 120 }}
-              resizeMode="cover"
-            />
-          </View>
-          <TextInput
-            value={address}
-            onChangeText={setAddress}
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
-            placeholder="Enter address"
-            placeholderTextColor={colors.muted}
-          />
+          {renderSectionHeader('Visuals', 'image')}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-2">
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className="w-24 h-24 rounded-xl items-center justify-center border border-dashed"
+                style={{ borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6' }}
+              >
+                <Ionicons name="add" size={24} color={colors.textSecondary} />
+                <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Add Photo</Text>
+              </TouchableOpacity>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
-            Upload Photos
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
-            <View className="flex-row gap-2">
-              {selectedImages.map((uri, index) => (
+              {images.map((uri, index) => (
                 <View key={index} className="relative">
-                  <Image 
-                    source={{ uri }}
-                    style={{ width: 100, height: 100, borderRadius: 8 }}
-                    resizeMode="cover"
-                  />
-                  <TouchableOpacity 
-                    className="absolute top-1 right-1 bg-red-500 rounded-full w-6 h-6 items-center justify-center"
-                    onPress={() => setSelectedImages(selectedImages.filter((_, i) => i !== index))}
+                  <Image source={{ uri }} className="w-24 h-24 rounded-xl bg-gray-200" />
+                  <TouchableOpacity
+                    className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 items-center justify-center border-2 border-white dark:border-gray-900"
+                    onPress={() => setImages(images.filter((_, i) => i !== index))}
                   >
-                    <Ionicons name="close" size={16} color="#FFF" />
+                    <Ionicons name="close" size={12} color="#fff" />
                   </TouchableOpacity>
                 </View>
               ))}
-              <TouchableOpacity 
-                style={{ width: 100, height: 100, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 8, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Ionicons name="add" size={32} color={colors.muted} />
-              </TouchableOpacity>
             </View>
           </ScrollView>
+          <Text className="text-xs mb-4" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Hold images to reorder or tap to view.</Text>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
-            Upload Contract
-          </Text>
-          <View style={{ borderWidth: 2, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 8, padding: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-            <Ionicons name="document-outline" size={40} color={colors.muted} />
-            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginTop: 8 }}>
-              Upload Contract
-            </Text>
-            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>
-              Tap to upload your contract.
-            </Text>
-            <TouchableOpacity 
-              style={{ marginTop: 16, paddingHorizontal: 24, paddingVertical: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 8 }}
-            >
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }}>
-                Upload
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
-            Talent Needs
-          </Text>
-          <View className="flex-row flex-wrap gap-2 mb-4">
-            {talentNeeds.map((talent, index) => (
-              <View key={index} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? colors.inputBackground : '#F3F4F6', borderRadius: 9999, paddingHorizontal: 16, paddingVertical: 8 }}>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.text }}>
-                  {talent}
-                </Text>
-                <TouchableOpacity onPress={() => removeTalent(index)} style={{ marginLeft: 8 }}>
-                  <Ionicons name="close-circle" size={18} color={colors.muted} />
-                </TouchableOpacity>
+          {renderSectionHeader('Documents', 'document-text')}
+          {documents.map((doc, i) => (
+            <View key={i} className="flex-row items-center justify-between p-4 mb-3 rounded-xl border" style={{ backgroundColor: colors.card, borderColor: colors.border }}>
+              <View className="flex-row items-center gap-3">
+                <Ionicons name="document" size={20} color={colors.primary} />
+                <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{doc}</Text>
               </View>
-            ))}
-            <TouchableOpacity style={{ borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 9999, paddingHorizontal: 16, paddingVertical: 8 }}>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }}>
-                + Add
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
-            Cost
-          </Text>
-          <TextInput
-            value={cost}
-            onChangeText={setCost}
-            style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, backgroundColor: colors.card, color: colors.text }}
-            placeholder="Enter cost"
-            placeholderTextColor={colors.muted}
-            keyboardType="numeric"
-          />
-
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, marginBottom: 8 }}>
-            Availability
-          </Text>
-          <View className="gap-3 mb-4">
-            {availabilitySlots.map((slot, index) => (
-              <View key={index} style={{ backgroundColor: isDark ? 'rgba(29, 185, 84, 0.1)' : '#EFF6FF', borderWidth: 1, borderColor: isDark ? 'rgba(29, 185, 84, 0.2)' : '#BFDBFE', borderRadius: 8, padding: 12 }}>
-                <View className="flex-row items-center justify-between mb-2">
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: colors.text }}>
-                    Slot {index + 1}
-                  </Text>
-                  <TouchableOpacity onPress={() => removeSlot(index)}>
-                    <Ionicons name="close-circle" size={20} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
-                <View className="flex-row items-center mb-2">
-                  <Ionicons name="calendar-outline" size={16} color={colors.muted} />
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginLeft: 8 }}>
-                    {slot.date}
-                  </Text>
-                </View>
-                <View className="flex-row items-center">
-                  <Ionicons name="time-outline" size={16} color={colors.muted} />
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginLeft: 8 }}>
-                    {slot.time}
-                  </Text>
-                </View>
-              </View>
-            ))}
-            <TouchableOpacity style={{ borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center' }}>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }}>
-                + Add Time Slot
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity 
-            className="rounded-xl bg-primary-500 items-center justify-center py-3 mb-6"
-            onPress={() => setModalVisible(true)}
-          >
-            <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>
-              Save Gig Profile
-            </Text>
+              <TouchableOpacity onPress={() => setDocuments(documents.filter((_, idx) => idx !== i))}>
+                <Ionicons name="trash-outline" size={18} color="#EF4444" />
+              </TouchableOpacity>
+            </View>
+          ))}
+          <TouchableOpacity className="flex-row items-center justify-center py-3 rounded-xl border border-dashed" style={{ borderColor: colors.border }}>
+            <Ionicons name="cloud-upload-outline" size={18} color={colors.primary} />
+            <Text className="ml-2" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Upload Document</Text>
           </TouchableOpacity>
-        </View>
-      </ScrollView>
 
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-        <Navbar/>
+          <View className="mt-8">
+            <TouchableOpacity
+              className="rounded-xl items-center justify-center py-4 mb-4 shadow-lg"
+              style={{ backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 8 }}
+              onPress={() => setModalVisible(true)}
+            >
+              <Text className="text-white text-base" style={{ fontFamily: 'Poppins_600SemiBold' }}>Save Changes</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              className="rounded-xl items-center justify-center py-4 border"
+              style={{ borderColor: colors.border }}
+              onPress={() => router.back()}
+            >
+              <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+
+        </ScrollView>
+
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+          <Navbar />
+        </View>
       </View>
-    </View>
-    
-    <Modal
-    visible = {modalVisible}
-    onClose={() => setModalVisible(false)}
-    title="Confirm Changes"
-    message="Are you sure you want to save these changes?"
-    buttonText="Save">
-    </Modal>
+
+      <Modal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Save Changes"
+        message="Are you sure you want to update this gig profile?"
+        buttonText="Save & Update"
+        onConfirm={handleSave}
+      />
     </>
-    );
+  );
 }
 

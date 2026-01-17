@@ -7,400 +7,346 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
-
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
   const [activeTab, setActiveTab] = useState('About');
   const [modalVisible, setModalVisible] = useState(false);
 
+  const tabs = ['About', 'Setup', 'Connect', 'Review'];
+
   return (
     <>
-    <View className="flex-1" style={{ backgroundColor: colors.background }}>
-      <View className="px-6">
-        <Header title="Group Details"></Header>
-      </View>
+      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+        <Header title="Group Details" />
 
-      <ScrollView showsVerticalScrollIndicator={false} className="px-6" contentContainerStyle={{ paddingBottom: 20 }}>
-        <View className="flex flex-1 mt-3 flex-col">
-          <View className="justify-center items-center gap-1">
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+
+          {/* Hero Section */}
+          <View className="px-6 mt-4">
             <View
-              className="rounded-xl"
-              style={{
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.1,
-                shadowRadius: 6,
-                elevation: 8,
-                marginHorizontal: 4,
-                marginVertical: 8,
-                height: 200,
-                width: '50%',
-              }}
+              className="w-full h-56 rounded-3xl overflow-hidden mb-4 relative shadow-lg"
+              style={{ shadowColor: colors.primary, shadowOpacity: 0.2, shadowRadius: 10, elevation: 8 }}
             >
               <Image
-                className="rounded-xl flex flex-1"
-                source={{uri: 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=400&h=400&fit=crop'}}
-                style={{
-                  flex: 1,
-                  height: 200,
-                  width: '100%',
-                }}
+                source={{ uri: 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop' }}
+                className="w-full h-full"
                 resizeMode="cover"
               />
-            </View>
-            
-            <Text className="mt-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Ben&Ben</Text>
-            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.textSecondary }}>Folk-Pop Band • 9 Members</Text>
-            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }}>Manila, Philippines</Text>
-            <TouchableOpacity 
-              className="mt-5 rounded-xl bg-primary-500 px-8 py-3 items-center" 
-              style={{
-                width: '45%',
-                shadowcolor: colors.primary,
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 4,
-                elevation: 3,
-              }}
-            >
-              <Text className="text-white" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>Invite Group</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View className="flex flex-row gap-5 mt-8 justify-center" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
-            <TouchableOpacity onPress={() => {setActiveTab('About')}}>
-              <Text className="pb-2" style={{ fontFamily: activeTab === 'About'? 'Poppins_600SemiBold': 'Poppins_500Medium', fontSize: 15, color: colors.text, borderBottomWidth: 1, borderBottomColor: colors.border }}>About</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => {setActiveTab('Apply')}}>
-              <Text className="pb-2" style={{ fontFamily: activeTab === 'Apply'? 'Poppins_600SemiBold': 'Poppins_500Medium', fontSize: 15, color: colors.text, borderBottomWidth: 1, borderBottomColor: colors.border  }}>Apply</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => {setActiveTab('Review')}}>
-              <Text className="pb-2" style={{ fontFamily: activeTab === 'Review'? 'Poppins_600SemiBold': 'Poppins_500Medium', fontSize: 15, color: colors.text, borderBottomWidth: 1, borderBottomColor: colors.border }}>Review</Text>
-            </TouchableOpacity>
-          </View>
-
-          {activeTab ==='About'? (
-            <View className="flex flex-1 flex-col mt-4">
-              <View>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text }}>Ben&Ben is a Filipino indie folk-pop band known for their poetic lyrics and soulful melodies. Formed in 2015, the 9-member ensemble has become one of the most celebrated acts in the Philippine music scene, with hits like "Pagtingin," "Leaves," and "Kathang Isip."</Text>
+              <View className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent" />
+              <View className="absolute bottom-4 left-4 right-4">
+                <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>Ben&Ben</Text>
+                <View className="flex-row items-center mt-1">
+                  <Text className="text-gray-200 text-sm ml-1" style={{ fontFamily: 'Poppins_500Medium' }}>Folk-Pop Band • 9 Members</Text>
+                </View>
+                <View className="flex-row items-center mt-1">
+                  <Ionicons name="location-outline" size={14} color="#E5E7EB" />
+                  <Text className="text-gray-200 text-xs ml-1" style={{ fontFamily: 'Poppins_400Regular' }}>Manila, Philippines</Text>
+                </View>
               </View>
+            </View>
+          </View>
 
-              <View className='flex flex-row mt-2 gap-4 mt-5'>
-                <View className="justify-start items-center">
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }} >Members</Text>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }} >9</Text>
+          {/* Tab Navigation */}
+          <View className="mx-6 mt-2 p-1 rounded-2xl flex-row" style={{ backgroundColor: colors.inputBackground }}>
+            {tabs.map((tab) => (
+              <TouchableOpacity
+                key={tab}
+                onPress={() => setActiveTab(tab)}
+                className={`flex-1 py-2.5 rounded-xl items-center justify-center transition-all`}
+                style={{
+                  backgroundColor: activeTab === tab ? colors.surface : 'transparent',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: activeTab === tab ? 2 : 0 },
+                  shadowOpacity: activeTab === tab ? 0.05 : 0,
+                  shadowRadius: 4,
+                  elevation: activeTab === tab ? 2 : 0
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: activeTab === tab ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
+                    color: activeTab === tab ? colors.primary : colors.textSecondary,
+                    fontSize: 13
+                  }}
+                >
+                  {tab}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View className="px-6 mt-6">
+            {activeTab === 'About' && (
+              <View className="gap-6">
+                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
+                  <Text className="text-base leading-6" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                    Ben&Ben is a Filipino indie folk-pop band known for their poetic lyrics and soulful melodies. Formed in 2015, the 9-member ensemble has become one of the most celebrated acts in the Philippine music scene, with hits like "Pagtingin," "Leaves," and "Kathang Isip."
+                  </Text>
+                </View>
+
+                <View className="flex-row gap-4">
+                  <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
+                    <Ionicons name="musical-notes-outline" size={24} color={colors.primary} className="mb-2" />
+                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Genre</Text>
+                    <Text className="text-center text-xs" style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>Folk-Pop, Indie</Text>
+                  </View>
+                  <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
+                    <Ionicons name="star-outline" size={24} color={colors.primary} className="mb-2" />
+                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Rating</Text>
+                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>4.9</Text>
+                  </View>
+                </View>
+
+                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
+                  <Text className="text-sm uppercase tracking-wider mb-4" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Band Leader</Text>
+                  <TouchableOpacity onPress={() => router.push('/profile')} className="flex-row items-center gap-4">
+                    <Image source={{ uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&fit=crop' }} className="w-12 h-12 rounded-full" />
+                    <View className="flex-1">
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Paolo Benjamin</Text>
+                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.primary }}>View Profile</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                  </TouchableOpacity>
                 </View>
 
                 <View>
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Genre</Text>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }}>Folk-Pop, Indie, OPM</Text>
+                  <Text className="text-lg mb-3" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Music Gallery</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-6 px-6 gap-3">
+                    {[1, 2, 3].map((i) => (
+                      <Image
+                        key={i}
+                        source={{ uri: `https://picsum.photos/300/200?random=${i + 20}` }}
+                        className="w-48 h-32 rounded-2xl"
+                      />
+                    ))}
+                  </ScrollView>
                 </View>
-              </View>
 
-              <View className="mt-5 flex gap-2 pt-3" style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Gallery</Text>
-
-                <ScrollView showsHorizontalScrollIndicator={false}>
-                  <View className="flex-row flex">
-                    <View
-                      className="rounded-xl"
-                      style={{
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 4 },
-                        shadowOpacity: 0.1,
-                        shadowRadius: 6,
-                        elevation: 8,
-                        marginHorizontal: 4,
-                        marginVertical: 8,
-                        height: 200,
-                        width: 200,
-                      }}
-                    >
-                      <Image
-                        className="rounded-xl"
-                        source={{uri: 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=400&h=400&fit=crop'}}
-                        style={{
-                          flex: 1,
-                          height: 200,
-                          width: 200
-                        }}
-                      />
+                {/* Upcoming Gigs Section */}
+                <View>
+                  <Text className="text-lg mb-3" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Upcoming Gigs</Text>
+                  <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
+                    <View className="flex-row items-center gap-3 mb-2">
+                      <Image source={{ uri: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100&h=100&fit=crop' }} className="w-10 h-10 rounded-lg" />
+                      <View className="flex-1">
+                        <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>The Blue Note Bar</Text>
+                        <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Dec 22 • 8:00 PM</Text>
+                      </View>
+                      <TouchableOpacity className="px-3 py-1 rounded-lg border" style={{ borderColor: colors.primary }}>
+                        <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary, fontSize: 12 }}>View</Text>
+                      </TouchableOpacity>
                     </View>
-
-                    <View
-                      className="rounded-xl"
-                      style={{
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 4 },
-                        shadowOpacity: 0.1,
-                        shadowRadius: 6,
-                        elevation: 8,
-                        marginHorizontal: 4,
-                        marginVertical: 8,
-                        height: 200,
-                        width: 200,
-                      }}
-                    >
-                      <Image
-                        className="rounded-xl"
-                        source={{uri: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=400&h=400&fit=crop'}}
-                        style={{
-                          flex: 1,
-                          height: 200,
-                          width: 200
-                        }}
-                      />
+                    <View className="flex-row items-center gap-3 mt-2 pt-2 border-t" style={{ borderColor: colors.border }}>
+                      <Image source={{ uri: 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=100&h=100&fit=crop' }} className="w-10 h-10 rounded-lg" />
+                      <View className="flex-1">
+                        <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Sunset Beach Festival</Text>
+                        <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Dec 31 • 9:00 PM</Text>
+                      </View>
+                      <TouchableOpacity className="px-3 py-1 rounded-lg border" style={{ borderColor: colors.primary }}>
+                        <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary, fontSize: 12 }}>View</Text>
+                      </TouchableOpacity>
                     </View>
-
-                    <View
-                      className="rounded-xl"
-                      style={{
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 4 },
-                        shadowOpacity: 0.1,
-                        shadowRadius: 6,
-                        elevation: 8,
-                        marginHorizontal: 4,
-                        marginVertical: 8,
-                        height: 200,
-                        width: 200,
-                      }}
-                    >
-                      <Image
-                        className="rounded-xl"
-                        source={{uri: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=400&fit=crop'}}
-                        style={{
-                          flex: 1,
-                          height: 200,
-                          width: 200
-                        }}
-                      />
-                    </View>
-                  </View>
-                </ScrollView>
-              </View>
-
-              <View className="mt-5 flex gap-2 pt-3" style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Completion Rate</Text>
-                <View className="flex flex-row gap-2 items-center">
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 20, color: '#10b981' }}>98%</Text>
-                  <View className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: isDark ? colors.inputBackground : '#D1D5DB' }}>
-                    <View className="h-full bg-green-500 rounded-full" style={{ width: '98%' }} />
                   </View>
                 </View>
               </View>
+            )}
 
-              <View className="mt-5 flex pt-3" style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Band Leader</Text>
-                
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-col">
-                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Paolo Benjamin</Text>
-                    <View className="flex-row gap-2 items-center">
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#10b981' }}>99%</Text>
-                      <View className="w-48 h-2 rounded-full overflow-hidden" style={{ backgroundColor: isDark ? colors.inputBackground : '#D1D5DB' }}>
-                        <View className="h-full bg-green-500 rounded-full" style={{ width: '99%' }} />
+
+
+            {activeTab === 'Setup' && (
+              <View className="gap-6">
+                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
+                  <Text className="text-lg mb-4" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Stage Plot</Text>
+                  <View className="h-48 border-2 border-dashed rounded-xl items-center justify-center mb-2" style={{ borderColor: colors.border, backgroundColor: isDark ? '#1e293b' : '#f8fafc' }}>
+                    <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
+                    <Text className="text-xs mt-2" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Standard 4-Piece Setup</Text>
+                  </View>
+                </View>
+
+                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
+                  <Text className="text-lg mb-4" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Input List</Text>
+                  {[
+                    { ch: 1, name: 'Kick', mic: 'Beta 52', stand: 'Boom' },
+                    { ch: 2, name: 'Snare Top', mic: 'SM57', stand: 'Clip' },
+                    { ch: 3, name: 'Hi-Hat', mic: 'SM81', stand: 'Boom' },
+                    { ch: 4, name: 'Bass DI', mic: 'J48', stand: '-' },
+                    { ch: 5, name: 'Gtr SL', mic: 'e609', stand: 'Short' },
+                    { ch: 6, name: 'Vox Center', mic: 'SM58', stand: 'Straight' },
+                  ].map((item, index) => (
+                    <View key={index} className="flex-row items-center py-3 border-b" style={{ borderColor: colors.border }}>
+                      <View className="w-8 items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-md mr-3">
+                        <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{item.ch}</Text>
+                      </View>
+                      <View className="flex-1">
+                        <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{item.name}</Text>
+                        <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>{item.mic} • {item.stand}</Text>
                       </View>
                     </View>
+                  ))}
+                </View>
 
-                    <TouchableOpacity onPress={() => router.push('/profile')}>
-                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.primary, textDecorationLine: 'underline' }}>View Profile</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <View className="rounded-2xl overflow-hidden" style={{height: 80, width: 80}}>
-                    <Image
-                      source={{uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop'}}
-                      style={{
-                        height: 80,
-                        width: 80,
-                      }}
-                      resizeMode="cover"
-                    />
-                  </View>
+                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
+                  <Text className="text-lg mb-2" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Hospitality</Text>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                    Allergies: Peanuts (Bass Player).{'\n'}
+                    Preferences: 4x Bottled Water, 2x Towels per show.
+                  </Text>
                 </View>
               </View>
-            </View>
+            )}
+            {activeTab === 'Connect' && (
+              <View className="gap-6">
+                {/* For Venues - Booking */}
+                <View>
+                  <View className="flex-row items-center gap-2 mb-3">
+                    <View className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 items-center justify-center">
+                      <Ionicons name="storefront-outline" size={18} color={colors.primary} />
+                    </View>
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>For Venues</Text>
+                  </View>
 
-          ): activeTab === 'Apply'? (
-            <View className="flex flex-1 flex-col mt-4">
-              <View>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>Message to band manager</Text>
-              </View>
+                  <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+                    <Text className="mb-3" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 13 }}>Send a booking request to hire this band for your event.</Text>
 
-              <View className="rounded-xl px-3 py-2 justify-start items-start mt-3" style={{ borderWidth: 1, borderColor: colors.border }}>
-                <TextInput className="justify-start items-start" placeholder='Introduce yourself and your event details' placeholderTextColor={colors.muted} multiline={true} style={{height: 200, width: '100%', fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text}}>
-                </TextInput>
-              </View>
-
-              <View className="mt-5">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>Event Details</Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginTop: 4 }}>Share information about your event and booking request</Text>
-              </View>
-
-              <View className="justify-center items-center border border-dashed rounded-xl p-6 mt-3" style={{ minHeight: 150, width: '100%', borderColor: colors.border }}>
-                <TouchableOpacity className="justify-center items-center">
-                  <Ionicons name="cloud-upload-outline" size={48} color={colors.textSecondary} />
-                  <Text className="mt-2" style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.textSecondary }}>Upload Event Proposal</Text>
-                  <Text className="mt-1" style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>PDF, DOC (Max 10MB)</Text>
-                </TouchableOpacity>
-              </View>
-
-              <TouchableOpacity className="mt-5 rounded-xl" style={{
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.1,
-                  shadowRadius: 6,
-                  elevation: 8,
-                  marginHorizontal: 4,
-                  marginVertical: 8,
-                }}>
-
-
-                <View className="justify-center items-center flex flex-row gap-4 pl-3 rounded-xl mt-5" style={{ backgroundColor: isDark ? colors.inputBackground : '#E5E7EB' }}>
-                      
-                    <View className="flex flex-col justify-center items-center" style={{width: '40%'}}>
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>Booking Terms</Text>
-                      <Text className="text-primary-500" style={{ fontFamily: 'Poppins_400Regular', fontSize: 13 }}>View Terms</Text>
+                    <Text className="mb-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Booking Message</Text>
+                    <View className="rounded-xl p-3 mb-4" style={{ backgroundColor: isDark ? '#1e293b' : '#f8fafc', borderWidth: 1, borderColor: colors.border }}>
+                      <TextInput
+                        placeholder='Introduce yourself and your event details...'
+                        placeholderTextColor={colors.textSecondary}
+                        multiline={true}
+                        style={{ height: 100, textAlignVertical: 'top', fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text }}
+                      />
                     </View>
 
-                    <Image
-                        className="rounded-r-xl flex flex-1"
-                        source={{uri: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?w=400&h=200&fit=crop'}}
-                        style={{
-                          height: 120
-                        }}
-                        resizeMode="contain"
-                      />                  
-                </View>
-              </TouchableOpacity>
+                    <Text className="mb-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Event Proposal</Text>
+                    <TouchableOpacity className="border-2 border-dashed rounded-xl p-5 items-center justify-center mb-4" style={{ borderColor: colors.border }}>
+                      <Ionicons name="document-attach-outline" size={28} color={colors.primary} />
+                      <Text className="mt-2" style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.text }}>Upload Event Details</Text>
+                      <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>PDF, DOC (Max 10MB)</Text>
+                    </TouchableOpacity>
 
-              <TouchableOpacity className="rounded-xl mt-3 justify-center items-center py-3 bg-primary-500" onPress={() => setModalVisible(true)}>
-                <Text className="text-white"style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15 }}>Submit Booking Request</Text>
-              </TouchableOpacity>
-            </View>
-          ) : activeTab ==="Review" ? (
-            <View className="flex flex-1 flex-col mt-4">
+                    <View className="flex-row items-center gap-3 p-3 rounded-xl mb-4" style={{ backgroundColor: isDark ? '#1e293b' : '#f0f9ff' }}>
+                      <Ionicons name="newspaper-outline" size={20} color="#3B82F6" />
+                      <View className="flex-1">
+                        <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.text }}>Booking Terms</Text>
+                      </View>
+                      <TouchableOpacity>
+                        <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: colors.primary }}>View</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <TouchableOpacity
+                      className="w-full py-3.5 rounded-xl items-center shadow-md"
+                      style={{ backgroundColor: colors.primary }}
+                      onPress={() => setModalVisible(true)}
+                    >
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#fff' }}>Submit Booking Request</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Divider */}
+                <View className="flex-row items-center">
+                  <View className="flex-1 h-[1px] bg-gray-200 dark:bg-gray-700" />
+                  <Text className="mx-4 text-xs" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>OR</Text>
+                  <View className="flex-1 h-[1px] bg-gray-200 dark:bg-gray-700" />
+                </View>
+
+                {/* For Musicians - Apply */}
+                <View>
+                  <View className="flex-row items-center gap-2 mb-3">
+                    <View className="w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 items-center justify-center">
+                      <Ionicons name="person-add-outline" size={18} color="#15803d" />
+                    </View>
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Join the Band</Text>
+                  </View>
+
+                  {/* Auditioning Banner */}
+                  <View className="p-4 rounded-2xl bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 mb-4">
+                    <View className="flex-row items-start gap-3">
+                      <View className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-800 items-center justify-center">
+                        <Ionicons name="megaphone-outline" size={20} color="#15803d" />
+                      </View>
+                      <View className="flex-1">
+                        <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>We're Auditioning!</Text>
+                        <Text className="mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 13 }}>
+                          Looking for a <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Keyboardist</Text> and <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Bass Player</Text>. Send us your demo!
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+                    <Text className="mb-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Why do you want to join?</Text>
+                    <View className="rounded-xl p-3 mb-4" style={{ backgroundColor: isDark ? '#1e293b' : '#f8fafc', borderWidth: 1, borderColor: colors.border }}>
+                      <TextInput
+                        placeholder='Tell us about your experience and influences...'
+                        placeholderTextColor={colors.textSecondary}
+                        multiline={true}
+                        style={{ height: 100, textAlignVertical: 'top', fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text }}
+                      />
+                    </View>
+
+                    <Text className="mb-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Your Demo</Text>
+                    <TouchableOpacity className="border-2 border-dashed rounded-xl p-5 items-center justify-center mb-4" style={{ borderColor: colors.border }}>
+                      <Ionicons name="musical-notes" size={28} color={colors.primary} />
+                      <Text className="mt-2" style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.text }}>Link Audio/Video Demo</Text>
+                      <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>YouTube, Spotify, SoundCloud, etc.</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      className="w-full py-3.5 rounded-xl items-center shadow-md"
+                      style={{ backgroundColor: '#15803d' }}
+                    >
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#fff' }}>Submit Audition</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {activeTab === "Review" && (
               <View>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>User Reviews</Text>
-              </View>
-
-              <View className ="justify-center items-center flex flex-row gap-10 mt-4">
-
-                <View className="w-1/4 items-center">
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 32, color: colors.text }}>4.5</Text>
-                  <View className="flex-row">
-                    <Ionicons name="star" size={16} color={colors.primary} />
-                    <Ionicons name="star" size={16} color={colors.primary} />
-                    <Ionicons name="star" size={16} color={colors.primary} />
-                    <Ionicons name="star" size={16} color={colors.primary} />
-                    <Ionicons name="star-half" size={16} color={colors.primary} />
+                <View className="items-center mb-8">
+                  <Text className="text-5xl mb-2" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>4.5</Text>
+                  <View className="flex-row gap-1 mb-2">
+                    {[1, 2, 3, 4].map(i => <Ionicons key={i} name="star" size={20} color={colors.primary} />)}
+                    <Ionicons name="star-half" size={20} color={colors.primary} />
                   </View>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary }}>25 Reviews</Text>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Based on 25 reviews</Text>
                 </View>
 
-                <View className="flex-1">
-                  <View className="flex flex-row items-center gap-2">
-                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12, color: colors.text }}>5</Text>
-                    <View className="flex-1 h-3 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? colors.inputBackground : '#D1D5DB' }}>
-                      <View className="h-full bg-primary-500 w-full rounded-xl" />
-                    </View>                  
+                <View className="p-4 rounded-2xl mb-4" style={{ backgroundColor: colors.surface }}>
+                  <View className="flex-row justify-between items-start mb-2">
+                    <View className="flex-row items-center gap-2">
+                      <Image source={{ uri: 'https://i.pravatar.cc/100?img=12' }} className="w-8 h-8 rounded-full" />
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Mark Santos</Text>
+                    </View>
+                    <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>2 weeks ago</Text>
                   </View>
-
-                  <View className="flex flex-row items-center gap-2">
-                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12, color: colors.text }}>4</Text>
-                    <View className="flex-1 h-3 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? colors.inputBackground : '#D1D5DB' }}>
-                      <View className="h-full bg-primary-500 w-4/5 rounded-xl" />
-                    </View>                  
+                  <View className="flex-row gap-0.5 mb-2">
+                    {[1, 2, 3, 4, 5].map(i => <Ionicons key={i} name="star" size={14} color={colors.primary} />)}
                   </View>
-          
-                  <View className="flex flex-row items-center gap-2">
-                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12, color: colors.text }}>3</Text>
-                    <View className="flex-1 h-3 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? colors.inputBackground : '#D1D5DB' }}>
-                      <View className="h-full bg-primary-500 w-3/5 rounded-xl" />
-                    </View>                  
-                  </View>
-
-                  <View className="flex flex-row items-center gap-2">
-                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12, color: colors.text }}>2</Text>
-                    <View className="flex-1 h-3 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? colors.inputBackground : '#D1D5DB' }}>
-                      <View className="h-full bg-primary-500 w-2/5 rounded-xl" />
-                    </View>                  
-                  </View>
-
-                  <View className="flex flex-row items-center gap-2">
-                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, width: 12, color: colors.text }}>1</Text>
-                    <View className="flex-1 h-3 rounded-xl overflow-hidden" style={{ backgroundColor: isDark ? colors.inputBackground : '#D1D5DB' }}>
-                      <View className="h-full bg-primary-500 w-1/5 rounded-xl" />
-                    </View>                  
-                  </View>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, lineHeight: 20 }}>
+                    Ben&Ben exceeded all expectations! Their live performance was absolutely breathtaking. Professional and punctual.
+                  </Text>
                 </View>
               </View>
+            )}
 
-              <View className="mt-5">
-                <View className="flex-row gap-2 items-center">
-                  <View className="rounded-3xl overflow-hidden" style={{height: 50, width: 50, borderWidth: 1, borderColor: colors.border}}>
-                    <Image
-                      source={{uri: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop'}}
-                      style={{
-                        height: 50,
-                        width: 50,
-                      }}
-                      resizeMode="cover"
-                    />
-                  </View>
+          </View>
+        </ScrollView>
 
-                  <View className="flex-col">
-                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>Mark Santos</Text>
-                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>2 weeks ago</Text>
-                  </View>
-                </View>
+        <Navbar />
+      </View>
 
-                <View className="flex-row mt-2">
-                  <Ionicons name="star" size={16} color={colors.primary} />
-                  <Ionicons name="star" size={16} color={colors.primary} />
-                  <Ionicons name="star" size={16} color={colors.primary} />
-                  <Ionicons name="star" size={16} color={colors.primary} />
-                  <Ionicons name="star" size={16} color={colors.primary} />
-                </View>
-
-
-                <View className="flex-1 mt-2">
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text }}>Ben&Ben exceeded all expectations at our corporate event! Their live performance was absolutely breathtaking. The band was professional, punctual, and their music created such a beautiful atmosphere. The crowd was mesmerized from start to finish. Highly recommend booking them!</Text>
-                </View>
-
-
-                <View className ="flex-row items-center gap-4 mt-3">
-                  <TouchableOpacity className="flex-row items-center gap-1">
-                    <Ionicons name="heart-outline" size={24} color={colors.text} />
-                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text }}>8</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity className="flex-row items-center gap-1">
-                    <Ionicons name="chatbubble-outline" size={22} color={colors.text} />
-                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text }}>1</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-            </View>
-          ) : null}
-
-
-        </View>
-      </ScrollView>
-
-      <Navbar/>
-    </View>
-    
-    <Modal
-    visible = {modalVisible}
-    onClose={() => setModalVisible(false)}
-    title="Confirm Booking"
-    message="Are you sure you want to submit this booking request?"
-    buttonText="Submit">
-    </Modal>
+      <Modal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Confirm Booking"
+        message="Are you sure you want to submit this booking request?"
+        buttonText="Submit">
+      </Modal>
     </>
   );
 }

@@ -28,15 +28,15 @@ interface ThemeContextType {
 }
 
 const lightColors: ThemeColors = {
-  background: '#FFFFFF',
-  surface: '#F9FAFB',
-  text: '#111827',
-  textSecondary: '#6B7280',
+  background: '#F9FAFB', // modern gray-50
+  surface: '#FFFFFF',
+  text: '#111827', // gray-900
+  textSecondary: '#6B7280', // gray-500
   secondary: '#6B7280',
-  primary: '#169C46',
-  primaryLight: '#D4F5E2',
-  primaryDark: '#0E6A2F',
-  border: '#E5E7EB',
+  primary: '#4F46E5', // Indigo 600
+  primaryLight: '#E0E7FF', // Indigo 100
+  primaryDark: '#4338CA', // Indigo 700
+  border: '#E5E7EB', // gray-200
   muted: '#9CA3AF',
   card: '#FFFFFF',
   inputBackground: '#F3F4F6',
@@ -44,19 +44,19 @@ const lightColors: ThemeColors = {
 };
 
 const darkColors: ThemeColors = {
-  background: '#0F0F0F',
-  surface: '#1A1A1A',
-  text: '#FFFFFF',
-  textSecondary: '#A1A1AA',
-  secondary: '#A1A1AA',
-  primary: '#1DB954',
-  primaryLight: '#1A472A',
-  primaryDark: '#169C46',
-  border: '#2D2D2D',
-  muted: '#71717A',
-  card: '#1F1F1F',
-  inputBackground: '#262626',
-  inputBorder: '#404040',
+  background: '#0F172A', // Slate 900
+  surface: '#1E293B', // Slate 800
+  text: '#F8FAFC', // Slate 50
+  textSecondary: '#94A3B8', // Slate 400
+  secondary: '#94A3B8',
+  primary: '#6366F1', // Indigo 500
+  primaryLight: '#312E81', // Indigo 900
+  primaryDark: '#4F46E5', // Indigo 600
+  border: '#334155', // Slate 700
+  muted: '#64748B',
+  card: '#1E293B', // Slate 800
+  inputBackground: '#1E293B',
+  inputBorder: '#475569',
 };
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -79,8 +79,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.setItem('theme', newTheme);
   };
 
-  const isDark = theme === 'system' 
-    ? systemColorScheme === 'dark' 
+  const isDark = theme === 'system'
+    ? systemColorScheme === 'dark'
     : theme === 'dark';
 
   const colors = isDark ? darkColors : lightColors;

@@ -7,144 +7,141 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
-
 export default function MyStudioScreen() {
-  const { colors, isDark } = useTheme();
-  const [modalVisible, setModalVisible] = useState(false);
+    const { colors, isDark } = useTheme();
+    const [modalVisible, setModalVisible] = useState(false);
 
     return (
-    <>
-    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
-      <Header title ="My Studio" />
+        <>
+            <View className="flex-1" style={{ backgroundColor: colors.background }}>
+                <Header title="My Studio" />
 
-      <ScrollView showsHorizontalScrollIndicator ={false}  className="pb-24">
-        <View className ="flex flex-col rounded-xl gap-2" style={{
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.1,
-            shadowRadius: 6,
-            elevation: 8,
-            marginHorizontal: 4,
-            marginVertical: 8,
-            minHeight: 130,
-            minWidth:100,
-            backgroundColor: colors.card,
-            borderWidth: isDark ? 1 : 0,
-            borderColor: colors.border
-        }}>
-            <View className ="rounded-t-xl bg-gray-200" style={{ minHeight: 130, minWidth:100}}>
-                <Image className ="rounded-t-xl "
-                    source={{uri: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=400&h=130&fit=crop'}} 
-                    style={{ minHeight: 130, minWidth:100}}
-                    resizeMode="cover"
-                />
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 150, paddingTop: 16 }} className="flex-1">
+
+                    {/* Studio Card 1 */}
+                    <View className="mb-6 rounded-3xl overflow-hidden" style={{
+                        backgroundColor: colors.surface,
+                        shadowColor: colors.primary,
+                        shadowOffset: { width: 0, height: 8 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 16,
+                        elevation: 4,
+                    }}>
+                        <View className="h-48 relative">
+                            <Image
+                                source={{ uri: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop' }}
+                                className="w-full h-full"
+                                resizeMode="cover"
+                            />
+                            <View className="absolute top-4 right-4 bg-white/90 dark:bg-black/60 px-3 py-1 rounded-full">
+                                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: colors.primary }}>Active</Text>
+                            </View>
+                        </View>
+
+                        <View className="p-4">
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 18, color: colors.text, marginBottom: 4 }}>Harmony Recording Studio</Text>
+                            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, lineHeight: 20 }}>
+                                Professional recording studio with state-of-the-art equipment. Perfect for vocals, instruments, and full band recordings.
+                            </Text>
+
+                            <View className="flex-row items-center justify-between mt-4 border-t pt-4" style={{ borderColor: colors.border }}>
+                                <View className="flex-row gap-3">
+                                    <TouchableOpacity
+                                        onPress={() => router.push('/manage_studio')}
+                                        className="flex-row items-center gap-2 px-4 py-2 rounded-xl"
+                                        style={{ backgroundColor: colors.primary }}
+                                    >
+                                        <Ionicons name="settings-outline" size={18} color="#FFF" />
+                                        <Text style={{ fontFamily: 'Poppins_500Medium', color: '#FFF' }}>Manage</Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        onPress={() => router.push('/edit_studio')}
+                                        className="p-2 rounded-xl border"
+                                        style={{ borderColor: colors.border }}
+                                    >
+                                        <Ionicons name="pencil-outline" size={20} color={colors.text} />
+                                    </TouchableOpacity>
+                                </View>
+
+                                <TouchableOpacity
+                                    onPress={() => setModalVisible(true)}
+                                    className="p-2"
+                                >
+                                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+
+                    {/* Studio Card 2 */}
+                    <View className="mb-6 rounded-3xl overflow-hidden" style={{
+                        backgroundColor: colors.surface,
+                        shadowColor: colors.primary,
+                        shadowOffset: { width: 0, height: 8 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 16,
+                        elevation: 4,
+                    }}>
+                        <View className="h-48 relative">
+                            <Image
+                                source={{ uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=800&fit=crop' }}
+                                className="w-full h-full"
+                                resizeMode="cover"
+                            />
+                            <View className="absolute top-4 right-4 bg-white/90 dark:bg-black/60 px-3 py-1 rounded-full">
+                                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: colors.primary }}>Active</Text>
+                            </View>
+                        </View>
+
+                        <View className="p-4">
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 18, color: colors.text, marginBottom: 4 }}>Studio Akustik Jakarta</Text>
+                            <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, lineHeight: 20 }}>
+                                Acoustic treatment studio with soundproof rooms. Ideal for podcast recording, voice-over sessions.
+                            </Text>
+
+                            <View className="flex-row items-center justify-between mt-4 border-t pt-4" style={{ borderColor: colors.border }}>
+                                <View className="flex-row gap-3">
+                                    <TouchableOpacity
+                                        onPress={() => router.push('/manage_studio')}
+                                        className="flex-row items-center gap-2 px-4 py-2 rounded-xl"
+                                        style={{ backgroundColor: colors.primary }}
+                                    >
+                                        <Ionicons name="settings-outline" size={18} color="#FFF" />
+                                        <Text style={{ fontFamily: 'Poppins_500Medium', color: '#FFF' }}>Manage</Text>
+                                    </TouchableOpacity>
+
+                                    <TouchableOpacity
+                                        onPress={() => router.push('/edit_studio')}
+                                        className="p-2 rounded-xl border"
+                                        style={{ borderColor: colors.border }}
+                                    >
+                                        <Ionicons name="pencil-outline" size={20} color={colors.text} />
+                                    </TouchableOpacity>
+                                </View>
+
+                                <TouchableOpacity
+                                    onPress={() => setModalVisible(true)}
+                                    className="p-2"
+                                >
+                                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+
+                </ScrollView>
+
+                <Navbar />
             </View>
-            <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text}}>Harmony Recording Studio</Text>
-            </View>
-
-            <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary}}>Professional recording studio with state-of-the-art equipment. Perfect for vocals, instruments, and full band recordings.</Text>
-            </View>
-
-
-            <View className="px-3 pb-3 flex-row justify-end gap-2">
-                <TouchableOpacity 
-                    className="rounded-lg bg-primary-500 items-center justify-center" 
-                    style={{height: 36, width: 36}}
-                    onPress={() => router.push('/manage_studio')}
-                >
-                    <Ionicons name="eye" size={20} color="#ffffff" />
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                    className="rounded-lg bg-accent-500 items-center justify-center" 
-                    style={{height: 36, width: 36}}
-                    onPress={() => router.push('/edit_studio')}
-                >
-                    <Ionicons name="pencil" size={20} color="#ffffff" />
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                    className="rounded-lg bg-red-500 items-center justify-center" 
-                    style={{height: 36, width: 36}}
-                    onPress={() => setModalVisible(true)}
-                >
-                    <Ionicons name="trash-outline" size={20} color="#ffffff" />
-                </TouchableOpacity>
-            </View>
-        </View>
-
-        <View className="flex flex-col rounded-xl gap-2" style={{
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.1,
-            shadowRadius: 6,
-            elevation: 8,
-            marginHorizontal: 4,
-            marginVertical: 8,
-            minHeight: 130,
-            minWidth: 100,
-            backgroundColor: colors.card,
-            borderWidth: isDark ? 1 : 0,
-            borderColor: colors.border
-        }}>
-            <View className="rounded-t-xl bg-gray-200" style={{ minHeight: 130, minWidth: 100}}>
-                <Image className="rounded-t-xl"
-                    source={{uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=130&fit=crop'}} 
-                    style={{ minHeight: 130, minWidth: 100}}
-                    resizeMode="cover"
-                />
-            </View>
-            <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text}}>Studio Akustik Jakarta</Text>
-            </View>
-
-            <View>
-                <Text className="px-3" style={{fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary}}>Acoustic treatment studio with soundproof rooms. Ideal for podcast recording, voice-over sessions, and acoustic performances.</Text>
-            </View>
-
-
-            <View className="px-3 pb-3 flex-row justify-end gap-2">
-                <TouchableOpacity 
-                    className="rounded-lg bg-primary-500 items-center justify-center" 
-                    style={{height: 36, width: 36}}
-                    onPress={() => router.push('/manage_studio')}
-                >
-                    <Ionicons name="eye" size={20} color="#ffffff" />
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                    className="rounded-lg bg-accent-500 items-center justify-center" 
-                    style={{height: 36, width: 36}}
-                    onPress={() => router.push('/edit_studio')}
-                >
-                    <Ionicons name="pencil" size={20} color="#ffffff" />
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                    className="rounded-lg bg-red-500 items-center justify-center" 
-                    style={{height: 36, width: 36}}
-                    onPress={() => setModalVisible(true)}
-                >
-                    <Ionicons name="trash" size={20} color="#ffffff" />
-                </TouchableOpacity>
-            </View>
-        </View>
-      </ScrollView>
-
-        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-              <Navbar/>
-        </View>
-    </View>
-    <Modal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Delete Studio"
-        message="Are you sure you want to delete this studio?"
-        buttonText="Delete"
-    />
-    </>
+            <Modal
+                visible={modalVisible}
+                onClose={() => setModalVisible(false)}
+                title="Delete Studio"
+                message="Are you sure you want to delete this studio?"
+                buttonText="Delete"
+            />
+        </>
     );
 }
 

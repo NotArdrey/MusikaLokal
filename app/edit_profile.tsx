@@ -1,13 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
-
-
-
 
 export default function EditProfileScreen() {
   const { colors, isDark } = useTheme();
@@ -17,15 +15,10 @@ export default function EditProfileScreen() {
   const [bio, setBio] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
 
+  // Expanded role list
   const availableRoles = [
-    'Vocalist',
-    'Guitarist',
-    'Bassist',
-    'Drummer',
-    'Keyboardist',
-    'DJ',
-    'Producer',
-    'Sound Engineer',
+    'Vocalist', 'Guitarist', 'Bassist', 'Drummer',
+    'Keyboardist', 'DJ', 'Producer', 'Sound Engineer'
   ];
 
   const toggleRole = (role: string) => {
@@ -37,170 +30,142 @@ export default function EditProfileScreen() {
   };
 
   const handleSave = () => {
-    // Handle save logic here
+    setModalVisible(false);
     console.log('Profile saved');
+    router.back();
   };
 
   return (
     <>
-    <View className="flex-1" style={{ backgroundColor: colors.background }}>
-      <View className="px-6">
-        <Header title="Edit Profile"></Header>
-      </View>
+      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+        <Header title="Edit Profile" />
 
-      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
-        <View className="pt-5 pb-24">
-          {/* Profile Picture Section */}
-          <View className="items-center mb-6">
-            <View style={{ width: 120, height: 120, borderRadius: 60, overflow: 'hidden', backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
-              <Image
-                source={{ uri: 'https://via.placeholder.com/150' }}
-                style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
-              />
-            </View>
-            <TouchableOpacity className="mt-3 flex-row items-center gap-2">
-              <Ionicons name="camera" size={20} color={colors.primary} />
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.primary }}>Change Photo</Text>
-            </TouchableOpacity>
-          </View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
 
-          <View className="gap-4">
-            <View>
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8, color: colors.text }}>Full Name</Text>
-              <View style={{ backgroundColor: colors.inputBackground, borderColor: colors.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12 }}>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.textSecondary }}>{name}</Text>
-              </View>
-            </View>
+          <View className="px-6 mt-6">
 
-            <View>
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8, color: colors.text }}>Role/Instrument</Text>
-              <View className="flex-row flex-wrap gap-2">
-                {availableRoles.map((role) => (
-                  <TouchableOpacity
-                    key={role}
-                    onPress={() => toggleRole(role)}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 8,
-                      borderWidth: 1,
-                      borderRadius: 9999,
-                      paddingHorizontal: 16,
-                      paddingVertical: 8,
-                      backgroundColor: selectedRoles.includes(role) ? colors.primary : colors.card,
-                      borderColor: selectedRoles.includes(role) ? colors.primary : colors.border
-                    }}
-                  >
-                    <View style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: 4,
-                      borderWidth: 1,
-                      backgroundColor: selectedRoles.includes(role) ? '#fff' : 'transparent',
-                      borderColor: selectedRoles.includes(role) ? '#fff' : colors.muted,
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      {selectedRoles.includes(role) && (
-                        <Ionicons name="checkmark" size={12} color={colors.primary} />
-                      )}
-                    </View>
-                    <Text style={{
-                      fontFamily: 'Poppins_400Regular',
-                      fontSize: 13,
-                      color: selectedRoles.includes(role) ? '#ffffff' : colors.text
-                    }}>{role}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Genres */}
-            <View>
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8, color: colors.text }}>Genres</Text>
-              <TextInput
-                value={genres}
-                onChangeText={setGenres}
-                style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.card, color: colors.text }}
-                placeholder="e.g., Rock, Jazz, Blues"
-                placeholderTextColor={colors.muted}
-              />
-            </View>
-
-            {/* Bio */}
-            <View>
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, marginBottom: 8, color: colors.text }}>Bio</Text>
-              <TextInput
-                value={bio}
-                onChangeText={setBio}
-                style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, minHeight: 100, textAlignVertical: 'top', borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.card, color: colors.text }}
-                placeholder="Tell us about yourself..."
-                placeholderTextColor={colors.muted}
-                multiline
-                numberOfLines={4}
-              />
-            </View>
-
-            {/* My Sample Music */}
-            <View className="mt-2">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, marginBottom: 12, color: colors.text }}>My Sample Music</Text>
-              <View className="flex-row gap-3">
-                <View style={{ width: '48%', height: 150, borderWidth: 1, borderColor: colors.border, borderRadius: 12, overflow: 'hidden', backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
+            {/* Profile Image */}
+            <View className="items-center mb-8">
+              <View className="relative">
+                <View
+                  style={{
+                    width: 120, height: 120, borderRadius: 60, overflow: 'hidden',
+                    borderWidth: 4, borderColor: colors.surface
+                  }}
+                >
                   <Image
-                    source={{ uri: 'https://via.placeholder.com/300x200?text=Video+Preview' }}
+                    source={{ uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
                     className="w-full h-full"
                     resizeMode="cover"
                   />
-                  <View className="absolute inset-0 items-center justify-center">
-                    <View className="w-12 h-12 rounded-full bg-black/50 items-center justify-center">
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 20, color: 'white' }}>▶</Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity className="absolute top-2 right-2 bg-white rounded-full p-1">
-                    <Ionicons name="close" size={16} color="#000" />
-                  </TouchableOpacity>
                 </View>
-
-                <TouchableOpacity style={{ width: '48%', height: 150, borderWidth: 2, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="add-circle-outline" size={40} color={colors.muted} />
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 8 }}>Add Video</Text>
+                <TouchableOpacity
+                  className="absolute bottom-0 right-0 p-3 rounded-full shadow-lg"
+                  style={{ backgroundColor: colors.primary }}
+                >
+                  <Ionicons name="camera" size={20} color="#fff" />
                 </TouchableOpacity>
               </View>
+              <Text className="mt-3 text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>Change Photo</Text>
             </View>
+
+            {/* Form Fields */}
+            <View className="gap-6">
+              <View>
+                <Text className="mb-2 text-xs uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Display Name</Text>
+                <View className="p-4 rounded-xl border border-gray-200" style={{ backgroundColor: colors.inputBackground, borderColor: colors.border }}>
+                  <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.muted }}>{name}</Text>
+                </View>
+                <Text className="mt-1 text-xs" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Display Name cannot be changed.</Text>
+              </View>
+
+              <View>
+                <Text className="mb-3 text-xs uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Roles & Instruments</Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {availableRoles.map((role) => {
+                    const isSelected = selectedRoles.includes(role);
+                    return (
+                      <TouchableOpacity
+                        key={role}
+                        onPress={() => toggleRole(role)}
+                        className={`px-4 py-2 rounded-full border ${isSelected ? 'border-primary-500 bg-primary-50' : 'border-gray-200 bg-transparent'}`}
+                        style={{
+                          borderColor: isSelected ? colors.primary : colors.border,
+                          backgroundColor: isSelected ? (isDark ? colors.primaryLight : '#EEF2FF') : 'transparent'
+                        }}
+                      >
+                        <Text style={{
+                          fontFamily: 'Poppins_500Medium',
+                          fontSize: 13,
+                          color: isSelected ? colors.primary : colors.textSecondary
+                        }}>
+                          {role}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+              </View>
+
+              <View>
+                <Text className="mb-2 text-xs uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Genres</Text>
+                <View className="p-3 rounded-xl border border-gray-200" style={{ borderColor: colors.border, backgroundColor: colors.card }}>
+                  <TextInput
+                    value={genres}
+                    onChangeText={setGenres}
+                    placeholder="e.g. Rock, Indie, Pop"
+                    placeholderTextColor={colors.textSecondary}
+                    style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
+                  />
+                </View>
+              </View>
+
+              <View>
+                <Text className="mb-2 text-xs uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Bio</Text>
+                <View className="p-3 rounded-xl border border-gray-200" style={{ borderColor: colors.border, backgroundColor: colors.card }}>
+                  <TextInput
+                    value={bio}
+                    onChangeText={setBio}
+                    placeholder="Tell us a bit about yourself..."
+                    placeholderTextColor={colors.textSecondary}
+                    multiline
+                    style={{ fontFamily: 'Poppins_400Regular', color: colors.text, height: 100, textAlignVertical: 'top' }}
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* Action Buttons */}
+            <View className="mt-8 gap-3">
+              <TouchableOpacity
+                onPress={() => setModalVisible(true)}
+                className="w-full py-4 rounded-xl items-center shadow-lg"
+                style={{ backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.3, shadowOffset: { width: 0, height: 4 }, shadowRadius: 8 }}
+              >
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#fff' }}>Save Profile</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => router.back()}
+                className="w-full py-4 rounded-xl items-center"
+              >
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.textSecondary }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+
           </View>
-
-          {/* Action Buttons */}
-          <View className="flex-row gap-3 mt-8">
-            <TouchableOpacity 
-              style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 }}
-              onPress={() => console.log('Cancel')}
-            >
-              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }}>Cancel</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              className="flex-1 bg-primary-500 rounded-xl items-center justify-center py-3"
-              onPress={() => setModalVisible(true)}
-            >
-              <Text className="text-white" style={{ fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Save Changes</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+        </ScrollView>
         <Navbar />
       </View>
-    </View>
-    
-    <Modal
-    visible = {modalVisible}
-    onClose={() => setModalVisible(false)}
-    title="Confirm Changes"
-    message="Are you sure you want to save these changes?"
-    buttonText="Save">
-    </Modal>
+
+      <Modal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Save Changes"
+        message="Are you sure you want to update your profile?"
+        buttonText="Save Changes"
+        onConfirm={handleSave}
+      />
     </>
   );
 }

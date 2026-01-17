@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import Header from '../src/components/header';
@@ -9,77 +10,83 @@ export default function PendingScreen() {
   const { colors, isDark } = useTheme();
   const [modalVisible, setModalVisible] = useState(false);
   const { width } = useWindowDimensions();
-  const isNarrow = width < 360;
-  const imageWidth = Math.min(Math.max(width * 0.38, 130), 170);
+
+  // Mock Data
+  const pendingItems = [
+    {
+      id: 1,
+      name: 'SoundWave Studio Malolos',
+      date: 'Sat, Nov 16 • 2:00 PM - 3:00 PM',
+      image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=400&h=300&fit=crop',
+      status: 'Waiting for Approval',
+      type: 'Studio Booking'
+    },
+    {
+      id: 2,
+      name: 'Echo Music Hub San Jose',
+      date: 'Sun, Nov 17 • 4:30 PM - 5:30 PM',
+      image: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=400&h=300&fit=crop',
+      status: 'Action Required',
+      type: 'Gig Application'
+    }
+  ];
 
   return (
     <>
-      <View className="flex-1 px-4" style={{ backgroundColor: colors.background }}>
+      <View className="flex-1" style={{ backgroundColor: colors.background }}>
         <Header title="Pending" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
-          <View className="flex flex-col gap-2 mt-3">
-            {/* Card 1 */}
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 24, paddingTop: 16 }}>
+          {pendingItems.map((item) => (
             <View
-              className={`p-3 rounded-xl mx-1 my-2 shadow-md ${isNarrow ? 'flex-col' : 'flex-row items-stretch'}`}
-              style={{ backgroundColor: colors.card, borderWidth: isDark ? 1 : 0, borderColor: colors.border }}
+              key={item.id}
+              className="mb-4 rounded-2xl overflow-hidden shadow-sm border"
+              style={{ backgroundColor: colors.card, borderColor: colors.border }}
             >
-              <View className="flex-1 flex justify-between gap-2 py-2 pr-3">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }} numberOfLines={2}>
-                  SoundWave Studio Malolos
-                </Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }} numberOfLines={1}>
-                  Sat, Nov 16 - 2:00 PM - 3:00 PM
-                </Text>
-                <TouchableOpacity className="rounded-lg px-3 py-2 justify-center items-center" style={{ backgroundColor: isDark ? colors.card : '#E5E7EB', borderWidth: isDark ? 1 : 0, borderColor: colors.border }}>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 11, color: colors.text }}>Awaiting Confirmation</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View
-                className={`rounded-xl overflow-hidden ${isNarrow ? 'w-full mt-3' : ''}`}
-                style={isNarrow ? { aspectRatio: 16 / 9 } : { width: imageWidth, aspectRatio: 16 / 9 }}
-              >
+              <View>
                 <Image
-                  className="rounded-xl h-full w-full"
-                  source={{ uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=130&fit=crop' }}
+                  source={{ uri: item.image }}
+                  className="w-full h-36"
                   resizeMode="cover"
                 />
-              </View>
-            </View>
-
-            {/* Card 2 */}
-            <View
-              className={`p-3 rounded-xl mx-1 my-2 shadow-md ${isNarrow ? 'flex-col' : 'flex-row items-stretch'}`}
-              style={{ backgroundColor: colors.card, borderWidth: isDark ? 1 : 0, borderColor: colors.border }}
-            >
-              <View className="flex-1 flex justify-between gap-2 py-2 pr-3">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }} numberOfLines={2}>
-                  Echo Music Hub San Jose
-                </Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }} numberOfLines={1}>
-                  Sun, Nov 17 - 4:30 PM - 5:30 PM
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setModalVisible(true)}
-                  className="bg-green-600 rounded-lg px-3 py-2 justify-center items-center"
-                >
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 11, color: '#fff' }}>Confirm</Text>
-                </TouchableOpacity>
+                <View className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md">
+                  <Text className="text-white text-[10px] font-medium" style={{ fontFamily: 'Poppins_600SemiBold' }}>{item.type}</Text>
+                </View>
               </View>
 
-              <View
-                className={`rounded-xl overflow-hidden ${isNarrow ? 'w-full mt-3' : ''}`}
-                style={isNarrow ? { aspectRatio: 16 / 9 } : { width: imageWidth, aspectRatio: 16 / 9 }}
-              >
-                <Image
-                  className="rounded-xl h-full w-full"
-                  source={{ uri: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=400&h=130&fit=crop' }}
-                  resizeMode="cover"
-                />
+              <View className="p-4">
+                <View className="flex-row justify-between items-start mb-2">
+                  <View className="flex-1 mr-2">
+                    <Text className="text-base" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }} numberOfLines={1}>{item.name}</Text>
+                    <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>{item.date}</Text>
+                  </View>
+                </View>
+
+                <View className="flex-row items-center justify-between mt-2 pt-3 border-t" style={{ borderColor: isDark ? colors.border : '#F3F4F6' }}>
+                  <View className="flex-row items-center">
+                    <Ionicons name="time-outline" size={16} color="#F59E0B" />
+                    <Text className="text-xs ml-1.5" style={{ fontFamily: 'Poppins_500Medium', color: "#F59E0B" }}>{item.status}</Text>
+                  </View>
+
+                  {item.status === 'Action Required' ? (
+                    <TouchableOpacity
+                      onPress={() => setModalVisible(true)}
+                      className="px-4 py-2 rounded-lg bg-green-600"
+                    >
+                      <Text className="text-xs text-white" style={{ fontFamily: 'Poppins_600SemiBold' }}>Confirm Now</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      className="px-4 py-2 rounded-lg border"
+                      style={{ borderColor: colors.border }}
+                    >
+                      <Text className="text-xs" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>View Details</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
             </View>
-          </View>
+          ))}
         </ScrollView>
 
         <View className="absolute bottom-0 left-0 right-0">
@@ -93,6 +100,7 @@ export default function PendingScreen() {
         title="Confirm Booking"
         message="Are you sure you want to confirm this booking?"
         buttonText="Confirm"
+        onConfirm={() => setModalVisible(false)}
       />
     </>
   );

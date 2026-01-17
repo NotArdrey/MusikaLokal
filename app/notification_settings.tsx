@@ -4,114 +4,80 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
-
-
-
 export default function NotificationSettingsScreen() {
-    const { colors } = useTheme();
-    const [bookingConfirmed, setBookingConfirmed] = useState(true);
-    const [awaitingConfirmation, setAwaitingConfirmation] = useState(true);
-    const [uploadRequired, setUploadRequired] = useState(false);
-    const [eventReminder, setEventReminder] = useState(true);
-    const [leaveReview, setLeaveReview] = useState(false);
+  const { colors, isDark } = useTheme();
+  const [bookingConfirmed, setBookingConfirmed] = useState(true);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(true);
+  const [uploadRequired, setUploadRequired] = useState(false);
+  const [eventReminder, setEventReminder] = useState(true);
+  const [leaveReview, setLeaveReview] = useState(false);
 
-    return (
-    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
-      <Header title="Notification Settings"></Header>
+  const renderToggle = (label: string, description: string, value: boolean, onValueChange: (val: boolean) => void) => (
+    <View
+      className="flex-row items-center justify-between py-5 border-b"
+      style={{ borderColor: isDark ? colors.border : '#F3F4F6' }}
+      key={label}
+    >
+      <View className="flex-1 pr-4">
+        <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
+          {label}
+        </Text>
+        <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, marginTop: 4, lineHeight: 20 }}>
+          {description}
+        </Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: isDark ? '#374151' : '#E5E7EB', true: colors.primary + '80' }} // Adding opacity to track for iOS/Android consistency
+        thumbColor={value ? colors.primary : '#F4F4F5'}
+        ios_backgroundColor={isDark ? '#374151' : '#E5E7EB'}
+      />
+    </View>
+  );
 
-      <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
-        <View className="pt-6">
-          <View className="flex-row items-center justify-between py-4 border-b border-gray-200">
-            <View className="flex-1 pr-4">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                Booking Confirmed
-              </Text>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
-                Your booking at The Jazz Club is confirmed.
-              </Text>
-            </View>
-            <Switch
-              value={bookingConfirmed}
-              onValueChange={setBookingConfirmed}
-              trackColor={{ false: '#D1D5DB', true: '#86EFAC' }}
-              thumbColor={bookingConfirmed ? '#22C55E' : '#F3F4F6'}
-            />
-          </View>
+  return (
+    <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <Header title="Notification Settings" />
 
-          <View className="flex-row items-center justify-between py-4 border-b border-gray-200">
-            <View className="flex-1 pr-4">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                Awaiting Confirmation
-              </Text>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
-                Your booking at The Blue Note is pending approval.
-              </Text>
-            </View>
-            <Switch
-              value={awaitingConfirmation}
-              onValueChange={setAwaitingConfirmation}
-              trackColor={{ false: '#D1D5DB', true: '#86EFAC' }}
-              thumbColor={awaitingConfirmation ? '#22C55E' : '#F3F4F6'}
-            />
-          </View>
-
-          <View className="flex-row items-center justify-between py-4 border-b border-gray-200">
-            <View className="flex-1 pr-4">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                Upload Required
-              </Text>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
-                Please upload your proof picture for Summer Music Fest.
-              </Text>
-            </View>
-            <Switch
-              value={uploadRequired}
-              onValueChange={setUploadRequired}
-              trackColor={{ false: '#D1D5DB', true: '#86EFAC' }}
-              thumbColor={uploadRequired ? '#22C55E' : '#F3F4F6'}
-            />
-          </View>
-
-          <View className="flex-row items-center justify-between py-4 border-b border-gray-200">
-            <View className="flex-1 pr-4">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                Event Reminder
-              </Text>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
-                Indie Rock Night starts at 8:00 PM.
-              </Text>
-            </View>
-            <Switch
-              value={eventReminder}
-              onValueChange={setEventReminder}
-              trackColor={{ false: '#D1D5DB', true: '#86EFAC' }}
-              thumbColor={eventReminder ? '#22C55E' : '#F3F4F6'}
-            />
-          </View>
-
-          <View className="flex-row items-center justify-between py-4 border-b border-gray-200">
-            <View className="flex-1 pr-4">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                Leave a Review
-              </Text>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
-                Share feedback for The Acoustic Lounge.
-              </Text>
-            </View>
-            <Switch
-              value={leaveReview}
-              onValueChange={setLeaveReview}
-              trackColor={{ false: '#D1D5DB', true: '#86EFAC' }}
-              thumbColor={leaveReview ? '#22C55E' : '#F3F4F6'}
-            />
-          </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+        <View className="px-6 pt-2">
+          {renderToggle(
+            "Booking Confirmed",
+            "Receive updates when your booking at a venue or studio is confirmed.",
+            bookingConfirmed,
+            setBookingConfirmed
+          )}
+          {renderToggle(
+            "Awaiting Confirmation",
+            "Get notified when your booking is pending approval from the host.",
+            awaitingConfirmation,
+            setAwaitingConfirmation
+          )}
+          {renderToggle(
+            "Upload Required",
+            "Reminders to upload necessary documents or proof for your events.",
+            uploadRequired,
+            setUploadRequired
+          )}
+          {renderToggle(
+            "Event Reminder",
+            "Receive reminders before your scheduled events or sessions start.",
+            eventReminder,
+            setEventReminder
+          )}
+          {renderToggle(
+            "Leave a Review",
+            "Get prompts to rate and review your experience after a booking.",
+            leaveReview,
+            setLeaveReview
+          )}
         </View>
       </ScrollView>
 
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-        <Navbar/>
+      <View className="absolute bottom-0 left-0 right-0">
+        <Navbar />
       </View>
     </View>
-    
-    );
+  );
 }

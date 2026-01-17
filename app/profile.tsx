@@ -1,99 +1,120 @@
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { Image, Text, TouchableOpacity, View } from 'react-native';
+import React from 'react';
+import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
-
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
-  const [showEdit, setShowEdit] = useState(true);
+
+  const MENU_ITEMS = [
+    { label: 'Edit Profile', icon: 'person-outline', route: '/edit_profile' },
+    { label: 'Wallet', icon: 'wallet-outline', route: '/wallet' },
+    { label: 'Settings', icon: 'settings-outline', route: '/settings' },
+    { label: 'Notifications', icon: 'notifications-outline', route: '/notifications' },
+  ];
 
   return (
-    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
-      <Header title="My Profile"></Header>
+    <>
+      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+        <Header title="My Profile" />
 
-      <View className="flex-row flex justify-center gap-5 pt-5 items-center">
-        <View style={{ width: 96, height: 96, borderRadius: 48, overflow: 'hidden', backgroundColor: colors.inputBackground, alignItems: 'center', justifyContent: 'center' }}>
-          <Image
-            source={{ uri: 'https://via.placeholder.com/150' }}
-            style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
-          />
-        </View>
-        <View className="flex-col justify-center items-start" >
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
 
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 18, color: colors.text }}>Jared Lopez Bagtas</Text>
-          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.textSecondary }}>Drummer</Text>
-          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.textSecondary }}>Rock, Indie, Folk</Text>
-          {showEdit ? (
-            <TouchableOpacity onPress={() => router.push('/edit_profile')} className="rounded-xl items-center justify-center py-2 px-3 flex-row gap-2 mt-2" style={{ width: '100%', borderWidth: 1, borderColor: colors.border }}>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text }}>Edit Profile</Text>
-              <Ionicons name="pencil" size={16} color={colors.text} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      </View>
+          {/* Profile Header */}
+          <View className="px-6 pt-2 pb-6 items-center">
+            <View className="relative">
+              <View
+                className="w-28 h-28 rounded-full overflow-hidden mb-4 border-4"
+                style={{ borderColor: colors.surface }}
+              >
+                <Image
+                  source={{ uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
+                  className="w-full h-full"
+                  resizeMode="cover"
+                />
+              </View>
+              <TouchableOpacity
+                onPress={() => router.push('/edit_profile')}
+                className="absolute bottom-4 right-0 p-2 rounded-full shadow-sm"
+                style={{ backgroundColor: colors.primary }}
+              >
+                <Ionicons name="pencil" size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
 
+            <Text className="text-xl mb-1 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Jared Lopez Bagtas</Text>
+            <Text className="text-sm mb-4 text-center" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Session Drummer • Manila</Text>
 
-      <View className="mt-5 flex gap-2 pt-3" style={{ borderTopWidth: 1, borderTopColor: colors.border }}>
-        <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Completion Rate</Text>
-        <View className="flex flex-row gap-2 items-center">
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 20, color: '#10b981' }}>98%</Text>
-          <View className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: isDark ? colors.inputBackground : '#D1D5DB' }}>
-            <View className="h-full bg-green-500 rounded-full" style={{ width: '98%' }} />
-          </View>
-        </View>
-      </View>
+            <View className="flex-row gap-2 flex-wrap justify-center mb-6">
+              {['Rock', 'Indie', 'Folk'].map((genre) => (
+                <View key={genre} className="px-3 py-1 rounded-full" style={{ backgroundColor: isDark ? '#1E293B' : '#F3F4F6' }}>
+                  <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>{genre}</Text>
+                </View>
+              ))}
+            </View>
 
-      <View className="flex-row flex-wrap mt-5 gap-3">
-        <View className="rounded-xl flex-col justify-center items-center p-4" style={{ width: '48%', borderWidth: 1, borderColor: colors.border }}>
-          <MaterialCommunityIcons name="microphone-variant" size={24} color={colors.primary} />
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Active Gigs</Text>
-          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 24, color: colors.primary }}>5</Text>
-        </View>
-
-        <View className="rounded-xl flex-col justify-center items-center p-4" style={{ width: '48%', borderWidth: 1, borderColor: colors.border }}>
-          <MaterialCommunityIcons name="check-circle" size={24} color="#10b981" />
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Completed</Text>
-          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 24, color: '#10b981' }}>5</Text>
-        </View>
-
-        <View className="rounded-xl flex-col justify-center items-center p-4" style={{ width: '48%', borderWidth: 1, borderColor: colors.border }}>
-          <MaterialCommunityIcons name="star-half-full" size={24} color="#D97706" />
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Reviews Pending</Text>
-          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 24, color: '#D97706' }}>5</Text>
-        </View>
-      </View>
-
-      <View className="mt-5">
-        <View className="flex-row items-center">
-          <MaterialCommunityIcons name="playlist-music" size={20} color={colors.primary} />
-          <Text className="ml-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>My Sample Music</Text>
-        </View>
-      </View>
-
-      <View className="flex flex-row mt-3">
-        <View className="rounded-xl overflow-hidden items-center justify-center" style={{ width: '48%', height: 150, borderWidth: 1, borderColor: colors.border, backgroundColor: isDark ? colors.inputBackground : '#F3F4F6' }}>
-          <Image
-            source={{ uri: 'https://via.placeholder.com/300x200?text=Video+Preview' }}
-            className="w-full h-full"
-            resizeMode="cover"
-          />
-          <View className="absolute inset-0 items-center justify-center">
-            <View className="w-12 h-12 rounded-full bg-black/50 items-center justify-center">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 20, color: 'white' }}>▶</Text>
+            <View className="flex-row w-full justify-between px-2">
+              <View className="items-center flex-1">
+                <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 18, color: colors.text }}>98%</Text>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Rating</Text>
+              </View>
+              <View className="w-[1px] h-full bg-gray-200" style={{ backgroundColor: colors.border }} />
+              <View className="items-center flex-1">
+                <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 18, color: colors.text }}>15</Text>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Gigs</Text>
+              </View>
+              <View className="w-[1px] h-full bg-gray-200" style={{ backgroundColor: colors.border }} />
+              <View className="items-center flex-1">
+                <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 18, color: colors.text }}>5</Text>
+                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Active</Text>
+              </View>
             </View>
           </View>
-        </View>
-      </View>
 
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+          {/* Menu Items */}
+          <View className="px-6 gap-3">
+            {MENU_ITEMS.map((item) => (
+              <TouchableOpacity
+                key={item.label}
+                onPress={() => router.push(item.route as any)}
+                className="flex-row items-center p-4 rounded-2xl mb-1 shadow-sm"
+                style={{ backgroundColor: colors.surface, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
+              >
+                <View className="p-2 rounded-xl mr-4" style={{ backgroundColor: isDark ? '#1E293B' : '#F3F4F6' }}>
+                  <Ionicons name={item.icon as any} size={22} color={colors.text} />
+                </View>
+                <Text className="flex-1 text-base relative top-[1px]" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{item.label}</Text>
+                <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Media Section */}
+          <View className="px-6 mt-6">
+            <Text className="mb-4 text-base" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Media & Portfolio</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-6 px-6 gap-3">
+              {[1, 2, 3].map((i) => (
+                <View key={i} className="w-64 h-40 rounded-2xl overflow-hidden relative shadow-sm" style={{ backgroundColor: colors.surface }}>
+                  <Image
+                    source={{ uri: `https://picsum.photos/400/300?random=${i + 50}` }}
+                    className="w-full h-full"
+                    style={{ opacity: 0.9 }}
+                  />
+                  <View className="absolute inset-0 items-center justify-center bg-black/20">
+                    <Ionicons name="play-circle" size={40} color="#fff" />
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+
+        </ScrollView>
         <Navbar />
       </View>
-    </View>
+    </>
   );
 }
 

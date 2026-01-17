@@ -11,174 +11,120 @@ export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const { theme, setTheme, colors, isDark } = useTheme();
 
-    return (
+  const handleLogout = () => {
+    setModalVisible(false);
+    // Add actual logout logic here
+    router.replace('/');
+  };
+
+  const SETTINGS_SECTIONS = [
+    {
+      title: 'Preferences',
+      items: [
+        { label: 'Account Security', icon: 'shield-outline', route: '/account_details' },
+      ]
+    },
+    {
+      title: 'Support & Legal',
+      items: [
+        { label: 'Help & Support', icon: 'help-circle-outline', route: '/help' },
+        { label: 'Terms and Conditions', icon: 'document-text-outline', route: '/terms_and_conditions' },
+        { label: 'Privacy Policy', icon: 'shield-checkmark-outline', route: '/privacy_policy' },
+      ]
+    }
+  ];
+
+  return (
     <>
-    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
-      <Header title="Settings"></Header>
+      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+        <Header title="Settings" />
 
-      <ScrollView showsVerticalScrollIndicator={false} className="pb-24">
-        <View className="pt-6">
-          <TouchableOpacity className="flex-row items-center py-4" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }} onPress ={() => router.push('/account_details')}>
-            <View className="w-10 h-10 rounded-full items-center justify-center mr-4" style={{ backgroundColor: isDark ? colors.card : '#F3F4F6' }}>
-              <Ionicons name="person-outline" size={20} color={colors.text} />
-            </View>
-            <View className="flex-1">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                Account
-              </Text>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.secondary }}>
-                Username
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
-          </TouchableOpacity>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
 
-          <TouchableOpacity className="flex-row items-center py-4" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }} onPress ={() => router.push('/notification_settings')}>
-            <View className="w-10 h-10 rounded-full items-center justify-center mr-4" style={{ backgroundColor: isDark ? colors.card : '#F3F4F6' }}>
-              <Ionicons name="notifications-outline" size={20} color={colors.text} />
-            </View>
-            <View className="flex-1">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                Notifications
-              </Text>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.secondary }}>
-                Turn alerts on or off for your
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
-          </TouchableOpacity>
+          {/* Section: Appearance */}
+          <View className="px-6 mt-6 mb-6">
+            <Text className="mb-3 text-xs uppercase tracking-wider pl-1" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Appearance</Text>
+            <View className="p-4 rounded-2xl border" style={{ backgroundColor: colors.card, borderColor: colors.border }}>
+              <Text className="mb-4 text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>Theme Preference</Text>
 
-          <TouchableOpacity className="flex-row items-center py-4" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }} onPress ={() => router.push('/terms_and_conditions')}>
-            <View className="w-10 h-10 rounded-full items-center justify-center mr-4" style={{ backgroundColor: isDark ? colors.card : '#F3F4F6' }}>
-              <Ionicons name="lock-closed-outline" size={20} color={colors.text} />
-            </View>
-            <View className="flex-1">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                Terms and Conditions
-              </Text>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.secondary }}>
-                App usage rules and guidelines
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
-          </TouchableOpacity>
-
-          <TouchableOpacity className="flex-row items-center py-4" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }} onPress ={() => router.push('/privacy_policy')}>
-            <View className="w-10 h-10 rounded-full items-center justify-center mr-4" style={{ backgroundColor: isDark ? colors.card : '#F3F4F6' }}>
-              <Ionicons name="information-circle-outline" size={20} color={colors.text} />
-            </View>
-            <View className="flex-1">
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                Privacy Policy
-              </Text>
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.secondary }}>
-                Data protection and security
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
-          </TouchableOpacity>
-
-          {/* Theme Selection */}
-          <View className="py-4" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
-            <View className="flex-row items-center mb-3">
-              <View className="w-10 h-10 rounded-full items-center justify-center mr-4" style={{ backgroundColor: isDark ? colors.card : '#F3F4F6' }}>
-                <Ionicons name="color-palette-outline" size={20} color={colors.text} />
+              <View className="flex-row gap-2">
+                {[
+                  { id: 'light', icon: 'sunny', label: 'Light' },
+                  { id: 'dark', icon: 'moon', label: 'Dark' },
+                  { id: 'system', icon: 'phone-portrait-outline', label: 'System' }
+                ].map((item) => {
+                  const isActive = theme === item.id;
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      onPress={() => setTheme(item.id as any)}
+                      className={`flex-1 py-3 rounded-xl items-center border ${isActive ? 'bg-indigo-50 border-indigo-200' : 'bg-transparent border-gray-200'}`}
+                      style={{
+                        backgroundColor: isActive ? (isDark ? colors.primaryLight : '#EEF2FF') : 'transparent',
+                        borderColor: isActive ? colors.primary : colors.border
+                      }}
+                    >
+                      <Ionicons name={item.icon as any} size={20} color={isActive ? colors.primary : colors.textSecondary} />
+                      <Text className="mt-1 text-xs" style={{ fontFamily: 'Poppins_500Medium', color: isActive ? colors.primary : colors.textSecondary }}>{item.label}</Text>
+                    </TouchableOpacity>
+                  )
+                })}
               </View>
-              <View className="flex-1">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
-                  Appearance
-                </Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.secondary }}>
-                  Choose your preferred theme
-                </Text>
-              </View>
-            </View>
-            <View className="flex-row justify-center gap-2 mt-2">
-              <TouchableOpacity
-                onPress={() => setTheme('light')}
-                className="flex-1 py-2 rounded-lg items-center"
-                style={{ 
-                  backgroundColor: theme === 'light' ? colors.primary : (isDark ? colors.card : '#E5E7EB'),
-                  borderWidth: theme === 'light' ? 0 : 1,
-                  borderColor: colors.border
-                }}
-              >
-                <Ionicons name="sunny" size={18} color={theme === 'light' ? '#FFF' : colors.text} />
-                <Text style={{ 
-                  fontFamily: 'Poppins_500Medium', 
-                  fontSize: 12, 
-                  color: theme === 'light' ? '#FFF' : colors.text,
-                  marginTop: 2
-                }}>
-                  Light
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setTheme('dark')}
-                className="flex-1 py-2 rounded-lg items-center"
-                style={{ 
-                  backgroundColor: theme === 'dark' ? colors.primary : (isDark ? colors.card : '#E5E7EB'),
-                  borderWidth: theme === 'dark' ? 0 : 1,
-                  borderColor: colors.border
-                }}
-              >
-                <Ionicons name="moon" size={18} color={theme === 'dark' ? '#FFF' : colors.text} />
-                <Text style={{ 
-                  fontFamily: 'Poppins_500Medium', 
-                  fontSize: 12, 
-                  color: theme === 'dark' ? '#FFF' : colors.text,
-                  marginTop: 2
-                }}>
-                  Dark
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setTheme('system')}
-                className="flex-1 py-2 rounded-lg items-center"
-                style={{ 
-                  backgroundColor: theme === 'system' ? colors.primary : (isDark ? colors.card : '#E5E7EB'),
-                  borderWidth: theme === 'system' ? 0 : 1,
-                  borderColor: colors.border
-                }}
-              >
-                <Ionicons name="phone-portrait-outline" size={18} color={theme === 'system' ? '#FFF' : colors.text} />
-                <Text style={{ 
-                  fontFamily: 'Poppins_500Medium', 
-                  fontSize: 12, 
-                  color: theme === 'system' ? '#FFF' : colors.text,
-                  marginTop: 2
-                }}>
-                  System
-                </Text>
-              </TouchableOpacity>
             </View>
           </View>
 
-        </View>
+          {SETTINGS_SECTIONS.map((section, index) => (
+            <View key={section.title} className="px-6 mb-6">
+              <Text className="mb-3 text-xs uppercase tracking-wider pl-1" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>{section.title}</Text>
+              <View className="rounded-2xl overflow-hidden border" style={{ backgroundColor: colors.card, borderColor: colors.border }}>
+                {section.items.map((item, i) => (
+                  <TouchableOpacity
+                    key={item.label}
+                    onPress={() => router.push(item.route as any)}
+                    className={`flex-row items-center p-4 active:bg-gray-50`}
+                    style={{
+                      borderBottomWidth: i === section.items.length - 1 ? 0 : 1,
+                      borderBottomColor: colors.border
+                    }}
+                  >
+                    <View className="w-8 h-8 rounded-full items-center justify-center mr-3" style={{ backgroundColor: isDark ? colors.inputBackground : '#F3F4F6' }}>
+                      <Ionicons name={item.icon as any} size={18} color={colors.text} />
+                    </View>
+                    <Text className="flex-1 text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{item.label}</Text>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ))}
 
-        <TouchableOpacity 
-          className="mt-8 mx-4 mb-6 rounded-lg items-center justify-center py-3"
-          style={{ backgroundColor: '#DC2626' }}
-          onPress={() => setModalVisible(true)}
-        >
-          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: '#FFF' }}>
-            Logout
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
+          <View className="px-6 mt-2">
+            <TouchableOpacity
+              onPress={() => setModalVisible(true)}
+              className="flex-row items-center justify-center p-4 rounded-xl mb-4"
+              style={{ backgroundColor: '#FEE2E2' }}
+            >
+              <Ionicons name="log-out-outline" size={20} color="#DC2626" />
+              <Text className="ml-2 text-sm text-red-600" style={{ fontFamily: 'Poppins_600SemiBold' }}>Log Out</Text>
+            </TouchableOpacity>
 
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-        <Navbar/>
+            <Text className="text-center text-xs" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Version 1.0.0 (Build 52)</Text>
+          </View>
+
+        </ScrollView>
+
+        <Navbar />
       </View>
-    </View>
-    <Modal
-      visible={modalVisible}
-      onClose={() => setModalVisible(false)}
-      title="Logout"
-      message="Are you sure you want to logout?"
-      buttonText="Logout"
-    />
+
+      <Modal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        title="Log Out"
+        message="Are you sure you want to log out of your account?"
+        buttonText="Log Out"
+        onConfirm={handleLogout}
+      />
     </>
-    );
-} 
+  );
+}
 

@@ -1,200 +1,197 @@
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
-  
+  const [activeCategory, setActiveCategory] = useState('All');
+
+  const categories = ['All', 'Gigs', 'Musicians', 'Studios'];
+
+  const renderStarRating = (rating: number) => (
+    <View className="flex-row items-center bg-yellow-400/20 px-2 py-1 rounded-lg">
+      <Ionicons name="star" size={12} color="#FBBF24" />
+      <Text className="ml-1 text-xs font-semibold text-yellow-600 dark:text-yellow-400">{rating}</Text>
+    </View>
+  );
+
   return (
-    <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
-      <Header title ="Home"/>
-        <ScrollView showsHorizontalScrollIndicator ={false} className="pb-24">
+    <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <Header title="Discover" />
 
-          {/*Title of this section-GiG*/}
-          <View className="pt-10 flex-row items-center">
-            <MaterialCommunityIcons name="microphone-variant" size={22} color={colors.primary} />
-            <Text className="ml-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 17, color: colors.text }}>Gigs</Text>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+
+        {/* Hero / Search Section */}
+        <View className="px-6 mb-6">
+          <Text className="text-3xl" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+            Find your <Text style={{ color: colors.primary }}>rhythm</Text>
+          </Text>
+          <Text className="text-base mt-1 mb-4" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+            Book the best local talent and spaces.
+          </Text>
+
+          <View className="flex-row items-center px-4 py-3 rounded-2xl" style={{ backgroundColor: colors.inputBackground }}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
+            <TextInput
+              placeholder="Search gigs, bands, studios..."
+              placeholderTextColor={colors.textSecondary}
+              className="flex-1 ml-3 text-base"
+              style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
+            />
           </View>
-          {/*Gig Sample Card. redirection not yet set*/}
-          <View className="pt-2 justify-between items-start gap-3">
-            <ScrollView horizontal showsHorizontalScrollIndicator ={false}>
-              <View className ="rounded-xl overflow-hidden flex-col flex-1" style={{
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.1,
-                shadowRadius: 6,
-                elevation: 8,
-                marginHorizontal: 4,
-                marginVertical: 8,
-                minHeight: 100,
-                minWidth:200,
-                backgroundColor: colors.card,
-                borderWidth: isDark ? 1 : 0,
-                borderColor: colors.border
-              }}>
-                <TouchableOpacity className="flex-col items-start justify-between"  onPress={() => router.push('/gig_details')}>
+        </View>
 
-                  <View style={{height: 150, width:200}}>
-                    <Image 
-                      source={{uri: 'https://picsum.photos/200/150?random=1'}} 
-                      style={{height: 150, width:200}}
-                      resizeMode="cover"
-                    />
-                    <View className="flex-row items-center bg-amber-50 rounded-md absolute top-3 left-3 rounded-lg px-3 py-1.5">
-                      <Ionicons name="star" size={14} color="#FFB800" />
-                      <Text className="ml-1 text-xs font-semibold" style={{ color: colors.text }}>4.8</Text>
-                    </View>
-                  </View>
-
-                  
-                  <View className ="flex-row flex justify-between items-center">
-                    <Text className ="px-3 mt-3" numberOfLines={2}    ellipsizeMode="clip" style={{fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.text }}>Barasoain Church Events</Text>
-                  </View>
-              
-                  <View className="mt-1 px-2.5 flex flex-row">
-                    <Ionicons name="location-outline" size={12} color="#808080" />
-                    <Text className =" px-0.5 text-[#808080]"style={{ fontFamily: 'Poppins_400Regular', fontSize: 10 }}>Malolos, Bulacan</Text>
-                  </View>
-
-                  <View className="flex-row items-center gap-2 mb-3 px-3 mt-2">
-                    <View className="flex-row items-center gap-1 bg-primary-100 rounded-md px-3 py-1.5">
-                      <Text className="text-[11px] text-primary-700 font-medium">Church</Text>
-                    </View>
-                    <View className="flex-row items-center gap-1 bg-accent-100 rounded-md px-3 py-1.5">
-                      <Text className="text-[11px] text-accent-700 font-medium">Wedding</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-
-
-          {/*Title of this section-Musicians Group*/}
-            <View className="pt-10 flex-row items-center">
-              <MaterialCommunityIcons name="account-music" size={22} color={colors.primary} />
-              <Text className="ml-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 17, color: colors.text }}>Musicians</Text>
-            </View>
-          {/*Musician Group Sample Card. redirection not yet set*/}
-          <View className="pt-2 justify-between items-start gap-3">
-            <ScrollView horizontal showsHorizontalScrollIndicator ={false}>
-              <View className ="rounded-xl overflow-hidden flex-col flex-1" style={{
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.1,
-                shadowRadius: 6,
-                elevation: 8,
-                marginHorizontal: 4,
-                marginVertical: 8,
-                minHeight: 100,
-                minWidth:200,
-                backgroundColor: colors.card,
-                borderWidth: isDark ? 1 : 0,
-                borderColor: colors.border
-              }}>
-                <TouchableOpacity className="flex-col items-start justify-between"  onPress={() => router.push('/group_details')}>
-
-                  <View style={{height: 150, width:200}}>
-                    <Image 
-                      source={{uri: 'https://picsum.photos/200/150?random=2'}} 
-                      style={{height: 150, width:200}}
-                      resizeMode="cover"
-                    />
-                    <View className="flex-row items-center bg-amber-50 rounded-md absolute top-3 left-3 rounded-lg px-3 py-1.5">
-                      <Ionicons name="star" size={14} color="#FFB800" />
-                      <Text className="ml-1 text-xs font-semibold" style={{ color: colors.text }}>4.8</Text>
-                    </View>
-                  </View>
-
-                  <View className ="flex-row flex justify-between items-center">
-                    <Text className ="px-3 mt-3" numberOfLines={2}    ellipsizeMode="clip" style={{fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.text }}>Juan Dela Cruz Band</Text>
-                  </View>
-              
-                  <View className="mt-1 px-2.5 flex flex-row">
-                    <Ionicons name="location-outline" size={12} color="#808080" />
-                    <Text className =" px-0.5 text-[#808080]"style={{ fontFamily: 'Poppins_400Regular', fontSize: 10 }}>San Jose Del Monte, Bulacan</Text>
-                  </View>
-
-                  <View className="flex-row items-center gap-2 mb-3 px-3 mt-2">
-                    <View className="flex-row items-center gap-1 bg-primary-100 rounded-md px-3 py-1.5">
-                      <Text className="text-[11px] text-primary-700 font-medium">Rock</Text>
-                    </View>
-                    <View className="flex-row items-center gap-1 bg-accent-100 rounded-md px-3 py-1.5">
-                      <Text className="text-[11px] text-accent-700 font-medium">OPM</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-            
-          {/*Title of this section-Studio*/}
-            <View className="pt-10 flex-row items-center">
-              <MaterialCommunityIcons name="music-box-outline" size={22} color={colors.primary} />
-              <Text className="ml-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 17, color: colors.text }}>Studios</Text>
-            </View>
-          {/*studio Sample Card. redirection not yet set*/}
-          <View className="pt-2 justify-between items-start gap-3">
-            <ScrollView horizontal showsHorizontalScrollIndicator ={false}>
-              <View className ="rounded-xl overflow-hidden flex-col flex-1" style={{
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.1,
-                shadowRadius: 6,
-                elevation: 8,
-                marginHorizontal: 4,
-                marginVertical: 8,
-                minHeight: 100,
-                minWidth:200,
-                backgroundColor: colors.card,
-                borderWidth: isDark ? 1 : 0,
-                borderColor: colors.border
-              }}>
-                <TouchableOpacity className="flex-col items-start justify-between"  onPress={() => router.push('/studio_details')}>
-
-                  <View style={{height: 150, width:200}}>
-                    <Image 
-                      source={{uri: 'https://picsum.photos/200/150?random=3'}} 
-                      style={{height: 150, width:200}}
-                      resizeMode="cover"
-                    />
-                    <View className="flex-row items-center bg-amber-50 rounded-md absolute top-3 left-3 rounded-lg px-3 py-1.5">
-                      <Ionicons name="star" size={14} color="#FFB800" />
-                      <Text className="ml-1 text-xs font-semibold" style={{ color: colors.text }}>4.8</Text>
-                    </View>
-                  </View>
-
-                  
-                  <View className ="flex-row flex justify-between items-center">
-                    <Text className ="px-3 mt-3" numberOfLines={2}    ellipsizeMode="clip" style={{fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.text }}>SM City Marilao Events Hall</Text>
-                  </View>
-              
-                  <View className="mt-1 px-2.5 flex flex-row">
-                    <Ionicons name="location-outline" size={12} color="#808080" />
-                    <Text className =" px-0.5 text-[#808080]"style={{ fontFamily: 'Poppins_400Regular', fontSize: 10 }}>Marilao, Bulacan</Text>
-                  </View>
-
-                  <View className="flex-row items-center gap-2 mb-3 px-3 mt-2">
-                    <View className="flex-row items-center gap-1 bg-primary-100 rounded-md px-3 py-1.5">
-                      <Text className="text-[11px] text-primary-700 font-medium">Gay</Text>
-                    </View>
-                    <View className="flex-row items-center gap-1 bg-accent-100 rounded-md px-3 py-1.5">
-                      <Text className="text-[11px] text-accent-700 font-medium">homosapiens</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
+        {/* Categories */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-6 mb-8 gap-3" contentContainerStyle={{ paddingRight: 24 }}>
+          {categories.map((cat, index) => (
+            <TouchableOpacity
+              key={index}
+              onPress={() => setActiveCategory(cat)}
+              className={`px-5 py-2.5 rounded-full mr-2 ${activeCategory === cat ? 'bg-primary-600' : 'bg-transparent border'}`}
+              style={{
+                backgroundColor: activeCategory === cat ? colors.primary : 'transparent',
+                borderColor: activeCategory === cat ? colors.primary : colors.border
+              }}
+            >
+              <Text
+                className="text-sm font-medium"
+                style={{
+                  color: activeCategory === cat ? '#FFF' : colors.textSecondary,
+                  fontFamily: 'Poppins_500Medium'
+                }}
+              >
+                {cat}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </ScrollView>
 
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
-        <Navbar/>
-      </View>
+        {/* Featured Section */}
+        <View className="px-6 mb-6">
+          <View className="flex-row justify-between items-center mb-4">
+            <Text className="text-lg" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Featured</Text>
+            <TouchableOpacity onPress={() => router.push('/find_talent_and_spaces')}>
+              <Text className="text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>See All</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="gap-4" contentContainerStyle={{ paddingRight: 24 }}>
+            {/* Card 1 */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => router.push('/gig_details')}
+              className="w-72 rounded-3xl p-3 mr-4"
+              style={{ backgroundColor: colors.card, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 }}
+            >
+              <View className="relative">
+                <Image
+                  source={{ uri: 'https://picsum.photos/400/250?random=10' }}
+                  className="w-full h-40 rounded-2xl"
+                  resizeMode="cover"
+                />
+                <View className="absolute top-3 left-3">
+                  {renderStarRating(4.9)}
+                </View>
+                <View className="absolute top-3 right-3 bg-white/90 p-2 rounded-full">
+                  <Ionicons name="heart-outline" size={18} color={colors.primary} />
+                </View>
+              </View>
+
+              <View className="mt-3 px-1">
+                <Text className="text-base mb-1" numberOfLines={1} style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Summer Jazz Festival</Text>
+                <View className="flex-row items-center mb-2">
+                  <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
+                  <Text className="text-xs ml-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>Malolos Convention Center</Text>
+                </View>
+                <View className="flex-row gap-2">
+                  <View className="px-2 py-1 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg">
+                    <Text className="text-[10px] font-medium text-indigo-600 dark:text-indigo-300">Jazz</Text>
+                  </View>
+                  <View className="px-2 py-1 bg-pink-50 dark:bg-pink-900/30 rounded-lg">
+                    <Text className="text-[10px] font-medium text-pink-600 dark:text-pink-300">Live Band</Text>
+                  </View>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            {/* Card 2 */}
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => router.push('/studio_details')}
+              className="w-72 rounded-3xl p-3 mr-4"
+              style={{ backgroundColor: colors.card, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 }}
+            >
+              <View className="relative">
+                <Image
+                  source={{ uri: 'https://picsum.photos/400/250?random=11' }}
+                  className="w-full h-40 rounded-2xl"
+                  resizeMode="cover"
+                />
+                <View className="absolute top-3 left-3">
+                  {renderStarRating(5.0)}
+                </View>
+                <View className="absolute top-3 right-3 bg-white/90 p-2 rounded-full">
+                  <Ionicons name="heart-outline" size={18} color={colors.primary} />
+                </View>
+              </View>
+
+              <View className="mt-3 px-1">
+                <Text className="text-base mb-1" numberOfLines={1} style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>SoundWave Studio</Text>
+                <View className="flex-row items-center mb-2">
+                  <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
+                  <Text className="text-xs ml-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>Plaridel, Bulacan</Text>
+                </View>
+                <View className="flex-row gap-2">
+                  <View className="px-2 py-1 bg-green-50 dark:bg-green-900/30 rounded-lg">
+                    <Text className="text-[10px] font-medium text-green-600 dark:text-green-300">Recording</Text>
+                  </View>
+                  <View className="px-2 py-1 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+                    <Text className="text-[10px] font-medium text-blue-600 dark:text-blue-300">Mixing</Text>
+                  </View>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+
+        {/* New Arrivals List */}
+        <View className="px-6">
+          <Text className="text-lg mb-4" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>New Arrivals</Text>
+
+          {[1, 2, 3].map((item, i) => (
+            <TouchableOpacity
+              key={i}
+              className="flex-row mb-4 p-3 rounded-2xl items-center"
+              style={{ backgroundColor: colors.card, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 4, elevation: 2 }}
+              onPress={() => router.push('/group_details')}
+            >
+              <Image
+                source={{ uri: `https://picsum.photos/100/100?random=${20 + i}` }}
+                className="w-20 h-20 rounded-xl"
+              />
+              <View className="flex-1 ml-4 justify-center">
+                <Text className="text-base font-semibold" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>The Weekenders</Text>
+                <Text className="text-xs mt-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>Indie Rock Band • 4 Members</Text>
+                <View className="flex-row items-center mt-2">
+                  <Ionicons name="star" size={12} color={colors.primary} />
+                  <Text className="text-xs ml-1 font-medium" style={{ color: colors.primary }}>4.5 (12 reviews)</Text>
+                </View>
+              </View>
+              <View className="bg-gray-100 dark:bg-gray-800 p-2 rounded-full">
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </View>
+            </TouchableOpacity>
+          ))}
+
+        </View>
+
+      </ScrollView>
+
+      <Navbar />
     </View>
   );
 }
