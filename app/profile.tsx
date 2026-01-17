@@ -13,7 +13,6 @@ export default function ProfileScreen() {
     { label: 'Edit Profile', icon: 'person-outline', route: '/edit_profile' },
     { label: 'Wallet', icon: 'wallet-outline', route: '/wallet' },
     { label: 'Settings', icon: 'settings-outline', route: '/settings' },
-    { label: 'Notifications', icon: 'notifications-outline', route: '/notifications' },
   ];
 
   return (
