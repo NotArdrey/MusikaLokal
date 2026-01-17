@@ -93,8 +93,9 @@ export default function HomeScreen() {
                   className="w-full h-40 rounded-2xl"
                   resizeMode="cover"
                 />
-                <View className="absolute top-3 left-3">
-                  {renderStarRating(4.9)}
+                <View className="absolute bottom-3 right-3 flex-row items-center bg-white/90 rounded-full px-2.5 py-1">
+                  <Ionicons name="star" size={12} color="#F59E0B" />
+                  <Text className="ml-1 text-xs font-bold text-gray-900" style={{ fontFamily: 'Poppins_600SemiBold' }}>4.9</Text>
                 </View>
                 <View className="absolute top-3 right-3 bg-white/90 p-2 rounded-full">
                   <Ionicons name="heart-outline" size={18} color={colors.primary} />
@@ -131,8 +132,9 @@ export default function HomeScreen() {
                   className="w-full h-40 rounded-2xl"
                   resizeMode="cover"
                 />
-                <View className="absolute top-3 left-3">
-                  {renderStarRating(5.0)}
+                <View className="absolute bottom-3 right-3 flex-row items-center bg-white/90 rounded-full px-2.5 py-1">
+                  <Ionicons name="star" size={12} color="#F59E0B" />
+                  <Text className="ml-1 text-xs font-bold text-gray-900" style={{ fontFamily: 'Poppins_600SemiBold' }}>5.0</Text>
                 </View>
                 <View className="absolute top-3 right-3 bg-white/90 p-2 rounded-full">
                   <Ionicons name="heart-outline" size={18} color={colors.primary} />

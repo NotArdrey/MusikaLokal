@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
@@ -31,6 +32,21 @@ export default function GigDetailsScreen() {
                 className="w-full h-full"
                 resizeMode="cover"
               />
+              {/* Report Button */}
+              <TouchableOpacity
+                onPress={() => router.push('/report?type=gig&name=Junction%2088' as any)}
+                className="absolute top-3 right-3 w-9 h-9 rounded-full items-center justify-center"
+                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+              >
+                <Ionicons name="flag-outline" size={18} color="#fff" />
+              </TouchableOpacity>
+              {/* Heart Button */}
+              <TouchableOpacity
+                className="absolute top-3 right-14 w-9 h-9 rounded-full items-center justify-center"
+                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+              >
+                <Ionicons name="heart-outline" size={18} color="#fff" />
+              </TouchableOpacity>
               <View className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent" />
               <View className="absolute bottom-4 left-4 right-4">
                 <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>Junction 88 Music Bar</Text>
@@ -275,6 +291,18 @@ export default function GigDetailsScreen() {
                   <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, lineHeight: 20 }}>
                     Amazing venue! The sound system was top-notch and the staff was incredibly professional. Highly recommend!
                   </Text>
+
+                  {/* Review Interactions */}
+                  <View className="flex-row items-center gap-4 mt-3">
+                    <TouchableOpacity className="flex-row items-center gap-1">
+                      <Ionicons name="heart-outline" size={16} color={colors.textSecondary} />
+                      <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>12</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity className="flex-row items-center gap-1">
+                      <Ionicons name="chatbubble-outline" size={16} color={colors.textSecondary} />
+                      <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Reply</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             )}

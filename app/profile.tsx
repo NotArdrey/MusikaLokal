@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
@@ -8,6 +8,11 @@ import { useTheme } from '../src/context/ThemeContext';
 
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
+  const params = useLocalSearchParams<{ userId?: string }>();
+
+  // Mock logic: If userId is present, it's a public view of another user
+  // In a real app, you'd compare params.userId with the logged-in user's ID
+  const isOwner = !params.userId;
 
   const MENU_ITEMS = [
     { label: 'Edit Profile', icon: 'person-outline', route: '/edit_profile' },
@@ -18,7 +23,7 @@ export default function ProfileScreen() {
   return (
     <>
       <View className="flex-1" style={{ backgroundColor: colors.background }}>
-        <Header title="My Profile" />
+        <Header title={isOwner ? "My Profile" : "User Profile"} />
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
 
@@ -35,13 +40,16 @@ export default function ProfileScreen() {
                   resizeMode="cover"
                 />
               </View>
-              <TouchableOpacity
-                onPress={() => router.push('/edit_profile')}
-                className="absolute bottom-4 right-0 p-2 rounded-full shadow-sm"
-                style={{ backgroundColor: colors.primary }}
-              >
-                <Ionicons name="pencil" size={16} color="#fff" />
-              </TouchableOpacity>
+
+              {isOwner && (
+                <TouchableOpacity
+                  onPress={() => router.push('/edit_profile')}
+                  className="absolute bottom-4 right-0 p-2 rounded-full shadow-sm"
+                  style={{ backgroundColor: colors.primary }}
+                >
+                  <Ionicons name="pencil" size={16} color="#fff" />
+                </TouchableOpacity>
+              )}
             </View>
 
             <Text className="text-xl mb-1 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Jared Lopez Bagtas</Text>
@@ -73,23 +81,43 @@ export default function ProfileScreen() {
             </View>
           </View>
 
-          {/* Menu Items */}
-          <View className="px-6 gap-3">
-            {MENU_ITEMS.map((item) => (
+          {/* Menu Items (Owner Only) */}
+          {isOwner ? (
+            <View className="px-6 gap-3">
+              {MENU_ITEMS.map((item) => (
+                <TouchableOpacity
+                  key={item.label}
+                  onPress={() => router.push(item.route as any)}
+                  className="p-4 rounded-2xl flex-row items-center justify-between"
+                  style={{ backgroundColor: colors.surface }}
+                >
+                  <View className="flex-row items-center gap-4">
+                    <View className="w-10 h-10 rounded-full items-center justify-center bg-gray-50 dark:bg-slate-800">
+                      <Ionicons name={item.icon as any} size={20} color={colors.text} />
+                    </View>
+                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 15, color: colors.text }}>
+                      {item.label}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            /* Public View Actions */
+            <View className="px-6 gap-3">
               <TouchableOpacity
-                key={item.label}
-                onPress={() => router.push(item.route as any)}
-                className="flex-row items-center p-4 rounded-2xl mb-1 shadow-sm"
-                style={{ backgroundColor: colors.surface, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 }}
+                onPress={() => router.push('/report?type=profile&name=Jared%20Lopez%20Bagtas' as any)}
+                className="p-4 rounded-2xl flex-row items-center justify-center gap-2 border border-red-200 dark:border-red-900/50"
+                style={{ backgroundColor: isDark ? '#450a0a' : '#fef2f2' }}
               >
-                <View className="p-2 rounded-xl mr-4" style={{ backgroundColor: isDark ? '#1E293B' : '#F3F4F6' }}>
-                  <Ionicons name={item.icon as any} size={22} color={colors.text} />
-                </View>
-                <Text className="flex-1 text-base relative top-[1px]" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{item.label}</Text>
-                <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                <Ionicons name="flag-outline" size={20} color="#ef4444" />
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: '#ef4444' }}>
+                  Report User
+                </Text>
               </TouchableOpacity>
-            ))}
-          </View>
+            </View>
+          )}
 
           {/* Media Section */}
           <View className="px-6 mt-6">

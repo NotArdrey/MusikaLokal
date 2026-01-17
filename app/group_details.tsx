@@ -32,6 +32,21 @@ export default function GroupDetailsScreen() {
                 className="w-full h-full"
                 resizeMode="cover"
               />
+              {/* Report Button */}
+              <TouchableOpacity
+                onPress={() => router.push('/report?type=group&name=Ben%26Ben' as any)}
+                className="absolute top-3 right-3 w-9 h-9 rounded-full items-center justify-center"
+                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+              >
+                <Ionicons name="flag-outline" size={18} color="#fff" />
+              </TouchableOpacity>
+              {/* Heart Button */}
+              <TouchableOpacity
+                className="absolute top-3 right-14 w-9 h-9 rounded-full items-center justify-center"
+                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+              >
+                <Ionicons name="heart-outline" size={18} color="#fff" />
+              </TouchableOpacity>
               <View className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent" />
               <View className="absolute bottom-4 left-4 right-4">
                 <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>Ben&Ben</Text>
@@ -330,6 +345,18 @@ export default function GroupDetailsScreen() {
                   <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, lineHeight: 20 }}>
                     Ben&Ben exceeded all expectations! Their live performance was absolutely breathtaking. Professional and punctual.
                   </Text>
+
+                  {/* Review Interactions */}
+                  <View className="flex-row items-center gap-4 mt-3">
+                    <TouchableOpacity className="flex-row items-center gap-1">
+                      <Ionicons name="heart-outline" size={16} color={colors.textSecondary} />
+                      <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>12</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity className="flex-row items-center gap-1">
+                      <Ionicons name="chatbubble-outline" size={16} color={colors.textSecondary} />
+                      <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Reply</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             )}
