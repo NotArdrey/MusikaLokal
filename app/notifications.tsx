@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { Image, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
@@ -104,23 +104,25 @@ export default function NotificationsScreen() {
     ];
 
     return (
-        <View className="flex-1" style={{ backgroundColor: colors.background }}>
+        <View style={[styles.flex1, { backgroundColor: colors.background }]}>
             <Header title="Notifications" />
             <ScrollView
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: 100 }}
+                contentContainerStyle={styles.scrollContent}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
             >
                 {/* Mark all as read button */}
                 {unreadCount > 0 && (
-                    <View className="px-6 py-2 flex-row justify-end">
+                    <View style={styles.markAllContainer}>
                         <TouchableOpacity
-                            className="flex-row items-center justify-center py-2 px-4 rounded-full"
-                            style={{ backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' }}
+                            style={[
+                                styles.markAllBtn,
+                                { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' }
+                            ]}
                             onPress={markAllAsRead}
                         >
                             <Ionicons name="checkmark-done" size={16} color={colors.primary} />
-                            <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, color: colors.primary, marginLeft: 6 }}>
+                            <Text style={[styles.markAllText, { color: colors.primary }]}>
                                 Mark all as read
                             </Text>
                         </TouchableOpacity>
@@ -128,7 +130,7 @@ export default function NotificationsScreen() {
                 )}
 
                 {loading && notifications.length === 0 ? (
-                    <View className="py-10 items-center">
+                    <View style={styles.loadingContainer}>
                         <Text style={{ color: colors.textSecondary }}>Loading...</Text>
                     </View>
                 ) : (
@@ -136,31 +138,33 @@ export default function NotificationsScreen() {
                         if (section.data.length === 0) return null;
 
                         return (
-                            <View key={section.title} className="mb-2">
-                                <Text className="px-6 mb-3 text-xs uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>
+                            <View key={section.title} style={{ marginBottom: 8 }}>
+                                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
                                     {section.title}
                                 </Text>
 
                                 {section.data.map((notification) => (
                                     <TouchableOpacity
                                         key={notification.id}
-                                        className={`flex-row items-center px-6 py-4 mx-2 rounded-2xl mb-2 border ${notification.read ? 'border-transparent' : 'border-indigo-100 bg-indigo-50/50'}`}
-                                        style={{
-                                            backgroundColor: notification.read ? 'transparent' : (isDark ? 'rgba(30, 41, 59, 0.5)' : '#F5F7FF'),
-                                            borderColor: notification.read ? 'transparent' : (isDark ? colors.border : '#E0E7FF')
-                                        }}
+                                        style={[
+                                            styles.notificationItem,
+                                            {
+                                                backgroundColor: notification.read ? 'transparent' : (isDark ? 'rgba(30, 41, 59, 0.5)' : '#F5F7FF'),
+                                                borderColor: notification.read ? 'transparent' : (isDark ? colors.border : '#E0E7FF')
+                                            }
+                                        ]}
                                         onPress={() => markAsRead(notification.id, notification.read)}
                                     >
-                                        <View className="relative mr-4">
-                                            <View className="w-12 h-12 rounded-full overflow-hidden border" style={{ borderColor: colors.border }}>
+                                        <View style={styles.avatarWrapper}>
+                                            <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
                                                 <Image
                                                     source={{ uri: notification.image || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop' }}
-                                                    className="w-full h-full"
+                                                    style={styles.avatarImage}
                                                     resizeMode="cover"
                                                 />
                                             </View>
                                             {/* Status indicator badge based on type */}
-                                            <View className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full items-center justify-center border-[2px]" style={{ backgroundColor: colors.card, borderColor: colors.card }}>
+                                            <View style={[styles.statusBadge, { backgroundColor: colors.card, borderColor: colors.card }]}>
                                                 {notification.type === 'success' && <Ionicons name="checkmark-circle" size={14} color="#10B981" />}
                                                 {notification.type === 'warning' && <Ionicons name="alert-circle" size={14} color="#F59E0B" />}
                                                 {notification.type === 'info' && <Ionicons name="information-circle" size={14} color="#3B82F6" />}
@@ -168,23 +172,23 @@ export default function NotificationsScreen() {
                                             </View>
                                         </View>
 
-                                        <View className="flex-1">
-                                            <View className="flex-row justify-between items-start">
-                                                <Text className="flex-1 mr-2 text-sm" numberOfLines={1} style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                                        <View style={styles.textContainer}>
+                                            <View style={styles.headerRow}>
+                                                <Text style={[styles.titleText, { color: colors.text }]} numberOfLines={1}>
                                                     {notification.title}
                                                 </Text>
-                                                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 10, color: colors.textSecondary }}>
+                                                <Text style={[styles.timeText, { color: colors.textSecondary }]}>
                                                     {formatTime(notification.created_at)}
                                                 </Text>
                                             </View>
 
-                                            <Text className="text-xs mt-1 leading-5" numberOfLines={2} style={{ fontFamily: 'Poppins_400Regular', color: notification.read ? colors.textSecondary : colors.text }}>
+                                            <Text style={[styles.messageText, { color: notification.read ? colors.textSecondary : colors.text }]} numberOfLines={2}>
                                                 {notification.message}
                                             </Text>
                                         </View>
 
                                         {!notification.read && (
-                                            <View className="w-2 h-2 rounded-full bg-primary-500 ml-2" />
+                                            <View style={styles.unreadDot} />
                                         )}
                                     </TouchableOpacity>
                                 ))}
@@ -194,16 +198,135 @@ export default function NotificationsScreen() {
                 )}
 
                 {!loading && notifications.length === 0 && (
-                    <View className="items-center justify-center py-10 opacity-50">
+                    <View style={styles.emptyState}>
                         <Ionicons name="notifications-off-outline" size={48} color={colors.textSecondary} />
-                        <Text className="mt-2" style={{ color: colors.textSecondary }}>No notifications yet</Text>
+                        <Text style={{ marginTop: 8, color: colors.textSecondary }}>No notifications yet</Text>
                     </View>
                 )}
             </ScrollView>
 
-            <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+            <View style={styles.navbarContainer}>
                 <Navbar />
             </View>
         </View>
     );
 }
+
+const styles = StyleSheet.create({
+    flex1: {
+        flex: 1,
+    },
+    scrollContent: {
+        paddingBottom: 100,
+    },
+    markAllContainer: {
+        paddingHorizontal: 24,
+        paddingVertical: 8,
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+    },
+    markAllBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 100,
+    },
+    markAllText: {
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
+        marginLeft: 6,
+    },
+    loadingContainer: {
+        paddingVertical: 40,
+        alignItems: 'center',
+    },
+    sectionTitle: {
+        paddingHorizontal: 24,
+        marginBottom: 12,
+        fontSize: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    notificationItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 24,
+        paddingVertical: 16,
+        marginHorizontal: 8,
+        borderRadius: 16,
+        marginBottom: 8,
+        borderWidth: 1,
+    },
+    avatarWrapper: {
+        position: 'relative',
+        marginRight: 16,
+    },
+    avatarContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        overflow: 'hidden',
+        borderWidth: 1,
+    },
+    avatarImage: {
+        width: '100%',
+        height: '100%',
+    },
+    statusBadge: {
+        position: 'absolute',
+        bottom: -4,
+        right: -4,
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+    },
+    textContainer: {
+        flex: 1,
+    },
+    headerRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+    },
+    titleText: {
+        flex: 1,
+        marginRight: 8,
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    timeText: {
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 10,
+    },
+    messageText: {
+        fontSize: 12,
+        marginTop: 4,
+        lineHeight: 20,
+        fontFamily: 'Poppins_400Regular',
+    },
+    unreadDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#6366F1', // primary-500
+        marginLeft: 8,
+    },
+    emptyState: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 40,
+        opacity: 0.5,
+    },
+    navbarContainer: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+    },
+});

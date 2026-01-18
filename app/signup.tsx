@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import VerificationModal from '../src/components/VerificationModal';
 import { useTheme } from '../src/context/ThemeContext';
@@ -142,40 +142,49 @@ export default function SignupScreen() {
         );
     };
 
+    // Derived styles based on theme
+    const themeStyles = {
+        container: { backgroundColor: colors.background },
+        text: { color: colors.text },
+        textSecondary: { color: colors.textSecondary },
+        inputContainer: {
+            backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+            borderColor: isDark ? '#374151' : '#E5E7EB',
+        },
+        primaryButton: { backgroundColor: colors.primary },
+        primaryText: { color: colors.primary },
+    };
+
     return (
         <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            className="flex-1"
-            style={{ backgroundColor: colors.background }}
+            style={[styles.flex1, themeStyles.container]}
         >
-            <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-                <View className="flex-1 px-8 justify-center min-h-screen py-12">
+            <ScrollView contentContainerStyle={styles.scrollContent}>
+                <View style={styles.contentContainer}>
 
-                    <TouchableOpacity onPress={() => router.back()} className="absolute top-12 left-8 z-10 p-2 -ml-2">
+                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
                         <Ionicons name="arrow-back" size={24} color={colors.text} />
                     </TouchableOpacity>
 
-                    <View className="mb-10">
-                        <Text className="text-3xl font-bold mb-2" style={{ fontFamily: 'Poppins_700Bold', color: colors.text }}>
+                    <View style={styles.headerContainer}>
+                        <Text style={[styles.headerTitle, themeStyles.text]}>
                             Create Account
                         </Text>
-                        <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                        <Text style={[styles.headerSubtitle, themeStyles.textSecondary]}>
                             Join the community today
                         </Text>
                     </View>
 
-                    <View className="gap-5">
+                    <View style={styles.formContainer}>
                         <View>
-                            <Text className="mb-2 text-xs uppercase font-bold tracking-wider" style={{ color: colors.textSecondary }}>
+                            <Text style={[styles.label, themeStyles.textSecondary]}>
                                 Email Address
                             </Text>
-                            <View
-                                className={`flex-row items-center px-4 h-14 rounded-2xl border ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'}`}
-                            >
+                            <View style={[styles.inputContainer, themeStyles.inputContainer]}>
                                 <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
                                 <TextInput
-                                    className="flex-1 ml-3 h-full"
-                                    style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
+                                    style={[styles.input, themeStyles.text]}
                                     placeholder="name@email.com"
                                     placeholderTextColor={colors.textSecondary}
                                     value={email}
@@ -187,16 +196,13 @@ export default function SignupScreen() {
                         </View>
 
                         <View>
-                            <Text className="mb-2 text-xs uppercase font-bold tracking-wider" style={{ color: colors.textSecondary }}>
+                            <Text style={[styles.label, themeStyles.textSecondary]}>
                                 Password
                             </Text>
-                            <View
-                                className={`flex-row items-center px-4 h-14 rounded-2xl border ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'}`}
-                            >
+                            <View style={[styles.inputContainer, themeStyles.inputContainer]}>
                                 <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                                 <TextInput
-                                    className="flex-1 ml-3 h-full"
-                                    style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
+                                    style={[styles.input, themeStyles.text]}
                                     placeholder="Create a password"
                                     placeholderTextColor={colors.textSecondary}
                                     value={password}
@@ -207,16 +213,13 @@ export default function SignupScreen() {
                         </View>
 
                         <View>
-                            <Text className="mb-2 text-xs uppercase font-bold tracking-wider" style={{ color: colors.textSecondary }}>
+                            <Text style={[styles.label, themeStyles.textSecondary]}>
                                 Confirm Password
                             </Text>
-                            <View
-                                className={`flex-row items-center px-4 h-14 rounded-2xl border ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'}`}
-                            >
+                            <View style={[styles.inputContainer, themeStyles.inputContainer]}>
                                 <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                                 <TextInput
-                                    className="flex-1 ml-3 h-full"
-                                    style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
+                                    style={[styles.input, themeStyles.text]}
                                     placeholder="Confirm your password"
                                     placeholderTextColor={colors.textSecondary}
                                     value={confirmPassword}
@@ -226,9 +229,9 @@ export default function SignupScreen() {
                             </View>
                         </View>
 
-                        <TouchableOpacity onPress={() => setShowPassword(!showPassword)} className="flex-row items-center mt-2">
+                        <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.showPasswordContainer}>
                             <Ionicons name={showPassword ? "checkbox" : "square-outline"} size={20} color={colors.primary} />
-                            <Text className="ml-2 text-xs" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                            <Text style={[styles.showPasswordText, themeStyles.textSecondary]}>
                                 Show Password
                             </Text>
                         </TouchableOpacity>
@@ -236,24 +239,23 @@ export default function SignupScreen() {
                         <TouchableOpacity
                             onPress={() => handleSignup()}
                             disabled={loading}
-                            className="h-14 rounded-2xl bg-primary items-center justify-center shadow-lg shadow-primary/30 mt-6"
-                            style={{ backgroundColor: colors.primary }}
+                            style={[styles.signupButton, themeStyles.primaryButton]}
                         >
                             {loading ? (
                                 <ActivityIndicator color="white" />
                             ) : (
-                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: 'white', fontSize: 16 }}>
+                                <Text style={styles.signupButtonText}>
                                     Sign Up
                                 </Text>
                             )}
                         </TouchableOpacity>
 
-                        <View className="flex-row justify-center mt-6">
-                            <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                        <View style={styles.loginLinkContainer}>
+                            <Text style={[styles.loginLinkText, themeStyles.textSecondary]}>
                                 Already have an account?{' '}
                             </Text>
                             <TouchableOpacity onPress={() => router.push('/')}>
-                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>
+                                <Text style={[styles.loginLinkHighlight, themeStyles.primaryText]}>
                                     Sign In
                                 </Text>
                             </TouchableOpacity>
@@ -268,6 +270,107 @@ export default function SignupScreen() {
                 onClose={() => setShowVerification(false)}
                 onSuccess={handleVerificationSuccess}
             />
-        </KeyboardAvoidingView >
+        </KeyboardAvoidingView>
     );
 }
+
+const styles = StyleSheet.create({
+    flex1: {
+        flex: 1,
+    },
+    scrollContent: {
+        flexGrow: 1,
+    },
+    contentContainer: {
+        flex: 1,
+        paddingHorizontal: 32, // px-8
+        justifyContent: 'center',
+        paddingVertical: 48, // py-12
+    },
+    backButton: {
+        position: 'absolute',
+        top: 48, // top-12
+        left: 32, // left-8
+        zIndex: 10,
+        padding: 8,
+        marginLeft: -8, // -ml-2
+    },
+    headerContainer: {
+        marginBottom: 40, // mb-10
+    },
+    headerTitle: {
+        fontSize: 30, // text-3xl
+        fontWeight: 'bold',
+        marginBottom: 8, // mb-2
+        fontFamily: 'Poppins_700Bold',
+    },
+    headerSubtitle: {
+        fontFamily: 'Poppins_400Regular',
+    },
+    formContainer: {
+        gap: 20, // gap-5
+    },
+    label: {
+        marginBottom: 8, // mb-2
+        fontSize: 12, // text-xs
+        textTransform: 'uppercase',
+        fontWeight: 'bold',
+        letterSpacing: 1, // tracking-wider
+    },
+    inputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16, // px-4
+        height: 56, // h-14
+        borderRadius: 16, // rounded-2xl
+        borderWidth: 1,
+    },
+    input: {
+        flex: 1,
+        marginLeft: 12, // ml-3
+        height: '100%',
+        fontFamily: 'Poppins_400Regular',
+    },
+    showPasswordContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8, // mt-2
+    },
+    showPasswordText: {
+        marginLeft: 8, // ml-2
+        fontSize: 12, // text-xs
+        fontFamily: 'Poppins_400Regular',
+    },
+    signupButton: {
+        height: 56, // h-14
+        borderRadius: 16, // rounded-2xl
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 24, // mt-6
+        // Pre-calculated shadow (shadow-lg)
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: 10,
+        },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+        elevation: 10,
+    },
+    signupButtonText: {
+        fontFamily: 'Poppins_600SemiBold',
+        color: 'white',
+        fontSize: 16,
+    },
+    loginLinkContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        marginTop: 24, // mt-6
+    },
+    loginLinkText: {
+        fontFamily: 'Poppins_400Regular',
+    },
+    loginLinkHighlight: {
+        fontFamily: 'Poppins_600SemiBold',
+    },
+});

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -31,53 +31,59 @@ export default function StudioDetailsScreen() {
 
   return (
     <>
-      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Manage Studio" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
           {/* Header Image & Info */}
-          <View className="px-6 mt-4 items-center">
+          <View style={styles.headerContainer}>
             <View
-              className="w-full h-48 rounded-3xl overflow-hidden mb-4 relative"
-              style={{
-                elevation: 10, shadowColor: colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 16
-              }}
+              style={[
+                styles.headerImageContainer,
+                {
+                  shadowColor: colors.primary,
+                }
+              ]}
             >
               <Image
                 source={{ uri: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop' }}
-                className="w-full h-full"
+                style={styles.headerImage}
                 resizeMode="cover"
               />
-              <View className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent" />
+              <View style={styles.headerImageGradient} />
             </View>
 
-            <Text className="text-2xl text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>SoundWave Recording Studio</Text>
-            <Text className="text-center mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Professional Recording Studio • Malolos City</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>SoundWave Recording Studio</Text>
+            <Text style={[styles.headerLocation, { color: colors.textSecondary }]}>Professional Recording Studio • Malolos City</Text>
           </View>
 
           {/* Segmented Control Tabs */}
-          <View className="mx-6 mt-6 p-1 rounded-2xl flex-row" style={{ backgroundColor: colors.inputBackground }}>
+          <View style={[styles.tabsContainer, { backgroundColor: colors.inputBackground }]}>
             {tabs.map((tab) => (
               <TouchableOpacity
                 key={tab}
                 onPress={() => setActiveTab(tab)}
-                className={`flex-1 py-2.5 rounded-xl items-center justify-center`}
-                style={{
-                  backgroundColor: activeTab === tab ? colors.surface : 'transparent',
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: activeTab === tab ? 2 : 0 },
-                  shadowOpacity: activeTab === tab ? 0.05 : 0,
-                  shadowRadius: 4,
-                  elevation: activeTab === tab ? 2 : 0
-                }}
+                style={[
+                  styles.tab,
+                  {
+                    backgroundColor: activeTab === tab ? colors.surface : 'transparent',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: activeTab === tab ? 2 : 0 },
+                    shadowOpacity: activeTab === tab ? 0.05 : 0,
+                    shadowRadius: 4,
+                    elevation: activeTab === tab ? 2 : 0
+                  }
+                ]}
               >
                 <Text
-                  style={{
-                    fontFamily: activeTab === tab ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
-                    color: activeTab === tab ? colors.primary : colors.textSecondary,
-                    fontSize: 13
-                  }}
+                  style={[
+                    styles.tabText,
+                    {
+                      fontFamily: activeTab === tab ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
+                      color: activeTab === tab ? colors.primary : colors.textSecondary,
+                    }
+                  ]}
                 >
                   {tab}
                 </Text>
@@ -85,34 +91,34 @@ export default function StudioDetailsScreen() {
             ))}
           </View>
 
-          <View className="px-6 mt-6">
+          <View style={styles.contentContainer}>
             {activeTab === 'About' && (
-              <View className="gap-6">
+              <View style={styles.aboutContainer}>
                 <View>
-                  <Text className="text-base leading-6" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                  <Text style={[styles.aboutText, { color: colors.textSecondary }]}>
                     SoundWave Recording Studio is a professional recording facility located in Malolos City, Bulacan. We offer state-of-the-art equipment including condenser microphones, acoustic treatment, mixing console, and monitoring systems. Perfect for musicians, bands, podcasters, and voice-over artists.
                   </Text>
                 </View>
 
-                <View className="flex-row gap-4">
-                  <View className="flex-1 p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Size</Text>
-                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>30 sqm</Text>
+                <View style={{ flexDirection: 'row', gap: 16 }}>
+                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Size</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>30 sqm</Text>
                   </View>
-                  <View className="flex-1 p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Equipment</Text>
-                    <Text className="text-sm" style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>Full Suite, Mixing Board</Text>
+                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Equipment</Text>
+                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }}>Full Suite, Mixing Board</Text>
                   </View>
                 </View>
 
                 <View>
-                  <Text className="text-lg mb-3" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Gallery</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-6 px-6 gap-3">
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Gallery</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryContainer}>
                     {[1, 2, 3].map((i) => (
                       <Image
                         key={i}
                         source={{ uri: `https://picsum.photos/300/200?random=${i + 10}` }}
-                        className="w-40 h-28 rounded-xl"
+                        style={styles.galleryImage}
                       />
                     ))}
                   </ScrollView>
@@ -121,103 +127,101 @@ export default function StudioDetailsScreen() {
             )}
 
             {activeTab === 'Setup' && (
-              <View className="gap-6">
+              <View style={styles.aboutContainer}>
                 {/* Search / Filter Placeholder */}
-                <View className="flex-row items-center px-4 py-2 rounded-xl" style={{ backgroundColor: colors.inputBackground }}>
+                <View style={[styles.searchContainer, { backgroundColor: colors.inputBackground }]}>
                   <Ionicons name="search" size={20} color={colors.textSecondary} />
-                  <Text className="ml-3 text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Search microphones, amps...</Text>
+                  <Text style={[styles.searchText, { color: colors.textSecondary }]}>Search microphones, amps...</Text>
                 </View>
 
                 {['Microphones', 'Instruments', 'Monitoring', 'DAW & Interfaces'].map((category, idx) => (
                   <View key={idx}>
-                    <Text className="text-lg mb-3" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>{category}</Text>
-                    <View className="flex-row flex-wrap gap-2">
+                    <Text style={[styles.categoryTitle, { color: colors.primary }]}>{category}</Text>
+                    <View style={styles.tagsContainer}>
                       {['Shure SM57', 'Neumann U87', 'Fender Twin Reverb', 'Logic Pro X', 'Apollo Twin'].slice(0, 4).map((item, i) => (
-                        <View key={i} className="px-3 py-2 rounded-lg border" style={{ borderColor: colors.border, backgroundColor: colors.surface }}>
-                          <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text, fontSize: 13 }}>{item}</Text>
+                        <View key={i} style={[styles.tag, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                          <Text style={[styles.tagText, { color: colors.text }]}>{item}</Text>
                         </View>
                       ))}
                     </View>
                   </View>
                 ))}
 
-                <TouchableOpacity className="py-3 rounded-xl items-center border border-dashed" style={{ borderColor: colors.primary }}>
-                  <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>+ Add Gear Item</Text>
+                <TouchableOpacity style={[styles.addGearButton, { borderColor: colors.primary }]}>
+                  <Text style={[styles.addGearText, { color: colors.primary }]}>+ Add Gear Item</Text>
                 </TouchableOpacity>
               </View>
             )}
 
             {/* Acoustics merged into Setup - keeping for reference */}
             {false && (
-              <View className="gap-6">
-                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                  <Text className="text-lg mb-4" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Room Profile</Text>
-                  <View className="flex-row flex-wrap gap-2 mb-4">
+              <View style={{ gap: 24 }}>
+                <View style={[styles.roomProfileCard, { backgroundColor: colors.surface }]}>
+                  <Text style={[styles.roomProfileTitle, { color: colors.text }]}>Room Profile</Text>
+                  <View style={styles.roomProfileTags}>
                     {['#DeadRoom', '#VocalBooth', '#FloatingFloor', '#DiffusedHighs'].map((tag, i) => (
-                      <View key={i} className="px-3 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30">
-                        <Text className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">{tag}</Text>
+                      <View key={i} style={[styles.roomProfileTag, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.3)' : '#EEF2FF' }]}>
+                        <Text style={[styles.roomProfileTagText, { color: isDark ? '#818CF8' : '#4F46E5' }]}>{tag}</Text>
                       </View>
                     ))}
                   </View>
 
-                  <View className="flex-row justify-between py-3 border-t" style={{ borderColor: colors.border }}>
-                    <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Reverb Time (RT60)</Text>
-                    <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>0.4s (Dry)</Text>
+                  <View style={[styles.roomProfileStat, { borderColor: colors.border }]}>
+                    <Text style={[styles.roomProfileStatLabel, { color: colors.textSecondary }]}>Reverb Time (RT60)</Text>
+                    <Text style={[styles.roomProfileStatValue, { color: colors.text }]}>0.4s (Dry)</Text>
                   </View>
-                  <View className="flex-row justify-between py-3 border-t" style={{ borderColor: colors.border }}>
-                    <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Dimensions</Text>
-                    <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>5m x 4m x 3m</Text>
+                  <View style={[styles.roomProfileStat, { borderColor: colors.border }]}>
+                    <Text style={[styles.roomProfileStatLabel, { color: colors.textSecondary }]}>Dimensions</Text>
+                    <Text style={[styles.roomProfileStatValue, { color: colors.text }]}>5m x 4m x 3m</Text>
                   </View>
-                  <View className="flex-row justify-between py-3 border-t" style={{ borderColor: colors.border }}>
-                    <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Isolation</Text>
-                    <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>-60dB</Text>
+                  <View style={[styles.roomProfileStat, { borderColor: colors.border }]}>
+                    <Text style={[styles.roomProfileStatLabel, { color: colors.textSecondary }]}>Isolation</Text>
+                    <Text style={[styles.roomProfileStatValue, { color: colors.text }]}>-60dB</Text>
                   </View>
                 </View>
 
-                <View className="h-40 rounded-2xl items-center justify-center bg-gray-100 dark:bg-slate-800">
+                <View style={[styles.graphContainer, { backgroundColor: isDark ? '#1e293b' : '#f3f4f6' }]}>
                   <Ionicons name="bar-chart-outline" size={48} color={colors.textSecondary} />
-                  <Text className="mt-2 text-xs" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Frequency Response Graph Placeholder</Text>
+                  <Text style={[styles.graphText, { color: colors.textSecondary }]}>Frequency Response Graph Placeholder</Text>
                 </View>
               </View>
             )}
 
             {activeTab === 'Bookings' && (
-              <View className="gap-4">
+              <View style={styles.aboutContainer}>
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: colors.textSecondary, letterSpacing: 0.5 }}>PENDING REQUESTS</Text>
 
                 {/* Booking Card 1 */}
-                <View className="p-4 rounded-3xl mb-2" style={{ backgroundColor: colors.surface }}>
-                  <View className="flex-row items-center gap-3 mb-3">
-                    <Image source={{ uri: 'https://i.pravatar.cc/100?img=3' }} className="w-12 h-12 rounded-full" />
-                    <View className="flex-1">
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text, fontSize: 16 }}>Marcus Rivera</Text>
-                      <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Solo Artist • Singer-Songwriter</Text>
+                <View style={[styles.bookingCard, { backgroundColor: colors.surface, marginBottom: 8 }]}>
+                  <View style={styles.bookingHeader}>
+                    <Image source={{ uri: 'https://i.pravatar.cc/100?img=3' }} style={styles.bookingImage} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.bookingTitle, { color: colors.text }]}>Marcus Rivera</Text>
+                      <Text style={[styles.bookingSubtitle, { color: colors.textSecondary }]}>Solo Artist • Singer-Songwriter</Text>
                     </View>
-                    <View className="items-end">
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, fontSize: 16 }}>₱2,000</Text>
-                      <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 11 }}>4 hours</Text>
+                    <View style={styles.bookingPriceContainer}>
+                      <Text style={[styles.bookingPrice, { color: colors.primary }]}>₱2,000</Text>
+                      <Text style={[styles.bookingDuration, { color: colors.textSecondary }]}>4 hours</Text>
                     </View>
                   </View>
 
-                  <View className="flex-row items-center gap-2 mb-3 bg-gray-50 dark:bg-slate-800/50 p-2 rounded-lg">
+                  <View style={[styles.bookingDateContainer, { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB' }]}>
                     <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-                    <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text, fontSize: 13 }}>Dec 15, 2025 • 2:00 PM - 6:00 PM</Text>
+                    <Text style={[styles.bookingDate, { color: colors.text }]}>Dec 15, 2025 • 2:00 PM - 6:00 PM</Text>
                   </View>
 
-                  <Text className="mb-4 italic text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>"I'd like to record my upcoming EP. I have 5 songs ready."</Text>
+                  <Text style={[styles.bookingMessage, { color: colors.textSecondary }]}>"I'd like to record my upcoming EP. I have 5 songs ready."</Text>
 
-                  <View className="flex-row gap-3">
+                  <View style={styles.actionButtons}>
                     <TouchableOpacity
                       onPress={() => handleAction('decline')}
-                      className="flex-1 py-3 rounded-xl border items-center justify-center"
-                      style={{ borderColor: colors.border }}
+                      style={[styles.declineButton, { borderColor: colors.border }]}
                     >
                       <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => handleAction('accept')}
-                      className="flex-1 py-3 rounded-xl items-center justify-center"
-                      style={{ backgroundColor: colors.primary }}
+                      style={[styles.acceptButton, { backgroundColor: colors.primary }]}
                     >
                       <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
                     </TouchableOpacity>
@@ -225,38 +229,36 @@ export default function StudioDetailsScreen() {
                 </View>
 
                 {/* Booking Card 2 */}
-                <View className="p-4 rounded-3xl" style={{ backgroundColor: colors.surface }}>
-                  <View className="flex-row items-center gap-3 mb-3">
-                    <Image source={{ uri: 'https://i.pravatar.cc/100?img=5' }} className="w-12 h-12 rounded-full" />
-                    <View className="flex-1">
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text, fontSize: 16 }}>The Midnight Echoes</Text>
-                      <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Band • Indie Rock</Text>
+                <View style={[styles.bookingCard, { backgroundColor: colors.surface }]}>
+                  <View style={styles.bookingHeader}>
+                    <Image source={{ uri: 'https://i.pravatar.cc/100?img=5' }} style={styles.bookingImage} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.bookingTitle, { color: colors.text }]}>The Midnight Echoes</Text>
+                      <Text style={[styles.bookingSubtitle, { color: colors.textSecondary }]}>Band • Indie Rock</Text>
                     </View>
-                    <View className="items-end">
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, fontSize: 16 }}>₱3,000</Text>
-                      <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 11 }}>6 hours</Text>
+                    <View style={styles.bookingPriceContainer}>
+                      <Text style={[styles.bookingPrice, { color: colors.primary }]}>₱3,000</Text>
+                      <Text style={[styles.bookingDuration, { color: colors.textSecondary }]}>6 hours</Text>
                     </View>
                   </View>
 
-                  <View className="flex-row items-center gap-2 mb-3 bg-gray-50 dark:bg-slate-800/50 p-2 rounded-lg">
+                  <View style={[styles.bookingDateContainer, { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB' }]}>
                     <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-                    <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text, fontSize: 13 }}>Dec 18, 2025 • 10:00 AM - 4:00 PM</Text>
+                    <Text style={[styles.bookingDate, { color: colors.text }]}>Dec 18, 2025 • 10:00 AM - 4:00 PM</Text>
                   </View>
 
-                  <Text className="mb-4 italic text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>"Recording our debut single. We need full suite."</Text>
+                  <Text style={[styles.bookingMessage, { color: colors.textSecondary }]}>"Recording our debut single. We need full suite."</Text>
 
-                  <View className="flex-row gap-3">
+                  <View style={styles.actionButtons}>
                     <TouchableOpacity
                       onPress={() => handleAction('decline')}
-                      className="flex-1 py-3 rounded-xl border items-center justify-center"
-                      style={{ borderColor: colors.border }}
+                      style={[styles.declineButton, { borderColor: colors.border }]}
                     >
                       <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => handleAction('accept')}
-                      className="flex-1 py-3 rounded-xl items-center justify-center"
-                      style={{ backgroundColor: colors.primary }}
+                      style={[styles.acceptButton, { backgroundColor: colors.primary }]}
                     >
                       <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
                     </TouchableOpacity>
@@ -267,27 +269,27 @@ export default function StudioDetailsScreen() {
 
             {activeTab === 'Review' && (
               <View>
-                <View className="items-center mb-8">
-                  <Text className="text-5xl mb-2" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>4.5</Text>
-                  <View className="flex-row gap-1 mb-2">
+                <View style={styles.reviewHeader}>
+                  <Text style={[styles.ratingText, { color: colors.text }]}>4.5</Text>
+                  <View style={styles.starsRow}>
                     {[1, 2, 3, 4].map(i => <Ionicons key={i} name="star" size={20} color={colors.primary} />)}
                     <Ionicons name="star-half" size={20} color={colors.primary} />
                   </View>
                   <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Based on 25 reviews</Text>
                 </View>
 
-                <View className="p-4 rounded-2xl mb-4" style={{ backgroundColor: colors.surface }}>
-                  <View className="flex-row justify-between items-start mb-2">
-                    <View className="flex-row items-center gap-2">
-                      <Image source={{ uri: 'https://i.pravatar.cc/100?img=3' }} className="w-8 h-8 rounded-full" />
+                <View style={[styles.reviewCard, { backgroundColor: colors.surface }]}>
+                  <View style={styles.reviewUserHeader}>
+                    <View style={styles.userInfo}>
+                      <Image source={{ uri: 'https://i.pravatar.cc/100?img=3' }} style={styles.userAvatar} />
                       <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Jared Cariaso</Text>
                     </View>
                     <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>1 month ago</Text>
                   </View>
-                  <View className="flex-row gap-0.5 mb-2">
+                  <View style={[styles.starsRow, { marginBottom: 8 }]}>
                     {[1, 2, 3, 4, 5].map(i => <Ionicons key={i} name="star" size={14} color={colors.primary} />)}
                   </View>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, lineHeight: 20 }}>
+                  <Text style={[styles.reviewText, { color: colors.textSecondary }]}>
                     Excellent studio! The acoustic treatment is superb and the equipment is professional-grade.
                   </Text>
                 </View>
@@ -309,4 +311,310 @@ export default function StudioDetailsScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+  },
+  headerContainer: {
+    paddingHorizontal: 24,
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  headerImageContainer: {
+    width: '100%',
+    height: 192,
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 16,
+    position: 'relative',
+    elevation: 10,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+  },
+  headerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  headerImageGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 96,
+    // Approximate gradient with transparent black
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    top: 100, // cheat to make it look like bottom gradient
+  },
+  headerTitle: {
+    fontSize: 24,
+    textAlign: 'center',
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  headerLocation: {
+    textAlign: 'center',
+    marginTop: 4,
+    fontFamily: 'Poppins_400Regular',
+  },
+  tabsContainer: {
+    marginHorizontal: 24,
+    marginTop: 24,
+    padding: 4,
+    borderRadius: 16,
+    flexDirection: 'row',
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabText: {
+    fontSize: 13,
+  },
+  contentContainer: {
+    paddingHorizontal: 24,
+    marginTop: 24,
+  },
+  aboutContainer: {
+    gap: 24,
+  },
+  aboutText: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontFamily: 'Poppins_400Regular',
+  },
+  infoCard: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 16,
+  },
+  infoLabel: {
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 4,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  infoValue: {
+    fontSize: 18,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  galleryContainer: {
+    gap: 12,
+  },
+  galleryImage: {
+    width: 160,
+    height: 112,
+    borderRadius: 12,
+    marginRight: 12,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  searchText: {
+    marginLeft: 12,
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+  },
+  categoryTitle: {
+    fontSize: 18,
+    marginBottom: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tag: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  tagText: {
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 13,
+  },
+  addGearButton: {
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  addGearText: {
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  roomProfileCard: {
+    padding: 16,
+    borderRadius: 16,
+  },
+  roomProfileTitle: {
+    fontSize: 18,
+    marginBottom: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  roomProfileTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  roomProfileTag: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  roomProfileTagText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  roomProfileStat: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+  },
+  roomProfileStatLabel: {
+    fontFamily: 'Poppins_400Regular',
+  },
+  roomProfileStatValue: {
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  graphContainer: {
+    height: 160,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  graphText: {
+    marginTop: 8,
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+  },
+  bookingCard: {
+    padding: 16,
+    borderRadius: 24,
+  },
+  bookingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  bookingImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  bookingTitle: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 16,
+  },
+  bookingSubtitle: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 12,
+  },
+  bookingPriceContainer: {
+    alignItems: 'flex-end',
+  },
+  bookingPrice: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 16,
+  },
+  bookingDuration: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 11,
+  },
+  bookingDateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    padding: 8,
+    borderRadius: 8,
+  },
+  bookingDate: {
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 13,
+  },
+  bookingMessage: {
+    marginBottom: 16,
+    fontStyle: 'italic',
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  declineButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  acceptButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewHeader: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  ratingText: {
+    fontSize: 48,
+    marginBottom: 8,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  starsRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 8,
+  },
+  reviewCard: {
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
+  reviewUserHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  userAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  reviewText: {
+    lineHeight: 20,
+  },
+});
 

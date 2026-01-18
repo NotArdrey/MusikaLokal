@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Alert, Image, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
@@ -72,71 +72,65 @@ export default function MyGigScreen() {
 
     return (
         <>
-            <View className="flex-1" style={{ backgroundColor: colors.background }}>
+            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
                 <Header title="My Gigs" />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
-                    contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 150, paddingTop: 16 }}
-                    className="flex-1"
+                    contentContainerStyle={styles.scrollContent}
+                    style={styles.flex1}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
                     {loading ? (
-                        <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 20 }}>Loading gigs...</Text>
+                        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading gigs...</Text>
                     ) : gigs.length === 0 ? (
-                        <View className="items-center py-10 opacity-50">
+                        <View style={styles.emptyState}>
                             <Ionicons name="musical-notes-outline" size={48} color={colors.textSecondary} />
-                            <Text className="mt-4" style={{ color: colors.textSecondary }}>No gigs found</Text>
+                            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No gigs found</Text>
                         </View>
                     ) : (
                         gigs.map((gig) => (
-                            <View key={gig.id} className="mb-6 rounded-3xl overflow-hidden" style={{
+                            <View key={gig.id} style={[styles.cardContainer, {
                                 backgroundColor: colors.surface,
                                 shadowColor: colors.primary,
-                                shadowOffset: { width: 0, height: 8 },
-                                shadowOpacity: 0.1,
-                                shadowRadius: 16,
-                                elevation: 4,
-                            }}>
-                                <View className="h-48 relative">
+                            }]}>
+                                <View style={styles.imageWrapper}>
                                     <Image
                                         source={{ uri: (gig.images && gig.images[0]) || 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop' }}
-                                        className="w-full h-full"
+                                        style={styles.cardImage}
                                         resizeMode="cover"
                                     />
-                                    <View className="absolute top-4 right-4 bg-white/90 dark:bg-black/60 px-3 py-1 rounded-full">
-                                        <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: colors.primary }}>{gig.status || 'Active'}</Text>
+                                    <View style={[styles.statusBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
+                                        <Text style={[styles.statusText, { color: colors.primary }]}>{gig.status || 'Active'}</Text>
                                     </View>
-                                    <View className="absolute bottom-4 left-4 bg-black/60 px-3 py-1.5 rounded-xl">
-                                        <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: '#FFF' }}>₱{gig.budget?.toLocaleString()}</Text>
+                                    <View style={styles.budgetBadge}>
+                                        <Text style={styles.budgetText}>₱{gig.budget?.toLocaleString()}</Text>
                                     </View>
                                 </View>
 
-                                <View className="p-4">
-                                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 18, color: colors.text, marginBottom: 2 }}>{gig.name}</Text>
-                                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.primary, marginBottom: 6 }}>
+                                <View style={styles.cardContent}>
+                                    <Text style={[styles.cardTitle, { color: colors.text }]}>{gig.name}</Text>
+                                    <Text style={[styles.cardSubTitle, { color: colors.primary }]}>
                                         {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'} • {gig.location}
                                     </Text>
 
-                                    <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 13, color: colors.textSecondary, lineHeight: 20 }} numberOfLines={2}>
+                                    <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
                                         {gig.description}
                                     </Text>
 
-                                    <View className="flex-row items-center justify-between mt-4 border-t pt-4" style={{ borderColor: colors.border }}>
-                                        <View className="flex-row gap-3">
+                                    <View style={[styles.actionRow, { borderColor: colors.border }]}>
+                                        <View style={styles.actionLeft}>
                                             <TouchableOpacity
                                                 onPress={() => router.push({ pathname: '/manage_gig', params: { id: gig.id } })}
-                                                className="flex-row items-center gap-2 px-4 py-2 rounded-xl"
-                                                style={{ backgroundColor: colors.primary }}
+                                                style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                                             >
                                                 <Ionicons name="settings-outline" size={18} color="#FFF" />
-                                                <Text style={{ fontFamily: 'Poppins_500Medium', color: '#FFF' }}>Manage</Text>
+                                                <Text style={styles.manageBtnText}>Manage</Text>
                                             </TouchableOpacity>
 
                                             <TouchableOpacity
                                                 onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
-                                                className="p-2 rounded-xl border"
-                                                style={{ borderColor: colors.border }}
+                                                style={[styles.editBtn, { borderColor: colors.border }]}
                                             >
                                                 <Ionicons name="pencil-outline" size={20} color={colors.text} />
                                             </TouchableOpacity>
@@ -144,7 +138,7 @@ export default function MyGigScreen() {
 
                                         <TouchableOpacity
                                             onPress={() => confirmDelete(gig.id)}
-                                            className="p-2"
+                                            style={styles.deleteBtn}
                                         >
                                             <Ionicons name="trash-outline" size={20} color="#EF4444" />
                                         </TouchableOpacity>
@@ -169,4 +163,122 @@ export default function MyGigScreen() {
         </>
     );
 }
+
+const styles = StyleSheet.create({
+    flex1: {
+        flex: 1,
+    },
+    scrollContent: {
+        paddingHorizontal: 24,
+        paddingBottom: 150,
+        paddingTop: 16,
+    },
+    loadingText: {
+        textAlign: 'center',
+        marginTop: 20,
+        fontFamily: 'Poppins_400Regular',
+    },
+    emptyState: {
+        alignItems: 'center',
+        paddingVertical: 40,
+        opacity: 0.5,
+    },
+    emptyText: {
+        marginTop: 16,
+        fontFamily: 'Poppins_400Regular',
+    },
+    cardContainer: {
+        marginBottom: 24,
+        borderRadius: 24,
+        overflow: 'hidden',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.1,
+        shadowRadius: 16,
+        elevation: 4,
+    },
+    imageWrapper: {
+        height: 192,
+        position: 'relative',
+    },
+    cardImage: {
+        width: '100%',
+        height: '100%',
+    },
+    statusBadge: {
+        position: 'absolute',
+        top: 16,
+        right: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 100,
+    },
+    statusText: {
+        fontSize: 12,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    budgetBadge: {
+        position: 'absolute',
+        bottom: 16,
+        left: 16,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+    },
+    budgetText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#FFF',
+    },
+    cardContent: {
+        padding: 16,
+    },
+    cardTitle: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 18,
+        marginBottom: 2,
+    },
+    cardSubTitle: {
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 13,
+        marginBottom: 6,
+    },
+    cardDescription: {
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 13,
+        lineHeight: 20,
+    },
+    actionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginTop: 16,
+        borderTopWidth: 1,
+        paddingTop: 16,
+    },
+    actionLeft: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    manageBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 12,
+    },
+    manageBtnText: {
+        fontFamily: 'Poppins_500Medium',
+        color: '#FFF',
+    },
+    editBtn: {
+        padding: 8,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    deleteBtn: {
+        padding: 8,
+    },
+});
 

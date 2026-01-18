@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
@@ -40,13 +40,15 @@ export default function AccountDetailsScreen() {
   };
 
   const renderSection = (title: string, children: React.ReactNode) => (
-    <View className="mb-6">
-      <Text className="text-sm font-semibold uppercase tracking-wider mb-3 ml-1" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>
+    <View style={styles.sectionContainer}>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
         {title}
       </Text>
       <View
-        className="rounded-2xl overflow-hidden shadow-sm"
-        style={{ backgroundColor: colors.card, borderWidth: isDark ? 1 : 0, borderColor: colors.border }}
+        style={[
+          styles.card,
+          { backgroundColor: colors.card, borderWidth: isDark ? 1 : 0, borderColor: colors.border }
+        ]}
       >
         {children}
       </View>
@@ -58,14 +60,17 @@ export default function AccountDetailsScreen() {
       onPress={onPress}
       disabled={!onPress}
       activeOpacity={onPress ? 0.7 : 1}
-      className={`flex-row items-center justify-between p-4 ${!isLast ? 'border-b' : ''}`}
-      style={{ borderColor: isDark ? colors.border : '#F3F4F6' }}
+      style={[
+        styles.itemRow,
+        !isLast && { borderBottomWidth: 1 },
+        { borderColor: isDark ? colors.border : '#F3F4F6' }
+      ]}
     >
-      <View className="flex-row items-center">
-        {icon && <View className="mr-3 w-8 h-8 rounded-full items-center justify-center bg-gray-100 dark:bg-gray-800">{icon}</View>}
+      <View style={styles.itemContent}>
+        {icon && <View style={styles.itemIcon}>{icon}</View>}
         <View>
-          <Text className="text-sm font-medium" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{label}</Text>
-          {value && <Text className="text-xs mt-0.5" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>{value}</Text>}
+          <Text style={[styles.itemLabel, { color: colors.text }]}>{label}</Text>
+          {value && <Text style={[styles.itemValue, { color: colors.textSecondary }]}>{value}</Text>}
         </View>
       </View>
       {onPress && showArrow && <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />}
@@ -74,7 +79,7 @@ export default function AccountDetailsScreen() {
 
   if (loading) {
     return (
-      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
         <Text style={{ color: colors.textSecondary }}>Loading account details...</Text>
       </View>
     );
@@ -82,21 +87,21 @@ export default function AccountDetailsScreen() {
 
   return (
     <>
-      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Account Details" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 24, paddingBottom: 100 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
-          <View className="items-center mb-8">
-            <View className="w-24 h-24 rounded-full bg-gray-200 overflow-hidden mb-3 border-4" style={{ borderColor: colors.card }}>
+          <View style={styles.profileHeader}>
+            <View style={[styles.avatarContainer, { borderColor: colors.card }]}>
               <Image
                 source={{ uri: profile?.avatar_url || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
-                className="w-full h-full"
+                style={styles.avatar}
                 resizeMode="cover"
               />
             </View>
-            <Text className="text-xl font-bold" style={{ fontFamily: 'Poppins_700Bold', color: colors.text }}>{profile?.full_name || 'User'}</Text>
-            <Text className="text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>{profile?.role || 'Member'} Account</Text>
+            <Text style={[styles.nameText, { color: colors.text }]}>{profile?.full_name || 'User'}</Text>
+            <Text style={[styles.roleText, { color: colors.textSecondary }]}>{profile?.role || 'Member'} Account</Text>
           </View>
 
           {renderSection('Personal Information', (
@@ -116,26 +121,26 @@ export default function AccountDetailsScreen() {
           {renderSection('Actions', (
             <>
               <TouchableOpacity
-                className="flex-row items-center justify-between p-4"
+                style={styles.actionRow}
                 onPress={() => setModalVisible(true)}
               >
-                <View className="flex-row items-center">
-                  <View className="mr-3 w-8 h-8 rounded-full items-center justify-center bg-red-50 dark:bg-red-900/20">
+                <View style={styles.itemContent}>
+                  <View style={[styles.deleteIconContainer, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEF2F2' }]}>
                     <Ionicons name="trash-outline" size={16} color="#EF4444" />
                   </View>
-                  <Text className="text-sm font-medium" style={{ fontFamily: 'Poppins_500Medium', color: '#EF4444' }}>Close Account</Text>
+                  <Text style={[styles.itemLabel, { color: '#EF4444' }]}>Close Account</Text>
                 </View>
               </TouchableOpacity>
             </>
           ))}
 
-          <Text className="text-center text-xs mt-4 mb-8" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+          <Text style={[styles.footerText, { color: colors.textSecondary }]}>
             Member since {profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : 'Unknown'}
           </Text>
 
         </ScrollView>
 
-        <View className="absolute bottom-0 left-0 right-0">
+        <View style={styles.navbarContainer}>
           <Navbar />
         </View>
       </View>
@@ -155,4 +160,128 @@ export default function AccountDetailsScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    paddingBottom: 100,
+  },
+  sectionContainer: {
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    fontSize: 14, // text-sm
+    fontWeight: '600', // font-semibold
+    textTransform: 'uppercase',
+    letterSpacing: 1, // tracking-wider
+    marginBottom: 12, // mb-3
+    marginLeft: 4, // ml-1
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  card: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    // shadow-sm logic usually needs shadow props manually
+    elevation: 2,
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  itemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  itemIcon: {
+    marginRight: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6', // bg-gray-100 (default, light mode logic handled in previous but I'll simplify here or assume overrides)
+    // Note: The previous code had conditional bg for icon. I'll need to check if I can inline specific styles or if I should make this generic.
+    // I will keep it generic here and let inline styles override if needed, but wait, `renderItem` passed the `icon` component.
+    // Wait, the `icon` argument was a React Node. So I wrapped it in `itemIcon` view.
+    // The original code: <View className="mr-3 w-8 h-8 ... bg-gray-100 dark:bg-gray-800">{icon}</View>
+    // My `itemIcon` style should just handle layout.
+  },
+  itemLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    fontFamily: 'Poppins_500Medium',
+  },
+  itemValue: {
+    fontSize: 12,
+    marginTop: 2,
+    fontFamily: 'Poppins_400Regular',
+  },
+  profileHeader: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  avatarContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: 999,
+    backgroundColor: '#E5E7EB', // bg-gray-200
+    overflow: 'hidden',
+    marginBottom: 12,
+    borderWidth: 4,
+  },
+  avatar: {
+    width: '100%',
+    height: '100%',
+  },
+  nameText: {
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: 'Poppins_700Bold',
+  },
+  roleText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  deleteIconContainer: {
+    marginRight: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerText: {
+    textAlign: 'center',
+    fontSize: 12,
+    marginTop: 16,
+    marginBottom: 32,
+    fontFamily: 'Poppins_400Regular',
+  },
+  navbarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+});
 

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -36,24 +36,24 @@ export default function SettingsScreen() {
 
   return (
     <>
-      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Custom Header with Back Button */}
-        <View className="flex-row items-center px-6 py-4 pt-12" style={{ backgroundColor: colors.background }}>
-          <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2 mr-2">
+        <View style={[styles.header, { backgroundColor: colors.background }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text className="text-xl" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Settings</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Settings</Text>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
           {/* Section: Appearance */}
-          <View className="px-6 mt-6 mb-6">
-            <Text className="mb-3 text-xs uppercase tracking-wider pl-1" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Appearance</Text>
-            <View className="p-4 rounded-2xl border" style={{ backgroundColor: colors.card, borderColor: colors.border }}>
-              <Text className="mb-4 text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>Theme Preference</Text>
+          <View style={styles.sectionContainer}>
+            <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>Appearance</Text>
+            <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.cardLabel, { color: colors.text }]}>Theme Preference</Text>
 
-              <View className="flex-row gap-2">
+              <View style={styles.themeOptionsContainer}>
                 {[
                   { id: 'light', icon: 'sunny', label: 'Light' },
                   { id: 'dark', icon: 'moon', label: 'Dark' },
@@ -64,14 +64,16 @@ export default function SettingsScreen() {
                     <TouchableOpacity
                       key={item.id}
                       onPress={() => setTheme(item.id as any)}
-                      className={`flex-1 py-3 rounded-xl items-center border ${isActive ? 'bg-indigo-50 border-indigo-200' : 'bg-transparent border-gray-200'}`}
-                      style={{
-                        backgroundColor: isActive ? (isDark ? colors.primaryLight : '#EEF2FF') : 'transparent',
-                        borderColor: isActive ? colors.primary : colors.border
-                      }}
+                      style={[
+                        styles.themeButton,
+                        {
+                          backgroundColor: isActive ? (isDark ? colors.primaryLight : '#EEF2FF') : 'transparent',
+                          borderColor: isActive ? colors.primary : colors.border
+                        }
+                      ]}
                     >
                       <Ionicons name={item.icon as any} size={20} color={isActive ? colors.primary : colors.textSecondary} />
-                      <Text className="mt-1 text-xs" style={{ fontFamily: 'Poppins_500Medium', color: isActive ? colors.primary : colors.textSecondary }}>{item.label}</Text>
+                      <Text style={[styles.themeButtonText, { color: isActive ? colors.primary : colors.textSecondary }]}>{item.label}</Text>
                     </TouchableOpacity>
                   )
                 })}
@@ -80,23 +82,25 @@ export default function SettingsScreen() {
           </View>
 
           {SETTINGS_SECTIONS.map((section, index) => (
-            <View key={section.title} className="px-6 mb-6">
-              <Text className="mb-3 text-xs uppercase tracking-wider pl-1" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>{section.title}</Text>
-              <View className="rounded-2xl overflow-hidden border" style={{ backgroundColor: colors.card, borderColor: colors.border }}>
+            <View key={section.title} style={styles.sectionContainer}>
+              <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{section.title}</Text>
+              <View style={[styles.cardOverflow, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 {section.items.map((item, i) => (
                   <TouchableOpacity
                     key={item.label}
                     onPress={() => router.push(item.route as any)}
-                    className={`flex-row items-center p-4 active:bg-gray-50`}
-                    style={{
-                      borderBottomWidth: i === section.items.length - 1 ? 0 : 1,
-                      borderBottomColor: colors.border
-                    }}
+                    style={[
+                      styles.menuItem,
+                      {
+                        borderBottomWidth: i === section.items.length - 1 ? 0 : 1,
+                        borderBottomColor: colors.border
+                      }
+                    ]}
                   >
-                    <View className="w-8 h-8 rounded-full items-center justify-center mr-3" style={{ backgroundColor: isDark ? colors.inputBackground : '#F3F4F6' }}>
+                    <View style={[styles.iconContainer, { backgroundColor: isDark ? colors.inputBackground : '#F3F4F6' }]}>
                       <Ionicons name={item.icon as any} size={18} color={colors.text} />
                     </View>
-                    <Text className="flex-1 text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{item.label}</Text>
+                    <Text style={[styles.menuText, { color: colors.text }]}>{item.label}</Text>
                     <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                 ))}
@@ -104,17 +108,16 @@ export default function SettingsScreen() {
             </View>
           ))}
 
-          <View className="px-6 mt-2">
+          <View style={styles.footerContainer}>
             <TouchableOpacity
               onPress={() => setModalVisible(true)}
-              className="flex-row items-center justify-center p-4 rounded-xl mb-4"
-              style={{ backgroundColor: '#FEE2E2' }}
+              style={[styles.logoutButton, { backgroundColor: '#FEE2E2' }]}
             >
               <Ionicons name="log-out-outline" size={20} color="#DC2626" />
-              <Text className="ml-2 text-sm text-red-600" style={{ fontFamily: 'Poppins_600SemiBold' }}>Log Out</Text>
+              <Text style={styles.logoutText}>Log Out</Text>
             </TouchableOpacity>
 
-            <Text className="text-center text-xs" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Version 1.0.0 (Build 52)</Text>
+            <Text style={[styles.versionText, { color: colors.textSecondary }]}>Version 1.0.0 (Build 52)</Text>
           </View>
 
         </ScrollView>
@@ -133,4 +136,114 @@ export default function SettingsScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    paddingTop: 48, // pt-12
+  },
+  backButton: {
+    padding: 8,
+    marginLeft: -8,
+    marginRight: 8,
+  },
+  headerTitle: {
+    fontSize: 20, // text-xl
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  scrollContent: {
+    paddingBottom: 150,
+  },
+  sectionContainer: {
+    paddingHorizontal: 24,
+    marginTop: 24,
+    marginBottom: 24,
+  },
+  sectionHeader: {
+    marginBottom: 12,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1, // tracking-wider
+    paddingLeft: 4,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  card: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  cardLabel: {
+    marginBottom: 16,
+    fontSize: 14,
+    fontFamily: 'Poppins_500Medium',
+  },
+  themeOptionsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  themeButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  themeButtonText: {
+    marginTop: 4,
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+  },
+  cardOverflow: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  iconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  menuText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Poppins_500Medium',
+  },
+  footerContainer: {
+    paddingHorizontal: 24,
+    marginTop: 8,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  logoutText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#DC2626', // red-600
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  versionText: {
+    textAlign: 'center',
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+  },
+});
 

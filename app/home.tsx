@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
@@ -33,56 +33,57 @@ export default function HomeScreen() {
 
   const categories = ['All', 'Gigs', 'Musicians', 'Studios'];
 
-  const renderStarRating = (rating: number) => (
-    <View className="flex-row items-center bg-yellow-400/20 px-2 py-1 rounded-lg">
-      <Ionicons name="star" size={12} color="#FBBF24" />
-      <Text className="ml-1 text-xs font-semibold text-yellow-600 dark:text-yellow-400">{rating}</Text>
-    </View>
-  );
-
   return (
-    <View className="flex-1" style={{ backgroundColor: colors.background }}>
+    <View style={[styles.flex1, { backgroundColor: colors.background }]}>
       <Header title="Discover" />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
         {/* Hero / Search Section */}
-        <View className="px-6 mb-6">
-          <Text className="text-3xl" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.heroTitle, { color: colors.text }]}>
             Find your <Text style={{ color: colors.primary }}>rhythm</Text>
           </Text>
-          <Text className="text-base mt-1 mb-4" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+          <Text style={[styles.heroSubtitle, { color: colors.textSecondary }]}>
             Book the best local talent and spaces.
           </Text>
 
-          <View className="flex-row items-center px-4 py-3 rounded-2xl" style={{ backgroundColor: colors.inputBackground }}>
+          <View style={[styles.searchContainer, { backgroundColor: colors.inputBackground }]}>
             <Ionicons name="search" size={20} color={colors.textSecondary} />
             <TextInput
               placeholder="Search gigs, bands, studios..."
               placeholderTextColor={colors.textSecondary}
-              className="flex-1 ml-3 text-base"
-              style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
+              style={[styles.searchInput, { color: colors.text }]}
             />
           </View>
         </View>
 
         {/* Categories */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="px-6 mb-8 gap-3" contentContainerStyle={{ paddingRight: 24 }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categoriesScroll}
+          contentContainerStyle={styles.categoriesContent}
+        >
           {categories.map((cat, index) => (
             <TouchableOpacity
               key={index}
               onPress={() => setActiveCategory(cat)}
-              className={`px-5 py-2.5 rounded-full mr-2 ${activeCategory === cat ? 'bg-primary-600' : 'bg-transparent border'}`}
-              style={{
-                backgroundColor: activeCategory === cat ? colors.primary : 'transparent',
-                borderColor: activeCategory === cat ? colors.primary : colors.border
-              }}
+              style={[
+                styles.categoryChip,
+                {
+                  backgroundColor: activeCategory === cat ? colors.primary : 'transparent',
+                  borderColor: activeCategory === cat ? colors.primary : colors.border,
+                  borderWidth: activeCategory === cat ? 0 : 1,
+                  marginRight: 8,
+                }
+              ]}
             >
               <Text
-                className="text-sm font-medium"
                 style={{
                   color: activeCategory === cat ? '#FFF' : colors.textSecondary,
-                  fontFamily: 'Poppins_500Medium'
+                  fontFamily: 'Poppins_500Medium',
+                  fontSize: 14,
                 }}
               >
                 {cat}
@@ -92,56 +93,67 @@ export default function HomeScreen() {
         </ScrollView>
 
         {/* Featured Section */}
-        <View className="px-6 mb-6">
-          <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-lg" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Featured</Text>
+        <View style={styles.sectionContainer}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Featured</Text>
             <TouchableOpacity onPress={() => router.push('/find_talent_and_spaces')}>
-              <Text className="text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>See All</Text>
+              <Text style={[styles.seeAllText, { color: colors.primary }]}>See All</Text>
             </TouchableOpacity>
           </View>
 
           {loading ? (
-            <Text className="text-gray-500 ml-1">Loading featured...</Text>
+            <Text style={{ color: colors.textSecondary, marginLeft: 4 }}>Loading featured...</Text>
           ) : featured.length === 0 ? (
-            <View className="items-center justify-center py-10 border border-dashed rounded-2xl" style={{ borderColor: colors.border }}>
+            <View style={[styles.emptyState, { borderColor: colors.border }]}>
               <Ionicons name="star-outline" size={32} color={colors.textSecondary} />
-              <Text className="mt-2 text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>No featured items yet</Text>
+              <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No featured items yet</Text>
             </View>
           ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="gap-4" contentContainerStyle={{ paddingRight: 24 }}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.featuredScrollContent}
+            >
               {featured.map((item, index) => (
                 <TouchableOpacity
                   key={index}
                   activeOpacity={0.9}
                   onPress={() => router.push(item.type === 'Gig' ? '/gig_details' : '/studio_details')}
-                  className="w-72 rounded-3xl p-3 mr-4"
-                  style={{ backgroundColor: colors.card, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10 }}
+                  style={[styles.featuredCard, { backgroundColor: colors.card }]}
                 >
-                  <View className="relative">
+                  <View style={styles.featuredImageContainer}>
                     <Image
                       source={{ uri: item.images?.[0] || 'https://picsum.photos/400/250' }}
-                      className="w-full h-40 rounded-2xl"
+                      style={styles.featuredImage}
                       resizeMode="cover"
                     />
-                    <View className="absolute bottom-3 right-3 flex-row items-center bg-white/90 rounded-full px-2.5 py-1">
+                    <View style={styles.ratingBadge}>
                       <Ionicons name="star" size={12} color="#F59E0B" />
-                      <Text className="ml-1 text-xs font-bold text-gray-900" style={{ fontFamily: 'Poppins_600SemiBold' }}>{item.rating || 'N/A'}</Text>
+                      <Text style={styles.ratingText}>{item.rating || 'N/A'}</Text>
                     </View>
-                    <View className="absolute top-3 right-3 bg-white/90 p-2 rounded-full">
+                    <View style={[styles.favoriteButton, { backgroundColor: 'rgba(255,255,255,0.9)' }]}>
                       <Ionicons name="heart-outline" size={18} color={colors.primary} />
                     </View>
                   </View>
 
-                  <View className="mt-3 px-1">
-                    <Text className="text-base mb-1" numberOfLines={1} style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{item.name}</Text>
-                    <View className="flex-row items-center mb-2">
+                  <View style={styles.featuredInfo}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.featuredTitle, { color: colors.text }]}
+                    >
+                      {item.name}
+                    </Text>
+                    <View style={styles.locationContainer}>
                       <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-                      <Text className="text-xs ml-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>{item.location || item.address || 'Unknown Location'}</Text>
+                      <Text style={[styles.locationText, { color: colors.textSecondary }]}>
+                        {item.location || item.address || 'Unknown Location'}
+                      </Text>
                     </View>
-                    <View className="flex-row gap-2">
-                      {/* Placeholder tags based on type */}
-                      <View className="px-2 py-1 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg">
-                        <Text className="text-[10px] font-medium text-indigo-600 dark:text-indigo-300">{item.type}</Text>
+                    <View style={styles.tagsContainer}>
+                      <View style={[styles.tag, { backgroundColor: isDark ? '#312E81' : '#E0E7FF' }]}>
+                        <Text style={[styles.tagText, { color: isDark ? '#A5B4FC' : '#4F46E5' }]}>
+                          {item.type}
+                        </Text>
                       </View>
                     </View>
                   </View>
@@ -152,36 +164,35 @@ export default function HomeScreen() {
         </View>
 
         {/* New Arrivals List */}
-        <View className="px-6">
-          <Text className="text-lg mb-4" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>New Arrivals</Text>
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 16 }]}>New Arrivals</Text>
 
           {loading ? (
-            <Text className="text-gray-500">Loading new arrivals...</Text>
+            <Text style={{ color: colors.textSecondary }}>Loading new arrivals...</Text>
           ) : newArrivals.length === 0 ? (
-            <View className="items-center justify-center py-10 border border-dashed rounded-2xl" style={{ borderColor: colors.border }}>
+            <View style={[styles.emptyState, { borderColor: colors.border }]}>
               <Ionicons name="musical-notes-outline" size={32} color={colors.textSecondary} />
-              <Text className="mt-2 text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>No new arrivals found</Text>
+              <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No new arrivals found</Text>
             </View>
           ) : newArrivals.map((item, i) => (
             <TouchableOpacity
               key={i}
-              className="flex-row mb-4 p-3 rounded-2xl items-center"
-              style={{ backgroundColor: colors.card, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 4, elevation: 2 }}
+              style={[styles.newArrivalCard, { backgroundColor: colors.card }]}
               onPress={() => router.push('/group_details')}
             >
               <Image
                 source={{ uri: item.images?.[0] || `https://picsum.photos/100/100?random=${20 + i}` }}
-                className="w-20 h-20 rounded-xl"
+                style={styles.newArrivalImage}
               />
-              <View className="flex-1 ml-4 justify-center">
-                <Text className="text-base font-semibold" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>{item.name}</Text>
-                <Text className="text-xs mt-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>{item.genre || 'Music Group'}</Text>
-                <View className="flex-row items-center mt-2">
+              <View style={styles.newArrivalInfo}>
+                <Text style={[styles.newArrivalTitle, { color: colors.text }]}>{item.name}</Text>
+                <Text style={[styles.newArrivalSubtitle, { color: colors.textSecondary }]}>{item.genre || 'Music Group'}</Text>
+                <View style={styles.ratingContainer}>
                   <Ionicons name="star" size={12} color={colors.primary} />
-                  <Text className="text-xs ml-1 font-medium" style={{ color: colors.primary }}>{item.rating || 'N/A'}</Text>
+                  <Text style={[styles.ratingValue, { color: colors.primary }]}>{item.rating || 'N/A'}</Text>
                 </View>
               </View>
-              <View className="bg-gray-100 dark:bg-gray-800 p-2 rounded-full">
+              <View style={[styles.chevronContainer, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                 <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
               </View>
             </TouchableOpacity>
@@ -195,3 +206,207 @@ export default function HomeScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 150,
+  },
+  sectionContainer: {
+    paddingHorizontal: 24, // px-6
+    marginBottom: 24, // mb-6
+  },
+  heroTitle: {
+    fontSize: 30, // text-3xl
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  heroSubtitle: {
+    fontSize: 16, // text-base
+    marginTop: 4,
+    marginBottom: 16,
+    fontFamily: 'Poppins_400Regular',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 16,
+    fontFamily: 'Poppins_400Regular',
+  },
+  categoriesScroll: {
+    marginHorizontal: 24, // px-6
+    marginBottom: 32, // mb-8
+  },
+  categoriesContent: {
+    paddingRight: 24,
+    gap: 12,
+  },
+  categoryChip: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 9999,
+    marginRight: 8,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  seeAllText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_500Medium',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 16,
+  },
+  emptyStateText: {
+    marginTop: 8,
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+  },
+  featuredScrollContent: {
+    paddingRight: 24,
+    gap: 16,
+  },
+  featuredCard: {
+    width: 288, // w-72 approx
+    borderRadius: 24,
+    padding: 12,
+    marginRight: 16,
+    // Shadows
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  featuredImageContainer: {
+    position: 'relative',
+  },
+  featuredImage: {
+    width: '100%',
+    height: 160,
+    borderRadius: 16,
+  },
+  ratingBadge: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 9999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  ratingText: {
+    marginLeft: 4,
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#111827',
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  favoriteButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    padding: 8,
+    borderRadius: 9999,
+  },
+  featuredInfo: {
+    marginTop: 12,
+    paddingHorizontal: 4,
+  },
+  featuredTitle: {
+    fontSize: 16,
+    marginBottom: 4,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  locationText: {
+    fontSize: 12,
+    marginLeft: 4,
+    fontFamily: 'Poppins_400Regular',
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  tag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  tagText: {
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  newArrivalCard: {
+    flexDirection: 'row',
+    marginBottom: 16,
+    padding: 12,
+    borderRadius: 16,
+    alignItems: 'center',
+    // Shadows
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  newArrivalImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+  },
+  newArrivalInfo: {
+    flex: 1,
+    marginLeft: 16,
+    justifyContent: 'center',
+  },
+  newArrivalTitle: {
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  newArrivalSubtitle: {
+    fontSize: 12,
+    marginTop: 4,
+    fontFamily: 'Poppins_400Regular',
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  ratingValue: {
+    fontSize: 12,
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  chevronContainer: {
+    padding: 8,
+    borderRadius: 9999,
+  },
+});

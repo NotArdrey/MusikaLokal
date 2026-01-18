@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -80,29 +80,31 @@ export default function EditGigScreen() {
   };
 
   const renderSectionHeader = (title: string, icon: string) => (
-    <View className="flex-row items-center gap-2 mb-4 mt-6">
+    <View style={styles.sectionHeader}>
       <Ionicons name={icon as any} size={18} color={colors.primary} />
-      <Text className="text-base" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{title}</Text>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
     </View>
   );
 
   const renderInput = (label: string, value: string, setValue: (text: string) => void, multiline = false, numeric = false) => (
-    <View className="mb-4">
-      <Text className="mb-2 text-xs uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>{label}</Text>
-      <View className={`rounded-xl border ${isDark ? 'border-gray-700' : 'border-gray-200'} overflow-hidden`} style={{ backgroundColor: colors.inputBackground }}>
+    <View style={styles.inputContainer}>
+      <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{label}</Text>
+      <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
         <TextInput
           value={value}
           onChangeText={setValue}
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
           keyboardType={numeric ? 'numeric' : 'default'}
-          className="p-4"
-          style={{
-            fontFamily: 'Poppins_400Regular',
-            color: colors.text,
-            height: multiline ? 120 : 'auto',
-            textAlignVertical: multiline ? 'top' : 'center'
-          }}
+          style={[
+            styles.input,
+            {
+              fontFamily: 'Poppins_400Regular',
+              color: colors.text,
+              height: multiline ? 120 : 'auto',
+              textAlignVertical: multiline ? 'top' : 'center'
+            }
+          ]}
         />
       </View>
     </View>
@@ -110,10 +112,10 @@ export default function EditGigScreen() {
 
   return (
     <>
-      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Gig" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 24 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
           {renderSectionHeader('Basic Details', 'information-circle')}
           {renderInput('Gig Title', gigName, setGigName)}
@@ -122,21 +124,20 @@ export default function EditGigScreen() {
           {renderInput('Budget (₱)', cost, setCost, false, true)}
 
           {renderSectionHeader('Visuals', 'image')}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-2">
-            <View className="flex-row gap-3">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesContainer}>
+            <View style={styles.imagesRow}>
               <TouchableOpacity
-                className="w-24 h-24 rounded-xl items-center justify-center border border-dashed"
-                style={{ borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6' }}
+                style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6' }]}
               >
                 <Ionicons name="add" size={24} color={colors.textSecondary} />
-                <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Add Photo</Text>
+                <Text style={[styles.addImageText, { color: colors.textSecondary }]}>Add Photo</Text>
               </TouchableOpacity>
 
               {images.map((uri, index) => (
-                <View key={index} className="relative">
-                  <Image source={{ uri }} className="w-24 h-24 rounded-xl bg-gray-200" />
+                <View key={index} style={styles.imageWrapper}>
+                  <Image source={{ uri }} style={styles.imageThumbnail} />
                   <TouchableOpacity
-                    className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 items-center justify-center border-2 border-white dark:border-gray-900"
+                    style={[styles.removeImageButton, { borderColor: isDark ? '#111827' : '#FFFFFF' }]}
                     onPress={() => setImages(images.filter((_, i) => i !== index))}
                   >
                     <Ionicons name="close" size={12} color="#fff" />
@@ -145,12 +146,12 @@ export default function EditGigScreen() {
               ))}
             </View>
           </ScrollView>
-          <Text className="text-xs mb-4" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Hold images to reorder or tap to view.</Text>
+          <Text style={[styles.imageHelpText, { color: colors.textSecondary }]}>Hold images to reorder or tap to view.</Text>
 
           {renderSectionHeader('Documents', 'document-text')}
           {documents.map((doc, i) => (
-            <View key={i} className="flex-row items-center justify-between p-4 mb-3 rounded-xl border" style={{ backgroundColor: colors.card, borderColor: colors.border }}>
-              <View className="flex-row items-center gap-3">
+            <View key={i} style={[styles.documentItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.documentInfo}>
                 <Ionicons name="document" size={20} color={colors.primary} />
                 <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{doc}</Text>
               </View>
@@ -159,23 +160,21 @@ export default function EditGigScreen() {
               </TouchableOpacity>
             </View>
           ))}
-          <TouchableOpacity className="flex-row items-center justify-center py-3 rounded-xl border border-dashed" style={{ borderColor: colors.border }}>
+          <TouchableOpacity style={[styles.uploadButton, { borderColor: colors.border }]}>
             <Ionicons name="cloud-upload-outline" size={18} color={colors.primary} />
-            <Text className="ml-2" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Upload Document</Text>
+            <Text style={[styles.uploadButtonText, { color: colors.primary }]}>Upload Document</Text>
           </TouchableOpacity>
 
-          <View className="mt-8">
+          <View style={styles.footerActions}>
             <TouchableOpacity
-              className="rounded-xl items-center justify-center py-4 mb-4 shadow-lg"
-              style={{ backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.3, shadowRadius: 8 }}
+              style={[styles.saveButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
               onPress={() => setModalVisible(true)}
             >
-              <Text className="text-white text-base" style={{ fontFamily: 'Poppins_600SemiBold' }}>Save Changes</Text>
+              <Text style={styles.saveButtonText}>Save Changes</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              className="rounded-xl items-center justify-center py-4 border"
-              style={{ borderColor: colors.border }}
+              style={[styles.cancelButton, { borderColor: colors.border }]}
               onPress={() => router.back()}
             >
               <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Cancel</Text>
@@ -184,7 +183,7 @@ export default function EditGigScreen() {
 
         </ScrollView>
 
-        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+        <View style={styles.bottomNavbarOverlay}>
           <Navbar />
         </View>
       </View>
@@ -200,4 +199,149 @@ export default function EditGigScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+    paddingHorizontal: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+    marginTop: 24,
+  },
+  sectionTitle: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 16,
+  },
+  inputContainer: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    marginBottom: 8,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  inputWrapper: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  input: {
+    padding: 16,
+  },
+  imagesContainer: {
+    marginBottom: 8,
+  },
+  imagesRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  addImageButton: {
+    width: 96,
+    height: 96,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  addImageText: {
+    fontSize: 12,
+    marginTop: 4,
+    fontFamily: 'Poppins_500Medium',
+  },
+  imageWrapper: {
+    position: 'relative',
+  },
+  imageThumbnail: {
+    width: 96,
+    height: 96,
+    borderRadius: 12,
+    backgroundColor: '#E5E7EB',
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+  },
+  imageHelpText: {
+    fontSize: 12,
+    marginBottom: 16,
+    fontFamily: 'Poppins_400Regular',
+  },
+  documentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  documentInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  uploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  uploadButtonText: {
+    marginLeft: 8,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  footerActions: {
+    marginTop: 32,
+  },
+  saveButton: {
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    marginBottom: 16,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    color: 'white',
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  cancelButton: {
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderWidth: 1,
+  },
+  bottomNavbarOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+});
 

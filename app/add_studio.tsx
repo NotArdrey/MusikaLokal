@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
@@ -76,10 +76,10 @@ export default function AddStudioScreen() {
         setAmenities(amenities.filter((_, i) => i !== index));
     };
 
-    const renderInput = (label: string, value: string, setValue: (text: string) => void, placeholder: string, multiline = false, numeric = false) => (
-        <View className="mb-4">
-            <Text className="mb-2 text-xs uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>{label}</Text>
-            <View className={`rounded-xl border ${isDark ? 'border-gray-700' : 'border-gray-200'} overflow-hidden`} style={{ backgroundColor: colors.inputBackground }}>
+    const renderInput = (label: string, value: string, setValue: (text: string) => void, placeholder: string, multiline = false, keyboardType: any = 'default') => (
+        <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{label}</Text>
+            <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
                 <TextInput
                     value={value}
                     onChangeText={setValue}
@@ -87,14 +87,15 @@ export default function AddStudioScreen() {
                     placeholderTextColor={colors.textSecondary}
                     multiline={multiline}
                     numberOfLines={multiline ? 4 : 1}
-                    keyboardType={numeric ? 'numeric' : 'default'}
-                    className="p-4"
-                    style={{
-                        fontFamily: 'Poppins_400Regular',
-                        color: colors.text,
-                        height: multiline ? 120 : 'auto',
-                        textAlignVertical: multiline ? 'top' : 'center'
-                    }}
+                    keyboardType={keyboardType}
+                    style={[
+                        styles.textInput,
+                        {
+                            color: colors.text,
+                            height: multiline ? 120 : 'auto',
+                            textAlignVertical: multiline ? 'top' : 'center'
+                        }
+                    ]}
                 />
             </View>
         </View>
@@ -102,32 +103,39 @@ export default function AddStudioScreen() {
 
     return (
         <>
-            <View className="flex-1" style={{ backgroundColor: colors.background }}>
-                <Header title="Create Studio" />
+            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+                <Header title="List Studio" />
 
                 {/* Enhanced Step Indicator (Fixed at top) */}
-                <View className="px-6 py-6 pb-2">
-                    <View className="flex-row items-center justify-between relative">
+                <View style={styles.stepIndicatorContainer}>
+                    <View style={styles.stepIndicatorContent}>
                         {/* Progress Line Background */}
-                        <View className="absolute left-0 right-0 h-1 bg-gray-200 dark:bg-gray-700 top-5 z-0" />
+                        <View style={[styles.progressLineBg, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
 
                         {/* Active Progress Line */}
                         <View
-                            className="absolute left-0 h-1 top-5 z-0 transition-all duration-300"
-                            style={{ width: `${((step - 1) / (steps.length - 1)) * 100}%`, backgroundColor: colors.primary }}
+                            style={[
+                                styles.activeProgressLine,
+                                {
+                                    width: `${((step - 1) / (steps.length - 1)) * 100}%`,
+                                    backgroundColor: colors.primary
+                                }
+                            ]}
                         />
 
                         {steps.map((s) => {
                             const isActive = step >= s.id;
                             const isCurrent = step === s.id;
                             return (
-                                <View key={s.id} className="items-center z-10 w-20">
+                                <View key={s.id} style={styles.stepItem}>
                                     <View
-                                        className="w-10 h-10 rounded-full items-center justify-center border-4"
-                                        style={{
-                                            backgroundColor: isActive ? colors.primary : (isDark ? '#334155' : '#E5E7EB'),
-                                            borderColor: isActive ? colors.primaryLight : (isDark ? '#1E293B' : '#F3F4F6')
-                                        }}
+                                        style={[
+                                            styles.stepCircle,
+                                            {
+                                                backgroundColor: isActive ? colors.primary : (isDark ? '#334155' : '#E5E7EB'),
+                                                borderColor: isActive ? '#818cf8' : (isDark ? '#1E293B' : '#F3F4F6')
+                                            }
+                                        ]}
                                     >
                                         <Ionicons
                                             name={isActive ? "checkmark" : s.icon as any}
@@ -136,12 +144,14 @@ export default function AddStudioScreen() {
                                         />
                                     </View>
                                     <Text
-                                        className="text-xs mt-2 text-center"
-                                        style={{
-                                            fontFamily: isCurrent ? 'Poppins_600SemiBold' : 'Poppins_400Regular',
-                                            color: isActive ? colors.text : colors.textSecondary,
-                                            fontWeight: isCurrent ? 'bold' : 'normal'
-                                        }}
+                                        style={[
+                                            styles.stepText,
+                                            {
+                                                fontFamily: isCurrent ? 'Poppins_600SemiBold' : 'Poppins_400Regular',
+                                                color: isActive ? colors.text : colors.textSecondary,
+                                                fontWeight: isCurrent ? 'bold' : 'normal'
+                                            }
+                                        ]}
                                     >
                                         {s.title}
                                     </Text>
@@ -151,63 +161,65 @@ export default function AddStudioScreen() {
                     </View>
                 </View>
 
-                <ScrollView className="flex-1 px-6 mt-4" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+                <ScrollView
+                    style={styles.formContainer}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.scrollContent}
+                >
                     {step === 1 && (
                         <View>
-                            <Text className="text-xl mb-6 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                                Studio Information
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                                Studio Details
                             </Text>
                             {renderInput('Studio Name', studioName, setStudioName, 'e.g. SoundWave Studios')}
                             {renderInput('Address', address, setAddress, 'e.g. 123 Music St, Manila')}
-                            {renderInput('Hourly Rate (PHP)', cost, setCost, 'e.g. 500', false, true)}
-                            {renderInput('Description', description, setDescription, 'Describe your gear and space...', true)}
+                            {renderInput('Hourly Rate (PHP)', cost, setCost, 'e.g. 500', false, 'numeric')}
+                            {renderInput('Description', description, setDescription, 'Equipment list, vibe, rules...', true)}
                         </View>
                     )}
 
                     {step === 2 && (
                         <View>
-                            <Text className="text-xl mb-6 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                                Studio Amenities
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                                Amenities
                             </Text>
 
-                            <View className="flex-row gap-2 mb-6">
-                                <View className={`flex-1 rounded-xl border ${isDark ? 'border-gray-700' : 'border-gray-200'} overflow-hidden`} style={{ backgroundColor: colors.inputBackground }}>
+                            <View style={styles.addMemberRow}>
+                                <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
                                     <TextInput
                                         value={newAmenity}
                                         onChangeText={setNewAmenity}
-                                        placeholder="Add amenity (e.g. Drum Kit, AC)..."
+                                        placeholder="Add amenity (e.g. WiFi, AC)..."
                                         placeholderTextColor={colors.textSecondary}
-                                        style={{ padding: 12, fontFamily: 'Poppins_400Regular', color: colors.text }}
+                                        style={[styles.textInput, { color: colors.text, padding: 12 }]}
                                     />
                                 </View>
                                 <TouchableOpacity
                                     onPress={addAmenity}
-                                    className="w-12 rounded-xl items-center justify-center"
-                                    style={{ backgroundColor: colors.primary }}
+                                    style={[styles.addBtn, { backgroundColor: colors.primary }]}
                                 >
                                     <Ionicons name="add" size={24} color="#fff" />
                                 </TouchableOpacity>
                             </View>
 
                             {amenities.length === 0 ? (
-                                <View className="items-center justify-center p-8 border-2 border-dashed rounded-2xl border-gray-300 dark:border-gray-700">
+                                <View style={[styles.dashedBox, { borderColor: isDark ? '#374151' : '#D1D5DB' }]}>
                                     <Ionicons name="mic-outline" size={48} color={colors.textSecondary} />
-                                    <Text className="mt-2 text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
-                                        No amenities listed
+                                    <Text style={[styles.dashedBoxText, { color: colors.textSecondary }]}>
+                                        No amenities added yet
                                     </Text>
                                 </View>
                             ) : (
-                                <View className="gap-2">
+                                <View style={styles.tagsWrapper}>
                                     {amenities.map((item, index) => (
-                                        <View key={index} className="flex-row items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700">
-                                            <View className="flex-row items-center gap-3">
-                                                <Ionicons name="checkmark-circle-outline" size={20} color={colors.primary} />
-                                                <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{item}</Text>
-                                            </View>
-                                            <TouchableOpacity onPress={() => removeAmenity(index)}>
-                                                <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
-                                            </TouchableOpacity>
-                                        </View>
+                                        <TouchableOpacity
+                                            key={index}
+                                            onPress={() => removeAmenity(index)}
+                                            style={[styles.tagItem, { backgroundColor: colors.primaryLight, borderColor: '#C7D2FE' }]}
+                                        >
+                                            <Text style={[styles.tagText, { color: colors.primaryDark }]}>{item}</Text>
+                                            <Ionicons name="close-circle" size={16} color={colors.primaryDark} />
+                                        </TouchableOpacity>
                                     ))}
                                 </View>
                             )}
@@ -216,59 +228,57 @@ export default function AddStudioScreen() {
 
                     {step === 3 && (
                         <View>
-                            <Text className="text-xl mb-6 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
                                 Review Details
                             </Text>
 
-                            <View className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800 gap-4 mb-4">
+                            <View style={[styles.reviewContainer, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB' }]}>
                                 <View>
-                                    <Text className="text-xs uppercase text-gray-400 font-bold mb-1">Studio Info</Text>
-                                    <Text className="text-lg font-bold" style={{ color: colors.text }}>{studioName || 'No Name'}</Text>
+                                    <Text style={styles.reviewLabel}>Studio Info</Text>
+                                    <Text style={[styles.reviewValue, { color: colors.text }]}>{studioName || 'No Name'}</Text>
                                     <Text style={{ color: colors.textSecondary }}>{address || 'No Address'}</Text>
-                                    <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', marginTop: 4 }}>₱{cost}/hr</Text>
+                                    <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', marginTop: 4 }}>Rate: ₱{cost}/hr</Text>
                                 </View>
 
-                                <View className="h-[1px] bg-gray-200 dark:bg-gray-700" />
+                                <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
 
                                 <View>
-                                    <Text className="text-xs uppercase text-gray-400 font-bold mb-2">Amenities ({amenities.length})</Text>
-                                    <View className="flex-row flex-wrap gap-2">
-                                        {amenities.map((m, i) => (
-                                            <View key={i} className="px-2 py-1 rounded-md bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600">
-                                                <Text style={{ fontSize: 12, color: colors.text }}>{m}</Text>
+                                    <Text style={styles.reviewLabel}>Amenities ({amenities.length})</Text>
+                                    <View style={styles.tagsWrapper}>
+                                        {amenities.map((a, i) => (
+                                            <View key={i} style={[styles.tag, { backgroundColor: isDark ? '#374151' : 'white', borderColor: isDark ? '#4B5563' : '#E5E7EB' }]}>
+                                                <Text style={{ fontSize: 12, color: colors.text }}>{a}</Text>
                                             </View>
                                         ))}
                                     </View>
                                 </View>
                             </View>
 
-                            <Text className="text-center text-xs text-gray-400 px-4">
-                                By tapping Create Studio, you agree to our Terms and Conditions.
+                            <Text style={styles.termsText}>
+                                By tapping List Studio, you agree to our Terms and Conditions.
                             </Text>
                         </View>
                     )}
 
-                    {/* Navigation Buttons (Inside ScrollView) */}
-                    <View className="mt-8 flex-row gap-4 mb-4">
+                    {/* Navigation Buttons */}
+                    <View style={styles.navigationButtons}>
                         {step > 1 && (
                             <TouchableOpacity
                                 onPress={handleBack}
-                                className="flex-1 py-4 rounded-xl items-center border border-gray-200 dark:border-gray-700"
+                                style={[styles.backBtn, { borderColor: isDark ? '#374151' : '#E5E7EB' }]}
                             >
-                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Back</Text>
+                                <Text style={[styles.backBtnText, { color: colors.text }]}>Back</Text>
                             </TouchableOpacity>
                         )}
                         <TouchableOpacity
                             onPress={handleNext}
-                            className="flex-1 py-4 rounded-xl items-center shadow-lg"
-                            style={{ backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.3 }}
+                            style={[styles.nextBtn, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
                         >
-                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#fff' }}>
-                                {step === 3 ? 'Create Studio' : 'Next'}
+                            <Text style={styles.nextBtnText}>
+                                {step === 3 ? 'List Studio' : 'Next'}
                             </Text>
                         </TouchableOpacity>
                     </View>
-
                 </ScrollView>
 
                 <Navbar />
@@ -284,3 +294,193 @@ export default function AddStudioScreen() {
         </>
     );
 }
+
+const styles = StyleSheet.create({
+    flex1: {
+        flex: 1,
+    },
+    stepIndicatorContainer: {
+        paddingHorizontal: 24,
+        paddingTop: 24,
+        paddingBottom: 8,
+    },
+    stepIndicatorContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        position: 'relative',
+    },
+    progressLineBg: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        height: 4,
+        top: 20,
+        zIndex: 0,
+    },
+    activeProgressLine: {
+        position: 'absolute',
+        left: 0,
+        height: 4,
+        top: 20,
+        zIndex: 0,
+    },
+    stepItem: {
+        alignItems: 'center',
+        zIndex: 10,
+        width: 80,
+    },
+    stepCircle: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 4,
+    },
+    stepText: {
+        fontSize: 12,
+        marginTop: 8,
+        textAlign: 'center',
+    },
+    formContainer: {
+        flex: 1,
+        paddingHorizontal: 24,
+        marginTop: 16,
+    },
+    scrollContent: {
+        paddingBottom: 150,
+    },
+    sectionTitle: {
+        fontSize: 20,
+        marginBottom: 24,
+        textAlign: 'center',
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    inputContainer: {
+        marginBottom: 16,
+    },
+    inputLabel: {
+        marginBottom: 8,
+        fontSize: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    inputWrapper: {
+        borderRadius: 12,
+        borderWidth: 1,
+        overflow: 'hidden',
+    },
+    textInput: {
+        padding: 16,
+        fontFamily: 'Poppins_400Regular',
+    },
+    addMemberRow: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: 24,
+    },
+    addBtn: {
+        width: 48,
+        height: 48,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    dashedBox: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 32,
+        borderWidth: 2,
+        borderStyle: 'dashed',
+        borderRadius: 16,
+        marginBottom: 24,
+    },
+    dashedBoxText: {
+        marginTop: 8,
+        fontSize: 14,
+        textAlign: 'center',
+        fontFamily: 'Poppins_400Regular',
+    },
+    tagsWrapper: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    tagItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 20,
+    },
+    tagText: {
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
+    },
+    reviewContainer: {
+        padding: 16,
+        borderRadius: 16,
+        gap: 16,
+        marginBottom: 16,
+    },
+    reviewLabel: {
+        fontSize: 12,
+        textTransform: 'uppercase',
+        color: '#9CA3AF',
+        fontWeight: 'bold',
+        marginBottom: 4,
+    },
+    reviewValue: {
+        fontSize: 18,
+        fontWeight: 'bold',
+    },
+    divider: {
+        height: 1,
+    },
+    tag: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        borderWidth: 1,
+    },
+    termsText: {
+        textAlign: 'center',
+        fontSize: 12,
+        color: '#9CA3AF',
+        paddingHorizontal: 16,
+    },
+    navigationButtons: {
+        marginTop: 32,
+        flexDirection: 'row',
+        gap: 16,
+        marginBottom: 16,
+    },
+    backBtn: {
+        flex: 1,
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        borderWidth: 1,
+    },
+    backBtnText: {
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    nextBtn: {
+        flex: 1,
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    nextBtnText: {
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#fff',
+    },
+});

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 
 type CustomModalProps = {
@@ -21,27 +21,38 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, onClose, onConfirm, 
       visible={visible}
       onRequestClose={onClose}
     >
-      <View className="flex-1 justify-center items-center bg-black/50">
-        <View className="w-4/5 rounded-3xl p-6 items-center shadow-xl" style={{ backgroundColor: colors.card, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 10, elevation: 10 }}>
+      <View style={styles.overlay}>
+        <View
+          style={[
+            styles.modalContainer,
+            {
+              backgroundColor: colors.card,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 4 }, // Added shadowOffset
+              shadowOpacity: 0.25,
+              shadowRadius: 10,
+              elevation: 10
+            }
+          ]}
+        >
           {title && (
-            <Text className="text-xl mb-3 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{title}</Text>
+            <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
           )}
-          <Text className="text-sm text-center mb-8 leading-6" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>{message}</Text>
+          <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text>
 
-          <View className="w-full gap-3">
+          <View style={styles.buttonContainer}>
             <TouchableOpacity
-              className="w-full rounded-xl py-3.5 items-center"
-              style={{ backgroundColor: colors.primary }}
+              style={[styles.confirmButton, { backgroundColor: colors.primary }]}
               onPress={onConfirm || onClose}
             >
-              <Text className="text-white text-sm" style={{ fontFamily: 'Poppins_600SemiBold' }}>{buttonText}</Text>
+              <Text style={styles.confirmButtonText}>{buttonText}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              className="w-full rounded-xl py-3.5 items-center"
+              style={styles.cancelButton}
               onPress={onClose}
             >
-              <Text className="text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Cancel</Text>
+              <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -50,5 +61,57 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, onClose, onConfirm, 
   );
 };
 
+const styles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)', // bg-black/50
+  },
+  modalContainer: {
+    width: '80%', // w-4/5
+    borderRadius: 24, // rounded-3xl
+    padding: 24, // p-6
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 20, // text-xl
+    marginBottom: 12, // mb-3
+    textAlign: 'center',
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  message: {
+    fontSize: 14, // text-sm
+    textAlign: 'center',
+    marginBottom: 32, // mb-8
+    lineHeight: 24, // leading-6
+    fontFamily: 'Poppins_400Regular',
+  },
+  buttonContainer: {
+    width: '100%',
+    gap: 12, // gap-3
+  },
+  confirmButton: {
+    width: '100%',
+    borderRadius: 12, // rounded-xl
+    paddingVertical: 14, // py-3.5
+    alignItems: 'center',
+  },
+  confirmButtonText: {
+    color: 'white',
+    fontSize: 14, // text-sm
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  cancelButton: {
+    width: '100%',
+    borderRadius: 12, // rounded-xl
+    paddingVertical: 14, // py-3.5
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 14, // text-sm
+    fontFamily: 'Poppins_500Medium',
+  },
+});
 
 export default CustomModal;

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import VerificationModal from '../src/components/VerificationModal';
 import { useTheme } from '../src/context/ThemeContext';
@@ -12,29 +12,28 @@ export default function LoginScreen() {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
 
     // Verification Modal State
     const [showVerification, setShowVerification] = useState(false);
     const [verificationUrl, setVerificationUrl] = useState('');
 
     const handleLogin = async () => {
-        if (!email || !password) {
-            Alert.alert(
-                'Missing Information',
-                'Please enter both your email and password to continue.',
-                [{ text: 'OK', style: 'default' }]
-            );
-            return;
+        setErrors({}); // Clear previous errors
+        const newErrors: { email?: string; password?: string } = {};
+
+        if (!email) {
+            newErrors.email = 'Email is required.';
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            newErrors.email = 'Please enter a valid email address.';
         }
 
-        // Basic email validation
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            Alert.alert(
-                'Invalid Email',
-                'Please enter a valid email address.',
-                [{ text: 'OK', style: 'default' }]
-            );
+        if (!password) {
+            newErrors.password = 'Password is required.';
+        }
+
+        if (Object.keys(newErrors).length > 0) {
+            setErrors(newErrors);
             return;
         }
 
@@ -139,103 +138,131 @@ export default function LoginScreen() {
         );
     };
 
+    // Derived styles based on theme
+    const themeStyles = {
+        container: { backgroundColor: colors.background },
+        text: { color: colors.text },
+        textSecondary: { color: colors.textSecondary },
+        inputContainer: {
+            backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+            borderColor: isDark ? '#374151' : '#E5E7EB',
+        },
+        primaryButton: { backgroundColor: colors.primary },
+        primaryText: { color: colors.primary },
+    };
+
     return (
         <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            className="flex-1"
-            style={{ backgroundColor: colors.background }}
+            style={[styles.flex1, themeStyles.container]}
         >
-            <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-                <View className="flex-1 px-8 justify-center min-h-screen">
+            <ScrollView contentContainerStyle={styles.scrollContent}>
+                <View style={styles.contentContainer}>
                     {/* Logo Section */}
-                    <View className="items-center mb-12">
-                        <View className="w-24 h-24 rounded-3xl bg-primary items-center justify-center mb-6 shadow-xl shadow-primary/30">
+                    <View style={styles.logoSection}>
+                        <View style={[styles.logoWrapper, styles.shadow]}>
                             <Image
                                 source={require('../assets/images/Musika-lokal-logo.png')}
-                                style={{ width: 100, height: 100, tintColor: 'white' }}
+                                style={styles.logoImage}
                                 resizeMode="contain"
                             />
                         </View>
-                        <Text className="text-3xl font-bold text-center mb-2" style={{ fontFamily: 'Poppins_700Bold', color: colors.text }}>
+                        <Text style={[styles.appName, themeStyles.text]}>
                             MusikaLokal
                         </Text>
-                        <Text className="text-center" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                        <Text style={[styles.appTagline, themeStyles.textSecondary]}>
                             Connect with the local music scene
                         </Text>
                     </View>
 
                     {/* Form Section */}
-                    <View className="gap-5">
+                    <View style={styles.formContainer}>
+
+
                         <View>
-                            <Text className="mb-2 text-xs uppercase font-bold tracking-wider" style={{ color: colors.textSecondary }}>
+                            <Text style={[styles.label, themeStyles.textSecondary]}>
                                 Email Address
                             </Text>
-                            <View
-                                className={`flex-row items-center px-4 h-14 rounded-2xl border ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'}`}
-                            >
+                            <View style={[
+                                styles.inputContainer,
+                                themeStyles.inputContainer,
+                                errors.email ? { borderColor: '#EF4444' } : null
+                            ]}>
                                 <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
                                 <TextInput
-                                    className="flex-1 ml-3 h-full"
-                                    style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
+                                    style={[styles.input, themeStyles.text]}
                                     placeholder="name@email.com"
                                     placeholderTextColor={colors.textSecondary}
                                     value={email}
-                                    onChangeText={setEmail}
+                                    onChangeText={(text) => {
+                                        setEmail(text);
+                                        if (errors.email) setErrors({ ...errors, email: undefined });
+                                    }}
                                     autoCapitalize="none"
                                     keyboardType="email-address"
                                 />
                             </View>
+                            {errors.email && (
+                                <Text style={styles.errorText}>{errors.email}</Text>
+                            )}
                         </View>
 
                         <View>
-                            <Text className="mb-2 text-xs uppercase font-bold tracking-wider" style={{ color: colors.textSecondary }}>
+                            <Text style={[styles.label, themeStyles.textSecondary]}>
                                 Password
                             </Text>
-                            <View
-                                className={`flex-row items-center px-4 h-14 rounded-2xl border ${isDark ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'}`}
-                            >
+                            <View style={[
+                                styles.inputContainer,
+                                themeStyles.inputContainer,
+                                errors.password ? { borderColor: '#EF4444' } : null
+                            ]}>
                                 <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                                 <TextInput
-                                    className="flex-1 ml-3 h-full"
-                                    style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
+                                    style={[styles.input, themeStyles.text]}
                                     placeholder="Enter your password"
                                     placeholderTextColor={colors.textSecondary}
                                     value={password}
-                                    onChangeText={setPassword}
+                                    onChangeText={(text) => {
+                                        setPassword(text);
+                                        if (errors.password) setErrors({ ...errors, password: undefined });
+                                    }}
                                     secureTextEntry={!showPassword}
                                 />
                                 <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
                                     <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
                                 </TouchableOpacity>
                             </View>
-                            <TouchableOpacity onPress={() => router.push('/forget_password')} className="items-end mt-2">
-                                <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary, fontSize: 12 }}>
-                                    Forgot Password?
-                                </Text>
-                            </TouchableOpacity>
+                            {errors.password ? (
+                                <Text style={styles.errorText}>{errors.password}</Text>
+                            ) : (
+                                <TouchableOpacity onPress={() => router.push('/forget_password')} style={styles.forgotPasswordButton}>
+                                    <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
+                                        Forgot Password?
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
 
                         <TouchableOpacity
                             onPress={handleLogin}
                             disabled={loading}
-                            className="h-14 rounded-2xl bg-primary items-center justify-center shadow-lg shadow-primary/30 mt-4"
-                            style={{ backgroundColor: colors.primary }}
+                            style={[styles.loginButton, themeStyles.primaryButton, styles.shadow]}
                         >
                             {loading ? (
                                 <ActivityIndicator color="white" />
                             ) : (
-                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: 'white', fontSize: 16 }}>
+                                <Text style={styles.loginButtonText}>
                                     Sign In
                                 </Text>
                             )}
                         </TouchableOpacity>
 
-                        <View className="flex-row justify-center mt-6">
-                            <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                        <View style={styles.signupLinkContainer}>
+                            <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
                                 Don't have an account?{' '}
                             </Text>
                             <TouchableOpacity onPress={() => router.push('/signup')}>
-                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>
+                                <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
                                     Create Account
                                 </Text>
                             </TouchableOpacity>
@@ -253,3 +280,120 @@ export default function LoginScreen() {
         </KeyboardAvoidingView>
     );
 }
+
+const styles = StyleSheet.create({
+    flex1: {
+        flex: 1,
+    },
+    scrollContent: {
+        flexGrow: 1,
+    },
+    contentContainer: {
+        flex: 1,
+        paddingHorizontal: 32, // px-8
+        justifyContent: 'center',
+        paddingVertical: 48, // py-12
+    },
+    logoSection: {
+        alignItems: 'center',
+        marginBottom: 48, // mb-12
+    },
+    logoWrapper: {
+        width: 96, // w-24
+        height: 96, // h-24
+        borderRadius: 24, // rounded-3xl
+        backgroundColor: '#4F46E5', // primary color fallback/base
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 24, // mb-6
+        // Shadow props
+    },
+    logoImage: {
+        width: 100,
+        height: 100,
+        tintColor: 'white',
+    },
+    appName: {
+        fontSize: 30, // text-3xl
+        fontWeight: 'bold',
+        textAlign: 'center',
+        marginBottom: 8, // mb-2
+        fontFamily: 'Poppins_700Bold',
+    },
+    appTagline: {
+        textAlign: 'center',
+        fontFamily: 'Poppins_400Regular',
+    },
+    formContainer: {
+        gap: 20, // gap-5 (approx)
+    },
+    label: {
+        marginBottom: 8, // mb-2
+        fontSize: 12, // text-xs
+        textTransform: 'uppercase',
+        fontWeight: 'bold',
+        letterSpacing: 1, // tracking-wider
+    },
+    inputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16, // px-4
+        height: 56, // h-14
+        borderRadius: 16, // rounded-2xl
+        borderWidth: 1,
+    },
+    input: {
+        flex: 1,
+        marginLeft: 12, // ml-3
+        height: '100%',
+        fontFamily: 'Poppins_400Regular',
+    },
+    forgotPasswordButton: {
+        alignItems: 'flex-end',
+        marginTop: 8, // mt-2
+    },
+    forgotPasswordText: {
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
+    },
+    loginButton: {
+        height: 56, // h-14
+        borderRadius: 16, // rounded-2xl
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 16, // mt-4
+    },
+    loginButtonText: {
+        fontFamily: 'Poppins_600SemiBold',
+        color: 'white',
+        fontSize: 16,
+    },
+    shadow: {
+        shadowColor: "#4F46E5", // shadow-primary
+        shadowOffset: {
+            width: 0,
+            height: 10,
+        },
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+        elevation: 10,
+    },
+    signupLinkContainer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        marginTop: 24, // mt-6
+    },
+    signupLinkText: {
+        fontFamily: 'Poppins_400Regular',
+    },
+    signupLinkHighlight: {
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    errorText: {
+        color: '#EF4444',
+        fontSize: 12,
+        marginTop: 4,
+        marginLeft: 4,
+        fontFamily: 'Poppins_400Regular',
+    },
+});

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
@@ -63,9 +63,9 @@ export default function AddGigScreen() {
     };
 
     const renderInput = (label: string, value: string, setValue: (text: string) => void, placeholder: string, multiline = false, keyboardType: any = 'default') => (
-        <View className="mb-4">
-            <Text className="mb-2 text-xs uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>{label}</Text>
-            <View className={`rounded-xl border ${isDark ? 'border-gray-700' : 'border-gray-200'} overflow-hidden`} style={{ backgroundColor: colors.inputBackground }}>
+        <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{label}</Text>
+            <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
                 <TextInput
                     value={value}
                     onChangeText={setValue}
@@ -74,13 +74,14 @@ export default function AddGigScreen() {
                     multiline={multiline}
                     numberOfLines={multiline ? 4 : 1}
                     keyboardType={keyboardType}
-                    className="p-4"
-                    style={{
-                        fontFamily: 'Poppins_400Regular',
-                        color: colors.text,
-                        height: multiline ? 120 : 'auto',
-                        textAlignVertical: multiline ? 'top' : 'center'
-                    }}
+                    style={[
+                        styles.textInput,
+                        {
+                            color: colors.text,
+                            height: multiline ? 120 : 'auto',
+                            textAlignVertical: multiline ? 'top' : 'center'
+                        }
+                    ]}
                 />
             </View>
         </View>
@@ -88,32 +89,39 @@ export default function AddGigScreen() {
 
     return (
         <>
-            <View className="flex-1" style={{ backgroundColor: colors.background }}>
+            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
                 <Header title="Create Gig" />
 
                 {/* Enhanced Step Indicator (Fixed at top) */}
-                <View className="px-6 py-6 pb-2">
-                    <View className="flex-row items-center justify-between relative">
+                <View style={styles.stepIndicatorContainer}>
+                    <View style={styles.stepIndicatorContent}>
                         {/* Progress Line Background */}
-                        <View className="absolute left-0 right-0 h-1 bg-gray-200 dark:bg-gray-700 top-5 z-0" />
+                        <View style={[styles.progressLineBg, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
 
                         {/* Active Progress Line */}
                         <View
-                            className="absolute left-0 h-1 top-5 z-0 transition-all duration-300"
-                            style={{ width: `${((step - 1) / (steps.length - 1)) * 100}%`, backgroundColor: colors.primary }}
+                            style={[
+                                styles.activeProgressLine,
+                                {
+                                    width: `${((step - 1) / (steps.length - 1)) * 100}%`,
+                                    backgroundColor: colors.primary
+                                }
+                            ]}
                         />
 
                         {steps.map((s) => {
                             const isActive = step >= s.id;
                             const isCurrent = step === s.id;
                             return (
-                                <View key={s.id} className="items-center z-10 w-20">
+                                <View key={s.id} style={styles.stepItem}>
                                     <View
-                                        className="w-10 h-10 rounded-full items-center justify-center border-4"
-                                        style={{
-                                            backgroundColor: isActive ? colors.primary : (isDark ? '#334155' : '#E5E7EB'),
-                                            borderColor: isActive ? colors.primaryLight : (isDark ? '#1E293B' : '#F3F4F6')
-                                        }}
+                                        style={[
+                                            styles.stepCircle,
+                                            {
+                                                backgroundColor: isActive ? colors.primary : (isDark ? '#334155' : '#E5E7EB'),
+                                                borderColor: isActive ? '#818cf8' : (isDark ? '#1E293B' : '#F3F4F6') // using primaryLight approx
+                                            }
+                                        ]}
                                     >
                                         <Ionicons
                                             name={isActive ? "checkmark" : s.icon as any}
@@ -122,12 +130,14 @@ export default function AddGigScreen() {
                                         />
                                     </View>
                                     <Text
-                                        className="text-xs mt-2 text-center"
-                                        style={{
-                                            fontFamily: isCurrent ? 'Poppins_600SemiBold' : 'Poppins_400Regular',
-                                            color: isActive ? colors.text : colors.textSecondary,
-                                            fontWeight: isCurrent ? 'bold' : 'normal'
-                                        }}
+                                        style={[
+                                            styles.stepText,
+                                            {
+                                                fontFamily: isCurrent ? 'Poppins_600SemiBold' : 'Poppins_400Regular',
+                                                color: isActive ? colors.text : colors.textSecondary,
+                                                fontWeight: isCurrent ? 'bold' : 'normal'
+                                            }
+                                        ]}
                                     >
                                         {s.title}
                                     </Text>
@@ -137,10 +147,14 @@ export default function AddGigScreen() {
                     </View>
                 </View>
 
-                <ScrollView className="flex-1 px-6 mt-4" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+                <ScrollView
+                    style={styles.formContainer}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={styles.scrollContent}
+                >
                     {step === 1 && (
                         <View>
-                            <Text className="text-xl mb-6 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
                                 Gig Information
                             </Text>
                             {renderInput('Event Name', gigName, setGigName, 'e.g. Saturday Night Live')}
@@ -152,13 +166,13 @@ export default function AddGigScreen() {
 
                     {step === 2 && (
                         <View>
-                            <Text className="text-xl mb-6 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
                                 Requirements
                             </Text>
 
-                            <View className="items-center justify-center p-8 border-2 border-dashed rounded-2xl border-gray-300 dark:border-gray-700 mb-6">
+                            <View style={[styles.dashedBox, { borderColor: isDark ? '#374151' : '#D1D5DB' }]}>
                                 <Ionicons name="options-outline" size={48} color={colors.textSecondary} />
-                                <Text className="mt-2 text-sm text-center" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                                <Text style={[styles.dashedBoxText, { color: colors.textSecondary }]}>
                                     Additional filters like Genre, Instrument, or Experience Level would go here.
                                 </Text>
                             </View>
@@ -167,48 +181,47 @@ export default function AddGigScreen() {
 
                     {step === 3 && (
                         <View>
-                            <Text className="text-xl mb-6 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
                                 Review Details
                             </Text>
 
-                            <View className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-800 gap-4 mb-4">
+                            <View style={[styles.reviewContainer, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB' }]}>
                                 <View>
-                                    <Text className="text-xs uppercase text-gray-400 font-bold mb-1">Gig Info</Text>
-                                    <Text className="text-lg font-bold" style={{ color: colors.text }}>{gigName || 'No Name'}</Text>
+                                    <Text style={styles.reviewLabel}>Gig Info</Text>
+                                    <Text style={[styles.reviewValue, { color: colors.text }]}>{gigName || 'No Name'}</Text>
                                     <Text style={{ color: colors.textSecondary }}>{address || 'No Location'}</Text>
                                     <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', marginTop: 4 }}>Budget: ₱{cost}</Text>
                                 </View>
 
-                                <View className="h-[1px] bg-gray-200 dark:bg-gray-700" />
+                                <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
 
                                 <View>
-                                    <Text className="text-xs uppercase text-gray-400 font-bold mb-2">Description</Text>
-                                    <Text style={{ fontSize: 13, color: colors.text, lineHeight: 20 }}>{description || 'No description provided.'}</Text>
+                                    <Text style={styles.reviewLabel}>Description</Text>
+                                    <Text style={[styles.reviewDescription, { color: colors.text }]}>{description || 'No description provided.'}</Text>
                                 </View>
                             </View>
 
-                            <Text className="text-center text-xs text-gray-400 px-4">
+                            <Text style={styles.termsText}>
                                 By tapping Create Gig, you agree to our Terms and Conditions.
                             </Text>
                         </View>
                     )}
 
-                    {/* Navigation Buttons (Inside ScrollView) */}
-                    <View className="mt-8 flex-row gap-4 mb-4">
+                    {/* Navigation Buttons */}
+                    <View style={styles.navigationButtons}>
                         {step > 1 && (
                             <TouchableOpacity
                                 onPress={handleBack}
-                                className="flex-1 py-4 rounded-xl items-center border border-gray-200 dark:border-gray-700"
+                                style={[styles.backBtn, { borderColor: isDark ? '#374151' : '#E5E7EB' }]}
                             >
-                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Back</Text>
+                                <Text style={[styles.backBtnText, { color: colors.text }]}>Back</Text>
                             </TouchableOpacity>
                         )}
                         <TouchableOpacity
                             onPress={handleNext}
-                            className="flex-1 py-4 rounded-xl items-center shadow-lg"
-                            style={{ backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.3 }}
+                            style={[styles.nextBtn, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
                         >
-                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#fff' }}>
+                            <Text style={styles.nextBtnText}>
                                 {step === 3 ? 'Create Gig' : 'Next'}
                             </Text>
                         </TouchableOpacity>
@@ -229,3 +242,161 @@ export default function AddGigScreen() {
         </>
     );
 }
+
+const styles = StyleSheet.create({
+    flex1: {
+        flex: 1,
+    },
+    stepIndicatorContainer: {
+        paddingHorizontal: 24,
+        paddingTop: 24,
+        paddingBottom: 8,
+    },
+    stepIndicatorContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        position: 'relative',
+    },
+    progressLineBg: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        height: 4,
+        top: 20,
+        zIndex: 0,
+    },
+    activeProgressLine: {
+        position: 'absolute',
+        left: 0,
+        height: 4,
+        top: 20,
+        zIndex: 0,
+    },
+    stepItem: {
+        alignItems: 'center',
+        zIndex: 10,
+        width: 80,
+    },
+    stepCircle: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 4,
+    },
+    stepText: {
+        fontSize: 12,
+        marginTop: 8,
+        textAlign: 'center',
+    },
+    formContainer: {
+        flex: 1,
+        paddingHorizontal: 24,
+        marginTop: 16,
+    },
+    scrollContent: {
+        paddingBottom: 150,
+    },
+    sectionTitle: {
+        fontSize: 20,
+        marginBottom: 24,
+        textAlign: 'center',
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    inputContainer: {
+        marginBottom: 16,
+    },
+    inputLabel: {
+        marginBottom: 8,
+        fontSize: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    inputWrapper: {
+        borderRadius: 12,
+        borderWidth: 1,
+        overflow: 'hidden',
+    },
+    textInput: {
+        padding: 16,
+        fontFamily: 'Poppins_400Regular',
+    },
+    dashedBox: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 32,
+        borderWidth: 2,
+        borderStyle: 'dashed',
+        borderRadius: 16,
+        marginBottom: 24,
+    },
+    dashedBoxText: {
+        marginTop: 8,
+        fontSize: 14,
+        textAlign: 'center',
+        fontFamily: 'Poppins_400Regular',
+    },
+    reviewContainer: {
+        padding: 16,
+        borderRadius: 16,
+        gap: 16,
+        marginBottom: 16,
+    },
+    reviewLabel: {
+        fontSize: 12,
+        textTransform: 'uppercase',
+        color: '#9CA3AF',
+        fontWeight: 'bold',
+        marginBottom: 4,
+    },
+    reviewValue: {
+        fontSize: 18,
+        fontWeight: 'bold',
+    },
+    reviewDescription: {
+        fontSize: 13,
+        lineHeight: 20,
+    },
+    divider: {
+        height: 1,
+    },
+    termsText: {
+        textAlign: 'center',
+        fontSize: 12,
+        color: '#9CA3AF',
+        paddingHorizontal: 16,
+    },
+    navigationButtons: {
+        marginTop: 32,
+        flexDirection: 'row',
+        gap: 16,
+        marginBottom: 16,
+    },
+    backBtn: {
+        flex: 1,
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        borderWidth: 1,
+    },
+    backBtnText: {
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    nextBtn: {
+        flex: 1,
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    nextBtnText: {
+        fontFamily: 'Poppins_600SemiBold',
+        color: '#fff',
+    },
+});

@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
@@ -56,7 +56,7 @@ export default function ManageScreen() {
 
     if (loading) {
         return (
-            <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+            <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
                 <ActivityIndicator size="large" color={colors.primary} />
                 <Text style={{ marginTop: 20, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
                     Loading your dashboard...
@@ -66,21 +66,21 @@ export default function ManageScreen() {
     }
 
     return (
-        <View className="flex-1" style={{ backgroundColor: colors.background }}>
+        <View style={[styles.flex1, { backgroundColor: colors.background }]}>
             <Header title="Manage" />
 
-            <View className="flex-1 px-6 pt-8">
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 24, color: colors.text, marginBottom: 8 }}>
+            <View style={styles.dashboardContainer}>
+                <Text style={[styles.title, { color: colors.text }]}>
                     Management Dashboard
                 </Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, marginBottom: 32 }}>
+                <Text style={[styles.description, { color: colors.textSecondary }]}>
                     It seems we couldn't automatically direct you to your specific dashboard.
                     Please ensure your account has the correct role assigned or contact support for assistance.
                 </Text>
 
 
                 {role && (
-                    <Text style={{ marginTop: 40, fontFamily: 'Poppins_400Regular', color: colors.textSecondary, textAlign: 'center' }}>
+                    <Text style={[styles.roleText, { color: colors.textSecondary }]}>
                         Detected Role: {role}
                     </Text>
                 )}
@@ -89,3 +89,33 @@ export default function ManageScreen() {
         </View>
     );
 }
+
+const styles = StyleSheet.create({
+    flex1: {
+        flex: 1,
+    },
+    centerContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    dashboardContainer: {
+        flex: 1,
+        paddingHorizontal: 24,
+        paddingTop: 32,
+    },
+    title: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 24,
+        marginBottom: 8,
+    },
+    description: {
+        fontFamily: 'Poppins_400Regular',
+        marginBottom: 32,
+    },
+    roleText: {
+        marginTop: 40,
+        fontFamily: 'Poppins_400Regular',
+        textAlign: 'center',
+    },
+});

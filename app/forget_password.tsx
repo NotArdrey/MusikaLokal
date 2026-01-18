@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import { useTheme } from '../src/context/ThemeContext';
@@ -13,44 +13,44 @@ export default function ForgetPasswordScreen() {
 
     return (
         <>
-            <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
+            <View style={[styles.container, { backgroundColor: colors.background }]}>
                 <Header title="Forget Password" />
 
-                <View className="mt-8">
-                    <Text className="text-base mb-2 font-medium" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>
+                <View style={styles.inputSection}>
+                    <Text style={[styles.label, { color: colors.text }]}>
                         Email Address
                     </Text>
 
                     <View
-                        className="w-full px-4 py-3.5 rounded-xl border flex-row items-center"
-                        style={{
-                            backgroundColor: colors.inputBackground,
-                            borderColor: colors.border
-                        }}
+                        style={[
+                            styles.inputContainer,
+                            {
+                                backgroundColor: colors.inputBackground,
+                                borderColor: colors.border
+                            }
+                        ]}
                     >
                         <TextInput
-                            className="flex-1 text-base ml-1"
+                            style={[styles.input, { color: colors.text }]}
                             placeholder="example@email.com"
                             placeholderTextColor={colors.textSecondary}
                             value={email}
                             onChangeText={setEmail}
                             keyboardType="email-address"
                             autoCapitalize="none"
-                            style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
                         />
                     </View>
-                    <Text className="text-xs mt-2 ml-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                    <Text style={[styles.helperText, { color: colors.textSecondary }]}>
                         We'll send a password reset link to this email.
                     </Text>
                 </View>
 
-                <View className="mt-8">
+                <View style={styles.buttonSection}>
                     <TouchableOpacity
-                        className="w-full py-4 rounded-xl shadow-lg shadow-indigo-500/30 items-center justify-center"
-                        style={{ backgroundColor: colors.primary }}
+                        style={[styles.button, { backgroundColor: colors.primary }]}
                         onPress={() => setModalVisible(true)}
                     >
-                        <Text className="text-white text-base font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>
+                        <Text style={styles.buttonText}>
                             Send Link
                         </Text>
                     </TouchableOpacity>
@@ -67,3 +67,62 @@ export default function ForgetPasswordScreen() {
         </>
     );
 }
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        paddingHorizontal: 24,
+    },
+    inputSection: {
+        marginTop: 32,
+    },
+    label: {
+        fontSize: 16,
+        marginBottom: 8,
+        fontFamily: 'Poppins_500Medium',
+    },
+    inputContainer: {
+        width: '100%',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    input: {
+        flex: 1,
+        fontSize: 16,
+        marginLeft: 4,
+        fontFamily: 'Poppins_400Regular',
+    },
+    helperText: {
+        fontSize: 12,
+        marginTop: 8,
+        marginLeft: 4,
+        fontFamily: 'Poppins_400Regular',
+    },
+    buttonSection: {
+        marginTop: 32,
+    },
+    button: {
+        width: '100%',
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#6366f1',
+        shadowOffset: {
+            width: 0,
+            height: 4,
+        },
+        shadowOpacity: 0.3,
+        shadowRadius: 4.65,
+        elevation: 8,
+    },
+    buttonText: {
+        color: 'white',
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+});

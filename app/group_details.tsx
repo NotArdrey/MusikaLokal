@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
@@ -71,7 +71,7 @@ export default function GroupDetailsScreen() {
 
   if (loading) {
     return (
-      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
         <Text style={{ color: colors.textSecondary }}>Loading...</Text>
       </View>
     );
@@ -79,9 +79,9 @@ export default function GroupDetailsScreen() {
 
   if (!group) {
     return (
-      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
         <Text style={{ color: colors.textSecondary }}>Group not found.</Text>
-        <TouchableOpacity onPress={() => router.back()} className="mt-4">
+        <TouchableOpacity onPress={() => router.back()} style={styles.goBackBtn}>
           <Text style={{ color: colors.primary }}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -90,28 +90,29 @@ export default function GroupDetailsScreen() {
 
   return (
     <>
-      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Group Details" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
           {/* Hero Section */}
-          <View className="px-6 mt-4">
+          <View style={styles.heroSection}>
             <View
-              className="w-full h-56 rounded-3xl overflow-hidden mb-4 relative shadow-lg"
-              style={{ shadowColor: colors.primary, shadowOpacity: 0.2, shadowRadius: 10, elevation: 8 }}
+              style={[
+                styles.heroImageContainer,
+                { shadowColor: colors.primary }
+              ]}
             >
               <Image
                 source={{ uri: (group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop' }}
-                className="w-full h-full"
+                style={styles.heroImage}
                 resizeMode="cover"
               />
               {/* Report Button - Hide if Owner */}
               {!isOwner && (
                 <TouchableOpacity
                   onPress={handleReport}
-                  className="absolute top-3 right-3 w-9 h-9 rounded-full items-center justify-center"
-                  style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+                  style={styles.reportButton}
                 >
                   <Ionicons name="flag-outline" size={18} color="#fff" />
                 </TouchableOpacity>
@@ -120,41 +121,39 @@ export default function GroupDetailsScreen() {
               {/* Heart Button */}
               <TouchableOpacity
                 onPress={toggleFavorite}
-                className={`absolute top-3 ${!isOwner ? 'right-14' : 'right-3'} w-9 h-9 rounded-full items-center justify-center`}
-                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+                style={[styles.favButton, !isOwner ? { right: 56 } : { right: 12 }]}
               >
                 <Ionicons name={isFavorited ? "heart" : "heart-outline"} size={18} color={isFavorited ? "#EF4444" : "#fff"} />
               </TouchableOpacity>
 
-              <View className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent" />
-              <View className="absolute bottom-4 left-4 right-4">
-                <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>{group.name}</Text>
-                <View className="flex-row items-center mt-1">
-                  <Text className="text-gray-200 text-sm ml-1" style={{ fontFamily: 'Poppins_500Medium' }}>{group.genre || 'Band'} • {group.members ? group.members.length : 0} Members</Text>
+              <View style={styles.heroOverlay} />
+              <View style={styles.heroContent}>
+                <Text style={styles.heroTitle}>{group.name}</Text>
+                <View style={styles.heroLocation}>
+                  <Text style={styles.heroSubtitle}>{group.genre || 'Band'} • {group.members ? group.members.length : 0} Members</Text>
                 </View>
-                <View className="flex-row items-center mt-1">
+                <View style={styles.heroLocation}>
                   <Ionicons name="location-outline" size={14} color="#E5E7EB" />
-                  <Text className="text-gray-200 text-xs ml-1" style={{ fontFamily: 'Poppins_400Regular' }}>{group.location || 'Location not set'}</Text>
+                  <Text style={styles.heroLocationText}>{group.location || 'Location not set'}</Text>
                 </View>
               </View>
             </View>
           </View>
 
           {/* Tab Navigation */}
-          <View className="mx-6 mt-2 p-1 rounded-2xl flex-row" style={{ backgroundColor: colors.inputBackground }}>
+          <View style={[styles.tabContainer, { backgroundColor: colors.inputBackground }]}>
             {tabs.map((tab) => (
               <TouchableOpacity
                 key={tab}
                 onPress={() => setActiveTab(tab)}
-                className={`flex-1 py-2.5 rounded-xl items-center justify-center transition-all`}
-                style={{
-                  backgroundColor: activeTab === tab ? colors.surface : 'transparent',
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: activeTab === tab ? 2 : 0 },
-                  shadowOpacity: activeTab === tab ? 0.05 : 0,
-                  shadowRadius: 4,
-                  elevation: activeTab === tab ? 2 : 0
-                }}
+                style={[
+                  styles.tabButton,
+                  {
+                    backgroundColor: activeTab === tab ? colors.surface : 'transparent',
+                    shadowOpacity: activeTab === tab ? 0.05 : 0,
+                    elevation: activeTab === tab ? 2 : 0
+                  }
+                ]}
               >
                 <Text
                   style={{
@@ -169,36 +168,36 @@ export default function GroupDetailsScreen() {
             ))}
           </View>
 
-          <View className="px-6 mt-6">
+          <View style={styles.sectionContainer}>
             {activeTab === 'About' && (
-              <View className="gap-6">
-                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                  <Text className="text-base leading-6" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+              <View style={styles.sectionGap}>
+                <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                  <Text style={[styles.descriptionText, { color: colors.textSecondary }]}>
                     {group.description || 'No description provided.'}
                   </Text>
                 </View>
 
-                <View className="flex-row gap-4">
-                  <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
-                    <Ionicons name="musical-notes-outline" size={24} color={colors.primary} className="mb-2" />
-                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Genre</Text>
-                    <Text className="text-center text-xs" style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>{group.genre || '-'}</Text>
+                <View style={styles.statsRow}>
+                  <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+                    <Ionicons name="musical-notes-outline" size={24} color={colors.primary} style={{ marginBottom: 8 }} />
+                    <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Genre</Text>
+                    <Text style={[styles.statSubValue, { color: colors.text }]}>{group.genre || '-'}</Text>
                   </View>
-                  <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
-                    <Ionicons name="star-outline" size={24} color={colors.primary} className="mb-2" />
-                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Rating</Text>
-                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>{group.rating || 'N/A'}</Text>
+                  <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+                    <Ionicons name="star-outline" size={24} color={colors.primary} style={{ marginBottom: 8 }} />
+                    <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rating</Text>
+                    <Text style={[styles.statValue, { color: colors.text }]}>{group.rating || 'N/A'}</Text>
                   </View>
                 </View>
 
-                {/* Owner Profile Link - Placeholder logic for now, assumes we might want to see the contact */}
-                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                  <Text className="text-sm uppercase tracking-wider mb-4" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Managed By</Text>
-                  <TouchableOpacity onPress={() => router.push('/profile')} className="flex-row items-center gap-4">
-                    <Image source={{ uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&fit=crop' }} className="w-12 h-12 rounded-full" />
-                    <View className="flex-1">
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Owner Profile</Text>
-                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.primary }}>View Profile</Text>
+                {/* Owner Profile Link */}
+                <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                  <Text style={[styles.statLabel, { color: colors.textSecondary, marginBottom: 16 }]}>Managed By</Text>
+                  <TouchableOpacity onPress={() => router.push('/profile')} style={styles.profileLink}>
+                    <Image source={{ uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&fit=crop' }} style={styles.profileAvatar} />
+                    <View style={styles.flex1}>
+                      <Text style={[styles.profileName, { color: colors.text }]}>Owner Profile</Text>
+                      <Text style={[styles.viewProfileText, { color: colors.primary }]}>View Profile</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
                   </TouchableOpacity>
@@ -206,20 +205,18 @@ export default function GroupDetailsScreen() {
               </View>
             )}
 
-
-
             {activeTab === 'Setup' && (
-              <View className="gap-6">
-                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                  <Text className="text-lg mb-4" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Stage Plot</Text>
-                  <View className="h-48 border-2 border-dashed rounded-xl items-center justify-center mb-2" style={{ borderColor: colors.border, backgroundColor: isDark ? '#1e293b' : '#f8fafc' }}>
+              <View style={styles.sectionGap}>
+                <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Stage Plot</Text>
+                  <View style={[styles.plotBox, { borderColor: colors.border, backgroundColor: isDark ? '#1e293b' : '#f8fafc' }]}>
                     <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
-                    <Text className="text-xs mt-2" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Standard 4-Piece Setup</Text>
+                    <Text style={{ marginTop: 8, fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Standard 4-Piece Setup</Text>
                   </View>
                 </View>
 
-                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                  <Text className="text-lg mb-4" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Input List</Text>
+                <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Input List</Text>
                   {[
                     { ch: 1, name: 'Kick', mic: 'Beta 52', stand: 'Boom' },
                     { ch: 2, name: 'Snare Top', mic: 'SM57', stand: 'Clip' },
@@ -228,11 +225,11 @@ export default function GroupDetailsScreen() {
                     { ch: 5, name: 'Gtr SL', mic: 'e609', stand: 'Short' },
                     { ch: 6, name: 'Vox Center', mic: 'SM58', stand: 'Straight' },
                   ].map((item, index) => (
-                    <View key={index} className="flex-row items-center py-3 border-b" style={{ borderColor: colors.border }}>
-                      <View className="w-8 items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-md mr-3">
+                    <View key={index} style={[styles.inputRow, { borderColor: colors.border }]}>
+                      <View style={[styles.inputCh, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                         <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{item.ch}</Text>
                       </View>
-                      <View className="flex-1">
+                      <View style={styles.flex1}>
                         <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{item.name}</Text>
                         <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>{item.mic} • {item.stand}</Text>
                       </View>
@@ -240,8 +237,8 @@ export default function GroupDetailsScreen() {
                   ))}
                 </View>
 
-                <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                  <Text className="text-lg mb-2" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Hospitality</Text>
+                <View style={[styles.card, { backgroundColor: colors.surface }]}>
+                  <Text style={[styles.sectionTitle, { marginBottom: 8, color: colors.text }]}>Hospitality</Text>
                   <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
                     Allergies: Peanuts (Bass Player).{'\n'}
                     Preferences: 4x Bottled Water, 2x Towels per show.
@@ -249,40 +246,41 @@ export default function GroupDetailsScreen() {
                 </View>
               </View>
             )}
+
             {activeTab === 'Connect' && (
-              <View className="gap-6">
+              <View style={styles.sectionGap}>
                 {/* For Venues - Booking */}
                 <View>
-                  <View className="flex-row items-center gap-2 mb-3">
-                    <View className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 items-center justify-center">
+                  <View style={styles.roleHeader}>
+                    <View style={[styles.roleIcon, { backgroundColor: isDark ? 'rgba(79, 70, 229, 0.3)' : '#E0E7FF' }]}>
                       <Ionicons name="storefront-outline" size={18} color={colors.primary} />
                     </View>
-                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>For Venues</Text>
+                    <Text style={[styles.roleTitle, { color: colors.text }]}>For Venues</Text>
                   </View>
 
-                  <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-                    <Text className="mb-3" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 13 }}>Send a booking request to hire this band for your event.</Text>
+                  <View style={[styles.bookingCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Text style={{ marginBottom: 12, fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 13 }}>Send a booking request to hire this band for your event.</Text>
 
-                    <Text className="mb-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Booking Message</Text>
-                    <View className="rounded-xl p-3 mb-4" style={{ backgroundColor: isDark ? '#1e293b' : '#f8fafc', borderWidth: 1, borderColor: colors.border }}>
+                    <Text style={[styles.inputLabel, { color: colors.text, fontSize: 14 }]}>Booking Message</Text>
+                    <View style={[styles.inputContainer, { backgroundColor: isDark ? '#1e293b' : '#f8fafc', borderColor: colors.border, marginBottom: 16 }]}>
                       <TextInput
                         placeholder='Introduce yourself and your event details...'
                         placeholderTextColor={colors.textSecondary}
                         multiline={true}
-                        style={{ height: 100, textAlignVertical: 'top', fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text }}
+                        style={[styles.textInputShort, { color: colors.text }]}
                       />
                     </View>
 
-                    <Text className="mb-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Event Proposal</Text>
-                    <TouchableOpacity className="border-2 border-dashed rounded-xl p-5 items-center justify-center mb-4" style={{ borderColor: colors.border }}>
+                    <Text style={[styles.inputLabel, { color: colors.text, fontSize: 14 }]}>Event Proposal</Text>
+                    <TouchableOpacity style={[styles.uploadBoxSmall, { borderColor: colors.border }]}>
                       <Ionicons name="document-attach-outline" size={28} color={colors.primary} />
-                      <Text className="mt-2" style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.text }}>Upload Event Details</Text>
-                      <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>PDF, DOC (Max 10MB)</Text>
+                      <Text style={{ marginTop: 8, fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.text }}>Upload Event Details</Text>
+                      <Text style={{ fontSize: 12, marginTop: 4, fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>PDF, DOC (Max 10MB)</Text>
                     </TouchableOpacity>
 
-                    <View className="flex-row items-center gap-3 p-3 rounded-xl mb-4" style={{ backgroundColor: isDark ? '#1e293b' : '#f0f9ff' }}>
+                    <View style={[styles.termsRow, { backgroundColor: isDark ? '#1e293b' : '#f0f9ff' }]}>
                       <Ionicons name="newspaper-outline" size={20} color="#3B82F6" />
-                      <View className="flex-1">
+                      <View style={styles.flex1}>
                         <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.text }}>Booking Terms</Text>
                       </View>
                       <TouchableOpacity>
@@ -291,69 +289,67 @@ export default function GroupDetailsScreen() {
                     </View>
 
                     <TouchableOpacity
-                      className="w-full py-3.5 rounded-xl items-center shadow-md"
-                      style={{ backgroundColor: colors.primary }}
+                      style={[styles.actionButton, { backgroundColor: colors.primary }]}
                       onPress={() => setModalVisible(true)}
                     >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#fff' }}>Submit Booking Request</Text>
+                      <Text style={styles.actionButtonText}>Submit Booking Request</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
 
                 {/* Divider */}
-                <View className="flex-row items-center">
-                  <View className="flex-1 h-[1px] bg-gray-200 dark:bg-gray-700" />
-                  <Text className="mx-4 text-xs" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>OR</Text>
-                  <View className="flex-1 h-[1px] bg-gray-200 dark:bg-gray-700" />
+                <View style={styles.dividerContainer}>
+                  <View style={[styles.dividerLine, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
+                  <Text style={[styles.dividerText, { color: colors.textSecondary }]}>OR</Text>
+                  <View style={[styles.dividerLine, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
                 </View>
 
                 {/* For Musicians - Apply */}
                 <View>
-                  <View className="flex-row items-center gap-2 mb-3">
-                    <View className="w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 items-center justify-center">
+                  <View style={styles.roleHeader}>
+                    <View style={[styles.roleIcon, { backgroundColor: isDark ? 'rgba(21, 128, 61, 0.3)' : '#DCFCE7' }]}>
                       <Ionicons name="person-add-outline" size={18} color="#15803d" />
                     </View>
-                    <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Join the Band</Text>
+                    <Text style={[styles.roleTitle, { color: colors.text }]}>Join the Band</Text>
                   </View>
 
                   {/* Auditioning Banner */}
-                  <View className="p-4 rounded-2xl bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 mb-4">
-                    <View className="flex-row items-start gap-3">
-                      <View className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-800 items-center justify-center">
+                  <View style={[styles.auditionBanner, { backgroundColor: isDark ? 'rgba(21, 128, 61, 0.2)' : '#F0FDF4', borderColor: isDark ? '#166534' : '#DCFCE7' }]}>
+                    <View style={styles.auditionContent}>
+                      <View style={[styles.auditionIcon, { backgroundColor: isDark ? '#166534' : '#DCFCE7' }]}>
                         <Ionicons name="megaphone-outline" size={20} color="#15803d" />
                       </View>
-                      <View className="flex-1">
-                        <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>We're Auditioning!</Text>
-                        <Text className="mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 13 }}>
+                      <View style={styles.flex1}>
+                        <Text style={[styles.auditionTitle, { color: colors.text }]}>We're Auditioning!</Text>
+                        <Text style={[styles.auditionText, { color: colors.textSecondary }]}>
                           Looking for a <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Keyboardist</Text> and <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Bass Player</Text>. Send us your demo!
                         </Text>
                       </View>
                     </View>
                   </View>
 
-                  <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-                    <Text className="mb-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Why do you want to join?</Text>
-                    <View className="rounded-xl p-3 mb-4" style={{ backgroundColor: isDark ? '#1e293b' : '#f8fafc', borderWidth: 1, borderColor: colors.border }}>
+                  <View style={[styles.bookingCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    <Text style={[styles.inputLabel, { color: colors.text, fontSize: 14 }]}>Why do you want to join?</Text>
+                    <View style={[styles.inputContainer, { backgroundColor: isDark ? '#1e293b' : '#f8fafc', borderColor: colors.border, marginBottom: 16 }]}>
                       <TextInput
                         placeholder='Tell us about your experience and influences...'
                         placeholderTextColor={colors.textSecondary}
                         multiline={true}
-                        style={{ height: 100, textAlignVertical: 'top', fontFamily: 'Poppins_400Regular', fontSize: 14, color: colors.text }}
+                        style={[styles.textInputShort, { color: colors.text }]}
                       />
                     </View>
 
-                    <Text className="mb-2" style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Your Demo</Text>
-                    <TouchableOpacity className="border-2 border-dashed rounded-xl p-5 items-center justify-center mb-4" style={{ borderColor: colors.border }}>
+                    <Text style={[styles.inputLabel, { color: colors.text, fontSize: 14 }]}>Your Demo</Text>
+                    <TouchableOpacity style={[styles.uploadBoxSmall, { borderColor: colors.border }]}>
                       <Ionicons name="musical-notes" size={28} color={colors.primary} />
-                      <Text className="mt-2" style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.text }}>Link Audio/Video Demo</Text>
-                      <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>YouTube, Spotify, SoundCloud, etc.</Text>
+                      <Text style={{ marginTop: 8, fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.text }}>Link Audio/Video Demo</Text>
+                      <Text style={{ fontSize: 12, marginTop: 4, fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>YouTube, Spotify, SoundCloud, etc.</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      className="w-full py-3.5 rounded-xl items-center shadow-md"
-                      style={{ backgroundColor: '#15803d' }}
+                      style={[styles.actionButton, { backgroundColor: '#15803d' }]}
                     >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#fff' }}>Submit Audition</Text>
+                      <Text style={styles.actionButtonText}>Submit Audition</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -362,24 +358,24 @@ export default function GroupDetailsScreen() {
 
             {activeTab === "Review" && (
               <View>
-                <View className="items-center mb-8">
-                  <Text className="text-5xl mb-2" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>4.5</Text>
-                  <View className="flex-row gap-1 mb-2">
+                <View style={styles.ratingOverview}>
+                  <Text style={[styles.ratingBig, { color: colors.text }]}>4.5</Text>
+                  <View style={styles.ratingStars}>
                     {[1, 2, 3, 4].map(i => <Ionicons key={i} name="star" size={20} color={colors.primary} />)}
                     <Ionicons name="star-half" size={20} color={colors.primary} />
                   </View>
                   <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Based on 25 reviews</Text>
                 </View>
 
-                <View className="p-4 rounded-2xl mb-4" style={{ backgroundColor: colors.surface }}>
-                  <View className="flex-row justify-between items-start mb-2">
-                    <View className="flex-row items-center gap-2">
-                      <Image source={{ uri: 'https://i.pravatar.cc/100?img=12' }} className="w-8 h-8 rounded-full" />
+                <View style={[styles.reviewCard, { backgroundColor: colors.surface }]}>
+                  <View style={styles.reviewHeader}>
+                    <View style={styles.reviewerInfo}>
+                      <Image source={{ uri: 'https://i.pravatar.cc/100?img=12' }} style={styles.reviewerAvatar} />
                       <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Mark Santos</Text>
                     </View>
                     <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>2 weeks ago</Text>
                   </View>
-                  <View className="flex-row gap-0.5 mb-2">
+                  <View style={styles.reviewStars}>
                     {[1, 2, 3, 4, 5].map(i => <Ionicons key={i} name="star" size={14} color={colors.primary} />)}
                   </View>
                   <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, lineHeight: 20 }}>
@@ -387,12 +383,12 @@ export default function GroupDetailsScreen() {
                   </Text>
 
                   {/* Review Interactions */}
-                  <View className="flex-row items-center gap-4 mt-3">
-                    <TouchableOpacity className="flex-row items-center gap-1">
+                  <View style={styles.reviewActions}>
+                    <TouchableOpacity style={styles.reviewActionBtn}>
                       <Ionicons name="heart-outline" size={16} color={colors.textSecondary} />
                       <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>12</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity className="flex-row items-center gap-1">
+                    <TouchableOpacity style={styles.reviewActionBtn}>
                       <Ionicons name="chatbubble-outline" size={16} color={colors.textSecondary} />
                       <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Reply</Text>
                     </TouchableOpacity>
@@ -417,4 +413,362 @@ export default function GroupDetailsScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  centerContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flex1: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+  },
+  goBackBtn: {
+    marginTop: 16,
+  },
+  heroSection: {
+    paddingHorizontal: 24,
+    marginTop: 16,
+  },
+  heroImageContainer: {
+    width: '100%',
+    height: 224,
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 16,
+    position: 'relative',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+  },
+  reportButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 10,
+  },
+  favButton: {
+    position: 'absolute',
+    top: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 10,
+  },
+  heroOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 96,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  heroContent: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 16,
+  },
+  heroTitle: {
+    color: '#fff',
+    fontSize: 24,
+    fontFamily: 'Poppins_700Bold',
+    fontWeight: 'bold',
+  },
+  heroSubtitle: {
+    color: '#E5E7EB',
+    fontSize: 14,
+    marginLeft: 4,
+    fontFamily: 'Poppins_500Medium',
+  },
+  heroLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  heroLocationText: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    marginLeft: 4,
+    fontFamily: 'Poppins_400Regular',
+  },
+  tabContainer: {
+    marginHorizontal: 24,
+    marginTop: 8,
+    padding: 4,
+    borderRadius: 16,
+    flexDirection: 'row',
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionContainer: {
+    paddingHorizontal: 24,
+    marginTop: 24,
+  },
+  sectionGap: {
+    gap: 24,
+  },
+  card: {
+    padding: 16,
+    borderRadius: 16,
+  },
+  descriptionText: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontFamily: 'Poppins_400Regular',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  statCard: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statLabel: {
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  statSubValue: {
+    textAlign: 'center',
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+  },
+  statValue: {
+    fontSize: 18,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  profileLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  profileAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  profileName: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 16,
+  },
+  viewProfileText: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    marginBottom: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  plotBox: {
+    height: 192,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  inputCh: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
+    marginRight: 12,
+  },
+  roleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  roleIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleTitle: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 16,
+  },
+  bookingCard: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  inputLabel: {
+    marginBottom: 8,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  inputContainer: {
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+  },
+  textInputShort: {
+    height: 100,
+    textAlignVertical: 'top',
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 14,
+  },
+  uploadBoxSmall: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  actionButton: {
+    width: '100%',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  actionButtonText: {
+    fontFamily: 'Poppins_600SemiBold',
+    color: '#fff',
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+  },
+  auditionBanner: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  auditionContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  auditionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  auditionTitle: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 15,
+  },
+  auditionText: {
+    marginTop: 4,
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 13,
+  },
+  ratingOverview: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  ratingBig: {
+    fontSize: 48,
+    marginBottom: 8,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  ratingStars: {
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 8,
+  },
+  reviewCard: {
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  reviewerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  reviewerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  reviewStars: {
+    flexDirection: 'row',
+    gap: 2,
+    marginBottom: 8,
+  },
+  reviewActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 12,
+  },
+  reviewActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+});
 

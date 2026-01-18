@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
 import React, { useCallback, useEffect, useState } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 
@@ -76,17 +76,13 @@ export default function Header({ title }: HeaderProps) {
 
     }, [addPath])
 
-
-
-
     return (
-        <View className="flex-row justify-between items-center pt-12 pb-4 px-2" style={{ backgroundColor: colors.background }}>
-            <View className="w-12 justify-center items-center">
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
+            <View style={styles.leftContainer}>
                 {backVisible ? (
                     <TouchableOpacity
                         onPress={() => router.back()}
-                        className="p-2 rounded-full"
-                        style={{ backgroundColor: isDark ? colors.surface : '#F3F4F6' }}
+                        style={[styles.backButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}
                     >
                         <Ionicons name="arrow-back" size={20} color={colors.text} />
                     </TouchableOpacity>
@@ -94,25 +90,25 @@ export default function Header({ title }: HeaderProps) {
             </View>
 
             {/* Title */}
-            <View className="flex-1 justify-center items-center">
-                <Text className="text-lg font-semibold tracking-wide" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
+            <View style={styles.titleContainer}>
+                <Text style={[styles.title, { color: colors.text }]}>
                     {title}
                 </Text>
             </View>
 
             {/* Action Button */}
-            <View className="w-12 justify-center items-center">
+            <View style={styles.rightContainer}>
                 {notifVisible ? (
-                    <TouchableOpacity onPress={() => router.push('/notifications')} className="p-2 relative">
+                    <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.iconButton}>
                         <Ionicons name="notifications-outline" size={24} color={colors.text} />
                         {hasUnread && (
-                            <View className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-red-500 border border-white dark:border-black" />
+                            <View style={styles.badge} />
                         )}
                     </TouchableOpacity>
                 ) : addbtnvisible ? (
                     <TouchableOpacity
                         onPress={() => router.push(btn)}
-                        className="p-1 rounded-full"
+                        style={styles.addButton}
                     >
                         <Ionicons name="add" size={28} color={colors.primary} />
                     </TouchableOpacity>
@@ -121,3 +117,58 @@ export default function Header({ title }: HeaderProps) {
         </View>
     );
 }
+
+const styles = StyleSheet.create({
+    container: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingTop: 48, // pt-12 (safe area approx)
+        paddingBottom: 16, // pb-4
+        paddingHorizontal: 8, // px-2
+    },
+    leftContainer: {
+        width: 48, // w-12
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    rightContainer: {
+        width: 48, // w-12
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    backButton: {
+        padding: 8,
+        borderRadius: 9999, // rounded-full
+    },
+    titleContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    title: {
+        fontSize: 18, // text-lg
+        fontWeight: '600', // font-semibold
+        letterSpacing: 0.5, // tracking-wide
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    iconButton: {
+        padding: 8,
+        position: 'relative',
+    },
+    badge: {
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: '#EF4444', // red-500
+        borderWidth: 1,
+        borderColor: 'white',
+    },
+    addButton: {
+        padding: 4,
+        borderRadius: 9999,
+    },
+});

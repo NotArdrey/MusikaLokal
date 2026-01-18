@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { LayoutAnimation, Linking, Platform, ScrollView, Text, TouchableOpacity, UIManager, View } from 'react-native';
+import { LayoutAnimation, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -45,60 +45,62 @@ export default function HelpSupportScreen() {
     ];
 
     return (
-        <View className="flex-1" style={{ backgroundColor: colors.background }}>
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
             <Header title="Help & Support" />
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
                 {/* Contact Support Section */}
-                <View className="p-6 mb-2">
-                    <Text className="text-lg font-bold mb-4" style={{ fontFamily: 'Poppins_700Bold', color: colors.text }}>Contact Us</Text>
-                    <View className="flex-row gap-4">
+                <View style={styles.contactSection}>
+                    <Text style={[styles.contactTitle, { color: colors.text }]}>Contact Us</Text>
+                    <View style={styles.contactButtons}>
                         <TouchableOpacity
-                            className="flex-1 p-4 rounded-xl items-center justify-center border"
-                            style={{ backgroundColor: colors.card, borderColor: colors.border }}
+                            style={[styles.contactButton, { backgroundColor: colors.card, borderColor: colors.border }]}
                             onPress={() => Linking.openURL('mailto:support@musikalokal.com')}
                         >
                             <Ionicons name="mail-outline" size={28} color={colors.primary} />
-                            <Text className="mt-2 font-medium" style={{ color: colors.text }}>Email</Text>
+                            <Text style={[styles.contactButtonText, { color: colors.text }]}>Email</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            className="flex-1 p-4 rounded-xl items-center justify-center border"
-                            style={{ backgroundColor: colors.card, borderColor: colors.border }}
+                            style={[styles.contactButton, { backgroundColor: colors.card, borderColor: colors.border }]}
                             onPress={() => Linking.openURL('tel:+1234567890')}
                         >
                             <Ionicons name="call-outline" size={28} color={colors.primary} />
-                            <Text className="mt-2 font-medium" style={{ color: colors.text }}>Phone</Text>
+                            <Text style={[styles.contactButtonText, { color: colors.text }]}>Phone</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
 
                 {/* FAQs */}
-                <View className="px-6">
-                    <Text className="text-lg font-bold mb-4" style={{ fontFamily: 'Poppins_700Bold', color: colors.text }}>Frequently Asked Questions</Text>
+                <View style={styles.faqSection}>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Frequently Asked Questions</Text>
 
                     {FAQS.map((faq, index) => {
                         const isExpanded = expandedId === faq.id;
                         return (
-                            <View key={faq.id} className="mb-3">
+                            <View key={faq.id} style={styles.faqItem}>
                                 <TouchableOpacity
                                     onPress={() => toggleExpand(faq.id)}
-                                    className="flex-row justify-between items-center p-4 rounded-xl border"
-                                    style={{
-                                        backgroundColor: colors.card,
-                                        borderColor: colors.border,
-                                        borderBottomLeftRadius: isExpanded ? 0 : 12,
-                                        borderBottomRightRadius: isExpanded ? 0 : 12
-                                    }}
+                                    style={[
+                                        styles.faqHeader,
+                                        {
+                                            backgroundColor: colors.card,
+                                            borderColor: colors.border,
+                                            borderBottomLeftRadius: isExpanded ? 0 : 12,
+                                            borderBottomRightRadius: isExpanded ? 0 : 12
+                                        }
+                                    ]}
                                 >
-                                    <Text className="flex-1 font-medium mr-2" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{faq.question}</Text>
+                                    <Text style={[styles.faqQuestion, { color: colors.text }]}>{faq.question}</Text>
                                     <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.textSecondary} />
                                 </TouchableOpacity>
 
                                 {isExpanded && (
                                     <View
-                                        className="p-4 rounded-b-xl border-x border-b"
-                                        style={{ backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB', borderColor: colors.border }}
+                                        style={[
+                                            styles.faqContent,
+                                            { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB', borderColor: colors.border }
+                                        ]}
                                     >
                                         <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, lineHeight: 20 }}>{faq.answer}</Text>
                                     </View>
@@ -109,20 +111,106 @@ export default function HelpSupportScreen() {
                 </View>
 
                 {/* Links */}
-                <View className="px-6 mt-8">
-                    <TouchableOpacity className="py-3 border-b border-gray-100 dark:border-gray-800">
+                <View style={styles.linksSection}>
+                    <TouchableOpacity style={[styles.linkItem, { borderColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                         <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>Terms of Service</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity className="py-3">
+                    <TouchableOpacity style={styles.linkItemLast}>
                         <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>Privacy Policy</Text>
                     </TouchableOpacity>
                 </View>
 
             </ScrollView>
 
-            <View className="absolute bottom-0 left-0 right-0">
+            <View style={styles.navbarContainer}>
                 <Navbar />
             </View>
         </View>
     );
 }
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+    },
+    scrollContent: {
+        paddingBottom: 100,
+    },
+    contactSection: {
+        padding: 24,
+        marginBottom: 8,
+    },
+    contactTitle: {
+        fontSize: 18, // text-lg
+        fontWeight: 'bold',
+        marginBottom: 16,
+        fontFamily: 'Poppins_700Bold',
+    },
+    contactButtons: {
+        flexDirection: 'row',
+        gap: 16,
+    },
+    contactButton: {
+        flex: 1,
+        padding: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+    },
+    contactButtonText: {
+        marginTop: 8,
+        fontWeight: '500', // font-medium
+    },
+    faqSection: {
+        paddingHorizontal: 24,
+    },
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        marginBottom: 16,
+        fontFamily: 'Poppins_700Bold',
+    },
+    faqItem: {
+        marginBottom: 12,
+    },
+    faqHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    faqQuestion: {
+        flex: 1,
+        fontWeight: '500',
+        marginRight: 8,
+        fontFamily: 'Poppins_500Medium',
+    },
+    faqContent: {
+        padding: 16,
+        borderBottomLeftRadius: 12,
+        borderBottomRightRadius: 12,
+        borderLeftWidth: 1,
+        borderRightWidth: 1,
+        borderBottomWidth: 1,
+    },
+    linksSection: {
+        paddingHorizontal: 24,
+        marginTop: 32,
+    },
+    linkItem: {
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+    },
+    linkItemLast: {
+        paddingVertical: 12,
+    },
+    navbarContainer: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+    },
+});

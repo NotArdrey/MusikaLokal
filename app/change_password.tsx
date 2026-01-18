@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import { useTheme } from '../src/context/ThemeContext';
@@ -24,28 +24,29 @@ export default function ChangePasswordScreen() {
         setShow: (show: boolean) => void,
         placeholder: string
     ) => (
-        <View className="mb-6">
-            <Text className="text-base mb-2 font-medium" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>
+        <View style={styles.inputWrapper}>
+            <Text style={[styles.label, { color: colors.text }]}>
                 {label}
             </Text>
             <View
-                className="w-full px-4 py-3.5 rounded-xl border flex-row items-center relative"
-                style={{
-                    backgroundColor: colors.inputBackground,
-                    borderColor: colors.border
-                }}
+                style={[
+                    styles.inputContainer,
+                    {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.border
+                    }
+                ]}
             >
                 <TextInput
-                    className="flex-1 text-base ml-1 pr-8"
+                    style={[styles.input, { color: colors.text }]}
                     placeholder={placeholder}
                     placeholderTextColor={colors.textSecondary}
                     value={value}
                     onChangeText={setValue}
                     secureTextEntry={!show}
-                    style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
                 />
                 <TouchableOpacity
-                    className="absolute right-4"
+                    style={styles.eyeIcon}
                     onPress={() => setShow(!show)}
                 >
                     <Ionicons
@@ -60,10 +61,10 @@ export default function ChangePasswordScreen() {
 
     return (
         <>
-            <View className="flex-1 px-6" style={{ backgroundColor: colors.background }}>
+            <View style={[styles.container, { backgroundColor: colors.background }]}>
                 <Header title="Change Password" />
 
-                <View className="mt-8">
+                <View style={styles.formContainer}>
                     {renderPasswordInput(
                         "Current Password",
                         currentPassword,
@@ -92,13 +93,18 @@ export default function ChangePasswordScreen() {
                     )}
                 </View>
 
-                <View className="mt-2">
+                <View style={styles.buttonContainer}>
                     <TouchableOpacity
-                        className="w-full py-4 rounded-xl shadow-lg shadow-indigo-500/30 items-center justify-center"
-                        style={{ backgroundColor: colors.primary }}
+                        style={[
+                            styles.button,
+                            {
+                                backgroundColor: colors.primary,
+                                shadowColor: '#6366F1', // indigo-500
+                            }
+                        ]}
                         onPress={() => setModalVisible(true)}
                     >
-                        <Text className="text-white text-base font-semibold" style={{ fontFamily: 'Poppins_600SemiBold' }}>
+                        <Text style={styles.buttonText}>
                             Update Password
                         </Text>
                     </TouchableOpacity>
@@ -116,3 +122,60 @@ export default function ChangePasswordScreen() {
     );
 }
 
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        paddingHorizontal: 24,
+    },
+    formContainer: {
+        marginTop: 32,
+    },
+    inputWrapper: {
+        marginBottom: 24,
+    },
+    label: {
+        fontSize: 16,
+        marginBottom: 8,
+        fontFamily: 'Poppins_500Medium',
+    },
+    inputContainer: {
+        width: '100%',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        position: 'relative',
+    },
+    input: {
+        flex: 1,
+        fontSize: 16,
+        marginLeft: 4,
+        paddingRight: 32,
+        fontFamily: 'Poppins_400Regular',
+    },
+    eyeIcon: {
+        position: 'absolute',
+        right: 16,
+    },
+    buttonContainer: {
+        marginTop: 8,
+    },
+    button: {
+        width: '100%',
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 8,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+    },
+    buttonText: {
+        color: 'white',
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+});

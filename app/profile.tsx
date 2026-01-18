@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
@@ -116,7 +116,7 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
         <Text style={{ color: colors.textSecondary }}>Loading profile...</Text>
       </View>
     );
@@ -124,21 +124,23 @@ export default function ProfileScreen() {
 
   return (
     <>
-      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title={isOwner ? "My Profile" : "User Profile"} />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
           {/* Profile Header */}
-          <View className="px-6 pt-2 pb-6 items-center">
-            <View className="relative">
+          <View style={styles.headerProfile}>
+            <View style={styles.avatarWrapper}>
               <View
-                className="w-28 h-28 rounded-full overflow-hidden mb-4 border-4"
-                style={{ borderColor: colors.surface }}
+                style={[
+                  styles.avatarContainer,
+                  { borderColor: colors.surface }
+                ]}
               >
                 <Image
                   source={{ uri: profile?.avatar_url || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
-                  className="w-full h-full"
+                  style={styles.avatarImage}
                   resizeMode="cover"
                 />
               </View>
@@ -146,58 +148,56 @@ export default function ProfileScreen() {
               {isOwner && (
                 <TouchableOpacity
                   onPress={() => router.push('/edit_profile')}
-                  className="absolute bottom-4 right-0 p-2 rounded-full shadow-sm"
-                  style={{ backgroundColor: colors.primary }}
+                  style={[styles.editIconBtn, { backgroundColor: colors.primary }]}
                 >
                   <Ionicons name="pencil" size={16} color="#fff" />
                 </TouchableOpacity>
               )}
             </View>
 
-            <Text className="text-xl mb-1 text-center" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{profile?.full_name || 'User'}</Text>
-            <Text className="text-sm mb-4 text-center" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>{profile?.skills?.join(', ') || 'Musician'} • {profile?.location || 'Unknown'}</Text>
+            <Text style={[styles.nameText, { color: colors.text }]}>{profile?.full_name || 'User'}</Text>
+            <Text style={[styles.roleText, { color: colors.textSecondary }]}>{profile?.skills?.join(', ') || 'Musician'} • {profile?.location || 'Unknown'}</Text>
 
-            <View className="flex-row gap-2 flex-wrap justify-center mb-6">
+            <View style={styles.genreRow}>
               {(profile?.genres || ['Rock', 'Indie']).map((genre: string) => (
-                <View key={genre} className="px-3 py-1 rounded-full" style={{ backgroundColor: isDark ? '#1E293B' : '#F3F4F6' }}>
-                  <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>{genre}</Text>
+                <View key={genre} style={[styles.genreTag, { backgroundColor: isDark ? '#1E293B' : '#F3F4F6' }]}>
+                  <Text style={[styles.genreText, { color: colors.textSecondary }]}>{genre}</Text>
                 </View>
               ))}
             </View>
 
-            <View className="flex-row w-full justify-between px-2">
-              <View className="items-center flex-1">
-                <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 18, color: colors.text }}>{profile?.rating ? `${Math.round(profile.rating * 20)}%` : 'N/A'}</Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Rating</Text>
+            <View style={styles.statsContainer}>
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, { color: colors.text }]}>{profile?.rating ? `${Math.round(profile.rating * 20)}%` : 'N/A'}</Text>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rating</Text>
               </View>
-              <View className="w-[1px] h-full bg-gray-200" style={{ backgroundColor: colors.border }} />
-              <View className="items-center flex-1">
-                <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 18, color: colors.text }}>{profile?.review_count || 0}</Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Reviews</Text>
+              <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, { color: colors.text }]}>{profile?.review_count || 0}</Text>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Reviews</Text>
               </View>
-              <View className="w-[1px] h-full bg-gray-200" style={{ backgroundColor: colors.border }} />
-              <View className="items-center flex-1">
-                <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 18, color: colors.text }}>-</Text>
-                <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Active</Text>
+              <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, { color: colors.text }]}>-</Text>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Active</Text>
               </View>
             </View>
           </View>
 
           {/* Menu Items (Owner Only) */}
           {isOwner ? (
-            <View className="px-6 gap-3">
+            <View style={styles.menuContainer}>
               {MENU_ITEMS.map((item) => (
                 <TouchableOpacity
                   key={item.label}
                   onPress={() => router.push(item.route as any)}
-                  className="p-4 rounded-2xl flex-row items-center justify-between"
-                  style={{ backgroundColor: colors.surface }}
+                  style={[styles.menuItem, { backgroundColor: colors.surface }]}
                 >
-                  <View className="flex-row items-center gap-4">
-                    <View className="w-10 h-10 rounded-full items-center justify-center bg-gray-50 dark:bg-slate-800">
+                  <View style={styles.menuLeft}>
+                    <View style={[styles.iconBox, { backgroundColor: isDark ? '#1E293B' : '#F9FAFB' }]}>
                       <Ionicons name={item.icon as any} size={20} color={colors.text} />
                     </View>
-                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 15, color: colors.text }}>
+                    <Text style={[styles.menuLabel, { color: colors.text }]}>
                       {item.label}
                     </Text>
                   </View>
@@ -207,18 +207,16 @@ export default function ProfileScreen() {
             </View>
           ) : (
             /* Public View Actions */
-            /* Public View Actions */
-            <View className="px-6 gap-3">
+            <View style={styles.menuContainer}>
               <TouchableOpacity
                 onPress={() => router.push('/report?type=profile&name=Jared%20Lopez%20Bagtas' as any)}
-                className="p-4 rounded-2xl flex-row items-center justify-between"
-                style={{ backgroundColor: colors.surface }}
+                style={[styles.menuItem, { backgroundColor: colors.surface }]}
               >
-                <View className="flex-row items-center gap-4">
-                  <View className="w-10 h-10 rounded-full items-center justify-center" style={{ backgroundColor: isDark ? '#450a0a' : '#fef2f2' }}>
+                <View style={styles.menuLeft}>
+                  <View style={[styles.iconBox, { backgroundColor: isDark ? '#450a0a' : '#fef2f2' }]}>
                     <Ionicons name="flag-outline" size={20} color="#ef4444" />
                   </View>
-                  <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 15, color: '#ef4444' }}>
+                  <Text style={[styles.menuLabel, { color: '#ef4444' }]}>
                     Report User
                   </Text>
                 </View>
@@ -228,35 +226,33 @@ export default function ProfileScreen() {
           )}
 
           {/* Media Section */}
-          <View className="px-6 mt-6">
-            <Text className="mb-4 text-base" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Media & Portfolio</Text>
+          <View style={styles.mediaSection}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Media & Portfolio</Text>
             {(!profile?.portfolio_urls || profile.portfolio_urls.length === 0) ? (
-              <View className="items-center justify-center py-10 border border-dashed rounded-2xl" style={{ borderColor: colors.border }}>
+              <View style={[styles.emptyMedia, { borderColor: colors.border }]}>
                 <Ionicons name="images-outline" size={32} color={colors.textSecondary} />
-                <Text className="mt-2 text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>No media yet</Text>
+                <Text style={{ marginTop: 8, fontSize: 14, fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>No media yet</Text>
                 {isOwner && (
                   <TouchableOpacity
                     onPress={addMediaToPortfolio}
                     disabled={uploading}
-                    className="mt-3 px-4 py-2 rounded-lg"
-                    style={{ backgroundColor: uploading ? colors.textSecondary : colors.primary }}
+                    style={[styles.uploadBtn, { backgroundColor: uploading ? colors.textSecondary : colors.primary }]}
                   >
-                    <Text style={{ fontFamily: 'Poppins_500Medium', color: '#fff', fontSize: 12 }}>
+                    <Text style={styles.uploadBtnText}>
                       {uploading ? 'Uploading...' : 'Add Media'}
                     </Text>
                   </TouchableOpacity>
                 )}
               </View>
             ) : (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-6 px-6 gap-3">
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaScroll}>
                 {profile.portfolio_urls.map((url: string, i: number) => (
-                  <View key={i} className="w-64 h-40 rounded-2xl overflow-hidden relative shadow-sm" style={{ backgroundColor: colors.surface }}>
+                  <View key={i} style={[styles.mediaItem, { backgroundColor: colors.surface }]}>
                     <Image
                       source={{ uri: url }}
-                      className="w-full h-full"
-                      style={{ opacity: 0.9 }}
+                      style={[styles.mediaImage, { opacity: 0.9 }]}
                     />
-                    <View className="absolute inset-0 items-center justify-center bg-black/20">
+                    <View style={styles.playOverlay}>
                       <Ionicons name="play-circle" size={40} color="#fff" />
                     </View>
                   </View>
@@ -271,4 +267,185 @@ export default function ProfileScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
+  centerContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scrollContent: {
+    paddingBottom: 150,
+  },
+  headerProfile: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 24,
+    alignItems: 'center',
+  },
+  avatarWrapper: {
+    position: 'relative',
+  },
+  avatarContainer: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    overflow: 'hidden',
+    marginBottom: 16,
+    borderWidth: 4,
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  editIconBtn: {
+    position: 'absolute',
+    bottom: 16,
+    right: 0,
+    padding: 8,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  nameText: {
+    fontSize: 20,
+    marginBottom: 4,
+    textAlign: 'center',
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  roleText: {
+    fontSize: 14,
+    marginBottom: 16,
+    textAlign: 'center',
+    fontFamily: 'Poppins_400Regular',
+  },
+  genreRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  genreTag: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 100,
+  },
+  genreText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statValue: {
+    fontFamily: 'Poppins_700Bold',
+    fontSize: 18,
+  },
+  statLabel: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 12,
+  },
+  statDivider: {
+    width: 1,
+    height: '100%',
+  },
+  menuContainer: {
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  menuItem: {
+    padding: 16,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  menuLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  iconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuLabel: {
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 15,
+  },
+  mediaSection: {
+    paddingHorizontal: 24,
+    marginTop: 24,
+  },
+  sectionTitle: {
+    marginBottom: 16,
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  emptyMedia: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 16,
+  },
+  uploadBtn: {
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  uploadBtnText: {
+    fontFamily: 'Poppins_500Medium',
+    color: '#fff',
+    fontSize: 12,
+  },
+  mediaScroll: {
+    marginLeft: -24,
+    paddingHorizontal: 24,
+    gap: 12,
+    marginRight: -24,
+  },
+  mediaItem: {
+    width: 256,
+    height: 160,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    shadowOpacity: 0.1,
+    elevation: 2,
+  },
+  mediaImage: {
+    width: '100%',
+    height: '100%',
+  },
+  playOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  }
+});
 

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -33,54 +33,55 @@ export default function PendingScreen() {
 
   return (
     <>
-      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Pending" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 24, paddingTop: 16 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {pendingItems.map((item) => (
             <View
               key={item.id}
-              className="mb-4 rounded-2xl overflow-hidden shadow-sm border"
-              style={{ backgroundColor: colors.card, borderColor: colors.border }}
+              style={[
+                styles.card,
+                { backgroundColor: colors.card, borderColor: colors.border }
+              ]}
             >
               <View>
                 <Image
                   source={{ uri: item.image }}
-                  className="w-full h-36"
+                  style={styles.cardImage}
                   resizeMode="cover"
                 />
-                <View className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md">
-                  <Text className="text-white text-[10px] font-medium" style={{ fontFamily: 'Poppins_600SemiBold' }}>{item.type}</Text>
+                <View style={styles.badgeContainer}>
+                  <Text style={styles.badgeText}>{item.type}</Text>
                 </View>
               </View>
 
-              <View className="p-4">
-                <View className="flex-row justify-between items-start mb-2">
-                  <View className="flex-1 mr-2">
-                    <Text className="text-base" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }} numberOfLines={1}>{item.name}</Text>
-                    <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>{item.date}</Text>
+              <View style={styles.cardContent}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardTitleWrapper}>
+                    <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
+                    <Text style={[styles.cardDate, { color: colors.textSecondary }]}>{item.date}</Text>
                   </View>
                 </View>
 
-                <View className="flex-row items-center justify-between mt-2 pt-3 border-t" style={{ borderColor: isDark ? colors.border : '#F3F4F6' }}>
-                  <View className="flex-row items-center">
+                <View style={[styles.cardFooter, { borderColor: isDark ? colors.border : '#F3F4F6' }]}>
+                  <View style={styles.statusRow}>
                     <Ionicons name="time-outline" size={16} color="#F59E0B" />
-                    <Text className="text-xs ml-1.5" style={{ fontFamily: 'Poppins_500Medium', color: "#F59E0B" }}>{item.status}</Text>
+                    <Text style={[styles.statusText, { color: "#F59E0B" }]}>{item.status}</Text>
                   </View>
 
                   {item.status === 'Action Required' ? (
                     <TouchableOpacity
                       onPress={() => setModalVisible(true)}
-                      className="px-4 py-2 rounded-lg bg-green-600"
+                      style={[styles.actionBtn, { backgroundColor: '#16A34A' }]}
                     >
-                      <Text className="text-xs text-white" style={{ fontFamily: 'Poppins_600SemiBold' }}>Confirm Now</Text>
+                      <Text style={[styles.actionBtnText, { color: 'white' }]}>Confirm Now</Text>
                     </TouchableOpacity>
                   ) : (
                     <TouchableOpacity
-                      className="px-4 py-2 rounded-lg border"
-                      style={{ borderColor: colors.border }}
+                      style={[styles.outlineBtn, { borderColor: colors.border }]}
                     >
-                      <Text className="text-xs" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>View Details</Text>
+                      <Text style={[styles.outlineBtnText, { color: colors.textSecondary }]}>View Details</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -89,7 +90,7 @@ export default function PendingScreen() {
           ))}
         </ScrollView>
 
-        <View className="absolute bottom-0 left-0 right-0">
+        <View style={styles.navbarContainer}>
           <Navbar />
         </View>
       </View>
@@ -105,3 +106,107 @@ export default function PendingScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+  },
+  card: {
+    marginBottom: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  cardImage: {
+    width: '100%',
+    height: 144,
+  },
+  badgeContainer: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 9999,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  badgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  cardContent: {
+    padding: 16,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  cardTitleWrapper: {
+    flex: 1,
+    marginRight: 8,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  cardDate: {
+    fontSize: 12,
+    marginTop: 4,
+    fontFamily: 'Poppins_400Regular',
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusText: {
+    fontSize: 12,
+    marginLeft: 6,
+    fontFamily: 'Poppins_500Medium',
+  },
+  actionBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  actionBtnText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  outlineBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  outlineBtnText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+  },
+  navbarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+});

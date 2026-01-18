@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { Image, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
@@ -30,7 +30,6 @@ export default function FindAGigScreen() {
         body: { query: searchQuery, type: selectedType, genre: selectedGenre, sortBy }
       });
       if (error) throw error;
-      console.log('Results:', data);
       setResults(data || []);
     } catch (e) {
       console.log('Error fetching results:', e);
@@ -45,19 +44,24 @@ export default function FindAGigScreen() {
 
   const renderPill = (label: string, selected: boolean, onPress: () => void) => (
     <TouchableOpacity
+      key={label}
       onPress={onPress}
-      className={`px-5 py-2.5 rounded-full mr-2 ${selected ? 'bg-primary-600' : 'bg-transparent border'}`}
-      style={{
-        backgroundColor: selected ? colors.primary : 'transparent',
-        borderColor: selected ? colors.primary : colors.border
-      }}
+      style={[
+        styles.pillButton,
+        {
+          backgroundColor: selected ? colors.primary : 'transparent',
+          borderColor: selected ? colors.primary : colors.border,
+          borderWidth: selected ? 0 : 1,
+        }
+      ]}
     >
       <Text
-        className="text-sm font-medium"
-        style={{
-          fontFamily: 'Poppins_500Medium',
-          color: selected ? '#FFFFFF' : colors.textSecondary
-        }}
+        style={[
+          styles.pillText,
+          {
+            color: selected ? '#FFFFFF' : colors.textSecondary
+          }
+        ]}
       >
         {label}
       </Text>
@@ -66,59 +70,81 @@ export default function FindAGigScreen() {
 
   const renderCard = (type: string, title: string, rating: string, location: string, tags: string[], price: string | null, distance: string, description: string, imageUri: string) => (
     <TouchableOpacity
-      className="mb-6 rounded-2xl overflow-hidden shadow-md"
-      style={{ backgroundColor: colors.card, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 3 }}
+      key={title + location} // Simple key for now
+      style={[
+        styles.cardContainer,
+        {
+          backgroundColor: colors.card,
+          // Shadow props for iOS
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 8,
+          // Elevation for Android
+          elevation: 3,
+        }
+      ]}
       onPress={() => { }}
     >
-      <View className="relative h-48">
+      <View style={styles.cardHeader}>
         <Image
           source={{ uri: imageUri }}
-          className="w-full h-full"
+          style={styles.cardImage}
           resizeMode="cover"
         />
-        <View className="absolute top-3 left-3 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md">
-          <Text className="text-white text-[10px] font-bold uppercase tracking-wide" style={{ fontFamily: 'Poppins_700Bold' }}>{type}</Text>
+        <View style={styles.cardBadge}>
+          <Text style={styles.cardBadgeText}>{type}</Text>
         </View>
-        <View className="absolute bottom-3 right-3 flex-row items-center bg-white/90 rounded-full px-2.5 py-1">
+        <View style={styles.ratingContainer}>
           <Ionicons name="star" size={12} color="#F59E0B" />
-          <Text className="ml-1 text-xs font-bold text-gray-900" style={{ fontFamily: 'Poppins_600SemiBold' }}>{rating}</Text>
+          <Text style={styles.ratingText}>{rating}</Text>
         </View>
       </View>
 
-      <View className="p-4">
-        <View className="flex-row justify-between items-start mb-1">
-          <Text className="text-lg flex-1 mr-2" style={{ fontFamily: 'Poppins_700Bold', color: colors.text }} numberOfLines={1}>{title}</Text>
+      <View style={styles.cardContent}>
+        <View style={styles.cardTitleRow}>
+          <Text
+            style={[styles.cardTitle, { color: colors.text }]}
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
         </View>
 
-        <View className="flex-row items-center mb-3">
+        <View style={styles.cardLocationRow}>
           <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-          <Text className="ml-1 text-xs" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }} numberOfLines={1}>{location}</Text>
+          <Text
+            style={[styles.cardLocationText, { color: colors.textSecondary }]}
+            numberOfLines={1}
+          >
+            {location}
+          </Text>
         </View>
 
-        <View className="flex-row flex-wrap gap-2 mb-4">
+        <View style={styles.tagsContainer}>
           {tags.map((tag, index) => (
-            <View key={index} className="px-2.5 py-1 rounded-md bg-indigo-50 dark:bg-indigo-900/20">
-              <Text className="text-[10px] font-medium" style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>{tag}</Text>
+            <View key={index} style={[styles.tag, { backgroundColor: isDark ? '#312E81' : '#E0E7FF' }]}>
+              <Text style={[styles.tagText, { color: colors.primary }]}>{tag}</Text>
             </View>
           ))}
         </View>
 
-        <View className="flex-row items-center justify-between pt-3 border-t" style={{ borderColor: isDark ? colors.border : '#F3F4F6' }}>
+        <View style={[styles.cardFooter, { borderColor: isDark ? colors.border : '#F3F4F6' }]}>
           <View>
             {price && (
-              <View className="flex-row items-center">
-                <Ionicons name="cash-outline" size={14} color={colors.textSecondary} className="mr-1" />
-                <Text className="text-xs" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>{price}</Text>
+              <View style={styles.priceContainer}>
+                <Ionicons name="cash-outline" size={14} color={colors.textSecondary} style={{ marginRight: 4 }} />
+                <Text style={[styles.priceText, { color: colors.primary }]}>{price}</Text>
               </View>
             )}
-            <View className="flex-row items-center mt-0.5">
-              <Ionicons name="navigate-outline" size={14} color={colors.textSecondary} className="mr-1" />
-              <Text className="text-xs" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>{distance}</Text>
+            <View style={styles.distanceContainer}>
+              <Ionicons name="navigate-outline" size={14} color={colors.textSecondary} style={{ marginRight: 4 }} />
+              <Text style={[styles.distanceText, { color: colors.textSecondary }]}>{distance}</Text>
             </View>
           </View>
 
-          <View className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-800">
-            <Text className="text-xs font-semibold" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>View Details</Text>
+          <View style={[styles.detailsButton, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+            <Text style={[styles.detailsButtonText, { color: colors.text }]}>View Details</Text>
           </View>
         </View>
       </View>
@@ -126,26 +152,25 @@ export default function FindAGigScreen() {
   );
 
   return (
-    <View className="flex-1" style={{ backgroundColor: colors.background }}>
+    <View style={[styles.flex1, { backgroundColor: colors.background }]}>
       <Header title="Find Talent & Spaces" />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 150 }}
+        contentContainerStyle={styles.scrollContent}
       >
 
-        {/* Search Bar - Consistent with Explore */}
-        <View className="px-6 pt-6 pb-2">
+        {/* Search Bar */}
+        <View style={styles.searchSection}>
           <View
-            className="flex-row items-center px-4 py-3.5 rounded-2xl"
-            style={{
-              backgroundColor: colors.inputBackground,
-            }}
+            style={[
+              styles.searchBar,
+              { backgroundColor: colors.inputBackground }
+            ]}
           >
             <Ionicons name="search" size={20} color={colors.textSecondary} />
             <TextInput
-              className="flex-1 ml-3 text-base"
-              style={{ fontFamily: 'Poppins_400Regular', color: colors.text }}
+              style={[styles.searchInput, { color: colors.text }]}
               placeholder="Search for Venues, Studios..."
               placeholderTextColor={colors.textSecondary}
               autoCapitalize="none"
@@ -156,44 +181,43 @@ export default function FindAGigScreen() {
         </View>
 
         {/* Filters */}
-        <View className="px-6 pb-2" style={{ backgroundColor: colors.background }}>
-          <View className="mt-4">
-            <Text className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Categories</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="gap-3" contentContainerStyle={{ paddingRight: 24 }}>
+        <View style={[styles.filterSection, { backgroundColor: colors.background }]}>
+          <View style={styles.filterGroup}>
+            <Text style={[styles.filterTitle, { color: colors.textSecondary }]}>Categories</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScrollContent}>
               {types.map(type => renderPill(type, selectedType === type, () => setSelectedType(type)))}
             </ScrollView>
           </View>
 
           <View>
-            <Text className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Genres</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="gap-3" contentContainerStyle={{ paddingRight: 24 }}>
+            <Text style={[styles.filterTitle, { color: colors.textSecondary }]}>Genres</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScrollContent}>
               {genres.map(genre => renderPill(genre, selectedGenre === genre, () => setSelectedGenre(genre)))}
             </ScrollView>
           </View>
 
-          <View className="flex-row items-center justify-between mt-6 mb-2">
-            <Text className="text-lg" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Results</Text>
+          <View style={styles.resultsHeader}>
+            <Text style={[styles.resultsTitle, { color: colors.text }]}>Results</Text>
             <TouchableOpacity
               onPress={() => setShowSortModal(true)}
-              className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-transparent"
-              style={{ borderColor: colors.border }}
+              style={[styles.sortButton, { borderColor: colors.border }]}
             >
               <Ionicons name="options-outline" size={14} color={colors.text} />
-              <Text className="text-xs font-medium" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>{sortBy}</Text>
+              <Text style={[styles.sortButtonText, { color: colors.text }]}>{sortBy}</Text>
               <Ionicons name="chevron-down" size={12} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Results */}
-        <View className="px-6 pt-2">
+        <View style={styles.resultsList}>
           {loading ? (
-            <Text className="text-gray-500 m-4">Searching...</Text>
+            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Searching...</Text>
           ) : results.length === 0 ? (
-            <View className="items-center justify-center py-20">
+            <View style={styles.emptyStateContainer}>
               <Ionicons name="search-outline" size={48} color={colors.border} />
-              <Text className="mt-4 text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>No results found</Text>
-              <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Try adjusting your filters</Text>
+              <Text style={[styles.emptyStateTitle, { color: colors.textSecondary }]}>No results found</Text>
+              <Text style={[styles.emptyStateSubtitle, { color: colors.textSecondary }]}>Try adjusting your filters</Text>
             </View>
           ) : results.map((item, index) => renderCard(
             item.itemType || item.type || 'Unknown',
@@ -218,13 +242,13 @@ export default function FindAGigScreen() {
         onRequestClose={() => setShowSortModal(false)}
       >
         <TouchableOpacity
-          className="flex-1 bg-black/50 justify-center items-center p-4"
+          style={styles.modalOverlay}
           activeOpacity={1}
           onPress={() => setShowSortModal(false)}
         >
-          <View className="w-full max-w-sm rounded-2xl overflow-hidden shadow-lg" style={{ backgroundColor: colors.card, borderWidth: isDark ? 1 : 0, borderColor: colors.border }}>
-            <View className="px-6 py-4 border-b" style={{ borderColor: colors.border }}>
-              <Text className="text-lg font-bold" style={{ fontFamily: 'Poppins_700Bold', color: colors.text }}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card, borderColor: colors.border, borderWidth: isDark ? 1 : 0 }]}>
+            <View style={[styles.modalHeader, { borderColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Sort Results
               </Text>
             </View>
@@ -236,8 +260,7 @@ export default function FindAGigScreen() {
                   setSortBy(option);
                   setShowSortModal(false);
                 }}
-                className="flex-row items-center justify-between px-6 py-4 border-b last:border-0"
-                style={{ borderColor: colors.border }}
+                style={[styles.sortOption, { borderColor: colors.border }]}
               >
                 <Text style={{
                   fontFamily: sortBy === option ? 'Poppins_600SemiBold' : 'Poppins_400Regular',
@@ -250,21 +273,302 @@ export default function FindAGigScreen() {
               </TouchableOpacity>
             ))}
 
-            <View className="p-4 bg-gray-50 dark:bg-black/20">
+            <View style={styles.modalFooter}>
               <TouchableOpacity
                 onPress={() => setShowSortModal(false)}
-                className="py-3 items-center rounded-xl bg-gray-200 dark:bg-gray-700"
+                style={styles.cancelButton}
               >
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Cancel</Text>
+                <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
       </Modal >
 
-      <View className="absolute bottom-0 left-0 right-0">
+      <View style={styles.navbarContainer}>
         <Navbar />
       </View>
     </View >
   );
 }
+
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 150,
+  },
+  searchSection: {
+    paddingHorizontal: 24, // px-6
+    paddingTop: 24, // pt-6
+    paddingBottom: 8, // pb-2
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 16,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 16,
+    fontFamily: 'Poppins_400Regular',
+  },
+  filterSection: {
+    paddingHorizontal: 24, // px-6
+    paddingBottom: 8, // pb-2
+  },
+  filterGroup: {
+    marginTop: 16,
+  },
+  filterTitle: {
+    fontSize: 12, // text-xs
+    marginBottom: 12, // mb-3
+    fontWeight: '600', // font-semibold
+    textTransform: 'uppercase',
+    letterSpacing: 1, // tracking-wider
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  filterScrollContent: {
+    paddingRight: 24,
+    gap: 12,
+  },
+  pillButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 9999,
+    marginRight: 8,
+  },
+  pillText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_500Medium',
+  },
+  resultsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  resultsTitle: {
+    fontSize: 18,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    backgroundColor: 'transparent',
+  },
+  sortButtonText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+  },
+  resultsList: {
+    paddingHorizontal: 24, // px-6
+    paddingTop: 8, // pt-2
+  },
+  loadingText: {
+    margin: 16,
+    fontFamily: 'Poppins_400Regular',
+  },
+  emptyStateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+  },
+  emptyStateTitle: {
+    marginTop: 16,
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+  },
+  emptyStateSubtitle: {
+    fontSize: 12,
+    marginTop: 4,
+    fontFamily: 'Poppins_400Regular',
+  },
+  // Card Styles
+  cardContainer: {
+    marginBottom: 24,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  cardHeader: {
+    height: 192, // h-48
+    position: 'relative',
+  },
+  cardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  cardBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  cardBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontFamily: 'Poppins_700Bold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  ratingContainer: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 9999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  ratingText: {
+    marginLeft: 4,
+    fontSize: 12,
+    color: '#111827',
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  cardContent: {
+    padding: 16,
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontFamily: 'Poppins_700Bold',
+    flex: 1,
+    marginRight: 8,
+  },
+  cardLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cardLocationText: {
+    marginLeft: 4,
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+    flex: 1,
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  tag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  tagText: {
+    fontSize: 10,
+    fontFamily: 'Poppins_500Medium',
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    borderTopWidth: 1,
+  },
+  priceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  priceText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  distanceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  distanceText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+  },
+  detailsButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  detailsButtonText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 384, // max-w-sm
+    borderRadius: 16,
+    overflow: 'hidden',
+    // Shadow
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  modalHeader: {
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontFamily: 'Poppins_700Bold',
+  },
+  sortOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  modalFooter: {
+    padding: 16,
+    backgroundColor: 'rgba(0,0,0,0.05)', // slight background hint
+  },
+  cancelButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 12,
+    backgroundColor: '#E5E7EB', // gray-200 / or dark variant handlded implicitly if strictly following theme, but modal footer bg logic is simpler here
+  },
+  cancelButtonText: {
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  navbarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+});

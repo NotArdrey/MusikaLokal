@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ScrollView, Switch, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -14,11 +14,13 @@ export default function NotificationSettingsScreen() {
 
   const renderToggle = (label: string, description: string, value: boolean, onValueChange: (val: boolean) => void) => (
     <View
-      className="flex-row items-center justify-between py-5 border-b"
-      style={{ borderColor: isDark ? colors.border : '#F3F4F6' }}
+      style={[
+        styles.row,
+        { borderColor: isDark ? colors.border : '#F3F4F6' }
+      ]}
       key={label}
     >
-      <View className="flex-1 pr-4">
+      <View style={styles.textContainer}>
         <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 15, color: colors.text }}>
           {label}
         </Text>
@@ -29,7 +31,7 @@ export default function NotificationSettingsScreen() {
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: isDark ? '#374151' : '#E5E7EB', true: colors.primary + '80' }} // Adding opacity to track for iOS/Android consistency
+        trackColor={{ false: isDark ? '#374151' : '#E5E7EB', true: colors.primary + '80' }}
         thumbColor={value ? colors.primary : '#F4F4F5'}
         ios_backgroundColor={isDark ? '#374151' : '#E5E7EB'}
       />
@@ -37,11 +39,11 @@ export default function NotificationSettingsScreen() {
   );
 
   return (
-    <View className="flex-1" style={{ backgroundColor: colors.background }}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title="Notification Settings" />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
-        <View className="px-6 pt-2">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.contentContainer}>
           {renderToggle(
             "Booking Confirmed",
             "Receive updates when your booking at a venue or studio is confirmed.",
@@ -75,9 +77,39 @@ export default function NotificationSettingsScreen() {
         </View>
       </ScrollView>
 
-      <View className="absolute bottom-0 left-0 right-0">
+      <View style={styles.navbarContainer}>
         <Navbar />
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 120,
+  },
+  contentContainer: {
+    paddingHorizontal: 24,
+    paddingTop: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+  },
+  textContainer: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  navbarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+});

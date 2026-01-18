@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -16,24 +16,24 @@ export default function SubmitReviewScreen() {
 
   return (
     <>
-      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Submit Feedback" />
 
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          className="flex-1"
+          style={styles.container}
         >
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 24, paddingTop: 20 }}>
-            <View className="items-center mb-8">
-              <Text className="text-xl font-semibold mb-2" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+            <View style={styles.header}>
+              <Text style={[styles.title, { color: colors.text }]}>
                 Rate your experience
               </Text>
-              <Text className="text-sm text-center px-4" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+              <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
                 How was your booking with SoundWave Studio Malolos?
               </Text>
             </View>
 
-            <View className="flex-row justify-center mb-10 gap-2">
+            <View style={styles.starsContainer}>
               {ratingOptions.map((item) => (
                 <TouchableOpacity
                   key={item}
@@ -50,18 +50,18 @@ export default function SubmitReviewScreen() {
             </View>
 
             <View>
-              <Text className="text-sm font-medium mb-2 ml-1" style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>Additional Comments</Text>
+              <Text style={[styles.label, { color: colors.text }]}>Additional Comments</Text>
               <TextInput
-                className={`rounded-xl border p-4 text-base ${isDark ? 'border-gray-700' : 'border-gray-200'}`}
+                style={[
+                  styles.textArea,
+                  {
+                    borderColor: isDark ? '#374151' : '#E5E7EB', // border-gray-700 : border-gray-200
+                    backgroundColor: colors.inputBackground,
+                    color: colors.text
+                  }
+                ]}
                 placeholder="Share your experience..."
                 placeholderTextColor={colors.textSecondary}
-                style={{
-                  height: 150,
-                  textAlignVertical: 'top',
-                  backgroundColor: colors.inputBackground,
-                  color: colors.text,
-                  fontFamily: 'Poppins_400Regular'
-                }}
                 multiline
                 value={feedback}
                 onChangeText={setFeedback}
@@ -69,21 +69,23 @@ export default function SubmitReviewScreen() {
             </View>
 
             <TouchableOpacity
-              className="mt-8 rounded-xl py-4 items-center shadow-md shadow-indigo-500/20"
-              style={{ backgroundColor: colors.primary, opacity: selectedValue === 0 ? 0.5 : 1 }}
+              style={[
+                styles.submitButton,
+                { backgroundColor: colors.primary, opacity: selectedValue === 0 ? 0.5 : 1 }
+              ]}
               onPress={() => {
                 if (selectedValue > 0) setModalVisible(true)
               }}
               disabled={selectedValue === 0}
             >
-              <Text className="text-white text-base" style={{ fontFamily: 'Poppins_600SemiBold' }}>
+              <Text style={styles.submitButtonText}>
                 Submit Review
               </Text>
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
 
-        <View className="absolute bottom-0 left-0 right-0">
+        <View style={styles.navbar}>
           <Navbar />
         </View>
       </View>
@@ -102,3 +104,72 @@ export default function SubmitReviewScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+    paddingHorizontal: 24,
+    paddingTop: 20,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  title: {
+    fontSize: 20, // text-xl
+    marginBottom: 8,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  subtitle: {
+    fontSize: 14, // text-sm
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    fontFamily: 'Poppins_400Regular',
+  },
+  starsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 40,
+    gap: 8,
+  },
+  label: {
+    fontSize: 14, // text-sm
+    marginBottom: 8,
+    marginLeft: 4,
+    fontFamily: 'Poppins_500Medium',
+  },
+  textArea: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    fontSize: 16, // text-base
+    height: 150,
+    textAlignVertical: 'top',
+    fontFamily: 'Poppins_400Regular',
+  },
+  submitButton: {
+    marginTop: 32,
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    shadowColor: '#6366f1',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3, // approximate shadow-md intent
+    elevation: 4,
+  },
+  submitButtonText: {
+    color: 'white',
+    fontSize: 16, // text-base
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  navbar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+});

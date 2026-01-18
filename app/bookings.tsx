@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
@@ -85,18 +85,21 @@ export default function BookingsScreen() {
     <TouchableOpacity
       key={tab}
       onPress={() => setActiveTab(tab)}
-      className={`px-4 py-2 rounded-full mr-2 border ${activeTab === tab ? 'bg-primary-500 border-primary-500' : 'bg-transparent border-gray-200'}`}
-      style={{
-        backgroundColor: activeTab === tab ? colors.primary : 'transparent',
-        borderColor: activeTab === tab ? colors.primary : colors.border
-      }}
+      style={[
+        styles.tabButton,
+        {
+          backgroundColor: activeTab === tab ? colors.primary : 'transparent',
+          borderColor: activeTab === tab ? colors.primary : colors.border
+        }
+      ]}
     >
       <Text
-        className="text-xs font-semibold"
-        style={{
-          fontFamily: 'Poppins_600SemiBold',
-          color: activeTab === tab ? '#FFF' : colors.textSecondary
-        }}
+        style={[
+          styles.tabText,
+          {
+            color: activeTab === tab ? '#FFF' : colors.textSecondary
+          }
+        ]}
       >
         {tab}
       </Text>
@@ -105,73 +108,74 @@ export default function BookingsScreen() {
 
   return (
     <>
-      <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="My Activity" />
 
         {/* Tab Navigation */}
-        <View className="pt-4 pb-2">
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 24 }}>
+        <View style={styles.tabContainer}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScrollContent}>
             {['Upcoming', 'Pending', 'Ongoing', 'Review'].map((tab) => renderTab(tab as Tab))}
           </ScrollView>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150, paddingHorizontal: 24, paddingTop: 16 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {loading ? (
-            <View className="items-center justify-center py-20">
-              <Text className="text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Loading bookings...</Text>
+            <View style={styles.centerContainer}>
+              <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading bookings...</Text>
             </View>
           ) : currentItems.length === 0 ? (
-            <View className="items-center justify-center py-20">
+            <View style={styles.centerContainer}>
               <Ionicons name="calendar-outline" size={48} color={colors.border} />
-              <Text className="mt-4 text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>No {activeTab.toLowerCase()} bookings</Text>
+              <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>No {activeTab.toLowerCase()} bookings</Text>
             </View>
           ) : (
             currentItems.map((item: any) => (
               <View
                 key={item.id}
-                className="mb-4 rounded-2xl overflow-hidden shadow-sm border"
-                style={{ backgroundColor: colors.card, borderColor: colors.border }}
+                style={[
+                  styles.cardContainer,
+                  { backgroundColor: colors.card, borderColor: colors.border }
+                ]}
               >
                 <View>
                   <Image
                     source={{ uri: item.image }}
-                    className="w-full h-36"
+                    style={[styles.cardImage, { opacity: item.isCancelled ? 0.6 : 1 }]}
                     resizeMode="cover"
-                    style={{ opacity: item.isCancelled ? 0.6 : 1 }}
                   />
-                  <View className="absolute top-3 left-3 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md">
-                    <Text className="text-white text-[10px] font-medium" style={{ fontFamily: 'Poppins_600SemiBold' }}>{item.type}</Text>
+                  <View style={styles.typeBadge}>
+                    <Text style={styles.typeBadgeText}>{item.type}</Text>
                   </View>
 
                   {/* Status Overlays */}
                   {activeTab === 'Ongoing' && (
-                    <View className="absolute top-3 right-3 px-3 py-1 rounded-full bg-green-500 shadow-md flex-row items-center animate-pulse">
-                      <View className="w-2 h-2 rounded-full bg-white mr-1.5" />
-                      <Text className="text-white text-[10px] font-bold uppercase">Live</Text>
+                    <View style={styles.liveBadge}>
+                      <View style={styles.liveDot} />
+                      <Text style={styles.liveText}>Live</Text>
                     </View>
                   )}
 
                   {item.isCancelled && (
-                    <View className="absolute inset-0 items-center justify-center bg-black/20">
-                      <View className="px-3 py-1 bg-red-500 rounded-lg">
-                        <Text className="text-white text-xs font-bold uppercase">Cancelled</Text>
+                    <View style={styles.cancelledOverlay}>
+                      <View style={styles.cancelledBadge}>
+                        <Text style={styles.cancelledText}>Cancelled</Text>
                       </View>
                     </View>
                   )}
                 </View>
 
-                <View className="p-4">
-                  <View className="flex-row justify-between items-start mb-2">
-                    <View className="flex-1 mr-2">
-                      <Text className="text-base" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }} numberOfLines={1}>{item.name}</Text>
-                      <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>{item.date}</Text>
+                <View style={styles.cardContent}>
+                  <View style={styles.cardHeader}>
+                    <View style={styles.cardTitleContainer}>
+                      <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
+                      <Text style={[styles.cardDate, { color: colors.textSecondary }]}>{item.date}</Text>
                     </View>
                   </View>
 
-                  <View className="flex-row items-center justify-between mt-2 pt-3 border-t" style={{ borderColor: isDark ? colors.border : '#F3F4F6' }}>
+                  <View style={[styles.cardFooter, { borderColor: isDark ? colors.border : '#F3F4F6' }]}>
 
                     {/* Status Text with Icon */}
-                    <View className="flex-row items-center">
+                    <View style={styles.statusContainer}>
                       {item.isCancelled ? (
                         <Ionicons name="close-circle" size={16} color="#EF4444" />
                       ) : activeTab === 'Ongoing' ? (
@@ -185,11 +189,12 @@ export default function BookingsScreen() {
                       )}
 
                       <Text
-                        className="text-xs ml-1.5"
-                        style={{
-                          fontFamily: 'Poppins_500Medium',
-                          color: item.isCancelled ? "#EF4444" : activeTab === 'Pending' ? "#F59E0B" : activeTab === 'Ongoing' ? "#10B981" : activeTab === 'Review' ? colors.textSecondary : "#10B981"
-                        }}
+                        style={[
+                          styles.statusText,
+                          {
+                            color: item.isCancelled ? "#EF4444" : activeTab === 'Pending' ? "#F59E0B" : activeTab === 'Ongoing' ? "#10B981" : activeTab === 'Review' ? colors.textSecondary : "#10B981"
+                          }
+                        ]}
                       >
                         {item.status}
                       </Text>
@@ -197,29 +202,29 @@ export default function BookingsScreen() {
 
 
                     {/* Action Buttons */}
-                    <View className="flex-row gap-2">
+                    <View style={styles.actionButtonsContainer}>
                       {activeTab === 'Pending' && item.action === 'Confirm Now' ? (
-                        <TouchableOpacity onPress={() => { setSelectedItem(item); setModalVisible(true); }} className="px-4 py-2 rounded-lg bg-green-600">
-                          <Text className="text-xs text-white" style={{ fontFamily: 'Poppins_600SemiBold' }}>Confirm Now</Text>
+                        <TouchableOpacity onPress={() => { setSelectedItem(item); setModalVisible(true); }} style={[styles.actionButton, { backgroundColor: '#16A34A' }]}>
+                          <Text style={[styles.actionButtonText, { color: 'white' }]}>Confirm Now</Text>
                         </TouchableOpacity>
                       ) : activeTab === 'Ongoing' ? (
-                        <TouchableOpacity className="px-4 py-2 rounded-lg bg-indigo-500 shadow-sm shadow-indigo-300" style={{ backgroundColor: colors.primary }}>
-                          <Text className="text-xs text-white" style={{ fontFamily: 'Poppins_600SemiBold' }}>Upload Proof</Text>
+                        <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.primary }]}>
+                          <Text style={[styles.actionButtonText, { color: 'white' }]}>Upload Proof</Text>
                         </TouchableOpacity>
                       ) : activeTab === 'Review' ? (
-                        <TouchableOpacity onPress={() => router.push('/submit_review' as any)} className="px-4 py-2 rounded-lg border-2" style={{ borderColor: colors.primary }}>
-                          <Text className="text-xs" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Leave Review</Text>
+                        <TouchableOpacity onPress={() => router.push('/submit_review' as any)} style={[styles.outlineButton, { borderColor: colors.primary }]}>
+                          <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Leave Review</Text>
                         </TouchableOpacity>
                       ) : (
                         // Default / Upcoming Buttons
-                        <View className="flex-row gap-2">
-                          <TouchableOpacity className="px-4 py-2 rounded-lg border" style={{ borderColor: colors.border }}>
-                            <Text className="text-xs" style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Details</Text>
+                        <View style={styles.defaultButtons}>
+                          <TouchableOpacity style={[styles.outlineButton, { borderColor: colors.border }]}>
+                            <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>Details</Text>
                           </TouchableOpacity>
 
                           {activeTab === 'Upcoming' && !item.isCancelled && (
-                            <TouchableOpacity onPress={() => { setSelectedItem(item); setModalVisible(true); }} className="px-4 py-2 rounded-lg bg-red-50 dark:bg-red-900/20">
-                              <Text className="text-xs text-red-600 dark:text-red-400" style={{ fontFamily: 'Poppins_600SemiBold' }}>Cancel</Text>
+                            <TouchableOpacity onPress={() => { setSelectedItem(item); setModalVisible(true); }} style={[styles.cancelButton, { backgroundColor: isDark ? 'rgba(127, 29, 29, 0.2)' : '#FEF2F2' }]}>
+                              <Text style={[styles.cancelButtonText, isDark ? { color: '#F87171' } : { color: '#DC2626' }]}>Cancel</Text>
                             </TouchableOpacity>
                           )}
                         </View>
@@ -233,7 +238,7 @@ export default function BookingsScreen() {
           )}
         </ScrollView>
 
-        <View className="absolute bottom-0 left-0 right-0">
+        <View style={styles.navbarPosition}>
           <Navbar />
         </View>
 
@@ -256,3 +261,203 @@ export default function BookingsScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
+  tabContainer: {
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  tabScrollContent: {
+    paddingHorizontal: 24,
+  },
+  tabButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 9999,
+    marginRight: 8,
+    borderWidth: 1,
+  },
+  tabText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  scrollContent: {
+    paddingBottom: 150,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+  },
+  centerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+  },
+  loadingText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+  },
+  emptyTitle: {
+    marginTop: 16,
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+  },
+  cardContainer: {
+    marginBottom: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    // Shadow
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  cardImage: {
+    width: '100%',
+    height: 144, // h-36
+  },
+  typeBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 9999,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  typeBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  liveBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 9999,
+    backgroundColor: '#22C55E', // green-500
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'white',
+    marginRight: 6,
+  },
+  liveText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  cancelledOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  cancelledBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    backgroundColor: '#EF4444', // red-500
+    borderRadius: 8,
+  },
+  cancelledText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  cardContent: {
+    padding: 16,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  cardTitleContainer: {
+    flex: 1,
+    marginRight: 8,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  cardDate: {
+    fontSize: 12,
+    marginTop: 4,
+    fontFamily: 'Poppins_400Regular',
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusText: {
+    fontSize: 12,
+    marginLeft: 6,
+    fontFamily: 'Poppins_500Medium',
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  actionButtonText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  outlineButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1, // Default border width for outline buttons
+  },
+  outlineButtonText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+  },
+  defaultButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  cancelButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  cancelButtonText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  navbarPosition: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+});
