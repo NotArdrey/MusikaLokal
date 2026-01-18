@@ -1,24 +1,68 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, usePathname } from 'expo-router';
-import React from 'react';
+import { router, useFocusEffect, usePathname } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 
 export default function Navbar() {
     const { colors } = useTheme();
     const pathname = usePathname();
-    let activeTab = '';
+    const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
+    const [role, setRole] = useState('');
 
-    // Active/Inactive colors from theme
+    useFocusEffect(
+        useCallback(() => {
+            fetchUserRole();
+        }, [])
+    );
+
+    const fetchUserRole = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            // Fetch generic profile to get role
+            const { data, error } = await supabase.functions.invoke('manage-profile', {
+                body: { action: 'fetch', userId: user.id }
+            });
+
+            if (data && data.role) {
+                setRole(data.role);
+                // Determine route based on role
+                if (data.role === 'studio-owner') {
+                    setManageRoute('/my_studio');
+                } else if (data.role === 'manager' || data.role === 'musician-member') {
+                    setManageRoute('/my_group');
+                } else if (data.role === 'venue-owner') {
+                    setManageRoute('/my_gig');
+                } else {
+                    setManageRoute('/manage'); // Default fallback page
+                }
+            } else {
+                setManageRoute('/manage');
+            }
+        } catch (e) {
+            console.log('Error fetching role for navbar:', e);
+            setManageRoute('/manage'); // Fallback on error
+        }
+    };
+
+    let activeTab = '';
     const ACTIVE_COLOR = colors.primary;
     const INACTIVE_COLOR = colors.muted;
-
 
     if (pathname.includes('home')) {
         activeTab = 'home';
     } else if (pathname.includes('bookings')) {
         activeTab = 'activity';
-    } else if (pathname.includes('my_studio') || pathname.includes('my_gig') || pathname.includes('my_group')) {
+    } else if (
+        pathname.includes('my_studio') ||
+        pathname.includes('my_gig') ||
+        pathname.includes('my_group') ||
+        pathname.includes('manage_') ||
+        pathname.includes('edit_')
+    ) {
         activeTab = 'manage';
     } else if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
         activeTab = 'profile';
@@ -70,7 +114,7 @@ export default function Navbar() {
 
             <TouchableOpacity
                 className={`justify-center items-center gap-1 ${activeTab === "manage" ? "opacity-100" : "opacity-60"}`}
-                onPress={() => router.push("/my_studio")}>
+                onPress={() => router.push(manageRoute as any)}>
                 <View className={`p-2 rounded-xl ${activeTab === "manage" ? "bg-primary-50" : "bg-transparent"}`}>
                     <Ionicons
                         name={activeTab === "manage" ? "briefcase" : "briefcase-outline"}

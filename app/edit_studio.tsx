@@ -7,26 +7,76 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
+import { useLocalSearchParams } from 'expo-router';
+import { supabase } from '../lib/supabase';
+
 export default function EditStudioScreen() {
   const { colors, isDark } = useTheme();
-  const [studioName, setStudioName] = useState('SoundWave Recording Studio');
-  const [description, setDescription] = useState('Professional recording studio equipped with state-of-the-art equipment and acoustic treatment for premium sound quality.');
-  const [address, setAddress] = useState('Malolos, Bulacan');
-  const [cost, setCost] = useState('800');
+  const { id } = useLocalSearchParams();
+  const [studioName, setStudioName] = useState('');
+  const [description, setDescription] = useState('');
+  const [address, setAddress] = useState('');
+  const [cost, setCost] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
 
-  const [amenities, setAmenities] = useState(['Soundproof Rooms', 'Mixing Console', 'Instruments', 'Wi-Fi']);
+  const [amenities, setAmenities] = useState<string[]>([]);
   const [newAmenity, setNewAmenity] = useState('');
-  const [selectedImages, setSelectedImages] = useState([
-    'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=300&h=200&fit=crop',
-    'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=300&h=200&fit=crop',
-    'https://images.unsplash.com/photo-1563330232-57114bb0823c?w=300&h=200&fit=crop'
-  ]);
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
 
-  const handleSave = () => {
-    setModalVisible(false);
-    console.log('Studio Updated');
-    router.back();
+  React.useEffect(() => {
+    fetchStudioDetails();
+  }, [id]);
+
+  const fetchStudioDetails = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_one', type: 'studio', id, userId: user.id }
+      });
+
+      if (error) throw error;
+      if (data) {
+        setStudioName(data.name);
+        setDescription(data.description);
+        setAddress(data.address);
+        setCost(data.hourly_rate?.toString() || '');
+        setAmenities(data.amenities || []);
+        // setSelectedImages(data.images || []);
+      }
+    } catch (e) {
+      console.log('Error fetching studio details:', e);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const payload = {
+        name: studioName,
+        description,
+        address,
+        hourly_rate: parseFloat(cost) || 0,
+        amenities,
+        // images: selectedImages,
+      };
+
+      const { error } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'update', type: 'studio', id, userId: user.id, payload }
+      });
+
+      if (error) throw error;
+
+      setModalVisible(false);
+      console.log('Studio Updated');
+      router.back();
+    } catch (e) {
+      console.log('Error updating studio:', e);
+      alert('Failed to update studio');
+    }
   };
 
   const addAmenity = () => {

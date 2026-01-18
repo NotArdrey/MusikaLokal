@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -33,10 +34,31 @@ export default function AddGroupScreen() {
     else router.back();
   };
 
-  const handleConfirm = () => {
-    setModalVisible(false);
-    console.log('Group Created');
-    router.back();
+  const handleConfirm = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const payload = {
+        name: groupName,
+        genre,
+        description,
+        members,
+      };
+
+      const { error } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'create', type: 'group', userId: user.id, payload }
+      });
+
+      if (error) throw error;
+
+      setModalVisible(false);
+      console.log('Group Created');
+      router.back();
+    } catch (e) {
+      console.log('Error creating group:', e);
+      alert('Failed to create group');
+    }
   };
 
   const addMember = () => {

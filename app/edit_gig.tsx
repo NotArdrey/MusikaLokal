@@ -7,12 +7,16 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
+import { useLocalSearchParams } from 'expo-router';
+import { supabase } from '../lib/supabase';
+
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
-  const [gigName, setGigName] = useState('BarRocks Music Lounge');
-  const [description, setDescription] = useState('A vibrant music venue in the heart of downtown, known for its eclectic mix of genres and lively atmosphere.');
-  const [address, setAddress] = useState('Floridel, Bulacan');
-  const [cost, setCost] = useState('6000');
+  const { id } = useLocalSearchParams();
+  const [gigName, setGigName] = useState('');
+  const [description, setDescription] = useState('');
+  const [address, setAddress] = useState('');
+  const [cost, setCost] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
 
   // Mock Data
@@ -23,10 +27,56 @@ export default function EditGigScreen() {
     'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=300&h=200&fit=crop'
   ]);
 
-  const handleSave = () => {
-    setModalVisible(false);
-    console.log('Gig Updated');
-    router.back();
+  React.useEffect(() => {
+    fetchGigDetails();
+  }, [id]);
+
+  const fetchGigDetails = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_one', type: 'gig', id, userId: user.id }
+      });
+
+      if (error) throw error;
+      if (data) {
+        setGigName(data.name);
+        setDescription(data.description);
+        setAddress(data.location);
+        setCost(data.budget?.toString() || '');
+        // setImages(data.images || []); // If backend has images
+      }
+    } catch (e) {
+      console.log('Error fetching gig details:', e);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const payload = {
+        name: gigName,
+        description,
+        location: address,
+        budget: parseFloat(cost) || 0,
+      };
+
+      const { error } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'update', type: 'gig', id, userId: user.id, payload }
+      });
+
+      if (error) throw error;
+      setModalVisible(false);
+      console.log('Gig Updated');
+      router.back();
+    } catch (e) {
+      console.log('Error updating gig:', e);
+      alert('Failed to update gig');
+    }
   };
 
   const renderSectionHeader = (title: string, icon: string) => (

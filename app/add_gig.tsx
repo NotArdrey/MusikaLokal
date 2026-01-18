@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -33,10 +34,32 @@ export default function AddGigScreen() {
         else router.back();
     };
 
-    const handleConfirm = () => {
-        setModalVisible(false);
-        console.log('Gig Created');
-        router.back();
+    const handleConfirm = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const payload = {
+                name: gigName,
+                description,
+                location: address,
+                budget: parseFloat(cost) || 0,
+                status: 'open'
+            };
+
+            const { error } = await supabase.functions.invoke('manage-listings', {
+                body: { action: 'create', type: 'gig', userId: user.id, payload }
+            });
+
+            if (error) throw error;
+
+            setModalVisible(false);
+            console.log('Gig Created');
+            // router.back() is handled by modal close usually or manual
+        } catch (e) {
+            console.log('Error creating gig:', e);
+            alert('Failed to create gig');
+        }
     };
 
     const renderInput = (label: string, value: string, setValue: (text: string) => void, placeholder: string, multiline = false, keyboardType: any = 'default') => (

@@ -7,22 +7,73 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
+import { useLocalSearchParams } from 'expo-router';
+import { supabase } from '../lib/supabase';
+
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
-  const [groupName, setGroupName] = useState('The Manila Beats');
-  const [genre, setGenre] = useState('OPM Rock');
-  const [description, setDescription] = useState('A dynamic music group specializing in contemporary Filipino music with a modern twist. We bring energy and passion to every performance.');
-  const [selectedImage, setSelectedImage] = useState('https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&h=300&fit=crop');
+  const { id } = useLocalSearchParams();
+  const [groupName, setGroupName] = useState('');
+  const [genre, setGenre] = useState('');
+  const [description, setDescription] = useState('');
+  const [selectedImage, setSelectedImage] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
 
-  // Mock Members
-  const [members, setMembers] = useState(['John Doe', 'Jane Smith', 'Mike Ross']);
+  // Members
+  const [members, setMembers] = useState<string[]>([]);
   const [newMember, setNewMember] = useState('');
 
-  const handleSave = () => {
-    setModalVisible(false);
-    console.log('Group Updated');
-    router.back();
+  React.useEffect(() => {
+    fetchGroupDetails();
+  }, [id]);
+
+  const fetchGroupDetails = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_one', type: 'group', id, userId: user.id }
+      });
+
+      if (error) throw error;
+      if (data) {
+        setGroupName(data.name);
+        setGenre(data.genre);
+        setDescription(data.description);
+        setMembers(data.members || []);
+        // setSelectedImage(data.images?.[0] || '');
+      }
+    } catch (e) {
+      console.log('Error fetching group details:', e);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const payload = {
+        name: groupName,
+        genre,
+        description,
+        members,
+      };
+
+      const { error } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'update', type: 'group', id, userId: user.id, payload }
+      });
+
+      if (error) throw error;
+
+      setModalVisible(false);
+      console.log('Group Updated');
+      router.back();
+    } catch (e) {
+      console.log('Error updating group:', e);
+      alert('Failed to update group');
+    }
   };
 
   const addMember = () => {
