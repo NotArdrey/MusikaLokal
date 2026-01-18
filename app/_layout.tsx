@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import '../global.css';
+import { AuthProvider } from '../src/context/AuthContext';
 import { ThemeProvider } from '../src/context/ThemeContext';
 
 SplashScreen.preventAutoHideAsync();
@@ -28,11 +29,13 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
-      <Stack 
-        screenOptions={{ 
-          headerShown: false,
-        }} 
-      />
+      <AuthProvider>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+          }}
+        />
+      </AuthProvider>
     </ThemeProvider>
   );
 }

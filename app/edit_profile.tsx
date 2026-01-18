@@ -27,6 +27,30 @@ export default function EditProfileScreen() {
     'Keyboardist', 'DJ', 'Producer', 'Sound Engineer'
   ];
 
+  const handleVerifyIdentity = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      Alert.alert('Starting Verification', 'Redirecting to Didit secure verification...');
+
+      const { data, error } = await supabase.functions.invoke('verify-identity', {
+        body: { action: 'create_session', userId: user.id }
+      });
+
+      if (error) throw error;
+
+      if (data && data.url) {
+        // In a real app, use WebBrowser.openBrowserAsync(data.url)
+        console.log('Verification URL:', data.url);
+        Alert.alert('Mock Success', `Opened verification URL: ${data.url}\n\n(In production this opens the browser)`);
+      }
+    } catch (e: any) {
+      console.log('Verification error:', e);
+      Alert.alert('Error', 'Failed to start verification');
+    }
+  };
+
   const pickAndUploadAvatar = async () => {
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -175,6 +199,28 @@ export default function EditProfileScreen() {
               <Text className="mt-3 text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>
                 {uploading ? 'Uploading...' : 'Change Photo'}
               </Text>
+            </View>
+
+            {/* Identity Verification Section */}
+            <View className="mb-8 p-4 rounded-2xl border border-blue-100 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800">
+              <View className="flex-row items-center justify-between mb-2">
+                <View className="flex-row items-center gap-2">
+                  <Ionicons name="shield-checkmark" size={20} color={colors.primary} />
+                  <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Identity Verification</Text>
+                </View>
+                <View className="px-2 py-1 rounded-full bg-yellow-100 dark:bg-yellow-900/30">
+                  <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 10, color: '#EAB308' }}>Unverified</Text>
+                </View>
+              </View>
+              <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12, marginBottom: 12 }}>
+                Verify your government ID and face liveliness to get a "Verified" badge and boost trust.
+              </Text>
+              <TouchableOpacity
+                onPress={handleVerifyIdentity}
+                className="py-3 rounded-xl items-center border border-blue-200 dark:border-blue-700 bg-white dark:bg-blue-900/10"
+              >
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Verify with Didit</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Form Fields */}
