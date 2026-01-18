@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import VerificationModal from '../src/components/VerificationModal';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function LoginScreen() {
@@ -12,6 +12,10 @@ export default function LoginScreen() {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+
+    // Verification Modal State
+    const [showVerification, setShowVerification] = useState(false);
+    const [verificationUrl, setVerificationUrl] = useState('');
 
     const handleLogin = async () => {
         if (!email || !password) {
@@ -112,27 +116,27 @@ export default function LoginScreen() {
 
     const startVerification = async (userId: string) => {
         try {
-            const { data, error } = await supabase.functions.invoke('verify-identity', {
-                body: { action: 'create_session', userId }
-            });
+            // Direct URL construction
+            const DIDIT_VERIFICATION_URL = 'https://verify.didit.me/verify/kxYhKHgC1LESNW-TQEmPcw';
+            const url = `${DIDIT_VERIFICATION_URL}?reference=${userId}`;
 
-            if (error) throw error;
+            setVerificationUrl(url);
+            setShowVerification(true);
 
-            if (data && data.url) {
-                // Open Didit verification URL in browser
-                await WebBrowser.openBrowserAsync(data.url);
-
-                // After browser closes, show success message
-                Alert.alert(
-                    'Verification Submitted',
-                    'Processing your ID. Please confirm your email if you haven\'t already.',
-                    [{ text: 'OK' }]
-                );
-            }
+            // Success alert handled by Modal onSuccess
         } catch (e) {
             console.log('Verification error:', e);
             Alert.alert('Error', 'Failed to start verification.');
         }
+    };
+
+    const handleVerificationSuccess = () => {
+        setShowVerification(false);
+        Alert.alert(
+            'Verification Submitted',
+            'Processing your ID. Please confirm your email if you haven\'t already.',
+            [{ text: 'OK' }]
+        );
     };
 
     return (
@@ -239,6 +243,13 @@ export default function LoginScreen() {
                     </View>
                 </View>
             </ScrollView>
+
+            <VerificationModal
+                visible={showVerification}
+                url={verificationUrl}
+                onClose={() => setShowVerification(false)}
+                onSuccess={handleVerificationSuccess}
+            />
         </KeyboardAvoidingView>
     );
 }

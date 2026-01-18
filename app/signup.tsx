@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import VerificationModal from '../src/components/VerificationModal';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function SignupScreen() {
@@ -13,6 +13,10 @@ export default function SignupScreen() {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+
+    // Verification Modal State
+    const [showVerification, setShowVerification] = useState(false);
+    const [verificationUrl, setVerificationUrl] = useState('');
 
     const handleSignup = async () => {
         if (!email || !password || !confirmPassword) {
@@ -91,18 +95,11 @@ export default function SignupScreen() {
 
             // Account created successfully - now trigger identity verification
             if (data.user) {
-                // Don't ask to check email yet. Go straight to verification.
-                Alert.alert(
-                    'Step 1 Complete! 🎵',
-                    'Your account is created. Now, let\'s verify your identity to activate it.',
-                    [
-                        {
-                            text: 'Start Verification',
-                            onPress: () => startVerification(data.user!.id),
-                            style: 'default'
-                        }
-                    ]
-                );
+                // Auto-redirect to Didit verification
+                // We use a small timeout to allow the UI to update slightly (optional, but good for UX)
+                setTimeout(() => {
+                    startVerification(data.user!.id);
+                }, 500);
             }
         } catch (e) {
             Alert.alert(
@@ -118,23 +115,14 @@ export default function SignupScreen() {
 
     const startVerification = async (userId: string) => {
         try {
-            const { data, error } = await supabase.functions.invoke('verify-identity', {
-                body: { action: 'create_session', userId }
-            });
+            // Direct URL construction
+            const DIDIT_VERIFICATION_URL = 'https://verify.didit.me/verify/kxYhKHgC1LESNW-TQEmPcw';
+            const url = `${DIDIT_VERIFICATION_URL}?reference=${userId}`;
 
-            if (error) throw error;
+            setVerificationUrl(url);
+            setShowVerification(true);
 
-            if (data && data.url) {
-                // Open Didit verification URL in browser
-                await WebBrowser.openBrowserAsync(data.url);
-
-                // After browser closes, show success message
-                Alert.alert(
-                    'Verification Submitted',
-                    'Great job! We are processing your ID.\n\nNow, please check your email inbox to confirm your account.',
-                    [{ text: 'Go to Login', onPress: () => router.push('/') }]
-                );
-            }
+            // Note: The success alert will be triggered by the modal's onSuccess callback
         } catch (e) {
             console.log('Verification error:', e);
             Alert.alert(
@@ -143,6 +131,15 @@ export default function SignupScreen() {
                 [{ text: 'Continue to Login', onPress: () => router.push('/') }]
             );
         }
+    };
+
+    const handleVerificationSuccess = () => {
+        setShowVerification(false);
+        Alert.alert(
+            'Verification Submitted',
+            'Great job! We are processing your ID.\n\nNow, please check your email inbox to confirm your account.',
+            [{ text: 'Go to Login', onPress: () => router.push('/') }]
+        );
     };
 
     return (
@@ -264,6 +261,13 @@ export default function SignupScreen() {
                     </View>
                 </View>
             </ScrollView>
-        </KeyboardAvoidingView>
+
+            <VerificationModal
+                visible={showVerification}
+                url={verificationUrl}
+                onClose={() => setShowVerification(false)}
+                onSuccess={handleVerificationSuccess}
+            />
+        </KeyboardAvoidingView >
     );
 }
