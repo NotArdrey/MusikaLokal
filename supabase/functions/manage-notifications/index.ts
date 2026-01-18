@@ -24,6 +24,24 @@ serve(async (req: Request) => {
 
         const { action, ...params } = await req.json()
 
+        // 0. UNREAD COUNT
+        if (action === 'unread_count') {
+            const { userId } = params
+
+            const { count, error } = await supabaseClient
+                .from('notifications')
+                .select('*', { count: 'exact', head: true })
+                .eq('user_id', userId)
+                .eq('read', false)
+
+            if (error) throw error
+
+            return new Response(JSON.stringify({ count }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
         // 1. FETCH NOTIFICATIONS
         if (action === 'fetch') {
             const { userId } = params

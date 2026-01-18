@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, usePathname } from "expo-router";
-import React, { useEffect, useState } from 'react';
+import { router, useFocusEffect, usePathname } from "expo-router";
+import React, { useCallback, useEffect, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 
 interface HeaderProps {
@@ -15,8 +16,32 @@ export default function Header({ title }: HeaderProps) {
     const [backVisible, setBackVisible] = useState(false);
     const [notifVisible, setnotifVisible] = useState(false);
     const [addbtnvisible, setaddbtnvisible] = useState(false);
+    const [hasUnread, setHasUnread] = useState(false);
     const addPath = usePathname();
     const [btn, setBtn] = useState<'/add_gig' | '/add_studio' | '/add_group'>('/add_gig');
+
+    useFocusEffect(
+        useCallback(() => {
+            checkUnreadNotifications();
+        }, [])
+    );
+
+    const checkUnreadNotifications = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const { data, error } = await supabase.functions.invoke('manage-notifications', {
+                body: { action: 'unread_count', userId: user.id }
+            });
+
+            if (!error && data) {
+                setHasUnread(data.count > 0);
+            }
+        } catch (e) {
+            console.log('Error checking notifications:', e);
+        }
+    };
 
     useEffect(() => {
         if (pathname === "/explore" || pathname === "/home" || pathname === "/manage" || pathname === "/bookings") {
@@ -78,9 +103,11 @@ export default function Header({ title }: HeaderProps) {
             {/* Action Button */}
             <View className="w-12 justify-center items-center">
                 {notifVisible ? (
-                    <TouchableOpacity onPress={() => router.push('/notifications')} className="p-2">
+                    <TouchableOpacity onPress={() => router.push('/notifications')} className="p-2 relative">
                         <Ionicons name="notifications-outline" size={24} color={colors.text} />
-                        <View className="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500" />
+                        {hasUnread && (
+                            <View className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-red-500 border border-white dark:border-black" />
+                        )}
                     </TouchableOpacity>
                 ) : addbtnvisible ? (
                     <TouchableOpacity
