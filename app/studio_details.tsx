@@ -1,18 +1,87 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function StudioDetailsScreen() {
+  const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
   const [activeTab, setActiveTab] = useState('About');
   const [modalVisible, setModalVisible] = useState(false);
+  const [studio, setStudio] = useState<any>(null);
+  const [isOwner, setIsOwner] = useState(false);
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchStudioDetails();
+  }, [id]);
+
+  const fetchStudioDetails = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+
+      const { data, error } = await supabase.functions.invoke('manage-details', {
+        body: { action: 'fetch', type: 'studio', id: id || '9d7f3d45-6678-4384-9345-123456789abc', userId } // Fallback ID for demo
+      });
+
+      if (error) throw error;
+      setStudio(data);
+      setIsOwner(data.is_owner);
+      setIsFavorited(data.is_favorited);
+    } catch (e) {
+      console.log('Error fetching studio:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleFavorite = async () => {
+    setIsFavorited(!isFavorited);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase.functions.invoke('manage-details', {
+        body: { action: 'toggle_favorite', type: 'studio', id: studio.id, userId: user.id }
+      });
+      if (data) setIsFavorited(data.is_favorited);
+    } catch (e) {
+      console.log('Error toggling favorite:', e);
+      setIsFavorited(!isFavorited);
+    }
+  };
+
+  const handleReport = () => {
+    router.push({ pathname: '/report', params: { type: 'studio', id: studio.id, name: studio.name } } as any);
+  };
 
   const tabs = ['About', 'Setup', 'Book', 'Review'];
+
+  if (loading) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+        <Text style={{ color: colors.textSecondary }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (!studio) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+        <Text style={{ color: colors.textSecondary }}>Studio not found.</Text>
+        <TouchableOpacity onPress={() => router.back()} className="mt-4">
+          <Text style={{ color: colors.primary }}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -28,31 +97,36 @@ export default function StudioDetailsScreen() {
               style={{ shadowColor: colors.primary, shadowOpacity: 0.2, shadowRadius: 10, elevation: 8 }}
             >
               <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop' }}
+                source={{ uri: (studio.images && studio.images[0]) || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop' }}
                 className="w-full h-full"
                 resizeMode="cover"
               />
-              {/* Report Button */}
-              <TouchableOpacity
-                onPress={() => router.push('/report?type=studio&name=SoundWave%20Studio' as any)}
-                className="absolute top-3 right-3 w-9 h-9 rounded-full items-center justify-center"
-                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
-              >
-                <Ionicons name="flag-outline" size={18} color="#fff" />
-              </TouchableOpacity>
+              {/* Report Button - Hide if Owner */}
+              {!isOwner && (
+                <TouchableOpacity
+                  onPress={handleReport}
+                  className="absolute top-3 right-3 w-9 h-9 rounded-full items-center justify-center"
+                  style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+                >
+                  <Ionicons name="flag-outline" size={18} color="#fff" />
+                </TouchableOpacity>
+              )}
+
               {/* Heart Button */}
               <TouchableOpacity
-                className="absolute top-3 right-14 w-9 h-9 rounded-full items-center justify-center"
+                onPress={toggleFavorite}
+                className={`absolute top-3 ${!isOwner ? 'right-14' : 'right-3'} w-9 h-9 rounded-full items-center justify-center`}
                 style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
               >
-                <Ionicons name="heart-outline" size={18} color="#fff" />
+                <Ionicons name={isFavorited ? "heart" : "heart-outline"} size={18} color={isFavorited ? "#EF4444" : "#fff"} />
               </TouchableOpacity>
+
               <View className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent" />
               <View className="absolute bottom-4 left-4 right-4">
-                <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>SoundWave Studio</Text>
+                <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>{studio.name}</Text>
                 <View className="flex-row items-center mt-1">
                   <Ionicons name="location-outline" size={14} color="#E5E7EB" />
-                  <Text className="text-gray-200 text-xs ml-1" style={{ fontFamily: 'Poppins_400Regular' }}>Malolos City, Bulacan, Philippines</Text>
+                  <Text className="text-gray-200 text-xs ml-1" style={{ fontFamily: 'Poppins_400Regular' }}>{studio.address || 'Address not set'}</Text>
                 </View>
               </View>
             </View>
@@ -92,20 +166,20 @@ export default function StudioDetailsScreen() {
               <View className="gap-6">
                 <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
                   <Text className="text-base leading-6" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
-                    SoundWave Recording Studio is a professional recording facility located in Malolos City, Bulacan. We offer state-of-the-art equipment including condenser microphones, acoustic treatment, mixing console, and monitoring systems.
+                    {studio.description || 'No description provided.'}
                   </Text>
                 </View>
 
                 <View className="flex-row gap-4">
                   <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
                     <Ionicons name="resize-outline" size={24} color={colors.primary} className="mb-2" />
-                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Size</Text>
-                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>30 sqm</Text>
+                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Rate</Text>
+                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>₱{studio.hourly_rate || '0'}/hr</Text>
                   </View>
                   <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
-                    <Ionicons name="mic-outline" size={24} color={colors.primary} className="mb-2" />
-                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Gear</Text>
-                    <Text className="text-center text-xs" style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>Pro Suite</Text>
+                    <Ionicons name="star-outline" size={24} color={colors.primary} className="mb-2" />
+                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Rating</Text>
+                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>{studio.rating || 'N/A'}</Text>
                   </View>
                 </View>
 

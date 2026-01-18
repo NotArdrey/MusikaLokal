@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -11,6 +12,32 @@ export default function FindAGigScreen() {
   const [selectedGenre, setSelectedGenre] = useState('All');
   const [sortBy, setSortBy] = useState('Relevance');
   const [showSortModal, setShowSortModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchResults();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [selectedType, selectedGenre, sortBy, searchQuery]);
+
+  async function fetchResults() {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('search-content', {
+        body: { query: searchQuery, type: selectedType, genre: selectedGenre, sortBy }
+      });
+      if (error) throw error;
+      console.log('Results:', data);
+      setResults(data || []);
+    } catch (e) {
+      console.log('Error fetching results:', e);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const sortOptions = ['Relevance', 'Distance', 'Rating', 'Price: Low to High', 'Price: High to Low'];
   const types = ['All', 'Venue', 'Studio', 'Music Group', 'Solo Artist'];
@@ -19,17 +46,17 @@ export default function FindAGigScreen() {
   const renderPill = (label: string, selected: boolean, onPress: () => void) => (
     <TouchableOpacity
       onPress={onPress}
-      className={`px-4 py-2 rounded-full mr-2 border ${selected ? 'border-primary-500 bg-primary-500' : 'border-gray-200 bg-transparent'}`}
+      className={`px-5 py-2.5 rounded-full mr-2 ${selected ? 'bg-primary-600' : 'bg-transparent border'}`}
       style={{
-        borderColor: selected ? colors.primary : colors.border,
-        backgroundColor: selected ? colors.primary : 'transparent'
+        backgroundColor: selected ? colors.primary : 'transparent',
+        borderColor: selected ? colors.primary : colors.border
       }}
     >
       <Text
-        className="text-xs font-medium"
+        className="text-sm font-medium"
         style={{
           fontFamily: 'Poppins_500Medium',
-          color: selected ? '#FFFFFF' : colors.text
+          color: selected ? '#FFFFFF' : colors.textSecondary
         }}
       >
         {label}
@@ -122,6 +149,8 @@ export default function FindAGigScreen() {
               placeholder="Search for Venues, Studios..."
               placeholderTextColor={colors.textSecondary}
               autoCapitalize="none"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
             />
           </View>
         </View>
@@ -130,14 +159,14 @@ export default function FindAGigScreen() {
         <View className="px-6 pb-2" style={{ backgroundColor: colors.background }}>
           <View className="mt-4">
             <Text className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Categories</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="gap-3" contentContainerStyle={{ paddingRight: 24 }}>
               {types.map(type => renderPill(type, selectedType === type, () => setSelectedType(type)))}
             </ScrollView>
           </View>
 
           <View>
             <Text className="text-xs mb-3 font-semibold uppercase tracking-wider" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary }}>Genres</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="gap-3" contentContainerStyle={{ paddingRight: 24 }}>
               {genres.map(genre => renderPill(genre, selectedGenre === genre, () => setSelectedGenre(genre)))}
             </ScrollView>
           </View>
@@ -158,35 +187,31 @@ export default function FindAGigScreen() {
 
         {/* Results */}
         <View className="px-6 pt-2">
-          {renderCard(
-            'Venue',
-            'Adonis Gay Bar',
-            '4.8',
-            'Plaridel Bulacan',
-            ['Gay Bar', 'Jazz Club', 'Live Music'],
-            '₱69,000 / night',
-            '6.9 km',
-            'Owned by JARED CARIASO...',
-            'https://picsum.photos/400/200?random=4'
-          )}
+          {loading ? (
+            <Text className="text-gray-500 m-4">Searching...</Text>
+          ) : results.length === 0 ? (
+            <View className="items-center justify-center py-20">
+              <Ionicons name="search-outline" size={48} color={colors.border} />
+              <Text className="mt-4 text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>No results found</Text>
+              <Text className="text-xs mt-1" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Try adjusting your filters</Text>
+            </View>
+          ) : results.map((item, index) => renderCard(
+            item.itemType || item.type || 'Unknown',
+            item.name,
+            String(item.rating || 'N/A'),
+            item.location || item.address || 'Unknown Location',
+            item.amenities || (item.genre ? [item.genre] : []),
+            item.hourly_rate ? `₱${item.hourly_rate} / hr` : null,
+            'N/A', // Distance
+            item.description,
+            item.images?.[0] || 'https://picsum.photos/400/200'
+          ))}
+        </View >
 
-          {renderCard(
-            'Music Group',
-            'The Manila Groove',
-            '4.9',
-            'Quezon City, Metro Manila',
-            ['Rock', 'Jazz Fusion', '5-piece'],
-            '₱25,000 / set',
-            '3.2 km',
-            '5-piece band with 8 years of experience...',
-            'https://picsum.photos/400/200?random=5'
-          )}
-        </View>
-
-      </ScrollView>
+      </ScrollView >
 
       {/* Sort Modal */}
-      <Modal
+      < Modal
         visible={showSortModal}
         transparent={true}
         animationType="fade"
@@ -235,11 +260,11 @@ export default function FindAGigScreen() {
             </View>
           </View>
         </TouchableOpacity>
-      </Modal>
+      </Modal >
 
       <View className="absolute bottom-0 left-0 right-0">
         <Navbar />
       </View>
-    </View>
+    </View >
   );
 }

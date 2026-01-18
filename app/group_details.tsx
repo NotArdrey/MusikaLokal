@@ -1,18 +1,92 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function GroupDetailsScreen() {
+  const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
   const [activeTab, setActiveTab] = useState('About');
   const [modalVisible, setModalVisible] = useState(false);
+  const [group, setGroup] = useState<any>(null);
+  const [isOwner, setIsOwner] = useState(false);
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchGroupDetails();
+  }, [id]);
+
+  const fetchGroupDetails = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+
+      const { data, error } = await supabase.functions.invoke('manage-details', {
+        body: { action: 'fetch', type: 'group', id: id || 'bd9552d7-b827-449e-8c43-2a4439c2c62c', userId } // Fallback ID for demo if param missing
+      });
+
+      if (error) throw error;
+      setGroup(data);
+      setIsOwner(data.is_owner);
+      setIsFavorited(data.is_favorited);
+    } catch (e) {
+      console.log('Error fetching group:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleFavorite = async () => {
+    // Optimistic update
+    setIsFavorited(!isFavorited);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase.functions.invoke('manage-details', {
+        body: { action: 'toggle_favorite', type: 'group', id: group.id, userId: user.id }
+      });
+
+      // Sync with server result just in case
+      if (data) setIsFavorited(data.is_favorited);
+    } catch (e) {
+      console.log('Error toggling favorite:', e);
+      // Revert
+      setIsFavorited(!isFavorited);
+    }
+  };
+
+  const handleReport = () => {
+    router.push({ pathname: '/report', params: { type: 'group', id: group.id, name: group.name } } as any);
+  };
 
   const tabs = ['About', 'Setup', 'Connect', 'Review'];
+
+  if (loading) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+        <Text style={{ color: colors.textSecondary }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (!group) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+        <Text style={{ color: colors.textSecondary }}>Group not found.</Text>
+        <TouchableOpacity onPress={() => router.back()} className="mt-4">
+          <Text style={{ color: colors.primary }}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -28,34 +102,39 @@ export default function GroupDetailsScreen() {
               style={{ shadowColor: colors.primary, shadowOpacity: 0.2, shadowRadius: 10, elevation: 8 }}
             >
               <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop' }}
+                source={{ uri: (group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop' }}
                 className="w-full h-full"
                 resizeMode="cover"
               />
-              {/* Report Button */}
-              <TouchableOpacity
-                onPress={() => router.push('/report?type=group&name=Ben%26Ben' as any)}
-                className="absolute top-3 right-3 w-9 h-9 rounded-full items-center justify-center"
-                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
-              >
-                <Ionicons name="flag-outline" size={18} color="#fff" />
-              </TouchableOpacity>
+              {/* Report Button - Hide if Owner */}
+              {!isOwner && (
+                <TouchableOpacity
+                  onPress={handleReport}
+                  className="absolute top-3 right-3 w-9 h-9 rounded-full items-center justify-center"
+                  style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+                >
+                  <Ionicons name="flag-outline" size={18} color="#fff" />
+                </TouchableOpacity>
+              )}
+
               {/* Heart Button */}
               <TouchableOpacity
-                className="absolute top-3 right-14 w-9 h-9 rounded-full items-center justify-center"
+                onPress={toggleFavorite}
+                className={`absolute top-3 ${!isOwner ? 'right-14' : 'right-3'} w-9 h-9 rounded-full items-center justify-center`}
                 style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
               >
-                <Ionicons name="heart-outline" size={18} color="#fff" />
+                <Ionicons name={isFavorited ? "heart" : "heart-outline"} size={18} color={isFavorited ? "#EF4444" : "#fff"} />
               </TouchableOpacity>
+
               <View className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent" />
               <View className="absolute bottom-4 left-4 right-4">
-                <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>Ben&Ben</Text>
+                <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>{group.name}</Text>
                 <View className="flex-row items-center mt-1">
-                  <Text className="text-gray-200 text-sm ml-1" style={{ fontFamily: 'Poppins_500Medium' }}>Folk-Pop Band • 9 Members</Text>
+                  <Text className="text-gray-200 text-sm ml-1" style={{ fontFamily: 'Poppins_500Medium' }}>{group.genre || 'Band'} • {group.members ? group.members.length : 0} Members</Text>
                 </View>
                 <View className="flex-row items-center mt-1">
                   <Ionicons name="location-outline" size={14} color="#E5E7EB" />
-                  <Text className="text-gray-200 text-xs ml-1" style={{ fontFamily: 'Poppins_400Regular' }}>Manila, Philippines</Text>
+                  <Text className="text-gray-200 text-xs ml-1" style={{ fontFamily: 'Poppins_400Regular' }}>{group.location || 'Location not set'}</Text>
                 </View>
               </View>
             </View>
@@ -95,7 +174,7 @@ export default function GroupDetailsScreen() {
               <View className="gap-6">
                 <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
                   <Text className="text-base leading-6" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
-                    Ben&Ben is a Filipino indie folk-pop band known for their poetic lyrics and soulful melodies. Formed in 2015, the 9-member ensemble has become one of the most celebrated acts in the Philippine music scene, with hits like "Pagtingin," "Leaves," and "Kathang Isip."
+                    {group.description || 'No description provided.'}
                   </Text>
                 </View>
 
@@ -103,65 +182,26 @@ export default function GroupDetailsScreen() {
                   <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
                     <Ionicons name="musical-notes-outline" size={24} color={colors.primary} className="mb-2" />
                     <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Genre</Text>
-                    <Text className="text-center text-xs" style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>Folk-Pop, Indie</Text>
+                    <Text className="text-center text-xs" style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>{group.genre || '-'}</Text>
                   </View>
                   <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
                     <Ionicons name="star-outline" size={24} color={colors.primary} className="mb-2" />
                     <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Rating</Text>
-                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>4.9</Text>
+                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>{group.rating || 'N/A'}</Text>
                   </View>
                 </View>
 
+                {/* Owner Profile Link - Placeholder logic for now, assumes we might want to see the contact */}
                 <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                  <Text className="text-sm uppercase tracking-wider mb-4" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Band Leader</Text>
+                  <Text className="text-sm uppercase tracking-wider mb-4" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Managed By</Text>
                   <TouchableOpacity onPress={() => router.push('/profile')} className="flex-row items-center gap-4">
                     <Image source={{ uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&fit=crop' }} className="w-12 h-12 rounded-full" />
                     <View className="flex-1">
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Paolo Benjamin</Text>
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Owner Profile</Text>
                       <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.primary }}>View Profile</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
                   </TouchableOpacity>
-                </View>
-
-                <View>
-                  <Text className="text-lg mb-3" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Music Gallery</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-6 px-6 gap-3">
-                    {[1, 2, 3].map((i) => (
-                      <Image
-                        key={i}
-                        source={{ uri: `https://picsum.photos/300/200?random=${i + 20}` }}
-                        className="w-48 h-32 rounded-2xl"
-                      />
-                    ))}
-                  </ScrollView>
-                </View>
-
-                {/* Upcoming Gigs Section */}
-                <View>
-                  <Text className="text-lg mb-3" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Upcoming Gigs</Text>
-                  <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
-                    <View className="flex-row items-center gap-3 mb-2">
-                      <Image source={{ uri: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100&h=100&fit=crop' }} className="w-10 h-10 rounded-lg" />
-                      <View className="flex-1">
-                        <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>The Blue Note Bar</Text>
-                        <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Dec 22 • 8:00 PM</Text>
-                      </View>
-                      <TouchableOpacity className="px-3 py-1 rounded-lg border" style={{ borderColor: colors.primary }}>
-                        <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary, fontSize: 12 }}>View</Text>
-                      </TouchableOpacity>
-                    </View>
-                    <View className="flex-row items-center gap-3 mt-2 pt-2 border-t" style={{ borderColor: colors.border }}>
-                      <Image source={{ uri: 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=100&h=100&fit=crop' }} className="w-10 h-10 rounded-lg" />
-                      <View className="flex-1">
-                        <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Sunset Beach Festival</Text>
-                        <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary, fontSize: 12 }}>Dec 31 • 9:00 PM</Text>
-                      </View>
-                      <TouchableOpacity className="px-3 py-1 rounded-lg border" style={{ borderColor: colors.primary }}>
-                        <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary, fontSize: 12 }}>View</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
                 </View>
               </View>
             )}

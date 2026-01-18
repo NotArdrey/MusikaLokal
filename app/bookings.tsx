@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -16,88 +17,69 @@ export default function BookingsScreen() {
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const { width } = useWindowDimensions();
 
-  // Unified Mock Data
-  const bookings = {
-    Pending: [
-      {
-        id: 1,
-        name: 'SoundWave Studio Malolos',
-        date: 'Sat, Nov 16 • 2:00 PM - 3:00 PM',
-        image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=400&h=300&fit=crop',
-        status: 'Waiting for Approval',
-        type: 'Studio Booking',
-        action: 'View Details'
-      },
-      {
-        id: 2,
-        name: 'Echo Music Hub San Jose',
-        date: 'Sun, Nov 17 • 4:30 PM - 5:30 PM',
-        image: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=400&h=300&fit=crop',
-        status: 'Action Required',
-        type: 'Gig Application',
-        action: 'Confirm Now'
-      }
-    ],
-    Upcoming: [
-      {
-        id: 3,
-        name: 'Echo Music Hub San Jose',
-        date: 'Sun, Nov 17 • 4:30 PM - 5:00 PM',
-        image: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=400&h=300&fit=crop',
-        status: 'Confirmed',
-        type: 'Studio Booking',
-        isCancelled: false
-      },
-      {
-        id: 4,
-        name: 'Acoustic Sessions Live',
-        date: 'Fri, Nov 22 • 8:00 PM - 11:00 PM',
-        image: 'https://images.unsplash.com/photo-1501612780327-45045538702b?w=400&h=300&fit=crop',
-        status: 'Confirmed',
-        type: 'Gig',
-        isCancelled: false
-      },
-      {
-        id: 5,
-        name: 'Studio A Recording',
-        date: 'Mon, Nov 25 • 1:00 PM - 4:00 PM',
-        image: 'https://images.unsplash.com/photo-1516280440614-6697288d5d38?w=400&h=300&fit=crop',
-        status: 'Cancelled',
-        type: 'Studio Booking',
-        isCancelled: true
-      }
-    ],
-    Ongoing: [
-      {
-        id: 6,
-        name: 'Music One Studios Makati',
-        date: 'Sat, Dec 14 • 2:00 PM - 4:00 PM',
-        image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=400&h=300&fit=crop',
-        status: 'In Progress',
-        type: 'Studio Booking'
-      },
-      {
-        id: 7,
-        name: 'Saguijo Cafe + Bar Makati',
-        date: 'Fri, Dec 13 • 8:00 PM - 11:00 PM',
-        image: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=400&h=300&fit=crop',
-        status: 'Happening Now',
-        type: 'Gig'
-      }
-    ],
-    Review: [
-      {
-        id: 8,
-        name: 'SoundWave Studio Malolos',
-        date: 'Sat, Nov 16 • 2:00 PM - 3:00 PM',
-        image: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=300&fit=crop',
-        status: 'Completed',
-        type: 'Studio Booking'
-      }
-    ]
-  };
+  // State for fetched data
+  const [data, setData] = useState({
+    Pending: [],
+    Upcoming: [],
+    Ongoing: [],
+    Review: []
+  });
+  const [loading, setLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
-  const currentItems = bookings[activeTab];
+  React.useEffect(() => {
+    fetchUserAndBookings();
+  }, []);
+
+  async function fetchUserAndBookings() {
+    try {
+      setLoading(true);
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.log('No user logged in');
+        return;
+      }
+      setCurrentUser(user);
+
+      // Fetch bookings
+      await fetchBookings(user.id);
+    } catch (e) {
+      console.log('Error initializing:', e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchBookings(userId: string) {
+    try {
+      const { data: bookings, error } = await supabase.functions.invoke('manage-bookings', {
+        body: { action: 'fetch', userId }
+      });
+      if (error) throw error;
+      setData(bookings || { Pending: [], Upcoming: [], Ongoing: [], Review: [] });
+    } catch (e) {
+      console.log('Error fetching bookings:', e);
+    }
+  }
+
+  async function handleStatusUpdate(bookingId: string, newStatus: string) {
+    try {
+      const { error } = await supabase.functions.invoke('manage-bookings', {
+        body: { action: 'update_status', booking_id: bookingId, new_status: newStatus }
+      });
+      if (error) throw error;
+
+      // Refresh list
+      if (currentUser) fetchBookings(currentUser.id);
+      setModalVisible(false);
+    } catch (e) {
+      console.log('Error updating status:', e);
+      alert('Failed to update booking status.');
+    }
+  }
+
+  const currentItems = data[activeTab] || [];
 
   const renderTab = (tab: Tab) => (
     <TouchableOpacity
@@ -134,7 +116,11 @@ export default function BookingsScreen() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150, paddingHorizontal: 24, paddingTop: 16 }}>
-          {currentItems.length === 0 ? (
+          {loading ? (
+            <View className="items-center justify-center py-20">
+              <Text className="text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Loading bookings...</Text>
+            </View>
+          ) : currentItems.length === 0 ? (
             <View className="items-center justify-center py-20">
               <Ionicons name="calendar-outline" size={48} color={colors.border} />
               <Text className="mt-4 text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>No {activeTab.toLowerCase()} bookings</Text>
@@ -259,7 +245,13 @@ export default function BookingsScreen() {
         title={activeTab === 'Pending' ? "Confirm Booking" : "Cancel Booking"}
         message={activeTab === 'Pending' ? "Are you sure you want to confirm this booking?" : "Are you sure you want to cancel this booking? This action cannot be undone."}
         buttonText={activeTab === 'Pending' ? "Confirm" : "Yes, Cancel Booking"}
-        onConfirm={() => setModalVisible(false)}
+        onConfirm={() => {
+          if (selectedItem) {
+            // If Pending, confirm. If Upcoming/other, cancel.
+            const status = activeTab === 'Pending' ? 'confirmed' : 'cancelled';
+            handleStatusUpdate(selectedItem.id, status);
+          }
+        }}
       />
     </>
   );

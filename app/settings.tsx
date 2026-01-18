@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import Header from '../src/components/header';
+import { supabase } from '../lib/supabase';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -11,9 +11,9 @@ export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const { theme, setTheme, colors, isDark } = useTheme();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setModalVisible(false);
-    // Add actual logout logic here
+    await supabase.auth.signOut();
     router.replace('/');
   };
 
@@ -27,7 +27,7 @@ export default function SettingsScreen() {
     {
       title: 'Support & Legal',
       items: [
-        { label: 'Help & Support', icon: 'help-circle-outline', route: '/help' },
+        { label: 'Help & Support', icon: 'help-circle-outline', route: '/help_support' },
         { label: 'Terms and Conditions', icon: 'document-text-outline', route: '/terms_and_conditions' },
         { label: 'Privacy Policy', icon: 'shield-checkmark-outline', route: '/privacy_policy' },
       ]
@@ -37,7 +37,13 @@ export default function SettingsScreen() {
   return (
     <>
       <View className="flex-1" style={{ backgroundColor: colors.background }}>
-        <Header title="Settings" />
+        {/* Custom Header with Back Button */}
+        <View className="flex-row items-center px-6 py-4 pt-12" style={{ backgroundColor: colors.background }}>
+          <TouchableOpacity onPress={() => router.back()} className="p-2 -ml-2 mr-2">
+            <Ionicons name="chevron-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <Text className="text-xl" style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Settings</Text>
+        </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
 

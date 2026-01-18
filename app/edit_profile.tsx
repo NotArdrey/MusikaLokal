@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -9,17 +11,100 @@ import { useTheme } from '../src/context/ThemeContext';
 
 export default function EditProfileScreen() {
   const { colors, isDark } = useTheme();
-  const name = 'Jared Lopez Bagtas'; // Non-editable
-  const [selectedRoles, setSelectedRoles] = useState(['Drummer']);
-  const [genres, setGenres] = useState('Rock, Indie, Folk');
+  const [userId, setUserId] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [genres, setGenres] = useState('');
   const [bio, setBio] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   // Expanded role list
   const availableRoles = [
     'Vocalist', 'Guitarist', 'Bassist', 'Drummer',
     'Keyboardist', 'DJ', 'Producer', 'Sound Engineer'
   ];
+
+  const pickAndUploadAvatar = async () => {
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert('Permission needed', 'Please allow access to your photos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets[0]) return;
+
+      setUploading(true);
+      const file = result.assets[0];
+      const fileExt = file.uri.split('.').pop() || 'jpg';
+      const fileName = `${userId}/${Date.now()}.${fileExt}`;
+
+      // Fetch the file and convert to blob
+      const response = await fetch(file.uri);
+      const blob = await response.blob();
+
+      // Upload to Supabase Storage
+      const { data, error } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, blob, { contentType: `image/${fileExt}`, upsert: true });
+
+      if (error) throw error;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(data.path);
+
+      setAvatarUrl(urlData.publicUrl);
+
+      // Update profile with new avatar URL
+      await supabase.functions.invoke('manage-profile', {
+        body: { action: 'update', userId, avatar_url: urlData.publicUrl }
+      });
+
+      Alert.alert('Success', 'Profile picture updated!');
+    } catch (e: any) {
+      console.log('Upload error:', e);
+      Alert.alert('Error', e.message || 'Failed to upload image');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchProfile();
+  }, []);
+
+  async function fetchProfile() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setUserId(user.id);
+
+      const { data, error } = await supabase.functions.invoke('manage-profile', {
+        body: { action: 'fetch', userId: user.id }
+      });
+      if (error) throw error;
+
+      setName(data?.full_name || '');
+      setSelectedRoles(data?.skills || []);
+      setGenres(data?.genres?.join(', ') || '');
+      setBio(data?.bio || '');
+      setAvatarUrl(data?.avatar_url || '');
+    } catch (e) {
+      console.log('Error fetching profile:', e);
+    }
+  }
 
   const toggleRole = (role: string) => {
     if (selectedRoles.includes(role)) {
@@ -29,10 +114,29 @@ export default function EditProfileScreen() {
     }
   };
 
-  const handleSave = () => {
-    setModalVisible(false);
-    console.log('Profile saved');
-    router.back();
+  const handleSave = async () => {
+    if (!userId) return;
+    setSaving(true);
+    try {
+      const genreArray = genres.split(',').map(g => g.trim()).filter(g => g);
+      const { error } = await supabase.functions.invoke('manage-profile', {
+        body: {
+          action: 'update',
+          userId,
+          skills: selectedRoles,
+          genres: genreArray,
+          bio
+        }
+      });
+      if (error) throw error;
+      setModalVisible(false);
+      router.back();
+    } catch (e) {
+      console.log('Error saving profile:', e);
+      alert('Failed to save profile.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -54,19 +158,23 @@ export default function EditProfileScreen() {
                   }}
                 >
                   <Image
-                    source={{ uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
+                    source={{ uri: avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
                     className="w-full h-full"
                     resizeMode="cover"
                   />
                 </View>
                 <TouchableOpacity
+                  onPress={pickAndUploadAvatar}
+                  disabled={uploading}
                   className="absolute bottom-0 right-0 p-3 rounded-full shadow-lg"
-                  style={{ backgroundColor: colors.primary }}
+                  style={{ backgroundColor: uploading ? colors.textSecondary : colors.primary }}
                 >
-                  <Ionicons name="camera" size={20} color="#fff" />
+                  <Ionicons name={uploading ? "hourglass" : "camera"} size={20} color="#fff" />
                 </TouchableOpacity>
               </View>
-              <Text className="mt-3 text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>Change Photo</Text>
+              <Text className="mt-3 text-sm" style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>
+                {uploading ? 'Uploading...' : 'Change Photo'}
+              </Text>
             </View>
 
             {/* Form Fields */}

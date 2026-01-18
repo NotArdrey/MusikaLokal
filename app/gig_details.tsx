@@ -1,18 +1,87 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import { Image, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function GigDetailsScreen() {
+  const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
   const [activeTab, setActiveTab] = useState('About');
   const [modalVisible, setModalVisible] = useState(false);
+  const [gig, setGig] = useState<any>(null);
+  const [isOwner, setIsOwner] = useState(false);
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchGigDetails();
+  }, [id]);
+
+  const fetchGigDetails = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+
+      const { data, error } = await supabase.functions.invoke('manage-details', {
+        body: { action: 'fetch', type: 'gig', id: id || 'g84f3d45-6678-4384-9345-123456789abc', userId } // Fallback ID for demo
+      });
+
+      if (error) throw error;
+      setGig(data);
+      setIsOwner(data.is_owner);
+      setIsFavorited(data.is_favorited);
+    } catch (e) {
+      console.log('Error fetching gig:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleFavorite = async () => {
+    setIsFavorited(!isFavorited);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase.functions.invoke('manage-details', {
+        body: { action: 'toggle_favorite', type: 'gig', id: gig.id, userId: user.id }
+      });
+      if (data) setIsFavorited(data.is_favorited);
+    } catch (e) {
+      console.log('Error toggling favorite:', e);
+      setIsFavorited(!isFavorited);
+    }
+  };
+
+  const handleReport = () => {
+    router.push({ pathname: '/report', params: { type: 'gig', id: gig.id, name: gig.name } } as any);
+  };
 
   const tabs = ['About', 'Info', 'Apply', 'Review'];
+
+  if (loading) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+        <Text style={{ color: colors.textSecondary }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (!gig) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+        <Text style={{ color: colors.textSecondary }}>Gig not found.</Text>
+        <TouchableOpacity onPress={() => router.back()} className="mt-4">
+          <Text style={{ color: colors.primary }}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -28,31 +97,36 @@ export default function GigDetailsScreen() {
               style={{ shadowColor: colors.primary, shadowOpacity: 0.2, shadowRadius: 10, elevation: 8 }}
             >
               <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=800&fit=crop' }}
+                source={{ uri: (gig.images && gig.images[0]) || 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=800&fit=crop' }}
                 className="w-full h-full"
                 resizeMode="cover"
               />
-              {/* Report Button */}
-              <TouchableOpacity
-                onPress={() => router.push('/report?type=gig&name=Junction%2088' as any)}
-                className="absolute top-3 right-3 w-9 h-9 rounded-full items-center justify-center"
-                style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
-              >
-                <Ionicons name="flag-outline" size={18} color="#fff" />
-              </TouchableOpacity>
+              {/* Report Button - Hide if Owner */}
+              {!isOwner && (
+                <TouchableOpacity
+                  onPress={handleReport}
+                  className="absolute top-3 right-3 w-9 h-9 rounded-full items-center justify-center"
+                  style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+                >
+                  <Ionicons name="flag-outline" size={18} color="#fff" />
+                </TouchableOpacity>
+              )}
+
               {/* Heart Button */}
               <TouchableOpacity
-                className="absolute top-3 right-14 w-9 h-9 rounded-full items-center justify-center"
+                onPress={toggleFavorite}
+                className={`absolute top-3 ${!isOwner ? 'right-14' : 'right-3'} w-9 h-9 rounded-full items-center justify-center`}
                 style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
               >
-                <Ionicons name="heart-outline" size={18} color="#fff" />
+                <Ionicons name={isFavorited ? "heart" : "heart-outline"} size={18} color={isFavorited ? "#EF4444" : "#fff"} />
               </TouchableOpacity>
+
               <View className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/80 to-transparent" />
               <View className="absolute bottom-4 left-4 right-4">
-                <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>Junction 88 Music Bar</Text>
+                <Text className="text-white text-2xl font-bold" style={{ fontFamily: 'Poppins_700Bold' }}>{gig.name}</Text>
                 <View className="flex-row items-center mt-1">
                   <Ionicons name="location-outline" size={14} color="#E5E7EB" />
-                  <Text className="text-gray-200 text-xs ml-1" style={{ fontFamily: 'Poppins_400Regular' }}>Plaridel, Bulacan, Philippines</Text>
+                  <Text className="text-gray-200 text-xs ml-1" style={{ fontFamily: 'Poppins_400Regular' }}>{gig.location || 'Location not set'}</Text>
                 </View>
               </View>
             </View>
@@ -92,20 +166,22 @@ export default function GigDetailsScreen() {
               <View className="gap-6">
                 <View className="p-4 rounded-2xl" style={{ backgroundColor: colors.surface }}>
                   <Text className="text-base leading-6" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
-                    The Junction 88 Music Bar is a premier live music venue in Plaridel, Bulacan, Philippines, known for its intimate atmosphere and diverse lineup of artists. We offer a full bar, stage lighting, and sound equipment for performers.
+                    {gig.description || 'No description provided.'}
                   </Text>
                 </View>
 
                 <View className="flex-row gap-4">
                   <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
                     <Ionicons name="people-outline" size={24} color={colors.primary} className="mb-2" />
-                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Capacity</Text>
-                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>69</Text>
+                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Budget</Text>
+                    <Text className="text-lg" style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>₱{gig.budget || '0'}</Text>
                   </View>
                   <View className="flex-1 p-4 rounded-2xl items-center justify-center" style={{ backgroundColor: colors.surface }}>
-                    <Ionicons name="construct-outline" size={24} color={colors.primary} className="mb-2" />
-                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Equipment</Text>
-                    <Text className="text-center text-xs" style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>Full Sound System</Text>
+                    <Ionicons name="calendar-outline" size={24} color={colors.primary} className="mb-2" />
+                    <Text className="text-xs uppercase tracking-wider mb-1" style={{ color: colors.textSecondary, fontFamily: 'Poppins_600SemiBold' }}>Date</Text>
+                    <Text className="text-center text-xs" style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>
+                      {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'TBA'}
+                    </Text>
                   </View>
                 </View>
 

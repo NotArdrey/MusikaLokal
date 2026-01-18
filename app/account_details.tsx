@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -10,6 +11,33 @@ import { useTheme } from '../src/context/ThemeContext';
 export default function AccountDetailsScreen() {
   const { colors, isDark } = useTheme();
   const [modalVisible, setModalVisible] = useState(false);
+  const [profile, setProfile] = useState<any>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchAccountDetails();
+  }, []);
+
+  const fetchAccountDetails = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      setUserEmail(user.email || null);
+
+      const { data, error } = await supabase.functions.invoke('manage-profile', {
+        body: { action: 'fetch', userId: user.id }
+      });
+
+      if (error) throw error;
+      setProfile(data);
+    } catch (e) {
+      console.log('Error fetching account details:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const renderSection = (title: string, children: React.ReactNode) => (
     <View className="mb-6">
@@ -44,6 +72,14 @@ export default function AccountDetailsScreen() {
     </TouchableOpacity>
   );
 
+  if (loading) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+        <Text style={{ color: colors.textSecondary }}>Loading account details...</Text>
+      </View>
+    );
+  }
+
   return (
     <>
       <View className="flex-1" style={{ backgroundColor: colors.background }}>
@@ -54,19 +90,19 @@ export default function AccountDetailsScreen() {
           <View className="items-center mb-8">
             <View className="w-24 h-24 rounded-full bg-gray-200 overflow-hidden mb-3 border-4" style={{ borderColor: colors.card }}>
               <Image
-                source={{ uri: 'https://picsum.photos/200' }}
+                source={{ uri: profile?.avatar_url || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
                 className="w-full h-full"
                 resizeMode="cover"
               />
             </View>
-            <Text className="text-xl font-bold" style={{ fontFamily: 'Poppins_700Bold', color: colors.text }}>Jared Carioso</Text>
-            <Text className="text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Artist Account</Text>
+            <Text className="text-xl font-bold" style={{ fontFamily: 'Poppins_700Bold', color: colors.text }}>{profile?.full_name || 'User'}</Text>
+            <Text className="text-sm" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>{profile?.role || 'Member'} Account</Text>
           </View>
 
           {renderSection('Personal Information', (
             <>
-              {renderItem('Full Name', 'Jared Carioso', undefined, false, <Ionicons name="person-outline" size={16} color={colors.text} />)}
-              {renderItem('Email', 'Jaredcarioso69@gmail.com', undefined, true, <Ionicons name="mail-outline" size={16} color={colors.text} />)}
+              {renderItem('Full Name', profile?.full_name || 'Not set', undefined, false, <Ionicons name="person-outline" size={16} color={colors.text} />)}
+              {renderItem('Email', userEmail || 'No email', undefined, true, <Ionicons name="mail-outline" size={16} color={colors.text} />)}
             </>
           ))}
 
@@ -94,7 +130,7 @@ export default function AccountDetailsScreen() {
           ))}
 
           <Text className="text-center text-xs mt-4 mb-8" style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
-            Member since November 2026
+            Member since {profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : 'Unknown'}
           </Text>
 
         </ScrollView>
