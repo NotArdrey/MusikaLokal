@@ -300,9 +300,9 @@ const styles = StyleSheet.create({
     paddingBottom: 150,
   },
   searchSection: {
-    paddingHorizontal: 24, // px-6
-    paddingTop: 24, // pt-6
-    paddingBottom: 8, // pb-2
+    paddingHorizontal: 24, 
+    paddingTop: 24, 
+    paddingBottom: 8, 
   },
   searchBar: {
     flexDirection: 'row',
@@ -318,18 +318,18 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_400Regular',
   },
   filterSection: {
-    paddingHorizontal: 24, // px-6
-    paddingBottom: 8, // pb-2
+    paddingHorizontal: 24, 
+    paddingBottom: 8, 
   },
   filterGroup: {
     marginTop: 16,
   },
   filterTitle: {
-    fontSize: 12, // text-xs
-    marginBottom: 12, // mb-3
-    fontWeight: '600', // font-semibold
+    fontSize: 12, 
+    marginBottom: 12, 
+    fontWeight: '600', 
     textTransform: 'uppercase',
-    letterSpacing: 1, // tracking-wider
+    letterSpacing: 1, 
     fontFamily: 'Poppins_600SemiBold',
   },
   filterScrollContent: {
@@ -372,8 +372,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
   },
   resultsList: {
-    paddingHorizontal: 24, // px-6
-    paddingTop: 8, // pt-2
+    paddingHorizontal: 24, 
+    paddingTop: 8, 
   },
   loadingText: {
     margin: 16,
@@ -394,7 +394,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontFamily: 'Poppins_400Regular',
   },
-  // Card Styles
   cardContainer: {
     marginBottom: 24,
     borderRadius: 16,
@@ -554,13 +553,13 @@ const styles = StyleSheet.create({
   },
   modalFooter: {
     padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.05)', // slight background hint
+    backgroundColor: 'rgba(0,0,0,0.05)',
   },
   cancelButton: {
     paddingVertical: 12,
     alignItems: 'center',
     borderRadius: 12,
-    backgroundColor: '#E5E7EB', // gray-200 / or dark variant handlded implicitly if strictly following theme, but modal footer bg logic is simpler here
+    backgroundColor: '#E5E7EB',
   },
   cancelButtonText: {
     fontFamily: 'Poppins_600SemiBold',
