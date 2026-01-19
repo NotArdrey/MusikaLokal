@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
-import VerificationModal from '../src/components/VerificationModal';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function SignupScreen() {
@@ -28,7 +28,6 @@ export default function SignupScreen() {
             return;
         }
 
-        // Basic email validation
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
             Alert.alert(
@@ -59,47 +58,32 @@ export default function SignupScreen() {
 
         setLoading(true);
         try {
-            const { data, error } = await supabase.auth.signUp({
-                email,
-                password,
-            });
+            // Store in pending_signups table (account NOT created yet)
+            const { data: pending, error: pendingError } = await supabase
+                .from('pending_signups')
+                .insert({
+                    email: email.toLowerCase().trim(),
+                    password_hash: password, // Will be hashed by Admin API on creation
+                })
+                .select()
+                .single();
 
-            if (error) {
-                // Handle specific error cases
-                if (error.message.includes('rate') || error.status === 429) {
+            if (pendingError) {
+                if (pendingError.message.includes('duplicate') || pendingError.message.includes('unique')) {
                     Alert.alert(
-                        'Too Many Attempts',
-                        'You\'ve made too many signup requests. Please wait a minute and try again.',
-                        [{ text: 'OK', style: 'default' }]
-                    );
-                } else if (error.message.includes('already registered') || error.message.includes('already exists')) {
-                    Alert.alert(
-                        'Email Already Used',
-                        'This email is already registered. Try logging in instead.',
-                        [
-                            { text: 'Go to Login', onPress: () => router.push('/'), style: 'default' },
-                            { text: 'Cancel', style: 'cancel' }
-                        ]
-                    );
-                } else if (error.message.includes('password')) {
-                    Alert.alert(
-                        'Weak Password',
-                        'Please choose a stronger password with at least 6 characters.',
+                        'Email Already Pending',
+                        'This email is already awaiting verification. Please complete the verification or try again later.',
                         [{ text: 'OK', style: 'default' }]
                     );
                 } else {
-                    Alert.alert('Signup Failed', error.message);
+                    Alert.alert('Signup Failed', pendingError.message);
                 }
                 return;
             }
 
-            // Account created successfully - now trigger identity verification
-            if (data.user) {
-                // Auto-redirect to Didit verification
-                // We use a small timeout to allow the UI to update slightly (optional, but good for UX)
-                setTimeout(() => {
-                    startVerification(data.user!.id);
-                }, 500);
+            // Now start Didit verification with pending signup ID
+            if (pending?.id) {
+                await startVerification(pending.id, email);
             }
         } catch (e) {
             Alert.alert(
@@ -113,22 +97,37 @@ export default function SignupScreen() {
         }
     };
 
-    const startVerification = async (userId: string) => {
+    const startVerification = async (pendingId: string, userEmail: string) => {
         try {
-            // Direct URL construction
             const DIDIT_VERIFICATION_URL = 'https://verify.didit.me/verify/kxYhKHgC1LESNW-TQEmPcw';
-            const url = `${DIDIT_VERIFICATION_URL}?reference=${userId}`;
+            const redirectUri = 'musikalokal://verification-complete';
+            const timestamp = Date.now(); // Cache buster to force new session
+            const url = `${DIDIT_VERIFICATION_URL}?reference=${pendingId}&redirect_uri=${encodeURIComponent(redirectUri)}&t=${timestamp}`;
 
-            setVerificationUrl(url);
-            setShowVerification(true);
+            // Use openAuthSessionAsync for automatic return to app
+            const result = await WebBrowser.openAuthSessionAsync(url, redirectUri);
 
-            // Note: The success alert will be triggered by the modal's onSuccess callback
+            if (result.type === 'success') {
+                // User was auto-redirected back
+                Alert.alert(
+                    'Verification Submitted',
+                    'Your ID is being processed. You will receive a confirmation email at ' + userEmail,
+                    [{ text: 'Go to Login', onPress: () => router.push('/') }]
+                );
+            } else {
+                // User closed browser manually - verification may still be complete
+                Alert.alert(
+                    'Verification Submitted',
+                    'If you completed the ID verification, your account will be created shortly.\n\nCheck your email at ' + userEmail + ' for confirmation.',
+                    [{ text: 'Go to Login', onPress: () => router.push('/') }]
+                );
+            }
         } catch (e) {
             console.log('Verification error:', e);
             Alert.alert(
                 'Verification Issue',
-                'We couldn\'t start the verification process. You can verify later in your profile settings.',
-                [{ text: 'Continue to Login', onPress: () => router.push('/') }]
+                'We couldn\'t start the verification process. Please try again.',
+                [{ text: 'OK', style: 'default' }]
             );
         }
     };
@@ -263,13 +262,6 @@ export default function SignupScreen() {
                     </View>
                 </View>
             </ScrollView>
-
-            <VerificationModal
-                visible={showVerification}
-                url={verificationUrl}
-                onClose={() => setShowVerification(false)}
-                onSuccess={handleVerificationSuccess}
-            />
         </KeyboardAvoidingView>
     );
 }

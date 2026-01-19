@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import VerificationModal from '../src/components/VerificationModal';
@@ -8,6 +8,19 @@ import { useTheme } from '../src/context/ThemeContext';
 
 export default function LoginScreen() {
     const { colors, isDark } = useTheme();
+    const { verified } = useLocalSearchParams();
+
+    // Check for verification success from deep link
+    useEffect(() => {
+        if (verified === 'true') {
+            Alert.alert(
+                'Verification Successful! 🎉',
+                'Your account has been verified. You can now log in.',
+                [{ text: 'OK' }]
+            );
+        }
+    }, [verified]);
+
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
