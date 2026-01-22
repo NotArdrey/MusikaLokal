@@ -67,6 +67,30 @@ serve(async (req) => {
 
                 console.log('Extracted document data:', { fullName, documentExpiry, userId: userReference });
 
+                // First, get the user's email from auth.users (needed for profile)
+                const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(userReference);
+                
+                if (authError) {
+                    console.log('Failed to get auth user:', authError.message);
+                    throw new Error('User not found: ' + authError.message);
+                }
+
+                const userEmail = authUser.user?.email;
+
+                // Confirm the user's email since they passed ID verification
+                // This allows them to log in without clicking email confirmation link
+                if (authUser.user && !authUser.user.email_confirmed_at) {
+                    const { error: confirmError } = await supabaseAdmin.auth.admin.updateUserById(userReference, {
+                        email_confirm: true
+                    });
+                    if (confirmError) {
+                        console.log('Failed to confirm email:', confirmError.message);
+                        // Continue anyway - user can still confirm via email
+                    } else {
+                        console.log(`Email confirmed for user ${userReference}`);
+                    }
+                }
+
                 // Update the user's profile to mark as verified
                 const { data: profile, error: profileError } = await supabaseAdmin
                     .from('profiles')
@@ -87,6 +111,7 @@ serve(async (req) => {
                         .from('profiles')
                         .upsert({
                             id: userReference,
+                            email: userEmail, // Include email (required field)
                             full_name: fullName || null,
                             is_verified: true,
                             id_document_expiry: documentExpiry,

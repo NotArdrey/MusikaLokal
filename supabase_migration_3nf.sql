@@ -8,7 +8,63 @@
 -- ============================================================
 
 -- ============================================================
--- STEP 1: Create Views for Computed Values BEFORE Removing Columns
+-- STEP 1: Remove Redundant pending_signups Table
+-- ============================================================
+
+-- Drop related cron jobs if exists (wrapped in DO block for safety)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM cron.unschedule('cleanup-ghost-accounts');
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  -- Ignore if cron job doesn't exist or pg_cron not installed
+  NULL;
+END $$;
+
+-- Drop policies first
+DROP POLICY IF EXISTS "Allow insert" ON pending_signups;
+DROP POLICY IF EXISTS "Allow select" ON pending_signups;
+DROP POLICY IF EXISTS "Service role delete" ON pending_signups;
+DROP POLICY IF EXISTS "Allow anonymous insert" ON pending_signups;
+DROP POLICY IF EXISTS "Service role full access" ON pending_signups;
+
+-- Drop indexes
+DROP INDEX IF EXISTS idx_pending_signups_email;
+DROP INDEX IF EXISTS idx_pending_signups_session;
+
+-- Drop the table
+DROP TABLE IF EXISTS pending_signups;
+
+-- ============================================================
+-- STEP 2: Remove Derived/Redundant Columns (BEFORE creating views)
+-- ============================================================
+
+-- Remove derived columns from profiles
+ALTER TABLE profiles DROP COLUMN IF EXISTS rating;
+ALTER TABLE profiles DROP COLUMN IF EXISTS review_count;
+
+-- Remove derived columns from groups
+ALTER TABLE groups DROP COLUMN IF EXISTS rating;
+ALTER TABLE groups DROP COLUMN IF EXISTS review_count;
+
+-- Remove derived columns from studios
+ALTER TABLE studios DROP COLUMN IF EXISTS rating;
+ALTER TABLE studios DROP COLUMN IF EXISTS review_count;
+
+-- Remove derived columns from gigs (if exists)
+ALTER TABLE gigs DROP COLUMN IF EXISTS rating;
+ALTER TABLE gigs DROP COLUMN IF EXISTS review_count;
+
+-- Remove derived column from reviews
+ALTER TABLE reviews DROP COLUMN IF EXISTS likes_count;
+
+-- Remove derived columns from studio_bookings
+ALTER TABLE studio_bookings DROP COLUMN IF EXISTS duration_hours;
+ALTER TABLE studio_bookings DROP COLUMN IF EXISTS total_cost;
+
+-- ============================================================
+-- STEP 3: Create Views for Computed Values (AFTER removing columns)
 -- ============================================================
 
 -- View: Profile with computed rating and review count
@@ -72,7 +128,7 @@ FROM studio_bookings sb
 JOIN studios s ON s.id = sb.studio_id;
 
 -- ============================================================
--- STEP 2: Create Helper Functions
+-- STEP 4: Create Helper Functions
 -- ============================================================
 
 -- Function to get rating for any entity type
@@ -107,56 +163,6 @@ BEGIN
   RETURN v_duration * COALESCE(v_hourly_rate, 0);
 END;
 $$ LANGUAGE plpgsql;
-
--- ============================================================
--- STEP 3: Remove Redundant pending_signups Table
--- ============================================================
-
--- Drop related cron jobs if exists
-SELECT cron.unschedule('cleanup-ghost-accounts') WHERE EXISTS (
-  SELECT 1 FROM cron.job WHERE jobname = 'cleanup-ghost-accounts'
-);
-
--- Drop policies first
-DROP POLICY IF EXISTS "Allow insert" ON pending_signups;
-DROP POLICY IF EXISTS "Allow select" ON pending_signups;
-DROP POLICY IF EXISTS "Service role delete" ON pending_signups;
-DROP POLICY IF EXISTS "Allow anonymous insert" ON pending_signups;
-DROP POLICY IF EXISTS "Service role full access" ON pending_signups;
-
--- Drop indexes
-DROP INDEX IF EXISTS idx_pending_signups_email;
-DROP INDEX IF EXISTS idx_pending_signups_session;
-
--- Drop the table
-DROP TABLE IF EXISTS pending_signups;
-
--- ============================================================
--- STEP 4: Remove Derived/Redundant Columns
--- ============================================================
-
--- Remove derived columns from profiles
-ALTER TABLE profiles DROP COLUMN IF EXISTS rating;
-ALTER TABLE profiles DROP COLUMN IF EXISTS review_count;
-
--- Remove derived columns from groups
-ALTER TABLE groups DROP COLUMN IF EXISTS rating;
-ALTER TABLE groups DROP COLUMN IF EXISTS review_count;
-
--- Remove derived columns from studios
-ALTER TABLE studios DROP COLUMN IF EXISTS rating;
-ALTER TABLE studios DROP COLUMN IF EXISTS review_count;
-
--- Remove derived columns from gigs (if exists)
-ALTER TABLE gigs DROP COLUMN IF EXISTS rating;
-ALTER TABLE gigs DROP COLUMN IF EXISTS review_count;
-
--- Remove derived column from reviews
-ALTER TABLE reviews DROP COLUMN IF EXISTS likes_count;
-
--- Remove derived columns from studio_bookings
-ALTER TABLE studio_bookings DROP COLUMN IF EXISTS duration_hours;
-ALTER TABLE studio_bookings DROP COLUMN IF EXISTS total_cost;
 
 -- ============================================================
 -- STEP 5: Add Performance Indexes
