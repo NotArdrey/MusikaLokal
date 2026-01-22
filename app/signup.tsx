@@ -367,14 +367,28 @@ export default function SignupScreen() {
 
 
                 switch (status) {
+
                     case 'approved':
                     case 'success':
                         // Signal global success
                         VerificationStore.setSuccess(true);
 
+                        // Trigger email confirmation resend
+                        try {
+                            await supabase.auth.resend({
+                                type: 'signup',
+                                email: userEmail,
+                                options: {
+                                    emailRedirectTo: 'https://musikalokal-redirection.vercel.app/'
+                                }
+                            });
+                        } catch (e) {
+                            console.log('Error resending confirmation email:', e);
+                        }
+
                         Alert.alert(
                             'Verification Complete! 🎉',
-                            'Your identity has been verified successfully. You can now log in to your account.',
+                            `Your identity is verified! We've sent a confirmation email to ${userEmail}.\n\nPlease check your inbox (and spam) to confirm your account.`,
                             [{ text: 'Go to Login', onPress: () => router.push('/') }]
                         );
                         break;
@@ -484,10 +498,27 @@ export default function SignupScreen() {
 
                 console.log('Verification status after close:', { verificationStatus, isVerified });
 
+
                 if (isVerified || verificationStatus === 'APPROVED') {
+                    // Signal global success just in case
+                    VerificationStore.setSuccess(true);
+
+                    // Trigger email confirmation resend
+                    try {
+                        await supabase.auth.resend({
+                            type: 'signup',
+                            email: userEmail,
+                            options: {
+                                emailRedirectTo: 'https://musikalokal-redirection.vercel.app/'
+                            }
+                        });
+                    } catch (e) {
+                        console.log('Error resending confirmation email:', e);
+                    }
+
                     Alert.alert(
                         'Verification Complete! 🎉',
-                        'Your identity has been verified successfully. You can now log in to your account.',
+                        `Your identity is verified! We've sent a confirmation email to ${userEmail}.\n\nPlease check your inbox (and spam) to confirm your account.`,
                         [{ text: 'Go to Login', onPress: () => router.push('/') }]
                     );
                 } else if (verificationStatus === 'PENDING_REVIEW') {

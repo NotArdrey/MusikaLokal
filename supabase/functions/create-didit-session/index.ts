@@ -68,21 +68,18 @@ serve(async (req) => {
 
     console.log('Callback/Redirect URL:', finalRedirectUrl);
 
-    // Create session with Didit API (using v2 endpoint)
-    // Try both 'callback' and 'redirect_url' fields for compatibility
-    const diditResponse = await fetch("https://verification.didit.me/v2/session/", {
+    // Create session with Didit API v3
+    const diditResponse = await fetch("https://verification.didit.me/v3/session/", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-Api-Key": DIDIT_API_KEY,
       },
-
       body: JSON.stringify({
         workflow_id: DIDIT_WORKFLOW_ID,
         vendor_data: userId, // This is passed to webhook and included in session
         callback: finalRedirectUrl, // Browser redirect URL after verification completes
-        redirect_url: finalRedirectUrl, // Alternative field name some APIs use
-        contact_details: email ? { email } : undefined,
+        features: email ? { email } : undefined, // v3 uses 'features' instead of 'contact_details'
       }),
     });
 
