@@ -27,29 +27,39 @@ serve(async (req: Request) => {
         let results: any[] = []
         const promises = []
 
-        // 1. Search Groups (Music Group, Solo Artist)
+        // 1. Search Groups (Music Group, Solo Artist) - using view with computed stats
         if (type === 'All' || type === 'Music Group' || type === 'Solo Artist') {
-            let q = supabaseClient.from('groups').select('*')
+            let q = supabaseClient.from('groups_with_stats').select('*')
             if (query) q = q.ilike('name', `%${query}%`)
             if (genre && genre !== 'All') q = q.ilike('genre', `%${genre}%`)
-            if (sortBy === 'Rating') q = q.order('rating', { ascending: false })
+            if (sortBy === 'Rating') q = q.order('computed_rating', { ascending: false })
             else q = q.order('created_at', { ascending: false })
 
-            promises.push(q.then(({ data }: { data: any }) => (data || []).map((i: any) => ({ ...i, itemType: 'Music Group' }))))
+            promises.push(q.then(({ data }: { data: any }) => (data || []).map((i: any) => ({ 
+                ...i, 
+                itemType: 'Music Group',
+                rating: i.computed_rating || 0,
+                review_count: i.computed_review_count || 0
+            }))))
         }
 
-        // 2. Search Studios (Studio, Venue)
+        // 2. Search Studios (Studio, Venue) - using view with computed stats
         if (type === 'All' || type === 'Studio' || type === 'Venue') {
-            let q = supabaseClient.from('studios').select('*')
+            let q = supabaseClient.from('studios_with_stats').select('*')
             if (query) q = q.ilike('name', `%${query}%`)
             // Studios don't have genre typically, unless handled in description or amenities. 
             // If genre is specific (e.g. Rock), maybe skip studios or check description?
             // For now, we ignore genre filter for studios or return empty if stricter?
             // Let's just Include studios even if genre is set, or filter by nothing.
-            if (sortBy === 'Rating') q = q.order('rating', { ascending: false })
+            if (sortBy === 'Rating') q = q.order('computed_rating', { ascending: false })
             else q = q.order('created_at', { ascending: false })
 
-            promises.push(q.then(({ data }: { data: any }) => (data || []).map((i: any) => ({ ...i, itemType: 'Studio' }))))
+            promises.push(q.then(({ data }: { data: any }) => (data || []).map((i: any) => ({ 
+                ...i, 
+                itemType: 'Studio',
+                rating: i.computed_rating || 0,
+                review_count: i.computed_review_count || 0
+            }))))
         }
 
         const resultsArrays = await Promise.all(promises)

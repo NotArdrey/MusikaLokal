@@ -25,13 +25,13 @@ serve(async (req: Request) => {
         const { action, ...params } = await req.json()
         const { userId, type, id } = params // type: 'group' | 'studio' | 'gig'
 
-        // 1. FETCH DETAILS
+        // 1. FETCH DETAILS (using views with computed stats)
         if (action === 'fetch') {
-            const table = type + 's' // groups, studios, gigs
+            const viewName = type + 's_with_stats' // groups_with_stats, studios_with_stats, gigs_with_stats
 
-            // Fetch Main Entity
+            // Fetch Main Entity from view with computed stats
             const { data: entity, error: entityError } = await supabaseClient
-                .from(table)
+                .from(viewName)
                 .select('*')
                 .eq('id', id)
                 .single()
@@ -55,19 +55,27 @@ serve(async (req: Request) => {
 
             const isFavorited = count ? count > 0 : false
 
-            // Fetch Reviews (Simple version: just get top 5 recent)
+            // Fetch Reviews with computed likes count (using view)
             const { data: reviews } = await supabaseClient
-                .from('reviews')
+                .from('reviews_with_stats')
                 .select('*, profiles(full_name, avatar_url)')
                 .eq(type + '_id', id)
                 .order('created_at', { ascending: false })
                 .limit(5)
 
+            // Map computed fields to expected names for frontend compatibility
+            const mappedReviews = (reviews || []).map((r: any) => ({
+                ...r,
+                likes_count: r.computed_likes_count || 0
+            }))
+
             return new Response(JSON.stringify({
                 ...entity,
+                rating: entity.computed_rating || 0,
+                review_count: entity.computed_review_count || 0,
                 is_owner: isOwner,
                 is_favorited: isFavorited,
-                reviews: reviews || []
+                reviews: mappedReviews
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,

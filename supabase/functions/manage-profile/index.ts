@@ -24,25 +24,32 @@ serve(async (req: Request) => {
 
         const { action, ...params } = await req.json()
 
-        // 1. FETCH PROFILE
+        // 1. FETCH PROFILE (using view with computed stats)
         if (action === 'fetch') {
             const { userId } = params
 
             const { data: profile, error } = await supabaseClient
-                .from('profiles')
+                .from('profiles_with_stats')
                 .select('*')
                 .eq('id', userId)
                 .single()
 
             if (error) throw error
 
-            return new Response(JSON.stringify(profile), {
+            // Map computed fields to expected names for frontend compatibility
+            const mappedProfile = {
+                ...profile,
+                rating: profile.computed_rating || 0,
+                review_count: profile.computed_review_count || 0
+            }
+
+            return new Response(JSON.stringify(mappedProfile), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             })
         }
 
-        // 2. UPDATE PROFILE
+        // 2. UPDATE PROFILE (uses base table for updates)
         if (action === 'update') {
             const { userId, full_name, bio, skills, genres, avatar_url, location, portfolio_urls } = params
 

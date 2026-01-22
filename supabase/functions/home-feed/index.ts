@@ -22,23 +22,23 @@ serve(async (req: Request) => {
             { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
         )
 
-        // Fetch Featured Gigs (highest rated)
+        // Fetch Featured Gigs with computed stats (using view)
         const { data: featuredGigs, error: gigsError } = await supabaseClient
-            .from('gigs')
+            .from('gigs_with_stats')
             .select('*, organizers:profiles(full_name, avatar_url)')
-            .order('created_at', { ascending: false }) // OR rating if available
+            .order('created_at', { ascending: false })
             .limit(5)
 
-        // Fetch Featured Studios (highest rated)
+        // Fetch Featured Studios with computed stats (using view)
         const { data: featuredStudios, error: studiosError } = await supabaseClient
-            .from('studios')
+            .from('studios_with_stats')
             .select('*')
-            .order('rating', { ascending: false })
+            .order('computed_rating', { ascending: false })
             .limit(5)
 
-        // Fetch New Arrivals (newly created groups)
+        // Fetch New Arrivals (newly created groups) with computed stats
         const { data: newArrivals, error: groupsError } = await supabaseClient
-            .from('groups')
+            .from('groups_with_stats')
             .select('*')
             .order('created_at', { ascending: false })
             .limit(5)
@@ -47,12 +47,30 @@ serve(async (req: Request) => {
             throw new Error('Failed to fetch data');
         }
 
+        // Map computed fields to expected field names for frontend compatibility
         const featured = [
-            ...(featuredGigs || []).map((item: any) => ({ ...item, type: 'Gig' })),
-            ...(featuredStudios || []).map((item: any) => ({ ...item, type: 'Studio' }))
+            ...(featuredGigs || []).map((item: any) => ({ 
+                ...item, 
+                type: 'Gig',
+                rating: item.computed_rating || 0,
+                review_count: item.computed_review_count || 0
+            })),
+            ...(featuredStudios || []).map((item: any) => ({ 
+                ...item, 
+                type: 'Studio',
+                rating: item.computed_rating || 0,
+                review_count: item.computed_review_count || 0
+            }))
         ].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
 
-        return new Response(JSON.stringify({ featured, newArrivals }), {
+        // Map new arrivals with computed stats
+        const mappedNewArrivals = (newArrivals || []).map((item: any) => ({
+            ...item,
+            rating: item.computed_rating || 0,
+            review_count: item.computed_review_count || 0
+        }));
+
+        return new Response(JSON.stringify({ featured, newArrivals: mappedNewArrivals }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200,
         })

@@ -7,6 +7,18 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+/**
+ * Didit Webhook Handler (3NF Normalized)
+ * 
+ * This webhook now works with the Supabase auth system directly.
+ * The 'reference' parameter in Didit verification URL should be the user's auth.uid
+ * (obtained after they complete signup via Supabase auth).
+ * 
+ * Flow:
+ * 1. User signs up via Supabase auth (gets unverified profile)
+ * 2. User completes Didit verification with their user ID as reference
+ * 3. This webhook updates their profile to is_verified = true
+ */
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -25,31 +37,14 @@ serve(async (req) => {
         const status = payload.status;
         const webhookType = payload.webhook_type;
         const decision = payload.decision;
+        // The reference should be the user's UUID (passed during verification initiation)
+        const userReference = payload.reference || payload.vendor_data;
 
-        console.log('Webhook type:', webhookType, 'Status:', status, 'Session:', sessionId);
+        console.log('Webhook type:', webhookType, 'Status:', status, 'Session:', sessionId, 'Reference:', userReference);
 
-        // When verification starts ("Not Started"), link session to most recent pending signup
+        // When verification starts, just acknowledge
         if (status === 'Not Started' && webhookType === 'status.updated') {
-            // Find the most recent pending signup without a session_id
-            const { data: pending, error } = await supabaseAdmin
-                .from('pending_signups')
-                .select('*')
-                .is('didit_session_id', null)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .single();
-
-            if (pending && !error) {
-                // Link this session to the pending signup
-                await supabaseAdmin
-                    .from('pending_signups')
-                    .update({ didit_session_id: sessionId })
-                    .eq('id', pending.id);
-                console.log(`Linked session ${sessionId} to pending signup ${pending.id}`);
-            } else {
-                console.log('No pending signup to link or error:', error?.message);
-            }
-
+            console.log(`Verification started for session ${sessionId}`);
             return new Response(JSON.stringify({ received: true }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
@@ -63,86 +58,35 @@ serve(async (req) => {
             const faceMatch = decision.face_matches?.[0];
             const isApproved = faceMatch?.status === 'Approved';
 
-            if (isApproved) {
-                // Find pending signup by session_id
-                const { data: pending, error: fetchError } = await supabaseAdmin
-                    .from('pending_signups')
-                    .select('*')
-                    .eq('didit_session_id', sessionId)
-                    .single();
-
-                if (fetchError || !pending) {
-                    console.log('Pending signup not found for session:', sessionId, fetchError?.message);
-                    // Return success anyway - might be a duplicate webhook
-                    return new Response(JSON.stringify({ received: true }), {
-                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                        status: 200,
-                    });
-                }
-
+            if (isApproved && userReference) {
                 // Extract ID document data
                 const firstName = idVerification?.first_name || '';
                 const lastName = idVerification?.last_name || idVerification?.extra_fields?.first_surname || '';
                 const fullName = firstName && lastName ? `${firstName} ${lastName}` : (firstName || lastName || '');
                 const documentExpiry = idVerification?.expiration_date || null;
 
-                console.log('Extracted document data:', { fullName, documentExpiry });
+                console.log('Extracted document data:', { fullName, documentExpiry, userId: userReference });
 
-                // First, try to invite the user (this actually sends an email)
-                const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(pending.email, {
-                    redirectTo: 'https://musikalokal-redirection.vercel.app/',
-                    data: {
-                        full_name: fullName,
+                // Update the user's profile to mark as verified
+                const { data: profile, error: profileError } = await supabaseAdmin
+                    .from('profiles')
+                    .update({
+                        full_name: fullName || undefined, // Only update if we have a value
                         is_verified: true,
-                    }
-                });
+                        id_document_expiry: documentExpiry,
+                        id_verified_at: new Date().toISOString(),
+                    })
+                    .eq('id', userReference)
+                    .select()
+                    .single();
 
-                if (inviteError) {
-                    // If invite fails (user might already exist), try creating user directly
-                    console.log('Invite failed, trying createUser:', inviteError.message);
-
-                    const { data: userData, error: createError } = await supabaseAdmin.auth.admin.createUser({
-                        email: pending.email,
-                        password: pending.password_hash,
-                        email_confirm: true, // Mark as confirmed since Didit verified
-                    });
-
-                    if (createError) {
-                        console.log('Failed to create user:', createError.message);
-                        throw new Error('Failed to create user account: ' + createError.message);
-                    }
-
-                    const newUserId = userData.user.id;
-                    console.log(`User ${newUserId} created with password for email ${pending.email}`);
-
-                    // Create profile
-                    await supabaseAdmin
+                if (profileError) {
+                    console.log('Failed to update profile:', profileError.message);
+                    // Profile might not exist yet, try to create it
+                    const { error: upsertError } = await supabaseAdmin
                         .from('profiles')
                         .upsert({
-                            id: newUserId,
-                            email: pending.email,
-                            full_name: fullName || null,
-                            is_verified: true,
-                            id_document_expiry: documentExpiry,
-                            id_verified_at: new Date().toISOString(),
-                            created_at: new Date().toISOString(),
-                        });
-                } else {
-                    // Invite succeeded - user will set password via email link
-                    const newUserId = inviteData.user.id;
-                    console.log(`User ${newUserId} invited via email to ${pending.email}`);
-
-                    // Update the user with the password they provided during signup
-                    await supabaseAdmin.auth.admin.updateUserById(newUserId, {
-                        password: pending.password_hash,
-                    });
-
-                    // Create profile
-                    await supabaseAdmin
-                        .from('profiles')
-                        .upsert({
-                            id: newUserId,
-                            email: pending.email,
+                            id: userReference,
                             full_name: fullName || null,
                             is_verified: true,
                             id_document_expiry: documentExpiry,
@@ -150,18 +94,38 @@ serve(async (req) => {
                             created_at: new Date().toISOString(),
                         });
 
-                    console.log(`Invitation email sent to ${pending.email}`);
+                    if (upsertError) {
+                        console.log('Failed to upsert profile:', upsertError.message);
+                        throw new Error('Failed to update user profile: ' + upsertError.message);
+                    }
                 }
 
-                // Delete pending signup
-                await supabaseAdmin
-                    .from('pending_signups')
-                    .delete()
-                    .eq('id', pending.id);
+                console.log(`Profile verified for user ${userReference}`);
 
-                console.log(`Account created and pending signup deleted for ${pending.email}`);
-            } else {
+                // Send notification to user
+                await supabaseAdmin
+                    .from('notifications')
+                    .insert({
+                        user_id: userReference,
+                        type: 'success',
+                        title: 'Identity Verified',
+                        message: 'Your identity has been successfully verified. You now have full access to all features.',
+                    });
+
+            } else if (!isApproved) {
                 console.log('Verification not approved. Face match status:', faceMatch?.status);
+                
+                // Optionally notify user of failed verification
+                if (userReference) {
+                    await supabaseAdmin
+                        .from('notifications')
+                        .insert({
+                            user_id: userReference,
+                            type: 'error',
+                            title: 'Verification Failed',
+                            message: 'Your identity verification was not successful. Please try again or contact support.',
+                        });
+                }
             }
         }
 

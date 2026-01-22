@@ -25,60 +25,92 @@ serve(async (req: Request) => {
         const { action, ...params } = await req.json()
         const { userId } = params
 
-        // FETCH MY GIGS
+        // FETCH MY GIGS (using view with computed stats)
         if (action === 'fetch_my_gigs') {
             const { data, error } = await supabaseClient
-                .from('gigs')
+                .from('gigs_with_stats')
                 .select('*')
                 .eq('organizer_id', userId)
                 .order('created_at', { ascending: false })
 
             if (error) throw error
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+            
+            // Map computed fields to expected names for frontend compatibility
+            const mapped = (data || []).map((item: any) => ({
+                ...item,
+                rating: item.computed_rating || 0,
+                review_count: item.computed_review_count || 0
+            }))
+            
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
-        // FETCH MY GROUPS
+        // FETCH MY GROUPS (using view with computed stats)
         if (action === 'fetch_my_groups') {
             const { data, error } = await supabaseClient
-                .from('groups')
+                .from('groups_with_stats')
                 .select('*')
                 .eq('owner_id', userId)
                 .order('created_at', { ascending: false })
 
             if (error) throw error
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+            
+            // Map computed fields to expected names for frontend compatibility
+            const mapped = (data || []).map((item: any) => ({
+                ...item,
+                rating: item.computed_rating || 0,
+                review_count: item.computed_review_count || 0
+            }))
+            
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
-        // FETCH MY STUDIOS
+        // FETCH MY STUDIOS (using view with computed stats)
         if (action === 'fetch_my_studios') {
             const { data, error } = await supabaseClient
-                .from('studios')
+                .from('studios_with_stats')
                 .select('*')
                 .eq('owner_id', userId)
                 .order('created_at', { ascending: false })
 
             if (error) throw error
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+            
+            // Map computed fields to expected names for frontend compatibility
+            const mapped = (data || []).map((item: any) => ({
+                ...item,
+                rating: item.computed_rating || 0,
+                review_count: item.computed_review_count || 0
+            }))
+            
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
-        // FETCH SINGLE ENTITY (SECURE)
+        // FETCH SINGLE ENTITY (SECURE) - using view with computed stats
         if (action === 'fetch_one') {
             const { type, id } = params
-            const table = type + 's'
+            const viewName = type + 's_with_stats'
             const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
 
             const { data, error } = await supabaseClient
-                .from(table)
+                .from(viewName)
                 .select('*')
                 .eq('id', id)
                 .eq(ownerField, userId)
                 .single()
 
             if (error) throw error
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+            
+            // Map computed fields
+            const mapped = {
+                ...data,
+                rating: data.computed_rating || 0,
+                review_count: data.computed_review_count || 0
+            }
+            
+            return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
-        // CREATE ENTITY
+        // CREATE ENTITY (uses base table for inserts)
         if (action === 'create') {
             const { type, payload } = params
             const table = type + 's'
@@ -91,10 +123,12 @@ serve(async (req: Request) => {
                 .single()
 
             if (error) throw error
-            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+            
+            // Return with default stats for new entity
+            return new Response(JSON.stringify({ ...data, rating: 0, review_count: 0 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
-        // UPDATE ENTITY
+        // UPDATE ENTITY (uses base table for updates)
         if (action === 'update') {
             const { type, id, payload } = params
             const table = type + 's'
@@ -112,7 +146,7 @@ serve(async (req: Request) => {
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
-        // DELETE ENTITY
+        // DELETE ENTITY (uses base table for deletes)
         if (action === 'delete') {
             const { type, id } = params // type: 'gig', 'group', 'studio'
             const table = type + 's'

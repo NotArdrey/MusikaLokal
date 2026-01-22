@@ -58,32 +58,49 @@ export default function SignupScreen() {
 
         setLoading(true);
         try {
-            // Store in pending_signups table (account NOT created yet)
-            const { data: pending, error: pendingError } = await supabase
-                .from('pending_signups')
-                .insert({
-                    email: email.toLowerCase().trim(),
-                    password_hash: password, // Will be hashed by Admin API on creation
-                })
-                .select()
-                .single();
+            // Create user account directly with Supabase Auth
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+                email: email.toLowerCase().trim(),
+                password: password,
+                options: {
+                    emailRedirectTo: 'https://musikalokal-redirection.vercel.app/',
+                    data: {
+                        is_verified: false, // Will be set to true after Didit verification
+                    }
+                }
+            });
 
-            if (pendingError) {
-                if (pendingError.message.includes('duplicate') || pendingError.message.includes('unique')) {
+            if (authError) {
+                if (authError.message.includes('already registered')) {
                     Alert.alert(
-                        'Email Already Pending',
-                        'This email is already awaiting verification. Please complete the verification or try again later.',
+                        'Email Already Registered',
+                        'This email is already associated with an account. Please sign in or use a different email.',
                         [{ text: 'OK', style: 'default' }]
                     );
                 } else {
-                    Alert.alert('Signup Failed', pendingError.message);
+                    Alert.alert('Signup Failed', authError.message);
                 }
                 return;
             }
 
-            // Now start Didit verification with pending signup ID
-            if (pending?.id) {
-                await startVerification(pending.id, email);
+            // Create initial profile (unverified)
+            if (authData.user) {
+                const { error: profileError } = await supabase
+                    .from('profiles')
+                    .upsert({
+                        id: authData.user.id,
+                        email: email.toLowerCase().trim(),
+                        is_verified: false,
+                        created_at: new Date().toISOString(),
+                    });
+
+                if (profileError) {
+                    console.log('Profile creation error:', profileError.message);
+                    // Continue anyway - profile can be created later
+                }
+
+                // Start Didit verification with user ID as reference
+                await startVerification(authData.user.id, email);
             }
         } catch (e) {
             Alert.alert(
@@ -97,12 +114,13 @@ export default function SignupScreen() {
         }
     };
 
-    const startVerification = async (pendingId: string, userEmail: string) => {
+    const startVerification = async (userId: string, userEmail: string) => {
         try {
             const DIDIT_VERIFICATION_URL = 'https://verify.didit.me/verify/kxYhKHgC1LESNW-TQEmPcw';
             const redirectUri = 'musikalokal://verification-complete';
             const timestamp = Date.now(); // Cache buster to force new session
-            const url = `${DIDIT_VERIFICATION_URL}?reference=${pendingId}&redirect_uri=${encodeURIComponent(redirectUri)}&t=${timestamp}`;
+            // Pass the user's auth ID as the reference for the webhook to update their profile
+            const url = `${DIDIT_VERIFICATION_URL}?reference=${userId}&redirect_uri=${encodeURIComponent(redirectUri)}&t=${timestamp}`;
 
             // Use openAuthSessionAsync for automatic return to app
             const result = await WebBrowser.openAuthSessionAsync(url, redirectUri);
@@ -111,14 +129,14 @@ export default function SignupScreen() {
                 // User was auto-redirected back
                 Alert.alert(
                     'Verification Submitted',
-                    'Your ID is being processed. You will receive a confirmation email at ' + userEmail,
+                    'Your ID is being processed. Please check your email at ' + userEmail + ' to confirm your account.',
                     [{ text: 'Go to Login', onPress: () => router.push('/') }]
                 );
             } else {
                 // User closed browser manually - verification may still be complete
                 Alert.alert(
                     'Verification Submitted',
-                    'If you completed the ID verification, your account will be created shortly.\n\nCheck your email at ' + userEmail + ' for confirmation.',
+                    'If you completed the ID verification, your account will be verified shortly.\n\nPlease check your email at ' + userEmail + ' to confirm your account.',
                     [{ text: 'Go to Login', onPress: () => router.push('/') }]
                 );
             }
@@ -126,8 +144,8 @@ export default function SignupScreen() {
             console.log('Verification error:', e);
             Alert.alert(
                 'Verification Issue',
-                'We couldn\'t start the verification process. Please try again.',
-                [{ text: 'OK', style: 'default' }]
+                'We couldn\'t start the verification process. Your account has been created. You can verify your identity later from your profile settings.',
+                [{ text: 'Go to Login', onPress: () => router.push('/') }]
             );
         }
     };
