@@ -6,6 +6,11 @@ import { supabase } from '../lib/supabase';
 import VerificationModal from '../src/components/VerificationModal';
 import { useTheme } from '../src/context/ThemeContext';
 
+
+import { VerificationStore } from './src/utils/VerificationStore';
+
+// ... existing imports ...
+
 export default function LoginScreen() {
     const { colors, isDark } = useTheme();
     const { verified } = useLocalSearchParams();
@@ -13,6 +18,9 @@ export default function LoginScreen() {
     // Check for verification success from deep link
     useEffect(() => {
         if (verified === 'true') {
+            // Signal global success to prevent conflicting alerts in signup.tsx
+            VerificationStore.setSuccess(true);
+
             Alert.alert(
                 'Verification Successful! 🎉',
                 'Your account has been verified. You can now log in.',
@@ -144,11 +152,7 @@ export default function LoginScreen() {
 
     const handleVerificationSuccess = () => {
         setShowVerification(false);
-        Alert.alert(
-            'Verification Submitted',
-            'Processing your ID. Please confirm your email if you haven\'t already.',
-            [{ text: 'OK' }]
-        );
+        // Silent
     };
 
     // Derived styles based on theme
