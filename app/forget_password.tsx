@@ -95,6 +95,8 @@ const styles = StyleSheet.create({
         fontSize: 16,
         marginLeft: 4,
         fontFamily: 'Poppins_400Regular',
+        textAlignVertical: 'center',
+        paddingVertical: 0,
     },
     helperText: {
         fontSize: 12,

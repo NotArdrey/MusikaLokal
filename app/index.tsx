@@ -364,6 +364,8 @@ const styles = StyleSheet.create({
         marginLeft: 12, // ml-3
         height: '100%',
         fontFamily: 'Poppins_400Regular',
+        textAlignVertical: 'center',
+        paddingVertical: 0,
     },
     forgotPasswordButton: {
         alignItems: 'flex-end',

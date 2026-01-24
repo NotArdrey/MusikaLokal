@@ -39,8 +39,8 @@ serve(async (req: Request) => {
             // Map computed fields to expected names for frontend compatibility
             const mappedProfile = {
                 ...profile,
-                rating: profile.computed_rating || 0,
-                review_count: profile.computed_review_count || 0
+                // View columns are already named 'rating' and 'review_count'
+                // No mapping needed, kept for backwards compatibility
             }
 
             return new Response(JSON.stringify(mappedProfile), {

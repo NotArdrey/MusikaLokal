@@ -32,14 +32,14 @@ serve(async (req: Request) => {
             let q = supabaseClient.from('groups_with_stats').select('*')
             if (query) q = q.ilike('name', `%${query}%`)
             if (genre && genre !== 'All') q = q.ilike('genre', `%${genre}%`)
-            if (sortBy === 'Rating') q = q.order('computed_rating', { ascending: false })
+            if (sortBy === 'Rating') q = q.order('rating', { ascending: false })
             else q = q.order('created_at', { ascending: false })
 
-            promises.push(q.then(({ data }: { data: any }) => (data || []).map((i: any) => ({ 
-                ...i, 
+            promises.push(q.then(({ data }: { data: any }) => (data || []).map((i: any) => ({
+                ...i,
                 itemType: 'Music Group',
-                rating: i.computed_rating || 0,
-                review_count: i.computed_review_count || 0
+                rating: i.rating || 0,
+                review_count: i.review_count || 0
             }))))
         }
 
@@ -51,14 +51,14 @@ serve(async (req: Request) => {
             // If genre is specific (e.g. Rock), maybe skip studios or check description?
             // For now, we ignore genre filter for studios or return empty if stricter?
             // Let's just Include studios even if genre is set, or filter by nothing.
-            if (sortBy === 'Rating') q = q.order('computed_rating', { ascending: false })
+            if (sortBy === 'Rating') q = q.order('rating', { ascending: false })
             else q = q.order('created_at', { ascending: false })
 
-            promises.push(q.then(({ data }: { data: any }) => (data || []).map((i: any) => ({ 
-                ...i, 
+            promises.push(q.then(({ data }: { data: any }) => (data || []).map((i: any) => ({
+                ...i,
                 itemType: 'Studio',
-                rating: i.computed_rating || 0,
-                review_count: i.computed_review_count || 0
+                rating: i.rating || 0,
+                review_count: i.review_count || 0
             }))))
         }
 

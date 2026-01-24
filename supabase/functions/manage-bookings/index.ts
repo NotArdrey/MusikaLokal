@@ -62,9 +62,9 @@ serve(async (req: Request) => {
                     type: 'Studio Booking',
                     isCancelled: b.status === 'cancelled',
                     action: b.status === 'pending' ? 'View Details' : 'Details',
-                    // Computed values from view
-                    duration_hours: b.computed_duration_hours,
-                    total_cost: b.computed_total_cost
+                    // Values from view (already named correctly)
+                    duration_hours: b.duration_hours,
+                    total_cost: b.total_cost
                 }
 
                 if (b.status === 'pending') {
@@ -152,8 +152,8 @@ serve(async (req: Request) => {
 
             return new Response(JSON.stringify({
                 ...bookingWithCost,
-                duration_hours: bookingWithCost.computed_duration_hours,
-                total_cost: bookingWithCost.computed_total_cost
+                duration_hours: bookingWithCost.duration_hours,
+                total_cost: bookingWithCost.total_cost
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 201,

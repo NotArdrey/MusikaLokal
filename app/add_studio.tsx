@@ -191,7 +191,7 @@ export default function AddStudioScreen() {
                                         onChangeText={setNewAmenity}
                                         placeholder="Add amenity (e.g. WiFi, AC)..."
                                         placeholderTextColor={colors.textSecondary}
-                                        style={[styles.textInput, { color: colors.text, padding: 12 }]}
+                                        style={[styles.textInput, { color: colors.text, padding: 12, textAlignVertical: 'center', paddingVertical: 0 }]}
                                     />
                                 </View>
                                 <TouchableOpacity

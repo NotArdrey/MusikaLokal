@@ -276,6 +276,8 @@ const styles = StyleSheet.create({
   },
   input: {
     padding: 16,
+    textAlignVertical: 'center',
+    paddingVertical: 0,
   },
   genreSelector: {
     flexDirection: 'row',

@@ -33,7 +33,7 @@ serve(async (req: Request) => {
         const { data: featuredStudios, error: studiosError } = await supabaseClient
             .from('studios_with_stats')
             .select('*')
-            .order('computed_rating', { ascending: false })
+            .order('rating', { ascending: false })
             .limit(5)
 
         // Fetch New Arrivals (newly created groups) with computed stats
@@ -49,25 +49,25 @@ serve(async (req: Request) => {
 
         // Map computed fields to expected field names for frontend compatibility
         const featured = [
-            ...(featuredGigs || []).map((item: any) => ({ 
-                ...item, 
+            ...(featuredGigs || []).map((item: any) => ({
+                ...item,
                 type: 'Gig',
-                rating: item.computed_rating || 0,
-                review_count: item.computed_review_count || 0
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
             })),
-            ...(featuredStudios || []).map((item: any) => ({ 
-                ...item, 
+            ...(featuredStudios || []).map((item: any) => ({
+                ...item,
                 type: 'Studio',
-                rating: item.computed_rating || 0,
-                review_count: item.computed_review_count || 0
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
             }))
         ].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
 
         // Map new arrivals with computed stats
         const mappedNewArrivals = (newArrivals || []).map((item: any) => ({
             ...item,
-            rating: item.computed_rating || 0,
-            review_count: item.computed_review_count || 0
+            rating: item.rating || 0,
+            review_count: item.review_count || 0
         }));
 
         return new Response(JSON.stringify({ featured, newArrivals: mappedNewArrivals }), {

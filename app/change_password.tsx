@@ -154,6 +154,8 @@ const styles = StyleSheet.create({
         marginLeft: 4,
         paddingRight: 32,
         fontFamily: 'Poppins_400Regular',
+        textAlignVertical: 'center',
+        paddingVertical: 0,
     },
     eyeIcon: {
         position: 'absolute',

@@ -185,7 +185,7 @@ export default function AddGroupScreen() {
                     onChangeText={setNewMember}
                     placeholder="Add member name..."
                     placeholderTextColor={colors.textSecondary}
-                    style={[styles.textInput, { color: colors.text, padding: 12 }]}
+                    style={[styles.textInput, { color: colors.text, padding: 12, textAlignVertical: 'center', paddingVertical: 0 }]}
                   />
                 </View>
                 <TouchableOpacity

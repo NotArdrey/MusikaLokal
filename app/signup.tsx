@@ -31,6 +31,16 @@ export default function SignupScreen() {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [selectedRole, setSelectedRole] = useState<'musician' | 'venue-owner' | 'studio-owner' | null>(null);
+    const [errors, setErrors] = useState<{ email?: string; password?: string; confirmPassword?: string; role?: string }>({});
+
+    // Role options for the selector
+    const roleOptions = [
+        { value: 'musician' as const, label: 'Musician', icon: 'musical-notes-outline' as const, description: 'Join bands, find gigs' },
+        { value: 'venue-owner' as const, label: 'Venue Owner', icon: 'business-outline' as const, description: 'Host events, hire artists' },
+        { value: 'studio-owner' as const, label: 'Studio Owner', icon: 'mic-outline' as const, description: 'Offer recording services' },
+    ];
 
     // Verification Modal State
     const [showVerification, setShowVerification] = useState(false);
@@ -156,40 +166,40 @@ export default function SignupScreen() {
     };
 
     const handleSignup = async () => {
-        if (!email || !password || !confirmPassword) {
-            Alert.alert(
-                'Missing Information',
-                'Please fill in all fields to create your account.',
-                [{ text: 'OK', style: 'default' }]
-            );
-            return;
-        }
+        setErrors({}); // Clear previous errors
+        const newErrors: { email?: string; password?: string; confirmPassword?: string; role?: string } = {};
 
+        // Email Validation
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            Alert.alert(
-                'Invalid Email',
-                'Please enter a valid email address.',
-                [{ text: 'OK', style: 'default' }]
-            );
-            return;
+        if (!email) {
+            newErrors.email = 'Email is required.';
+        } else if (!emailRegex.test(email)) {
+            newErrors.email = 'Please enter a valid email address.';
         }
 
-        if (password !== confirmPassword) {
-            Alert.alert(
-                'Passwords Don\'t Match',
-                'Please make sure both passwords are the same.',
-                [{ text: 'OK', style: 'default' }]
-            );
-            return;
+        // Password Validation
+        // Min 8 chars, 1 upper, 1 lower, 1 number, 1 special char
+        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+        if (!password) {
+            newErrors.password = 'Password is required.';
+        } else if (!passwordRegex.test(password)) {
+            newErrors.password = 'Password must be at least 8 characters long and include an uppercase letter, a lowercase letter, a number, and a special character.';
         }
 
-        if (password.length < 6) {
-            Alert.alert(
-                'Password Too Short',
-                'Your password must be at least 6 characters long.',
-                [{ text: 'OK', style: 'default' }]
-            );
+        // Confirm Password Validation
+        if (!confirmPassword) {
+            newErrors.confirmPassword = 'Please confirm your password.';
+        } else if (password !== confirmPassword) {
+            newErrors.confirmPassword = 'Passwords do not match.';
+        }
+
+        // Role Validation
+        if (!selectedRole) {
+            newErrors.role = 'Please select a role.';
+        }
+
+        if (Object.keys(newErrors).length > 0) {
+            setErrors(newErrors);
             return;
         }
 
@@ -263,6 +273,7 @@ export default function SignupScreen() {
                     .upsert({
                         id: authData.user.id,
                         email: email.toLowerCase().trim(),
+                        role: selectedRole,
                         is_verified: false,
                         verification_status: 'NOT_STARTED',
                         created_at: new Date().toISOString(),
@@ -594,10 +605,6 @@ export default function SignupScreen() {
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.contentContainer}>
 
-                    <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                        <Ionicons name="arrow-back" size={24} color={colors.text} />
-                    </TouchableOpacity>
-
                     <View style={styles.headerContainer}>
                         <Text style={[styles.headerTitle, themeStyles.text]}>
                             Create Account
@@ -612,60 +619,136 @@ export default function SignupScreen() {
                             <Text style={[styles.label, themeStyles.textSecondary]}>
                                 Email Address
                             </Text>
-                            <View style={[styles.inputContainer, themeStyles.inputContainer]}>
+                            <View style={[
+                                styles.inputContainer,
+                                themeStyles.inputContainer,
+                                errors.email ? { borderColor: '#EF4444' } : null
+                            ]}>
                                 <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
                                 <TextInput
                                     style={[styles.input, themeStyles.text]}
                                     placeholder="name@email.com"
                                     placeholderTextColor={colors.textSecondary}
                                     value={email}
-                                    onChangeText={setEmail}
+                                    onChangeText={(text) => {
+                                        setEmail(text);
+                                        if (errors.email) setErrors({ ...errors, email: undefined });
+                                    }}
                                     autoCapitalize="none"
                                     keyboardType="email-address"
                                 />
                             </View>
+                            {errors.email && (
+                                <Text style={styles.errorText}>{errors.email}</Text>
+                            )}
                         </View>
 
                         <View>
                             <Text style={[styles.label, themeStyles.textSecondary]}>
                                 Password
                             </Text>
-                            <View style={[styles.inputContainer, themeStyles.inputContainer]}>
+                            <View style={[
+                                styles.inputContainer,
+                                themeStyles.inputContainer,
+                                errors.password ? { borderColor: '#EF4444' } : null
+                            ]}>
                                 <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                                 <TextInput
                                     style={[styles.input, themeStyles.text]}
                                     placeholder="Create a password"
                                     placeholderTextColor={colors.textSecondary}
                                     value={password}
-                                    onChangeText={setPassword}
+                                    onChangeText={(text) => {
+                                        setPassword(text);
+                                        if (errors.password) setErrors({ ...errors, password: undefined });
+                                    }}
                                     secureTextEntry={!showPassword}
                                 />
+                                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                                    <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
+                                </TouchableOpacity>
                             </View>
+                            {errors.password && (
+                                <Text style={styles.errorText}>{errors.password}</Text>
+                            )}
                         </View>
 
                         <View>
                             <Text style={[styles.label, themeStyles.textSecondary]}>
                                 Confirm Password
                             </Text>
-                            <View style={[styles.inputContainer, themeStyles.inputContainer]}>
+                            <View style={[
+                                styles.inputContainer,
+                                themeStyles.inputContainer,
+                                errors.confirmPassword ? { borderColor: '#EF4444' } : null
+                            ]}>
                                 <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                                 <TextInput
                                     style={[styles.input, themeStyles.text]}
                                     placeholder="Confirm your password"
                                     placeholderTextColor={colors.textSecondary}
                                     value={confirmPassword}
-                                    onChangeText={setConfirmPassword}
-                                    secureTextEntry={!showPassword}
+                                    onChangeText={(text) => {
+                                        setConfirmPassword(text);
+                                        if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: undefined });
+                                    }}
+                                    secureTextEntry={!showConfirmPassword}
                                 />
+                                <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
+                                    <Ionicons name={showConfirmPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
+                                </TouchableOpacity>
+                            </View>
+                            {errors.confirmPassword && (
+                                <Text style={styles.errorText}>{errors.confirmPassword}</Text>
+                            )}
+                        </View>
+
+                        {/* Role Selector */}
+                        <View>
+                            <Text style={[styles.label, themeStyles.textSecondary]}>
+                                I am a...
+                            </Text>
+                            <View style={styles.roleContainer}>
+                                {roleOptions.map((option) => (
+                                    <TouchableOpacity
+                                        key={option.value}
+                                        onPress={() => setSelectedRole(option.value)}
+                                        style={[
+                                            styles.roleCard,
+                                            themeStyles.inputContainer,
+                                            selectedRole === option.value && {
+                                                borderColor: colors.primary,
+                                                borderWidth: 2,
+                                                backgroundColor: isDark ? 'rgba(99, 102, 241, 0.1)' : 'rgba(99, 102, 241, 0.05)',
+                                            },
+                                            errors.role && !selectedRole ? { borderColor: '#EF4444' } : null
+                                        ]}
+                                    >
+                                        <Ionicons
+                                            name={option.icon}
+                                            size={24}
+                                            color={selectedRole === option.value ? colors.primary : colors.textSecondary}
+                                        />
+                                        <Text style={[
+                                            styles.roleLabel,
+                                            themeStyles.text,
+                                            selectedRole === option.value && { color: colors.primary, fontWeight: '600' }
+                                        ]}>
+                                            {option.label}
+                                        </Text>
+                                        <Text style={[styles.roleDescription, themeStyles.textSecondary]}>
+                                            {option.description}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
                             </View>
                         </View>
 
-                        <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.showPasswordContainer}>
-                            <Ionicons name={showPassword ? "checkbox" : "square-outline"} size={20} color={colors.primary} />
-                            <Text style={[styles.showPasswordText, themeStyles.textSecondary]}>
-                                Show Password
-                            </Text>
-                        </TouchableOpacity>
+                        <View style={{ marginTop: 8 }}>
+                            {errors.role && (
+                                <Text style={styles.errorText}>{errors.role}</Text>
+                            )}
+                        </View>
 
                         <TouchableOpacity
                             onPress={() => handleSignup()}
@@ -741,6 +824,13 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         letterSpacing: 1, // tracking-wider
     },
+    errorText: {
+        color: '#EF4444',
+        fontSize: 12,
+        marginTop: 4,
+        marginLeft: 4,
+        fontFamily: 'Poppins_400Regular',
+    },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -754,16 +844,8 @@ const styles = StyleSheet.create({
         marginLeft: 12, // ml-3
         height: '100%',
         fontFamily: 'Poppins_400Regular',
-    },
-    showPasswordContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 8, // mt-2
-    },
-    showPasswordText: {
-        marginLeft: 8, // ml-2
-        fontSize: 12, // text-xs
-        fontFamily: 'Poppins_400Regular',
+        textAlignVertical: 'center',
+        paddingVertical: 0,
     },
     signupButton: {
         height: 56, // h-14
@@ -796,5 +878,32 @@ const styles = StyleSheet.create({
     },
     loginLinkHighlight: {
         fontFamily: 'Poppins_600SemiBold',
+    },
+    roleContainer: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    roleCard: {
+        flex: 1,
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        paddingHorizontal: 8,
+        borderRadius: 16,
+        borderWidth: 1,
+        minHeight: 100,
+    },
+    roleLabel: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
+        marginTop: 8,
+        textAlign: 'center',
+    },
+    roleDescription: {
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 10,
+        marginTop: 4,
+        textAlign: 'center',
     },
 });

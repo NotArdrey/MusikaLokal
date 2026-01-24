@@ -300,9 +300,9 @@ const styles = StyleSheet.create({
     paddingBottom: 150,
   },
   searchSection: {
-    paddingHorizontal: 24, 
-    paddingTop: 24, 
-    paddingBottom: 8, 
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 8,
   },
   searchBar: {
     flexDirection: 'row',
@@ -316,20 +316,22 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     fontSize: 16,
     fontFamily: 'Poppins_400Regular',
+    textAlignVertical: 'center',
+    paddingVertical: 0,
   },
   filterSection: {
-    paddingHorizontal: 24, 
-    paddingBottom: 8, 
+    paddingHorizontal: 24,
+    paddingBottom: 8,
   },
   filterGroup: {
     marginTop: 16,
   },
   filterTitle: {
-    fontSize: 12, 
-    marginBottom: 12, 
-    fontWeight: '600', 
+    fontSize: 12,
+    marginBottom: 12,
+    fontWeight: '600',
     textTransform: 'uppercase',
-    letterSpacing: 1, 
+    letterSpacing: 1,
     fontFamily: 'Poppins_600SemiBold',
   },
   filterScrollContent: {
@@ -372,8 +374,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
   },
   resultsList: {
-    paddingHorizontal: 24, 
-    paddingTop: 8, 
+    paddingHorizontal: 24,
+    paddingTop: 8,
   },
   loadingText: {
     margin: 16,

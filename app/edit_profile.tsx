@@ -456,6 +456,8 @@ const styles = StyleSheet.create({
   },
   textInput: {
     fontFamily: 'Poppins_400Regular',
+    textAlignVertical: 'center',
+    paddingVertical: 0,
   },
   actionsContainer: {
     marginTop: 32,

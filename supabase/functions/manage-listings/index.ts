@@ -34,14 +34,14 @@ serve(async (req: Request) => {
                 .order('created_at', { ascending: false })
 
             if (error) throw error
-            
-            // Map computed fields to expected names for frontend compatibility
+
+            // View columns already named 'rating' and 'review_count'
             const mapped = (data || []).map((item: any) => ({
                 ...item,
-                rating: item.computed_rating || 0,
-                review_count: item.computed_review_count || 0
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
             }))
-            
+
             return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
@@ -54,14 +54,14 @@ serve(async (req: Request) => {
                 .order('created_at', { ascending: false })
 
             if (error) throw error
-            
-            // Map computed fields to expected names for frontend compatibility
+
+            // View columns already named 'rating' and 'review_count'
             const mapped = (data || []).map((item: any) => ({
                 ...item,
-                rating: item.computed_rating || 0,
-                review_count: item.computed_review_count || 0
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
             }))
-            
+
             return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
@@ -74,14 +74,14 @@ serve(async (req: Request) => {
                 .order('created_at', { ascending: false })
 
             if (error) throw error
-            
-            // Map computed fields to expected names for frontend compatibility
+
+            // View columns already named 'rating' and 'review_count'
             const mapped = (data || []).map((item: any) => ({
                 ...item,
-                rating: item.computed_rating || 0,
-                review_count: item.computed_review_count || 0
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
             }))
-            
+
             return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
@@ -99,14 +99,14 @@ serve(async (req: Request) => {
                 .single()
 
             if (error) throw error
-            
-            // Map computed fields
+
+            // View columns already named 'rating' and 'review_count'
             const mapped = {
                 ...data,
-                rating: data.computed_rating || 0,
-                review_count: data.computed_review_count || 0
+                rating: data.rating || 0,
+                review_count: data.review_count || 0
             }
-            
+
             return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
@@ -123,7 +123,7 @@ serve(async (req: Request) => {
                 .single()
 
             if (error) throw error
-            
+
             // Return with default stats for new entity
             return new Response(JSON.stringify({ ...data, rating: 0, review_count: 0 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }

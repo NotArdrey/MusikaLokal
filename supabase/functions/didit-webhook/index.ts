@@ -35,7 +35,7 @@ async function verifySignature(payload: string, signature: string): Promise<bool
         console.log('Signature received:', signature);
         console.log('Payload length:', payload.length);
         console.log('Secret key length:', WEBHOOK_SECRET_KEY.length);
-        
+
         // The signature is base64 encoded HMAC-SHA256
         const encoder = new TextEncoder();
         const keyData = encoder.encode(WEBHOOK_SECRET_KEY);
@@ -49,7 +49,7 @@ async function verifySignature(payload: string, signature: string): Promise<bool
         );
 
         const payloadData = encoder.encode(payload);
-        
+
         // Try decoding the signature
         let signatureBytes: Uint8Array;
         try {
@@ -78,7 +78,7 @@ async function verifySignature(payload: string, signature: string): Promise<bool
 
 serve(async (req) => {
     console.log('=== DIDIT WEBHOOK v41 TRIGGERED ===');
-    
+
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
     }
@@ -108,7 +108,7 @@ serve(async (req) => {
         }
 
         const payload = JSON.parse(rawBody);
-        
+
         // Log ALL top-level keys in the payload to understand the structure
         console.log('=== DIDIT WEBHOOK PAYLOAD KEYS ===');
         console.log('Top-level keys:', Object.keys(payload));
@@ -124,7 +124,7 @@ serve(async (req) => {
         const status = payload.status;
         const webhookType = payload.webhook_type || payload.event || payload.type;
         const decision = payload.decision;
-        
+
         // The reference should be the user's UUID (passed during verification initiation)
         // Didit returns vendor_data that we passed when creating the session
         const userReference = payload.vendor_data || payload.reference || payload.external_id || payload.metadata?.user_id;
@@ -188,10 +188,10 @@ serve(async (req) => {
 
             // Check if userReference is a valid UUID
             const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userReference || '');
-            
+
             // If valid UUID, use it directly; otherwise try to find user by session ID
             let finalUserReference: string | null = isValidUUID ? userReference : null;
-            
+
             if (!isValidUUID && sessionId) {
                 console.log('vendor_data is not a UUID, looking up user by session ID:', sessionId);
                 const { data: profileData, error: profileError } = await supabaseAdmin
@@ -199,7 +199,7 @@ serve(async (req) => {
                     .select('id')
                     .eq('didit_session_id', sessionId)
                     .maybeSingle(); // Use maybeSingle instead of single to avoid error when not found
-                
+
                 if (profileData?.id) {
                     finalUserReference = profileData.id;
                     console.log('Found user by session ID:', finalUserReference);
@@ -330,12 +330,12 @@ async function sendVerificationEmail(
     console.log('Recipient:', userEmail);
     console.log('First Name:', firstName || '(empty)');
     console.log('Full Name:', fullName || '(empty)');
-    
+
     if (!userEmail) {
         console.error('No email address provided, cannot send email');
         return false;
     }
-    
+
     const displayName = firstName || fullName || 'there';
 
     // Email content for the verification confirmation
@@ -390,11 +390,11 @@ async function sendVerificationEmail(
     try {
         const supabaseUrl = Deno.env.get('SUPABASE_URL');
         const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-        
+
         if (supabaseUrl && serviceRoleKey) {
             console.log('Sending verification confirmation email via Supabase Auth...');
             console.log('Using configured SMTP and custom email template');
-            
+
             // Use magic link endpoint - customize the "Magic Link" template in 
             // Supabase Dashboard > Authentication > Email Templates
             // Template variables available: {{ .ConfirmationURL }}, {{ .Email }}, {{ .SiteURL }}
@@ -425,7 +425,7 @@ async function sendVerificationEmail(
             } else {
                 const errorText = await response.text();
                 console.log('Supabase Auth magiclink email failed:', response.status, errorText);
-                
+
                 // Fallback: Try invite endpoint
                 console.log('Trying invite endpoint as fallback...');
                 const inviteResponse = await fetch(`${supabaseUrl}/auth/v1/invite`, {
@@ -446,7 +446,7 @@ async function sendVerificationEmail(
                         }
                     }),
                 });
-                
+
                 if (inviteResponse.ok) {
                     console.log(`✅ Invite email sent via Supabase Auth to ${userEmail}`);
                     return true;
@@ -463,7 +463,7 @@ async function sendVerificationEmail(
     // Method 2: Try Resend API as fallback
     const resendApiKey = Deno.env.get('RESEND_API_KEY');
     console.log('RESEND_API_KEY configured:', !!resendApiKey);
-    
+
     if (resendApiKey) {
         try {
             const resendFrom = Deno.env.get('RESEND_FROM') || 'MusikaLokal <noreply@musikalokal.com>';
@@ -511,7 +511,7 @@ async function sendVerificationEmail(
                 status: 'pending',
                 created_at: new Date().toISOString(),
             });
-        
+
         if (!notifyError) {
             console.log('Email notification queued in database');
             return true;
@@ -545,23 +545,23 @@ async function handleApproved(
     // - first_name: payload.decision.id_verifications[0].first_name
     // - last_name: payload.decision.id_verifications[0].last_name
     // - For Spanish/Latin American IDs: extra_fields.first_surname
-    
+
     const firstName = idVerification?.first_name || '';
     const lastName = idVerification?.last_name || idVerification?.extra_fields?.first_surname || '';
     const fullName = firstName && lastName ? `${firstName} ${lastName}` : (firstName || lastName || '');
-    
+
     const documentExpiry = idVerification?.expiration_date || null;
     const dateOfBirth = idVerification?.date_of_birth || null;
     const nationality = idVerification?.nationality || null;
     const documentNumber = idVerification?.document_number || null;
 
-    console.log('Approving user - extracted data:', { 
-        userReference, 
-        fullName, 
-        firstName, 
+    console.log('Approving user - extracted data:', {
+        userReference,
+        fullName,
+        firstName,
         lastName,
-        documentExpiry, 
-        dateOfBirth, 
+        documentExpiry,
+        dateOfBirth,
         nationality,
         documentNumber,
         rawIdVerification: JSON.stringify(idVerification)
@@ -605,7 +605,7 @@ async function handleApproved(
         documentExpiry,
         verificationStatus: 'APPROVED'
     });
-    
+
     const { error: updateError, data: updateData } = await supabaseAdmin
         .from('profiles')
         .update({
@@ -627,7 +627,7 @@ async function handleApproved(
         } else {
             console.log('No profile found to update, creating new profile via upsert...');
         }
-        
+
         // Profile doesn't exist - create it with upsert
         const { error: upsertError, data: upsertData } = await supabaseAdmin
             .from('profiles')
@@ -642,7 +642,7 @@ async function handleApproved(
                 didit_session_id: null,
             })
             .select();
-        
+
         if (upsertError) {
             console.error('Upsert failed:', upsertError.message);
         } else {
@@ -680,8 +680,6 @@ async function handleDeclined(supabaseAdmin: any, userReference: string) {
             verification_status: 'DECLINED',
             // Clear any partial data
             full_name: null,
-            first_name: null,
-            last_name: null,
             // Clear session to allow new verification attempt
             didit_session_id: null,
         })
@@ -706,8 +704,6 @@ async function handleAbandoned(supabaseAdmin: any, userReference: string) {
             verification_status: 'ABANDONED',
             // Clear any partial data
             full_name: null,
-            first_name: null,
-            last_name: null,
             // Clear session to allow new verification attempt
             didit_session_id: null,
         })
