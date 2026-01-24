@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
@@ -17,12 +17,46 @@ export default function AddGroupScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [members, setMembers] = useState<string[]>([]);
   const [newMember, setNewMember] = useState('');
+  const [authorized, setAuthorized] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   const steps = [
     { id: 1, title: 'Group Info', icon: 'people' },
     { id: 2, title: 'Members', icon: 'person-add' },
     { id: 3, title: 'Review', icon: 'checkmark-circle' },
   ];
+
+  // Role-based access control
+  useEffect(() => {
+    checkAuthorization();
+  }, []);
+
+  const checkAuthorization = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace('/');
+        return;
+      }
+
+      const { data: profile } = await supabase.functions.invoke('manage-profile', {
+        body: { action: 'fetch', userId: user.id }
+      });
+
+      if (profile?.role !== 'musician') {
+        Alert.alert('Unauthorized', 'Only musicians can create groups.');
+        router.replace('/home');
+        return;
+      }
+
+      setAuthorized(true);
+    } catch (e) {
+      console.error('Authorization check failed:', e);
+      router.replace('/home');
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
 
   const handleNext = () => {
     if (step < 3) setStep(step + 1);
@@ -60,6 +94,23 @@ export default function AddGroupScreen() {
       alert('Failed to create group');
     }
   };
+
+  // Show loading while checking authorization
+  if (checkingAuth) {
+    return (
+      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+          Checking permissions...
+        </Text>
+      </View>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!authorized) {
+    return null;
+  }
 
   const addMember = () => {
     if (newMember.trim()) {
@@ -295,6 +346,10 @@ export default function AddGroupScreen() {
 const styles = StyleSheet.create({
   flex1: {
     flex: 1,
+  },
+  centerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   stepIndicatorContainer: {
     paddingHorizontal: 24,

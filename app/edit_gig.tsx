@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -18,6 +18,9 @@ export default function EditGigScreen() {
   const [address, setAddress] = useState('');
   const [cost, setCost] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   // Mock Data
   const [documents, setDocuments] = useState(['Contract.pdf', 'Rider_v2.pdf']);
@@ -27,29 +30,76 @@ export default function EditGigScreen() {
     'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=300&h=200&fit=crop'
   ]);
 
-  React.useEffect(() => {
-    fetchGigDetails();
-  }, [id]);
+  // Role-based access control
+  useEffect(() => {
+    checkAuthorization();
+  }, []);
+
+  const checkAuthorization = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace('/');
+        return;
+      }
+
+      const { data: profile } = await supabase.functions.invoke('manage-profile', {
+        body: { action: 'fetch', userId: user.id }
+      });
+
+      if (profile?.role !== 'venue-owner') {
+        Alert.alert('Unauthorized', 'Only venue owners can edit gigs.');
+        router.replace('/home');
+        return;
+      }
+
+      setAuthorized(true);
+    } catch (e) {
+      console.error('Authorization check failed:', e);
+      router.replace('/home');
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
+
+  useEffect(() => {
+    if (authorized && id) {
+      fetchGigDetails();
+    }
+  }, [id, authorized]);
 
   const fetchGigDetails = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        router.replace('/');
+        return;
+      }
 
       const { data, error } = await supabase.functions.invoke('manage-listings', {
         body: { action: 'fetch_one', type: 'gig', id, userId: user.id }
       });
 
       if (error) throw error;
-      if (data) {
-        setGigName(data.name);
-        setDescription(data.description);
-        setAddress(data.location);
-        setCost(data.budget?.toString() || '');
-        // setImages(data.images || []); // If backend has images
+
+      // If no data returned, user doesn't own this gig
+      if (!data) {
+        Alert.alert('Not Found', 'Gig not found or you do not have permission to edit it.');
+        router.replace('/home');
+        return;
       }
+
+      setGigName(data.name);
+      setDescription(data.description);
+      setAddress(data.location);
+      setCost(data.budget?.toString() || '');
+      // setImages(data.images || []); // If backend has images
     } catch (e) {
       console.log('Error fetching gig details:', e);
+      Alert.alert('Error', 'Failed to load gig details.');
+      router.replace('/home');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -109,6 +159,35 @@ export default function EditGigScreen() {
       </View>
     </View>
   );
+
+  // Show loading while checking authorization
+  if (checkingAuth) {
+    return (
+      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+          Checking permissions...
+        </Text>
+      </View>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!authorized) {
+    return null;
+  }
+
+  // Show loading while fetching data
+  if (loading) {
+    return (
+      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+          Loading gig details...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -203,6 +282,10 @@ export default function EditGigScreen() {
 const styles = StyleSheet.create({
   flex1: {
     flex: 1,
+  },
+  centerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollContent: {
     paddingBottom: 100,

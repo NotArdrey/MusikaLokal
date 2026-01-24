@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -18,34 +18,84 @@ export default function EditGroupScreen() {
   const [description, setDescription] = useState('');
   const [selectedImage, setSelectedImage] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   // Members
   const [members, setMembers] = useState<string[]>([]);
   const [newMember, setNewMember] = useState('');
 
-  React.useEffect(() => {
-    fetchGroupDetails();
-  }, [id]);
+  // Role-based access control
+  useEffect(() => {
+    checkAuthorization();
+  }, []);
+
+  const checkAuthorization = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace('/');
+        return;
+      }
+
+      const { data: profile } = await supabase.functions.invoke('manage-profile', {
+        body: { action: 'fetch', userId: user.id }
+      });
+
+      if (profile?.role !== 'musician') {
+        Alert.alert('Unauthorized', 'Only musicians can edit groups.');
+        router.replace('/home');
+        return;
+      }
+
+      setAuthorized(true);
+    } catch (e) {
+      console.error('Authorization check failed:', e);
+      router.replace('/home');
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
+
+  useEffect(() => {
+    if (authorized && id) {
+      fetchGroupDetails();
+    }
+  }, [id, authorized]);
 
   const fetchGroupDetails = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        router.replace('/');
+        return;
+      }
 
       const { data, error } = await supabase.functions.invoke('manage-listings', {
         body: { action: 'fetch_one', type: 'group', id, userId: user.id }
       });
 
       if (error) throw error;
-      if (data) {
-        setGroupName(data.name);
-        setGenre(data.genre);
-        setDescription(data.description);
-        setMembers(data.members || []);
-        // setSelectedImage(data.images?.[0] || '');
+
+      // If no data returned, user doesn't own this group
+      if (!data) {
+        Alert.alert('Not Found', 'Group not found or you do not have permission to edit it.');
+        router.replace('/home');
+        return;
       }
+
+      setGroupName(data.name);
+      setGenre(data.genre);
+      setDescription(data.description);
+      setMembers(data.members || []);
+      // setSelectedImage(data.images?.[0] || '');
     } catch (e) {
       console.log('Error fetching group details:', e);
+      Alert.alert('Error', 'Failed to load group details.');
+      router.replace('/home');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -116,6 +166,35 @@ export default function EditGroupScreen() {
       </View>
     </View>
   );
+
+  // Show loading while checking authorization
+  if (checkingAuth) {
+    return (
+      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+          Checking permissions...
+        </Text>
+      </View>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!authorized) {
+    return null;
+  }
+
+  // Show loading while fetching data
+  if (loading) {
+    return (
+      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+          Loading group details...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -243,6 +322,10 @@ export default function EditGroupScreen() {
 const styles = StyleSheet.create({
   flex1: {
     flex: 1,
+  },
+  centerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollContent: {
     paddingBottom: 100,

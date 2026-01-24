@@ -14,7 +14,7 @@
 -- Email: musician@test.com / Password: pass123
 INSERT INTO profiles (id, email, full_name, role, bio, location, skills, genres, is_verified, verification_status)
 VALUES (
-    '00000000-0000-0000-0000-000000000001', -- Replace with actual auth.users UUID
+    (SELECT id FROM auth.users WHERE email = 'musician@test.com' LIMIT 1),
     'musician@test.com',
     'Juan Dela Cruz',
     'musician',
@@ -32,7 +32,7 @@ VALUES (
 -- Email: studio@test.com / Password: pass123
 INSERT INTO profiles (id, email, full_name, role, bio, location, is_verified, verification_status)
 VALUES (
-    '00000000-0000-0000-0000-000000000002', -- Replace with actual auth.users UUID
+    (SELECT id FROM auth.users WHERE email = 'studio@test.com' LIMIT 1),
     'studio@test.com',
     'Maria Santos',
     'studio-owner',
@@ -48,7 +48,7 @@ VALUES (
 -- Email: manager@test.com / Password: pass123
 INSERT INTO profiles (id, email, full_name, role, bio, location, is_verified, verification_status)
 VALUES (
-    '00000000-0000-0000-0000-000000000003', -- Replace with actual auth.users UUID
+    (SELECT id FROM auth.users WHERE email = 'manager@test.com' LIMIT 1),
     'manager@test.com',
     'Pedro Reyes',
     'venue-owner',
@@ -67,22 +67,22 @@ VALUES (
 -- Sample Groups
 INSERT INTO groups (id, owner_id, name, genre, description, location, images)
 VALUES 
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000001', 'The Manila Sound', 'Rock', 'High-energy rock band from Manila', 'Manila, Philippines', ARRAY['https://picsum.photos/400/300?random=1']),
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000001', 'Indie Vibes', 'Indie', 'Chill indie folk duo', 'Quezon City, Philippines', ARRAY['https://picsum.photos/400/300?random=2'])
+    (uuid_generate_v4(), (SELECT id FROM auth.users WHERE email = 'musician@test.com' LIMIT 1), 'The Manila Sound', 'Rock', 'High-energy rock band from Manila', 'Manila, Philippines', ARRAY['https://picsum.photos/400/300?random=1']),
+    (uuid_generate_v4(), (SELECT id FROM auth.users WHERE email = 'musician@test.com' LIMIT 1), 'Indie Vibes', 'Indie', 'Chill indie folk duo', 'Quezon City, Philippines', ARRAY['https://picsum.photos/400/300?random=2'])
 ON CONFLICT DO NOTHING;
 
 -- Sample Studios
 INSERT INTO studios (id, owner_id, name, address, hourly_rate, description, amenities, images)
 VALUES 
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000002', 'Santos Recording Studio', '123 Music Ave, Quezon City', 1500, 'Professional recording studio with state-of-the-art equipment', ARRAY['Air Conditioning', 'Drum Kit', 'Amplifiers', 'Mixing Console'], ARRAY['https://picsum.photos/400/300?random=3']),
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000002', 'Pocket Studio QC', '456 Sound St, Quezon City', 800, 'Affordable rehearsal and recording space', ARRAY['Air Conditioning', 'Basic PA System'], ARRAY['https://picsum.photos/400/300?random=4'])
+    (uuid_generate_v4(), (SELECT id FROM auth.users WHERE email = 'studio@test.com' LIMIT 1), 'Santos Recording Studio', '123 Music Ave, Quezon City', 1500, 'Professional recording studio with state-of-the-art equipment', ARRAY['Air Conditioning', 'Drum Kit', 'Amplifiers', 'Mixing Console'], ARRAY['https://picsum.photos/400/300?random=3']),
+    (uuid_generate_v4(), (SELECT id FROM auth.users WHERE email = 'studio@test.com' LIMIT 1), 'Pocket Studio QC', '456 Sound St, Quezon City', 800, 'Affordable rehearsal and recording space', ARRAY['Air Conditioning', 'Basic PA System'], ARRAY['https://picsum.photos/400/300?random=4'])
 ON CONFLICT DO NOTHING;
 
 -- Sample Gigs
 INSERT INTO gigs (id, organizer_id, name, location, budget, description, event_date, status, images)
 VALUES 
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'Friday Night Live', 'Route 196, Katipunan', 15000, 'Looking for a rock band to headline our Friday night show', NOW() + INTERVAL '14 days', 'open', ARRAY['https://picsum.photos/400/300?random=5']),
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'Acoustic Sunday', 'Coffee Project, BGC', 8000, 'Need an acoustic act for our Sunday brunch sessions', NOW() + INTERVAL '7 days', 'open', ARRAY['https://picsum.photos/400/300?random=6'])
+    (uuid_generate_v4(), (SELECT id FROM auth.users WHERE email = 'manager@test.com' LIMIT 1), 'Friday Night Live', 'Route 196, Katipunan', 15000, 'Looking for a rock band to headline our Friday night show', NOW() + INTERVAL '14 days', 'open', ARRAY['https://picsum.photos/400/300?random=5']),
+    (uuid_generate_v4(), (SELECT id FROM auth.users WHERE email = 'manager@test.com' LIMIT 1), 'Acoustic Sunday', 'Coffee Project, BGC', 8000, 'Need an acoustic act for our Sunday brunch sessions', NOW() + INTERVAL '7 days', 'open', ARRAY['https://picsum.photos/400/300?random=6'])
 ON CONFLICT DO NOTHING;
 
 -- ============================================================

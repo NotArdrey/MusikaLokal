@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -18,35 +18,88 @@ export default function EditStudioScreen() {
   const [address, setAddress] = useState('');
   const [cost, setCost] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [amenities, setAmenities] = useState<string[]>([]);
   const [newAmenity, setNewAmenity] = useState('');
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
 
-  React.useEffect(() => {
-    fetchStudioDetails();
-  }, [id]);
+  // Role-based access control
+  useEffect(() => {
+    checkAuthorization();
+  }, []);
+
+  const checkAuthorization = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace('/');
+        return;
+      }
+
+      const { data: profile } = await supabase.functions.invoke('manage-profile', {
+        body: { action: 'fetch', userId: user.id }
+      });
+
+      if (profile?.role !== 'studio-owner') {
+        Alert.alert('Unauthorized', 'Only studio owners can edit studios.');
+        router.replace('/home');
+        return;
+      }
+
+      setAuthorized(true);
+      // Now fetch the studio details
+      // fetchStudioDetails(); // This will be called by the other useEffect now
+    } catch (e) {
+      console.error('Authorization check failed:', e);
+      router.replace('/home');
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
+
+  useEffect(() => {
+    // Only refetch if id changes and we're already authorized
+    if (authorized && id) {
+      fetchStudioDetails();
+    }
+  }, [id, authorized]);
 
   const fetchStudioDetails = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        router.replace('/');
+        return;
+      }
 
       const { data, error } = await supabase.functions.invoke('manage-listings', {
         body: { action: 'fetch_one', type: 'studio', id, userId: user.id }
       });
 
       if (error) throw error;
-      if (data) {
-        setStudioName(data.name);
-        setDescription(data.description);
-        setAddress(data.address);
-        setCost(data.hourly_rate?.toString() || '');
-        setAmenities(data.amenities || []);
-        // setSelectedImages(data.images || []);
+
+      // If no data returned, user doesn't own this studio
+      if (!data) {
+        Alert.alert('Not Found', 'Studio not found or you do not have permission to edit it.');
+        router.replace('/home');
+        return;
       }
+
+      setStudioName(data.name);
+      setDescription(data.description);
+      setAddress(data.address);
+      setCost(data.hourly_rate?.toString() || '');
+      setAmenities(data.amenities || []);
+      // setSelectedImages(data.images || []);
     } catch (e) {
       console.log('Error fetching studio details:', e);
+      Alert.alert('Error', 'Failed to load studio details.');
+      router.replace('/home');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -120,6 +173,35 @@ export default function EditStudioScreen() {
       </View>
     </View>
   );
+
+  // Show loading while checking authorization
+  if (checkingAuth) {
+    return (
+      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+          Checking permissions...
+        </Text>
+      </View>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!authorized) {
+    return null;
+  }
+
+  // Show loading while fetching data
+  if (loading) {
+    return (
+      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+          Loading studio details...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -227,6 +309,10 @@ export default function EditStudioScreen() {
 const styles = StyleSheet.create({
   flex1: {
     flex: 1,
+  },
+  centerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollContent: {
     paddingBottom: 100,
