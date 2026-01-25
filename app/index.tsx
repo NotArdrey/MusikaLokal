@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import VerificationModal from '../src/components/VerificationModal';
@@ -8,8 +8,6 @@ import { useTheme } from '../src/context/ThemeContext';
 
 
 import { VerificationStore } from './src/utils/VerificationStore';
-
-// ... existing imports ...
 
 export default function LoginScreen() {
     const { colors, isDark } = useTheme();
@@ -118,7 +116,7 @@ export default function LoginScreen() {
                             ]
                         );
                     } else {
-                        router.replace('/home');
+                        router.replace('/home'as any);
                     }
                 }
             }

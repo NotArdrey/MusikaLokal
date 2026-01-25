@@ -1,15 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 
 interface HeaderProps {
     title: string;
+    transparent?: boolean;
 }
 
-export default function Header({ title }: HeaderProps) {
+export default function Header({ title, transparent }: HeaderProps) {
     const { colors, isDark } = useTheme();
 
     const pathname = usePathname();
@@ -77,7 +78,7 @@ export default function Header({ title }: HeaderProps) {
     }, [addPath])
 
     return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.container, { backgroundColor: transparent ? 'transparent' : colors.background }]}>
             <View style={styles.leftContainer}>
                 {backVisible ? (
                     <TouchableOpacity

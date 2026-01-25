@@ -1,412 +1,390 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Dimensions,
+    Image,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
+import ListingCard from '../src/components/ListingCard';
+import ListingDetailsSheet from '../src/components/ListingDetailsSheet';
 import Navbar from '../src/components/navbar';
+import SearchBottomSheet from '../src/components/SearchBottomSheet';
 import { useTheme } from '../src/context/ThemeContext';
+import { MOCK_LISTINGS } from '../src/data/mockData';
+
+const { width, height } = Dimensions.get('window');
+
+// Refined Categories
+const CATEGORIES = ['All', 'Musicians', 'Venues', 'Studios'];
 
 export default function HomeScreen() {
-  const { colors, isDark } = useTheme();
-  const [activeCategory, setActiveCategory] = useState('All');
-  const [featured, setFeatured] = useState<any[]>([]);
-  const [newArrivals, setNewArrivals] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+    const { colors, isDark } = useTheme();
+    const insets = useSafeAreaInsets();
+    const [loading, setLoading] = useState(true);
+    const [activeCategory, setActiveCategory] = useState('All');
+    const [featured, setFeatured] = useState<any[]>([]);
+    const [userName, setUserName] = useState('Martin');
 
-  React.useEffect(() => {
-    fetchFeed();
-  }, []);
+    // Bottom Sheet
+    const bottomSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
+    const searchSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
+    const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
 
-  async function fetchFeed() {
-    try {
-      const { data, error } = await supabase.functions.invoke('home-feed');
-      if (error) throw error;
-      setFeatured(data.featured || []);
-      setNewArrivals(data.newArrivals || []);
-    } catch (e) {
-      console.log('Error fetching feed:', e);
-    } finally {
-      setLoading(false);
-    }
-  }
+    // Filter items selection
+    const filteredItems = activeCategory === 'All'
+        ? featured
+        : featured.filter(item => {
+            if (activeCategory === 'Musicians') return item.type === 'Group';
+            if (activeCategory === 'Venues') return item.type === 'Venue';
+            if (activeCategory === 'Studios') return item.type === 'Studio';
+            return true;
+        });
 
-  const categories = ['All', 'Gigs', 'Musicians', 'Studios'];
+    // Mock "Discover New" items
+    const discoverItems = [
+        { id: 'd1', title: 'Hidden Valley', location: 'Rizal', image: 'https://images.unsplash.com/photo-1510784722466-f2aa9c52fff6?w=800&fit=crop' },
+        { id: 'd2', title: 'Coastal Vibes', location: 'La Union', image: 'https://images.unsplash.com/photo-1520116468816-95b69f847357?w=800&fit=crop' },
+        { id: 'd3', title: 'Mountain Retreat', location: 'Baguio', image: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=800&fit=crop' },
+    ];
 
-  return (
-    <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-      <Header title="Discover" />
+    useEffect(() => {
+        fetchHomeData();
+        fetchUserProfile();
+    }, []);
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+    const fetchUserProfile = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            const { data } = await supabase.functions.invoke('manage-profile', {
+                body: { action: 'fetch', userId: user.id }
+            });
+            if (data?.full_name) {
+                setUserName(data.full_name.split(' ')[0]);
+            }
+        } catch (e) {
+            console.log('Error fetching user profile:', e);
+        }
+    };
 
-        {/* Hero / Search Section */}
-        <View style={styles.sectionContainer}>
-          <Text style={[styles.heroTitle, { color: colors.text }]}>
-            Find your <Text style={{ color: colors.primary }}>rhythm</Text>
-          </Text>
-          <Text style={[styles.heroSubtitle, { color: colors.textSecondary }]}>
-            Book the best local talent and spaces.
-          </Text>
+    const fetchHomeData = async () => {
+        try {
+            const { data, error } = await supabase.functions.invoke('home-feed');
+            let fetchedItems: any[] = [];
+            if (data?.featured || data?.newArrivals) {
+                fetchedItems = [...(data?.featured || []), ...(data?.newArrivals || [])];
+            }
+            const uniqueItems = Array.from(new Map(fetchedItems.map(item => [item.id, item])).values());
+            setFeatured([...uniqueItems, ...MOCK_LISTINGS]);
+        } catch (e) {
+            console.log('Error fetching home feed:', e);
+            setFeatured([...MOCK_LISTINGS]);
+        } finally {
+            setLoading(false);
+        }
+    };
 
-          <View style={[styles.searchContainer, { backgroundColor: colors.inputBackground }]}>
-            <Ionicons name="search" size={20} color={colors.textSecondary} />
-            <TextInput
-              placeholder="Search gigs, bands, studios..."
-              placeholderTextColor={colors.textSecondary}
-              style={[styles.searchInput, { color: colors.text }]}
+    const handleCardPress = (item: any) => {
+        setSelectedListingId(item.id);
+        bottomSheetRef.current?.present();
+    };
+
+    // 1. Immersive Hero Section
+    const renderHero = () => (
+        <View style={styles.heroContainer}>
+            <Image
+                source={{ uri: 'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=1200&fit=crop' }}
+                style={styles.heroImage}
+                resizeMode="cover"
             />
-          </View>
-        </View>
+            <LinearGradient
+                colors={['rgba(0,0,0,0.1)', 'transparent', 'rgba(0,0,0,0.8)']}
+                style={styles.heroGradient}
+            />
 
-        {/* Categories */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoriesScroll}
-          contentContainerStyle={styles.categoriesContent}
-        >
-          {categories.map((cat, index) => (
-            <TouchableOpacity
-              key={index}
-              onPress={() => setActiveCategory(cat)}
-              style={[
-                styles.categoryChip,
-                {
-                  backgroundColor: activeCategory === cat ? colors.primary : 'transparent',
-                  borderColor: activeCategory === cat ? colors.primary : colors.border,
-                  borderWidth: activeCategory === cat ? 0 : 1,
-                  marginRight: 8,
-                }
-              ]}
-            >
-              <Text
-                style={{
-                  color: activeCategory === cat ? '#FFF' : colors.textSecondary,
-                  fontFamily: 'Poppins_500Medium',
-                  fontSize: 14,
-                }}
-              >
-                {cat}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Featured Section */}
-        <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Featured</Text>
-            <TouchableOpacity onPress={() => router.push('/find_talent_and_spaces')}>
-              <Text style={[styles.seeAllText, { color: colors.primary }]}>See All</Text>
-            </TouchableOpacity>
-          </View>
-
-          {loading ? (
-            <Text style={{ color: colors.textSecondary, marginLeft: 4 }}>Loading featured...</Text>
-          ) : featured.length === 0 ? (
-            <View style={[styles.emptyState, { borderColor: colors.border }]}>
-              <Ionicons name="star-outline" size={32} color={colors.textSecondary} />
-              <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No featured items yet</Text>
+            {/* Header Component Overlay */}
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 }}>
+                <Header title="MusikaLokal" transparent />
             </View>
-          ) : (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.featuredScrollContent}
-            >
-              {featured.map((item, index) => (
-                <TouchableOpacity
-                  key={index}
-                  activeOpacity={0.9}
-                  onPress={() => router.push(item.type === 'Gig' ? '/gig_details' : '/studio_details')}
-                  style={[styles.featuredCard, { backgroundColor: colors.card }]}
-                >
-                  <View style={styles.featuredImageContainer}>
-                    <Image
-                      source={{ uri: item.images?.[0] || 'https://picsum.photos/400/250' }}
-                      style={styles.featuredImage}
-                      resizeMode="cover"
-                    />
-                    <View style={styles.ratingBadge}>
-                      <Ionicons name="star" size={12} color="#F59E0B" />
-                      <Text style={styles.ratingText}>{item.rating || 'N/A'}</Text>
-                    </View>
-                    <View style={[styles.favoriteButton, { backgroundColor: 'rgba(255,255,255,0.9)' }]}>
-                      <Ionicons name="heart-outline" size={18} color={colors.primary} />
-                    </View>
-                  </View>
 
-                  <View style={styles.featuredInfo}>
-                    <Text
-                      numberOfLines={1}
-                      style={[styles.featuredTitle, { color: colors.text }]}
-                    >
-                      {item.name}
-                    </Text>
-                    <View style={styles.locationContainer}>
-                      <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
-                      <Text style={[styles.locationText, { color: colors.textSecondary }]}>
-                        {item.location || item.address || 'Unknown Location'}
-                      </Text>
-                    </View>
-                    <View style={styles.tagsContainer}>
-                      <View style={[styles.tag, { backgroundColor: isDark ? '#312E81' : '#E0E7FF' }]}>
-                        <Text style={[styles.tagText, { color: isDark ? '#A5B4FC' : '#4F46E5' }]}>
-                          {item.type}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-        </View>
-
-        {/* New Arrivals List */}
-        <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 16 }]}>New Arrivals</Text>
-
-          {loading ? (
-            <Text style={{ color: colors.textSecondary }}>Loading new arrivals...</Text>
-          ) : newArrivals.length === 0 ? (
-            <View style={[styles.emptyState, { borderColor: colors.border }]}>
-              <Ionicons name="musical-notes-outline" size={32} color={colors.textSecondary} />
-              <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No new arrivals found</Text>
-            </View>
-          ) : newArrivals.map((item, i) => (
-            <TouchableOpacity
-              key={i}
-              style={[styles.newArrivalCard, { backgroundColor: colors.card }]}
-              onPress={() => router.push('/group_details')}
-            >
-              <Image
-                source={{ uri: item.images?.[0] || `https://picsum.photos/100/100?random=${20 + i}` }}
-                style={styles.newArrivalImage}
-              />
-              <View style={styles.newArrivalInfo}>
-                <Text style={[styles.newArrivalTitle, { color: colors.text }]}>{item.name}</Text>
-                <Text style={[styles.newArrivalSubtitle, { color: colors.textSecondary }]}>{item.genre || 'Music Group'}</Text>
-                <View style={styles.ratingContainer}>
-                  <Ionicons name="star" size={12} color={colors.primary} />
-                  <Text style={[styles.ratingValue, { color: colors.primary }]}>{item.rating || 'N/A'}</Text>
+            {/* Content within Hero */}
+            <View style={[styles.heroContent, { paddingTop: insets.top + 60 }]}>
+                {/* Greeting */}
+                <View>
+                    <Text style={styles.heroGreeting}>Hey, {userName}!</Text>
                 </View>
-              </View>
-              <View style={[styles.chevronContainer, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-              </View>
-            </TouchableOpacity>
-          ))}
 
+                {/* Glassmorphism Search Pill */}
+                <BlurView intensity={40} tint="light" style={styles.searchPill}>
+                    <TouchableOpacity
+                        style={styles.searchTouch}
+                        onPress={() => searchSheetRef.current?.present()}
+                    >
+                        <Ionicons name="search" size={20} color="#FFF" style={{ marginRight: 8 }} />
+                        <View style={styles.searchTexts}>
+                            <Text style={styles.searchPlaceholder}>Where to?</Text>
+                            <Text style={styles.searchSubPlaceholder}>Dates • Guests</Text>
+                        </View>
+                    </TouchableOpacity>
+                </BlurView>
+            </View>
         </View>
+    );
 
-      </ScrollView>
+    // 3. Category Chips
+    const renderCategories = () => (
+        <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryContainer}
+        >
+            {CATEGORIES.map(cat => (
+                <TouchableOpacity
+                    key={cat}
+                    onPress={() => setActiveCategory(cat)}
+                    style={[
+                        styles.categoryChip,
+                        activeCategory === cat && { backgroundColor: parseColor(colors.primary), borderColor: 'transparent' }
+                    ]}
+                >
+                    <Text style={[
+                        styles.categoryText,
+                        activeCategory === cat && { color: '#FFF', fontWeight: '600' }
+                    ]}>{cat}</Text>
+                </TouchableOpacity>
+            ))}
+        </ScrollView>
+    );
 
-      <Navbar />
-    </View>
-  );
+    // Unified Card Renderer
+    const renderUnifiedCard = (item: any) => {
+        return (
+            <ListingCard
+                key={item.id}
+                item={item}
+                onPress={handleCardPress}
+                variant="horizontal"
+            />
+        );
+    };
+
+    // 4. "The Most Relevant" Horizontal Carousel
+    const renderFeatured = () => (
+        <View style={styles.sectionContainer}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>The Most Relevant</Text>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingLeft: 24, paddingRight: 8 }}
+                decelerationRate="fast"
+                snapToInterval={width * 0.6 + 16}
+            >
+                {filteredItems.slice(0, 5).map(item => renderUnifiedCard(item))}
+            </ScrollView>
+        </View>
+    );
+
+    // 5. Discovery Section
+    const renderDiscovery = () => (
+        <View style={styles.sectionContainer}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: 24 }}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Discover new places</Text>
+                <TouchableOpacity>
+                    <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: 12 }}>See all</Text>
+                </TouchableOpacity>
+            </View>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingLeft: 24, paddingRight: 8 }}
+            >
+                {discoverItems.map(item => renderUnifiedCard(item))}
+            </ScrollView>
+        </View>
+    );
+
+    // Helpers
+    const parseColor = (c: string) => c;
+
+    if (loading) {
+        return (
+            <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+                <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+        );
+    }
+
+    return (
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
+            <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
+            <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 100 }}
+                bounces={false}
+            >
+                {renderHero()}
+
+                <View style={{ marginTop: 20 }}>
+                    {renderCategories()}
+                </View>
+
+                {renderFeatured()}
+
+                {renderDiscovery()}
+
+                {/* Extra space for Recently Viewed mockup if needed */}
+                <View style={styles.sectionContainer}>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Recently Viewed</Text>
+                    <View style={{ paddingHorizontal: 24 }}>
+                        <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No recent items</Text>
+                    </View>
+                </View>
+
+            </ScrollView>
+
+            <Navbar />
+
+            <ListingDetailsSheet ref={bottomSheetRef} listingId={selectedListingId} />
+            <SearchBottomSheet ref={searchSheetRef} />
+        </View>
+    );
 }
 
 const styles = StyleSheet.create({
-  flex1: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 150,
-  },
-  sectionContainer: {
-    paddingHorizontal: 24, // px-6
-    marginBottom: 24, // mb-6
-  },
-  heroTitle: {
-    fontSize: 30, // text-3xl
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  heroSubtitle: {
-    fontSize: 16, // text-base
-    marginTop: 4,
-    marginBottom: 16,
-    fontFamily: 'Poppins_400Regular',
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 16,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 12,
-    fontSize: 16,
-    fontFamily: 'Poppins_400Regular',
-  },
-  categoriesScroll: {
-    marginHorizontal: 24, // px-6
-    marginBottom: 32, // mb-8
-  },
-  categoriesContent: {
-    paddingRight: 24,
-    gap: 12,
-  },
-  categoryChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 9999,
-    marginRight: 8,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  seeAllText: {
-    fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderRadius: 16,
-  },
-  emptyStateText: {
-    marginTop: 8,
-    fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
-  },
-  featuredScrollContent: {
-    paddingRight: 24,
-    gap: 16,
-  },
-  featuredCard: {
-    width: 288, // w-72 approx
-    borderRadius: 24,
-    padding: 12,
-    marginRight: 16,
-    // Shadows
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  featuredImageContainer: {
-    position: 'relative',
-  },
-  featuredImage: {
-    width: '100%',
-    height: 160,
-    borderRadius: 16,
-  },
-  ratingBadge: {
-    position: 'absolute',
-    bottom: 12,
-    right: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 9999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  ratingText: {
-    marginLeft: 4,
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#111827',
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  favoriteButton: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    padding: 8,
-    borderRadius: 9999,
-  },
-  featuredInfo: {
-    marginTop: 12,
-    paddingHorizontal: 4,
-  },
-  featuredTitle: {
-    fontSize: 16,
-    marginBottom: 4,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  locationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  locationText: {
-    fontSize: 12,
-    marginLeft: 4,
-    fontFamily: 'Poppins_400Regular',
-  },
-  tagsContainer: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  tag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  tagText: {
-    fontSize: 10,
-    fontWeight: '500',
-  },
-  newArrivalCard: {
-    flexDirection: 'row',
-    marginBottom: 16,
-    padding: 12,
-    borderRadius: 16,
-    alignItems: 'center',
-    // Shadows
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  newArrivalImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 12,
-  },
-  newArrivalInfo: {
-    flex: 1,
-    marginLeft: 16,
-    justifyContent: 'center',
-  },
-  newArrivalTitle: {
-    fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  newArrivalSubtitle: {
-    fontSize: 12,
-    marginTop: 4,
-    fontFamily: 'Poppins_400Regular',
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  ratingValue: {
-    fontSize: 12,
-    marginLeft: 4,
-    fontWeight: '500',
-  },
-  chevronContainer: {
-    padding: 8,
-    borderRadius: 9999,
-  },
+    container: {
+        flex: 1,
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    // Hero
+    heroContainer: {
+        height: height * 0.45,
+        width: '100%',
+        position: 'relative',
+    },
+    heroImage: {
+        width: '100%',
+        height: '100%',
+    },
+    heroGradient: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    heroContent: {
+        position: 'absolute',
+        bottom: 40,
+        left: 24,
+        right: 24,
+        zIndex: 10,
+    },
+    heroGreeting: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 32,
+        color: '#FFF',
+        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 4,
+        marginBottom: 20,
+    },
+    searchPill: {
+        borderRadius: 100,
+        overflow: 'hidden',
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
+    },
+    searchTouch: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 14,
+    },
+    searchTexts: {
+        marginLeft: 4,
+    },
+    searchPlaceholder: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 14,
+    },
+    searchSubPlaceholder: {
+        color: 'rgba(255,255,255,0.8)',
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 12,
+    },
+
+    // Categories
+    categoryContainer: {
+        paddingHorizontal: 24,
+        paddingVertical: 8,
+        gap: 10,
+    },
+    categoryChip: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+        backgroundColor: 'transparent',
+    },
+    categoryText: {
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 13,
+        color: '#6B7280',
+    },
+
+    // Sections
+    sectionContainer: {
+        marginTop: 32,
+    },
+    sectionTitle: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 18,
+        marginLeft: 24,
+        marginBottom: 16,
+    },
+
+    // Discovery
+    discoveryCard: {
+        width: 140,
+        height: 180,
+        borderRadius: 16,
+        overflow: 'hidden',
+        marginRight: 12,
+        position: 'relative',
+    },
+    discoveryImage: {
+        width: '100%',
+        height: '100%',
+    },
+    discoveryOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.2)',
+        justifyContent: 'flex-end',
+        padding: 12,
+    },
+    discoveryTitle: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 14,
+    },
+    discoveryLoc: {
+        color: 'rgba(255,255,255,0.9)',
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 11,
+    }
 });
