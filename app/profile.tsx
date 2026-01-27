@@ -6,10 +6,12 @@ import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } fr
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
+  const { session, loading: authLoading, userId: currentUserId } = useAuth();
   const params = useLocalSearchParams<{ userId?: string }>();
 
   const [profile, setProfile] = useState<any>(null);
@@ -17,30 +19,45 @@ export default function ProfileScreen() {
   const [isOwner, setIsOwner] = useState(false);
 
   React.useEffect(() => {
-    fetchProfile();
-  }, [params.userId]);
+    if (!authLoading) {
+      fetchProfile();
+    }
+  }, [params.userId, authLoading, currentUserId]);
 
   async function fetchProfile() {
     try {
-      // Check session first to avoid unnecessary API calls
-      const { data: { session } } = await supabase.auth.getSession();
-      console.log('Session available:', !!session, 'Access token:', session?.access_token?.substring(0, 20) + '...');
-      const currentUserId = session?.user?.id;
-
       // Determine target ID: param OR current user
-      const targetId = params.userId || currentUserId;
+      let targetId = params.userId || currentUserId;
+      console.log('👤 Profile - Param userId:', params.userId);
+      console.log('👤 Profile - Context userId:', currentUserId);
+
+      // If still no targetId, try to get from auth directly
+      if (!targetId) {
+        console.log('⚠️ Profile - No userId, fetching from auth...');
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error) {
+          console.log('❌ Profile - Auth error:', error.message);
+        }
+        if (user) {
+          console.log('✅ Profile - Got user from auth:', user.id);
+          targetId = user.id;
+        }
+      }
 
       if (!targetId) {
-        // No user logged in and no userId param - can't fetch profile
-        setLoading(false);
+        console.log('❌ Profile - No user ID available, redirecting to login');
+        // No user logged in and no userId param - redirect to login
+        router.replace('/');
         return;
       }
+
+      console.log('🎯 Profile - Fetching profile for:', targetId);
 
       // Check ownership
       const ownership = currentUserId && targetId === currentUserId;
       setIsOwner(!!ownership);
 
-      // Only call API if we have a target to fetch
+      // Fetch profile data
       const { data, error } = await supabase.functions.invoke('manage-profile', {
         body: { action: 'fetch', userId: targetId }
       });

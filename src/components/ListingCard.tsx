@@ -1,19 +1,25 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Image, Pressable, Share, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
 interface ListingCardProps {
     item: any;
     onPress: (item: any) => void;
+    onInvite?: (item: any) => void;
     variant?: 'horizontal' | 'vertical';
     style?: any;
 }
 
-const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, variant = 'horizontal', style }) => {
+const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, variant = 'horizontal', style }) => {
     const { colors, isDark } = useTheme();
+    const { userRole } = useAuth();
     const { width } = useWindowDimensions();
     const [isLiked, setIsLiked] = useState(false);
+
+    // Check if current user can invite (venue-owner or studio-owner viewing a musician/Group)
+    const canInvite = (userRole === 'venue-owner' || userRole === 'studio-owner') && item.type === 'Group';
 
     // Determine "Subtitle" (Location or Genre)
     let subtitle = item.location || item.address;
@@ -83,6 +89,14 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, variant = 'hor
                     ) : <View />}
 
                     <View style={{ flexDirection: 'row', gap: 8 }}>
+                        {canInvite && onInvite && (
+                            <TouchableOpacity
+                                style={[styles.iconBtn, styles.inviteBtn]}
+                                onPress={() => onInvite(item)}
+                            >
+                                <Ionicons name="mail-outline" size={18} color="#FFF" />
+                            </TouchableOpacity>
+                        )}
                         <TouchableOpacity style={styles.iconBtn} onPress={handleShare}>
                             <Ionicons name="share-outline" size={20} color="#000" />
                         </TouchableOpacity>
@@ -237,6 +251,9 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontFamily: 'Poppins_600SemiBold',
         color: '#10B981',
+    },
+    inviteBtn: {
+        backgroundColor: '#7C3AED',
     }
 });
 

@@ -6,12 +6,14 @@ import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 type Tab = 'Pending' | 'Upcoming' | 'Ongoing' | 'Review';
 
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
+  const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
   const [activeTab, setActiveTab] = useState<Tab>('Upcoming');
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
@@ -25,41 +27,25 @@ export default function BookingsScreen() {
     Review: []
   });
   const [loading, setLoading] = useState(false);
-  const [currentUser, setCurrentUser] = useState<any>(null);
 
   React.useEffect(() => {
-    fetchUserAndBookings();
-  }, []);
+    if (isAuthenticated && userId) {
+      fetchBookings(userId);
+    }
+  }, [isAuthenticated, userId]);
 
-  async function fetchUserAndBookings() {
+  async function fetchBookings(targetUserId: string) {
     try {
       setLoading(true);
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        console.log('No user logged in');
-        return;
-      }
-      setCurrentUser(user);
-
-      // Fetch bookings
-      await fetchBookings(user.id);
-    } catch (e) {
-      console.log('Error initializing:', e);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchBookings(userId: string) {
-    try {
       const { data: bookings, error } = await supabase.functions.invoke('manage-bookings', {
-        body: { action: 'fetch', userId }
+        body: { action: 'fetch', userId: targetUserId }
       });
       if (error) throw error;
       setData(bookings || { Pending: [], Upcoming: [], Ongoing: [], Review: [] });
     } catch (e) {
       console.log('Error fetching bookings:', e);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -71,7 +57,7 @@ export default function BookingsScreen() {
       if (error) throw error;
 
       // Refresh list
-      if (currentUser) fetchBookings(currentUser.id);
+      if (userId) fetchBookings(userId);
       setModalVisible(false);
     } catch (e) {
       console.log('Error updating status:', e);

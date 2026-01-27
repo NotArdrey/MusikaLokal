@@ -6,10 +6,12 @@ import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function MyGroupScreen() {
     const { colors, isDark } = useTheme();
+    const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [groups, setGroups] = useState<any[]>([]);
@@ -17,12 +19,10 @@ export default function MyGroupScreen() {
     const [refreshing, setRefreshing] = useState(false);
 
     const fetchGroups = async () => {
+        if (!userId) return;
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
             const { data, error } = await supabase.functions.invoke('manage-listings', {
-                body: { action: 'fetch_my_groups', userId: user.id }
+                body: { action: 'fetch_my_groups', userId }
             });
 
             if (error) throw error;
@@ -37,8 +37,10 @@ export default function MyGroupScreen() {
 
     useFocusEffect(
         useCallback(() => {
-            fetchGroups();
-        }, [])
+            if (isAuthenticated && userId) {
+                fetchGroups();
+            }
+        }, [isAuthenticated, userId])
     );
 
     const onRefresh = () => {
@@ -52,13 +54,10 @@ export default function MyGroupScreen() {
     };
 
     const handleDelete = async () => {
-        if (!selectedId) return;
+        if (!selectedId || !userId) return;
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
             const { error } = await supabase.functions.invoke('manage-listings', {
-                body: { action: 'delete', type: 'group', id: selectedId, userId: user.id }
+                body: { action: 'delete', type: 'group', id: selectedId, userId }
             });
 
             if (error) throw error;

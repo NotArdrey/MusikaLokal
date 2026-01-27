@@ -697,6 +697,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
     const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const [hasExistingVenue, setHasExistingVenue] = useState(false);
+    const [checkingVenue, setCheckingVenue] = useState(false);
 
     // Fetch current user role and ID
     useEffect(() => {
@@ -705,11 +707,40 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             if (user) {
                 setCurrentUserId(user.id);
                 const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-                if (data) setCurrentUserRole(data.role);
+                if (data) {
+                    setCurrentUserRole(data.role);
+                    // If venue-owner, check if they have any gigs uploaded
+                    if (data.role === 'venue-owner') {
+                        checkForExistingVenue(user.id);
+                    }
+                }
             }
         };
         fetchUserRole();
     }, []);
+
+    // Check if venue-owner has any gigs/venues uploaded
+    const checkForExistingVenue = async (userId: string) => {
+        setCheckingVenue(true);
+        try {
+            const { data, error } = await supabase
+                .from('gigs')
+                .select('id')
+                .eq('organizer_id', userId)
+                .limit(1);
+            
+            if (!error && data && data.length > 0) {
+                setHasExistingVenue(true);
+            } else {
+                setHasExistingVenue(false);
+            }
+        } catch (e) {
+            console.log('Error checking venue:', e);
+            setHasExistingVenue(false);
+        } finally {
+            setCheckingVenue(false);
+        }
+    };
 
     const handleProfileNavigation = () => {
         // Implementation for navigation
@@ -829,6 +860,30 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         </View>
     );
 
+    // Handler for Send Request button with venue check
+    const handleSendBookingRequest = () => {
+        // Check if venue-owner has a venue uploaded
+        if (currentUserRole === 'venue-owner' && !hasExistingVenue) {
+            handleConfirm(
+                () => {
+                    // Navigate to add gig/venue page
+                    const router = require('expo-router').router;
+                    router.push('/add_gig');
+                },
+                'No Venue Found',
+                'You need to create a venue first before sending booking requests. Would you like to create one now?'
+            );
+            return;
+        }
+
+        // Proceed with normal booking request
+        handleConfirm(
+            () => console.log('Sent Request'),
+            'Send Booking Request',
+            'Are you sure you want to send this booking request to the artist?'
+        );
+    };
+
     // Group: Connect Tab
     const renderGroupConnect = () => (
         <View style={styles.tabContent}>
@@ -856,13 +911,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
                         <TouchableOpacity
                             style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
-                            onPress={() => handleConfirm(
-                                () => console.log('Sent Request'),
-                                'Send Booking Request',
-                                'Are you sure you want to send this booking request to the artist?'
-                            )}
+                            onPress={handleSendBookingRequest}
+                            disabled={checkingVenue}
                         >
-                            <Text style={styles.primaryBtnText}>Send Request</Text>
+                            <Text style={styles.primaryBtnText}>
+                                {checkingVenue ? 'Checking...' : 'Send Request'}
+                            </Text>
                         </TouchableOpacity>
                     </View>
                 </View>

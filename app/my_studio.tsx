@@ -6,10 +6,12 @@ import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function MyStudioScreen() {
     const { colors, isDark } = useTheme();
+    const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [studios, setStudios] = useState<any[]>([]);
@@ -17,12 +19,10 @@ export default function MyStudioScreen() {
     const [refreshing, setRefreshing] = useState(false);
 
     const fetchStudios = async () => {
+        if (!userId) return;
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
             const { data, error } = await supabase.functions.invoke('manage-listings', {
-                body: { action: 'fetch_my_studios', userId: user.id }
+                body: { action: 'fetch_my_studios', userId }
             });
 
             if (error) throw error;
@@ -37,8 +37,10 @@ export default function MyStudioScreen() {
 
     useFocusEffect(
         useCallback(() => {
-            fetchStudios();
-        }, [])
+            if (isAuthenticated && userId) {
+                fetchStudios();
+            }
+        }, [isAuthenticated, userId])
     );
 
     const onRefresh = () => {
@@ -52,13 +54,10 @@ export default function MyStudioScreen() {
     };
 
     const handleDelete = async () => {
-        if (!selectedId) return;
+        if (!selectedId || !userId) return;
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
             const { error } = await supabase.functions.invoke('manage-listings', {
-                body: { action: 'delete', type: 'studio', id: selectedId, userId: user.id }
+                body: { action: 'delete', type: 'studio', id: selectedId, userId }
             });
 
             if (error) throw error;

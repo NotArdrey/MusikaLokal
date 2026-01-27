@@ -236,10 +236,17 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>((
         return () => clearTimeout(timeout);
     }, [searchQuery, activeFilter]);
 
+    // Handle invite action - opens the details sheet for booking/connecting
+    const handleInvite = (item: any) => {
+        setSelectedListingId(item.id);
+        detailsRef.current?.present();
+    };
+
     const renderItem = ({ item }: { item: any }) => (
         <ListingCard
             item={item}
             onPress={handleCardPress}
+            onInvite={handleInvite}
             variant="vertical"
             style={{ width: '100%', marginBottom: 24, marginRight: 0 }}
         />
@@ -285,33 +292,35 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>((
                         )}
                     </View>
 
-                    {/* 2. Category Filter Chips (Horizontal) */}
-                    <View style={styles.chipsContainer}>
-                        <BottomSheetFlatList
-                            horizontal
-                            data={FILTERS}
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingHorizontal: 24, gap: 10 }}
-                            keyExtractor={(i: string) => i}
-                            renderItem={({ item }: { item: string }) => {
-                                const isActive = item === activeFilter;
-                                return (
-                                    <TouchableOpacity
-                                        style={[
-                                            styles.chip,
-                                            isActive ? { backgroundColor: colors.primary, borderColor: colors.primary } : { backgroundColor: 'transparent', borderColor: colors.border },
-                                        ]}
-                                        onPress={() => setActiveFilter(item)}
-                                    >
-                                        <Text style={[
-                                            styles.chipText,
-                                            isActive ? { color: '#FFF' } : { color: colors.textSecondary },
-                                        ]}>{item}</Text>
-                                    </TouchableOpacity>
-                                );
-                            }}
-                        />
-                    </View>
+                    {/* 2. Category Filter Chips (Horizontal) - Hidden for owners */}
+                    {!isOwner && (
+                        <View style={styles.chipsContainer}>
+                            <BottomSheetFlatList
+                                horizontal
+                                data={FILTERS}
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={{ paddingHorizontal: 24, gap: 10 }}
+                                keyExtractor={(i: string) => i}
+                                renderItem={({ item }: { item: string }) => {
+                                    const isActive = item === activeFilter;
+                                    return (
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.chip,
+                                                isActive ? { backgroundColor: colors.primary, borderColor: colors.primary } : { backgroundColor: 'transparent', borderColor: colors.border },
+                                            ]}
+                                            onPress={() => setActiveFilter(item)}
+                                        >
+                                            <Text style={[
+                                                styles.chipText,
+                                                isActive ? { color: '#FFF' } : { color: colors.textSecondary },
+                                            ]}>{item}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                }}
+                            />
+                        </View>
+                    )}
                 </View>
 
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />

@@ -5,7 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
 serve(async (req: Request) => {
@@ -17,7 +17,7 @@ serve(async (req: Request) => {
         // Log authorization header for debugging (remove in production)
         const authHeader = req.headers.get('Authorization')
         console.log('Authorization header present:', !!authHeader)
-        
+
         if (!authHeader) {
             return new Response(JSON.stringify({ error: 'No authorization header provided' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -5,7 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
 serve(async (req: Request) => {
@@ -28,28 +28,16 @@ serve(async (req: Request) => {
         if (action === 'fetch') {
             const { userId } = params
 
-            // A. Fetch Studio Bookings
-            const { data: bookings, error: bookingError } = await supabaseClient
-                .from('studio_bookings_with_cost')
-                .select('*')
-                .eq('user_id', userId)
-                .order('booking_date', { ascending: false })
+            // First, get user role to determine what to fetch
+            const { data: profile, error: profileError } = await supabaseClient
+                .from('profiles')
+                .select('role')
+                .eq('id', userId)
+                .single()
 
-            if (bookingError) throw bookingError
+            if (profileError) throw profileError
 
-            // B. Fetch Gig Applications (Personal)
-            // Assuming 'gig_applications' has 'musician_id' and joins to 'gigs'
-            const { data: gigApps, error: gigError } = await supabaseClient
-                .from('gig_applications')
-                .select('*, gigs(name, event_date, image_url)') // Adjusted fields based on assumption
-                .eq('musician_id', userId)
-                .order('created_at', { ascending: false })
-
-            if (gigError) {
-                console.log('Error fetching gig apps:', gigError)
-                // Don't fail entire request if just gig apps fail? Or throw?
-                // throw gigError
-            }
+            const userRole = profile?.role
 
             const categorized = {
                 Pending: [],
@@ -60,88 +48,172 @@ serve(async (req: Request) => {
 
             const now = new Date()
 
-            // Process Studio Bookings
-            // @ts-ignore
-            bookings?.forEach((b: any) => {
-                const bookingDate = new Date(`${b.booking_date}T${b.start_time}`)
-                const endDate = new Date(`${b.booking_date}T${b.end_time}`)
+            // A. For Musicians: Fetch their Studio Bookings as customers
+            if (userRole === 'musician') {
+                const { data: bookings, error: bookingError } = await supabaseClient
+                    .from('studio_bookings_with_cost')
+                    .select('*')
+                    .eq('user_id', userId)
+                    .order('booking_date', { ascending: false })
 
-                const item = {
-                    id: b.id,
-                    type_id: 'studio_booking', // internal type identifier
-                    raw_date: b.booking_date,
-                    name: b.studio_name || 'Unknown Studio',
-                    date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
-                    image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
-                    status: b.status === 'pending' ? 'Waiting for Approval' :
-                        b.status === 'confirmed' ? 'Confirmed' :
-                            b.status === 'cancelled' ? 'Cancelled' : b.status,
-                    type: 'Studio Booking',
-                    isCancelled: b.status === 'cancelled',
-                    action: b.status === 'pending' ? 'View Details' : 'Details',
-                    duration_hours: b.duration_hours,
-                    total_cost: b.total_cost
-                }
+                if (bookingError) throw bookingError
 
-                if (b.status === 'pending') {
-                    // @ts-ignore
-                    categorized.Pending.push(item)
-                } else if (b.status === 'confirmed') {
-                    if (now >= bookingDate && now <= endDate) {
+                // Process Studio Bookings
+                // @ts-ignore
+                bookings?.forEach((b: any) => {
+                    const bookingDate = new Date(`${b.booking_date}T${b.start_time}`)
+                    const endDate = new Date(`${b.booking_date}T${b.end_time}`)
+
+                    const item = {
+                        id: b.id,
+                        type_id: 'studio_booking',
+                        raw_date: b.booking_date,
+                        name: b.studio_name || 'Unknown Studio',
+                        date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
+                        image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
+                        status: b.status === 'pending' ? 'Waiting for Approval' :
+                            b.status === 'confirmed' ? 'Confirmed' :
+                                b.status === 'cancelled' ? 'Cancelled' : b.status,
+                        type: 'Studio Booking',
+                        isCancelled: b.status === 'cancelled',
+                        action: b.status === 'pending' ? 'View Details' : 'Details',
+                        duration_hours: b.duration_hours,
+                        total_cost: b.total_cost
+                    }
+
+                    if (b.status === 'pending') {
                         // @ts-ignore
-                        categorized.Ongoing.push({ ...item, status: 'In Progress' })
-                    } else if (now > endDate) {
-                        // @ts-ignore
-                        categorized.Review.push({ ...item, status: 'Completed' })
-                    } else {
+                        categorized.Pending.push(item)
+                    } else if (b.status === 'confirmed') {
+                        if (now >= bookingDate && now <= endDate) {
+                            // @ts-ignore
+                            categorized.Ongoing.push({ ...item, status: 'In Progress' })
+                        } else if (now > endDate) {
+                            // @ts-ignore
+                            categorized.Review.push({ ...item, status: 'Completed' })
+                        } else {
+                            // @ts-ignore
+                            categorized.Upcoming.push(item)
+                        }
+                    } else if (b.status === 'cancelled') {
                         // @ts-ignore
                         categorized.Upcoming.push(item)
                     }
-                } else if (b.status === 'cancelled') {
+                })
+            }
+
+            // B. For Studio Owners: Fetch bookings for THEIR studios
+            if (userRole === 'studio-owner') {
+                // First get their studios
+                const { data: studios } = await supabaseClient
+                    .from('studios')
+                    .select('id')
+                    .eq('owner_id', userId)
+
+                const studioIds = studios?.map(s => s.id) || []
+
+                if (studioIds.length > 0) {
+                    const { data: bookings, error: bookingError } = await supabaseClient
+                        .from('studio_bookings_with_cost')
+                        .select('*')
+                        .in('studio_id', studioIds)
+                        .order('booking_date', { ascending: false })
+
+                    if (bookingError) throw bookingError
+
+                    // Process Studio Bookings
                     // @ts-ignore
-                    categorized.Upcoming.push(item)
+                    bookings?.forEach((b: any) => {
+                        const bookingDate = new Date(`${b.booking_date}T${b.start_time}`)
+                        const endDate = new Date(`${b.booking_date}T${b.end_time}`)
+
+                        const item = {
+                            id: b.id,
+                            type_id: 'studio_booking',
+                            raw_date: b.booking_date,
+                            name: `Booking by ${b.user_email || 'Guest'}`,
+                            date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
+                            image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
+                            status: b.status === 'pending' ? 'Awaiting Your Approval' :
+                                b.status === 'confirmed' ? 'Confirmed' :
+                                    b.status === 'cancelled' ? 'Cancelled' : b.status,
+                            type: 'Studio Booking',
+                            isCancelled: b.status === 'cancelled',
+                            action: b.status === 'pending' ? 'Confirm Now' : 'Details',
+                            duration_hours: b.duration_hours,
+                            total_cost: b.total_cost,
+                            studio_name: b.studio_name
+                        }
+
+                        if (b.status === 'pending') {
+                            // @ts-ignore
+                            categorized.Pending.push(item)
+                        } else if (b.status === 'confirmed') {
+                            if (now >= bookingDate && now <= endDate) {
+                                // @ts-ignore
+                                categorized.Ongoing.push({ ...item, status: 'In Progress' })
+                            } else if (now > endDate) {
+                                // @ts-ignore
+                                categorized.Review.push({ ...item, status: 'Completed' })
+                            } else {
+                                // @ts-ignore
+                                categorized.Upcoming.push(item)
+                            }
+                        } else if (b.status === 'cancelled') {
+                            // @ts-ignore
+                            categorized.Upcoming.push(item)
+                        }
+                    })
                 }
-            })
+            }
 
-            // Process Gig Applications
-            // @ts-ignore
-            gigApps?.forEach((g: any) => {
-                const gig = g.gigs;
-                const dateStr = gig?.event_date || g.created_at?.split('T')[0] || 'TBA'; // Fallback
-                // For gig apps, 'pending' is awaiting organizer decision
-                // 'accepted' -> Upcoming?
+            // C. For ALL roles: Fetch Gig Applications if they're a musician
+            if (userRole === 'musician') {
+                const { data: gigApps, error: gigError } = await supabaseClient
+                    .from('gig_applications')
+                    .select('*, gig:gig_id(name, event_date, image_url)')
+                    .eq('applicant_id', userId)
+                    .order('created_at', { ascending: false })
 
-                const item = {
-                    id: g.id,
-                    type_id: 'gig_application',
-                    raw_date: dateStr,
-                    name: gig?.name || 'Unknown Gig',
-                    date: dateStr,
-                    image: gig?.image_url || 'https://picsum.photos/400/300',
-                    status: g.status === 'pending' ? 'Applied' :
-                        g.status === 'accepted' ? 'Accepted' :
-                            g.status === 'rejected' ? 'Rejected' : g.status,
-                    type: 'Gig Application',
-                    isCancelled: g.status === 'cancelled' || g.status === 'rejected',
-                    action: g.status === 'accepted' ? 'View Details' : 'Details',
+                if (gigError) {
+                    console.log('Error fetching gig apps:', gigError)
                 }
 
-                if (g.status === 'pending') {
-                    // @ts-ignore
-                    categorized.Pending.push(item)
-                } else if (g.status === 'accepted') {
-                    // @ts-ignore
-                    categorized.Upcoming.push(item) // Treat accepted gig as upcoming?
-                } else {
-                    // @ts-ignore
-                    categorized.Review.push(item) // Rejected or other? Or put in Upcoming as cancelled?
-                    // Let's put rejected in Upcoming/History but marked cancelled
-                    if (g.status === 'rejected' || g.status === 'cancelled') {
-                        // @ts-ignore
-                        categorized.Upcoming.push({ ...item, isCancelled: true })
+                // Process Gig Applications
+                // @ts-ignore
+                gigApps?.forEach((g: any) => {
+                    const gig = g.gig
+                    const dateStr = gig?.event_date || g.created_at?.split('T')[0] || 'TBA'
+
+                    const item = {
+                        id: g.id,
+                        type_id: 'gig_application',
+                        raw_date: dateStr,
+                        name: gig?.name || 'Unknown Gig',
+                        date: dateStr,
+                        image: gig?.image_url || 'https://picsum.photos/400/300',
+                        status: g.status === 'pending' ? 'Applied' :
+                            g.status === 'accepted' ? 'Accepted' :
+                                g.status === 'rejected' ? 'Rejected' : g.status,
+                        type: 'Gig Application',
+                        isCancelled: g.status === 'cancelled' || g.status === 'rejected',
+                        action: g.status === 'accepted' ? 'View Details' : 'Details',
                     }
-                }
-            })
+
+                    if (g.status === 'pending') {
+                        // @ts-ignore
+                        categorized.Pending.push(item)
+                    } else if (g.status === 'accepted') {
+                        // @ts-ignore
+                        categorized.Upcoming.push(item)
+                    } else {
+                        if (g.status === 'rejected' || g.status === 'cancelled') {
+                            // @ts-ignore
+                            categorized.Upcoming.push({ ...item, isCancelled: true })
+                        }
+                    }
+                })
+            }
 
             return new Response(JSON.stringify(categorized), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },

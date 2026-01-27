@@ -1,64 +1,82 @@
-import { router, useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function ManageScreen() {
     const { colors } = useTheme();
+    const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+    const { userRole } = useAuth();
     const [loading, setLoading] = useState(true);
-    const [role, setRole] = useState<string | null>(null);
+    const [fetchedRole, setFetchedRole] = useState<string | null>(null);
 
-    const checkRoleAndRedirect = async () => {
-        try {
-            setLoading(true);
-            // Check session first to avoid unnecessary API calls
-            const { data: { session } } = await supabase.auth.getSession();
-            console.log('Manage screen - Session:', !!session);
-
-            if (!session) {
-                // Not logged in - redirect to login
-                setLoading(false);
-                return;
-            }
-
-            const { data, error } = await supabase.functions.invoke('manage-profile', {
-                body: { action: 'fetch', userId: session.user.id }
-            });
-            
-            console.log('Manage screen - Profile data:', data);
-            console.log('Manage screen - Error:', error);
-
-            if (data && data.role) {
-                setRole(data.role);
-                console.log('Manage screen - Role:', data.role);
-                // Attempt redirect
-                if (data.role === 'studio-owner') {
-                    router.replace('/my_studio');
-                } else if (data.role === 'musician') {
-                    router.replace('/my_group');
-                } else if (data.role === 'venue-owner') {
-                    router.replace('/my_venue');
-                } else {
-                    // Role exists but unknown? Stay here.
-                    setLoading(false);
-                }
+    useEffect(() => {
+        // If not authenticated, the hook will redirect
+        if (authLoading) return;
+        
+        if (isAuthenticated && userId) {
+            // Try to get role from context first, or fetch directly
+            if (userRole) {
+                handleRedirect(userRole);
             } else {
+                // Fallback: Fetch role directly from DB
+                fetchRoleAndRedirect();
+            }
+        } else if (!authLoading) {
+            setLoading(false);
+        }
+    }, [authLoading, isAuthenticated, userRole, userId]);
+
+    const fetchRoleAndRedirect = async () => {
+        console.log('🎯 Manage - User ID from context:', userId);
+        if (!userId) {
+            console.log('❌ Manage - No userId available');
+            setLoading(false);
+            return;
+        }
+
+        try {
+            console.log('🔍 Manage - Fetching role for user:', userId);
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('role')
+                .eq('id', userId)
+                .single();
+            
+            if (error) {
+                console.log('❌ Manage - Error fetching role:', error.message);
+                throw error;
+            }
+            
+            if (data?.role) {
+                console.log('✅ Manage - Role fetched:', data.role);
+                setFetchedRole(data.role);
+                handleRedirect(data.role);
+            } else {
+                console.log('⚠️ Manage - No role data found');
                 setLoading(false);
             }
-        } catch (e) {
-            console.log('Error in manage screen:', e);
+        } catch (error) {
+            console.log('❌ Manage - Exception:', error);
             setLoading(false);
         }
     };
 
-    useFocusEffect(
-        useCallback(() => {
-            checkRoleAndRedirect();
-        }, [])
-    );
+    const handleRedirect = (role: string) => {
+        if (role === 'studio-owner') {
+            router.replace('/my_studio');
+        } else if (role === 'musician') {
+            router.replace('/my_group');
+        } else if (role === 'venue-owner') {
+            router.replace('/my_venue');
+        } else {
+            setLoading(false);
+        }
+    };
 
     if (loading) {
         return (
@@ -85,9 +103,9 @@ export default function ManageScreen() {
                 </Text>
 
 
-                {role && (
+                {(userRole || fetchedRole) && (
                     <Text style={[styles.roleText, { color: colors.textSecondary }]}>
-                        Detected Role: {role}
+                        Detected Role: {userRole || fetchedRole}
                     </Text>
                 )}
             </View>
