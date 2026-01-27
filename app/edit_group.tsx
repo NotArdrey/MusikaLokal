@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -16,6 +17,10 @@ export default function EditGroupScreen() {
   const [groupName, setGroupName] = useState('');
   const [genre, setGenre] = useState('');
   const [description, setDescription] = useState('');
+  const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [selectedImage, setSelectedImage] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -88,6 +93,9 @@ export default function EditGroupScreen() {
       setGroupName(data.name);
       setGenre(data.genre);
       setDescription(data.description);
+      setAddress(data.location || '');
+      setLatitude(data.latitude || null);
+      setLongitude(data.longitude || null);
       setMembers(data.members || []);
       // setSelectedImage(data.images?.[0] || '');
     } catch (e) {
@@ -108,11 +116,14 @@ export default function EditGroupScreen() {
         name: groupName,
         genre,
         description,
+        location: address,
+        latitude,
+        longitude,
         members,
       };
 
       const { error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'group', id, userId: user.id, payload }
+        body: { action: 'update', type: 'group', id: id, userId: user.id, payload }
       });
 
       if (error) throw error;
@@ -205,6 +216,25 @@ export default function EditGroupScreen() {
 
           {renderSectionHeader('Group Details', 'people')}
           {renderInput('Group Name', groupName, setGroupName)}
+
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Based Location</Text>
+            <TouchableOpacity
+              onPress={() => setLocationPickerVisible(true)}
+              style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
+                <Text style={{
+                  flex: 1,
+                  color: address ? colors.text : colors.textSecondary,
+                  fontFamily: 'Poppins_400Regular'
+                }}>
+                  {address || 'Tap to select location on map'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genre</Text>
@@ -314,6 +344,18 @@ export default function EditGroupScreen() {
         message="Are you sure you want to update this group profile?"
         buttonText="Save & Update"
         onConfirm={handleSave}
+      />
+
+      <LocationPicker
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        onSelect={(location) => {
+          setAddress(location.address);
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationPickerVisible(false);
+        }}
+        initialLocation={latitude && longitude ? { lat: latitude, lng: longitude } : undefined}
       />
     </>
   );
@@ -475,4 +517,3 @@ const styles = StyleSheet.create({
     right: 0,
   },
 });
-

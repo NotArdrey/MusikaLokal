@@ -63,10 +63,10 @@ export default function BookingsScreen() {
     }
   }
 
-  async function handleStatusUpdate(bookingId: string, newStatus: string) {
+  async function handleStatusUpdate(bookingId: string, newStatus: string, typeId: string = 'studio_booking') {
     try {
       const { error } = await supabase.functions.invoke('manage-bookings', {
-        body: { action: 'update_status', booking_id: bookingId, new_status: newStatus }
+        body: { action: 'update_status', booking_id: bookingId, new_status: newStatus, type_id: typeId }
       });
       if (error) throw error;
 
@@ -248,7 +248,23 @@ export default function BookingsScreen() {
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         title={activeTab === 'Pending' ? "Confirm Booking" : "Cancel Booking"}
-        message={activeTab === 'Pending' ? "Are you sure you want to confirm this booking?" : "Are you sure you want to cancel this booking? This action cannot be undone."}
+        message={
+          activeTab === 'Pending'
+            ? "Are you sure you want to confirm this booking?"
+            : (() => {
+              if (selectedItem?.raw_date) {
+                const eventDate = new Date(selectedItem.raw_date);
+                const now = new Date();
+                const diffTime = eventDate.getTime() - now.getTime();
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                if (diffDays > 7) return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
+                if (diffDays >= 3) return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
+                return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
+              }
+              return "Are you sure you want to cancel this booking? This action cannot be undone.";
+            })()
+        }
         buttonText={activeTab === 'Pending' ? "Confirm" : "Yes, Cancel Booking"}
         onConfirm={() => {
           if (selectedItem) {

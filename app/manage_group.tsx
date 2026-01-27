@@ -8,8 +8,11 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
+import { useLocalSearchParams } from 'expo-router';
+
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { id } = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState('About');
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
@@ -17,6 +20,11 @@ export default function GroupDetailsScreen() {
   const [modalButtonText, setModalButtonText] = useState('');
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const [group, setGroup] = useState<any>(null);
+  const [applications, setApplications] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Role-based access control
   useEffect(() => {
@@ -42,11 +50,44 @@ export default function GroupDetailsScreen() {
       }
 
       setAuthorized(true);
+      if (id) fetchData(user.id);
     } catch (e) {
       console.error('Authorization check failed:', e);
       router.replace('/home');
     } finally {
       setCheckingAuth(false);
+    }
+  };
+
+  const fetchData = async (userId: string) => {
+    setLoading(true);
+    try {
+      // Fetch Group Details
+      const { data: groupData, error: groupError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_one', type: 'group', id: id, userId }
+      });
+      if (groupError) throw groupError;
+      setGroup(groupData);
+
+      // Fetch Group Applications (Sent)
+      const { data: appData, error: appError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_group_applications', groupId: id, userId }
+      });
+      if (appError) throw appError;
+      setApplications(appData || []);
+
+      // Fetch Reviews
+      const { data: reviewData, error: reviewError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_reviews', type: 'group', id: id, userId }
+      });
+      if (reviewError) throw reviewError;
+      setReviews(reviewData || []);
+
+    } catch (e) {
+      console.log('Error fetching data:', e);
+      Alert.alert('Error', 'Failed to load group data');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -63,7 +104,7 @@ export default function GroupDetailsScreen() {
     setModalVisible(true);
   }
 
-  const tabs = ['About', 'Setup', 'Connect', 'Review'];
+  const tabs = ['About', 'Setup', 'Applications', 'Review'];
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -107,8 +148,8 @@ export default function GroupDetailsScreen() {
               <View style={styles.headerImageGradient} />
             </View>
 
-            <Text style={[styles.headerTitle, { color: colors.text }]}>Junction 88 Music Bar</Text>
-            <Text style={[styles.headerLocation, { color: colors.textSecondary }]}>Live Music Venue • Plaridel, Bulacan</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>{group?.name || 'Loading...'}</Text>
+            <Text style={[styles.headerLocation, { color: colors.textSecondary }]}>{group?.genre || 'Genre N/A'} • {group?.location || 'Location N/A'}</Text>
           </View>
 
           {/* Segmented Control Tabs */}
@@ -149,18 +190,18 @@ export default function GroupDetailsScreen() {
               <View style={styles.aboutContainer}>
                 <View>
                   <Text style={[styles.aboutText, { color: colors.textSecondary }]}>
-                    The Junction 88 Music Bar is a premier live music venue in Plaridel, Bulacan, Philippines, known for its intimate atmosphere and diverse lineup of artists. We offer a full bar, stage lighting, and sound equipment for performers.
+                    {group?.description || 'No description available.'}
                   </Text>
                 </View>
 
                 <View style={{ flexDirection: 'row', gap: 16 }}>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Capacity</Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}>69</Text>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Members</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>{group?.members?.length || 0}</Text>
                   </View>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Services</Text>
-                    <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Sound System, Lights</Text>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Genre</Text>
+                    <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 14 }}>{group?.genre || 'N/A'}</Text>
                   </View>
                 </View>
 
@@ -361,59 +402,27 @@ export default function GroupDetailsScreen() {
               </View>
             )}
 
-            {activeTab === 'Connect' && (
+            {activeTab === 'Applications' && (
               <View style={styles.aboutContainer}>
-                <View style={[styles.featuredVideoContainer, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.setupTitle, { color: colors.text, marginBottom: 16 }]}>Featured Video</Text>
-                  <View style={styles.featuredVideo}>
-                    <Image
-                      source={{ uri: 'https://images.unsplash.com/photo-1516280440614-6697288d5d38?w=800&fit=crop' }}
-                      style={{ width: '100%', height: '100%' }}
-                      resizeMode="cover"
-                    />
-                    <View style={styles.playIconOverlay}>
-                      <Ionicons name="play-circle" size={64} color="#FFF" />
-                    </View>
-                  </View>
-                  <Text style={[styles.videoTitle, { color: colors.text }]}>Live at The Grand Theater (2025)</Text>
-                  <Text style={[styles.videoViews, { color: colors.textSecondary }]}>1.2M Views</Text>
-                </View>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Sent Applications</Text>
 
-                <View>
-                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Press & EPK</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryContainer}>
-                    <View style={[styles.pressCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                      <Text style={[styles.pressMetric, { color: colors.primary }]}>TOP 10</Text>
-                      <Text style={[styles.pressLabel, { color: colors.text }]}>"Acts to Watch in 2026"</Text>
-                      <Text style={styles.pressSource}>- Rolling Stone PH</Text>
-                    </View>
-                    <View style={[styles.pressCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                      <Text style={[styles.pressMetric, { color: colors.primary }]}>150+</Text>
-                      <Text style={[styles.pressLabel, { color: colors.text }]}>Shows played last year</Text>
-                      <Text style={styles.pressSource}>- Verified Metric</Text>
-                    </View>
-                  </ScrollView>
-                </View>
-
-                <View style={[styles.setupCard, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.setupTitle, { color: colors.text, marginBottom: 12 }]}>Audio Demo</Text>
-                  {[
-                    { title: "Midnight Blues (Demo)", duration: "3:45" },
-                    { title: "City Lights (Live)", duration: "4:20" },
-                    { title: "Acoustic Session Vol. 1", duration: "12:10" }
-                  ].map((track, i) => (
-                    <View key={i} style={[styles.audioDemoItem, { borderColor: colors.border, borderBottomWidth: i === 2 ? 0 : 1 }]}>
-                      <TouchableOpacity style={[styles.playButton, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.3)' : '#E0E7FF' }]}>
-                        <Ionicons name="play" size={20} color={colors.primary} />
-                      </TouchableOpacity>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.trackTitle, { color: colors.text }]}>{track.title}</Text>
-                        <Text style={[styles.trackDuration, { color: colors.textSecondary }]}>{track.duration}</Text>
+                {applications.length === 0 ? (
+                  <Text style={{ color: colors.textSecondary }}>No applications sent yet.</Text>
+                ) : (
+                  applications.map((app) => (
+                    <View key={app.id} style={[styles.setupCard, { backgroundColor: colors.surface, marginBottom: 12 }]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <Text style={[styles.setupTitle, { color: colors.text }]}>{app.gig?.name || 'Unknown Gig'}</Text>
+                        <Text style={{ color: app.status === 'approved' ? 'green' : app.status === 'pending' ? 'orange' : 'red', fontWeight: 'bold' }}>
+                          {app.status.toUpperCase()}
+                        </Text>
                       </View>
-                      <Ionicons name="ellipsis-vertical" size={20} color={colors.textSecondary} />
+                      <Text style={{ color: colors.textSecondary, marginBottom: 4 }}>{app.gig?.location}</Text>
+                      <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>Budget: ₱{(app.gig?.budget || 0).toLocaleString()}</Text>
+                      <Text style={{ color: colors.textSecondary }}>Applied on: {new Date(app.created_at).toLocaleDateString()}</Text>
                     </View>
-                  ))}
-                </View>
+                  ))
+                )}
               </View>
             )}
 

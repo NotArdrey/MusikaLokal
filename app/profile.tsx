@@ -22,14 +22,16 @@ export default function ProfileScreen() {
 
   async function fetchProfile() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const currentUserId = user?.id;
+      // Check session first to avoid unnecessary API calls
+      const { data: { session } } = await supabase.auth.getSession();
+      console.log('Session available:', !!session, 'Access token:', session?.access_token?.substring(0, 20) + '...');
+      const currentUserId = session?.user?.id;
 
       // Determine target ID: param OR current user
       const targetId = params.userId || currentUserId;
 
       if (!targetId) {
-        console.log('No user found');
+        // No user logged in and no userId param - can't fetch profile
         setLoading(false);
         return;
       }
@@ -38,6 +40,7 @@ export default function ProfileScreen() {
       const ownership = currentUserId && targetId === currentUserId;
       setIsOwner(!!ownership);
 
+      // Only call API if we have a target to fetch
       const { data, error } = await supabase.functions.invoke('manage-profile', {
         body: { action: 'fetch', userId: targetId }
       });

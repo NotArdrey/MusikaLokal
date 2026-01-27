@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -16,6 +17,9 @@ export default function EditGigScreen() {
   const [gigName, setGigName] = useState('');
   const [description, setDescription] = useState('');
   const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [cost, setCost] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -92,6 +96,8 @@ export default function EditGigScreen() {
       setGigName(data.name);
       setDescription(data.description);
       setAddress(data.location);
+      setLatitude(data.latitude || null);
+      setLongitude(data.longitude || null);
       setCost(data.budget?.toString() || '');
       // setImages(data.images || []); // If backend has images
     } catch (e) {
@@ -113,13 +119,16 @@ export default function EditGigScreen() {
         description,
         location: address,
         budget: parseFloat(cost) || 0,
+        latitude,
+        longitude,
       };
 
       const { error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'gig', id, userId: user.id, payload }
+        body: { action: 'update', type: 'gig', id: id, userId: user.id, payload }
       });
 
       if (error) throw error;
+
       setModalVisible(false);
       console.log('Gig Updated');
       router.back();
@@ -199,7 +208,25 @@ export default function EditGigScreen() {
           {renderSectionHeader('Basic Details', 'information-circle')}
           {renderInput('Gig Title', gigName, setGigName)}
           {renderInput('Description', description, setDescription, true)}
-          {renderInput('Location', address, setAddress)}
+
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Location</Text>
+            <TouchableOpacity
+              onPress={() => setLocationPickerVisible(true)}
+              style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
+                <Text style={{
+                  flex: 1,
+                  color: address ? colors.text : colors.textSecondary,
+                  fontFamily: 'Poppins_400Regular'
+                }}>
+                  {address || 'Tap to select location on map'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
           {renderInput('Budget (₱)', cost, setCost, false, true)}
 
           {renderSectionHeader('Visuals', 'image')}
@@ -274,6 +301,18 @@ export default function EditGigScreen() {
         message="Are you sure you want to update this gig profile?"
         buttonText="Save & Update"
         onConfirm={handleSave}
+      />
+
+      <LocationPicker
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        onSelect={(location) => {
+          setAddress(location.address);
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationPickerVisible(false);
+        }}
+        initialLocation={latitude && longitude ? { lat: latitude, lng: longitude } : undefined}
       />
     </>
   );

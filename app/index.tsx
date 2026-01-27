@@ -1,31 +1,26 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
 import { useTheme } from '../src/context/ThemeContext';
 
 
-import { VerificationStore } from './src/utils/VerificationStore';
+import { VerificationStore } from '../src/utils/VerificationStore';
+
+interface AlertState {
+    visible: boolean;
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+}
 
 export default function LoginScreen() {
     const { colors, isDark } = useTheme();
     const { verified } = useLocalSearchParams();
-
-    // Check for verification success from deep link
-    useEffect(() => {
-        if (verified === 'true') {
-            // Signal global success to prevent conflicting alerts in signup.tsx
-            VerificationStore.setSuccess(true);
-
-            Alert.alert(
-                'Verification Successful! 🎉',
-                'Your account has been verified. You can now log in.',
-                [{ text: 'OK' }]
-            );
-        }
-    }, [verified]);
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -36,6 +31,48 @@ export default function LoginScreen() {
     // Verification Modal State
     const [showVerification, setShowVerification] = useState(false);
     const [verificationUrl, setVerificationUrl] = useState('');
+
+    // Custom Alert State
+    const [alertState, setAlertState] = useState<AlertState>({
+        visible: false,
+        type: 'info',
+        title: '',
+        message: '',
+        buttons: [{ text: 'OK' }],
+    });
+
+    // Helper function to show alert
+    const showAlert = (
+        type: AlertType,
+        title: string,
+        message: string,
+        buttons?: AlertState['buttons']
+    ) => {
+        setAlertState({
+            visible: true,
+            type,
+            title,
+            message,
+            buttons: buttons || [{ text: 'OK' }],
+        });
+    };
+
+    const closeAlert = () => {
+        setAlertState(prev => ({ ...prev, visible: false }));
+    };
+
+    // Check for verification success from deep link
+    useEffect(() => {
+        if (verified === 'true') {
+            // Signal global success to prevent conflicting alerts in signup.tsx
+            VerificationStore.setSuccess(true);
+            showAlert(
+                'success',
+                'Verification Successful! 🎉',
+                'Your account has been verified. You can now log in.'
+            );
+        }
+    }, [verified]);
 
     const handleLogin = async () => {
         setErrors({}); // Clear previous errors
@@ -66,25 +103,28 @@ export default function LoginScreen() {
             if (error) {
                 // Handle specific error cases
                 if (error.message.includes('Invalid login credentials')) {
-                    Alert.alert(
+                    showAlert(
+                        'error',
                         'Login Failed',
                         'The email or password you entered is incorrect. Please try again.',
                         [{ text: 'Try Again', style: 'default' }]
                     );
                 } else if (error.message.includes('Email not confirmed')) {
-                    Alert.alert(
+                    showAlert(
+                        'warning',
                         'Email Not Verified',
                         'Please check your inbox and click the verification link we sent you.',
                         [{ text: 'OK', style: 'default' }]
                     );
                 } else if (error.message.includes('rate') || error.status === 429) {
-                    Alert.alert(
+                    showAlert(
+                        'warning',
                         'Too Many Attempts',
-                        'You\'ve tried logging in too many times. Please wait a minute and try again.',
+                        "You've tried logging in too many times. Please wait a minute and try again.",
                         [{ text: 'OK', style: 'default' }]
                     );
                 } else {
-                    Alert.alert('Login Failed', error.message);
+                    showAlert('error', 'Login Failed', error.message);
                 }
             } else {
                 // Check if user is verified
@@ -92,7 +132,7 @@ export default function LoginScreen() {
                 if (user) {
                     const { data: profile } = await supabase
                         .from('profiles')
-                        .select('is_verified')
+                        .select('is_verified, id_document_expiry')
                         .eq('id', user.id)
                         .single();
 
@@ -100,7 +140,8 @@ export default function LoginScreen() {
                         // Sign out immediately to prevent access
                         await supabase.auth.signOut();
 
-                        Alert.alert(
+                        showAlert(
+                            'warning',
                             'Verification Required',
                             'You need to verify your identity before accessing the app.',
                             [
@@ -115,13 +156,34 @@ export default function LoginScreen() {
                                 }
                             ]
                         );
+                    } else if (profile?.id_document_expiry && new Date(profile.id_document_expiry) < new Date()) {
+                        // Check for expired ID
+                        await supabase.auth.signOut();
+
+                        showAlert(
+                            'warning',
+                            'ID Document Expired',
+                            'Your identification document has expired. Please update your verification documents to continue using the app.',
+                            [
+                                {
+                                    text: 'Update Now',
+                                    onPress: () => startVerification(user.id),
+                                    style: 'default'
+                                },
+                                {
+                                    text: 'Cancel',
+                                    style: 'cancel'
+                                }
+                            ]
+                        );
                     } else {
-                        router.replace('/home'as any);
+                        router.replace('/home' as any);
                     }
                 }
             }
         } catch (e) {
-            Alert.alert(
+            showAlert(
+                'error',
                 'Connection Error',
                 'Unable to connect to the server. Please check your internet connection and try again.',
                 [{ text: 'OK', style: 'default' }]
@@ -144,7 +206,7 @@ export default function LoginScreen() {
             // Success alert handled by Modal onSuccess
         } catch (e) {
             console.log('Verification error:', e);
-            Alert.alert('Error', 'Failed to start verification.');
+            showAlert('error', 'Error', 'Failed to start verification.');
         }
     };
 
@@ -291,6 +353,15 @@ export default function LoginScreen() {
                 url={verificationUrl}
                 onClose={() => setShowVerification(false)}
                 onSuccess={handleVerificationSuccess}
+            />
+
+            <CustomAlert
+                visible={alertState.visible}
+                type={alertState.type}
+                title={alertState.title}
+                message={alertState.message}
+                buttons={alertState.buttons}
+                onClose={closeAlert}
             />
         </KeyboardAvoidingView>
     );

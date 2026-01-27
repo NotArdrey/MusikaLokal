@@ -8,15 +8,25 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
+import { useLocalSearchParams } from 'expo-router';
+
 export default function GigDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { id } = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState('About');
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
   const [modalMessage, setModalMessage] = useState('');
   const [modalButtonText, setModalButtonText] = useState('');
+  const [modalAction, setModalAction] = useState<() => Promise<void> | void>(() => { });
+
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const [gig, setGig] = useState<any>(null);
+  const [applications, setApplications] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Role-based access control
   useEffect(() => {
@@ -42,6 +52,7 @@ export default function GigDetailsScreen() {
       }
 
       setAuthorized(true);
+      if (id) fetchData(user.id);
     } catch (e) {
       console.error('Authorization check failed:', e);
       router.replace('/home');
@@ -50,18 +61,61 @@ export default function GigDetailsScreen() {
     }
   };
 
-  const handleAction = (action: string) => {
-    if (action === 'accept') {
-      setModalTitle('Accept Application');
-      setModalMessage('Are you sure you want to accept this application?');
-      setModalButtonText('Accept');
-    } else {
-      setModalTitle('Decline Application');
-      setModalMessage('Are you sure you want to decline this application?');
-      setModalButtonText('Decline');
+  const fetchData = async (userId: string) => {
+    setLoading(true);
+    try {
+      // Fetch Gig Details
+      const { data: gigData, error: gigError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_one', type: 'gig', id: id, userId }
+      });
+      if (gigError) throw gigError;
+      setGig(gigData);
+
+      // Fetch Applications
+      const { data: appData, error: appError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_gig_applications', gigId: id, userId }
+      });
+      if (appError) throw appError;
+      setApplications(appData || []);
+
+      // Fetch Reviews
+      const { data: reviewData, error: reviewError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_reviews', type: 'gig', id: id, userId }
+      });
+      if (reviewError) throw reviewError;
+      setReviews(reviewData || []);
+
+    } catch (e) {
+      console.log('Error fetching data:', e);
+      Alert.alert('Error', 'Failed to load gig data');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const confirmAction = (applicationId: string, status: string) => {
+    setModalTitle(status === 'approved' ? 'Accept Application' : 'Decline Application');
+    setModalMessage(`Are you sure you want to ${status === 'approved' ? 'accept' : 'decline'} this application?`);
+    setModalButtonText(status === 'approved' ? 'Accept' : 'Decline');
+    setModalAction(() => async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { error } = await supabase.functions.invoke('manage-listings', {
+          body: { action: 'update_application_status', applicationId, status, userId: user.id }
+        });
+        if (error) throw error;
+
+        setApplications(applications.map(a => a.id === applicationId ? { ...a, status } : a));
+        setModalVisible(false);
+      } catch (e) {
+        console.log('Error updating application:', e);
+        Alert.alert('Error', 'Failed to update application status');
+      }
+    });
     setModalVisible(true);
-  }
+  };
 
   const tabs = ['About', 'Info', 'Applicants', 'Review'];
 
@@ -113,8 +167,8 @@ export default function GigDetailsScreen() {
               <View style={[styles.headerImageOverlay, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
             </View>
 
-            <Text style={[styles.headerTitle, { color: colors.text }]}>Acoustic Sunset Session</Text>
-            <Text style={[styles.headerLocation, { color: colors.textSecondary }]}>Junction 88 Music Bar • Plaridel, Bulacan</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>{gig?.name || 'Loading...'}</Text>
+            <Text style={[styles.headerLocation, { color: colors.textSecondary }]}>{gig?.location || 'Location N/A'}</Text>
           </View>
 
           {/* Segmented Control Tabs */}
@@ -155,7 +209,7 @@ export default function GigDetailsScreen() {
               <View style={styles.aboutContainer}>
                 <View>
                   <Text style={[styles.aboutText, { color: colors.textSecondary }]}>
-                    We are looking for an acoustic duo or trio to perform at our weekly Sunset Session. The vibe is chill and laid back. Performers must have their own instruments. Sound system provided.
+                    {gig?.description || 'No description available.'}
                   </Text>
                 </View>
 
@@ -167,12 +221,11 @@ export default function GigDetailsScreen() {
                   </View>
                   <View style={[styles.dealInfo, { borderColor: colors.border }]}>
                     <View>
-                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Payout Structure</Text>
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text, fontSize: 16 }}>Guarantee + Door Split</Text>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>Budget</Text>
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text, fontSize: 16 }}>Total Payout</Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={[styles.payoutAmount, { color: colors.primary }]}>₱3,500</Text>
-                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>+ 20% of Door</Text>
+                      <Text style={[styles.payoutAmount, { color: colors.primary }]}>₱{(gig?.budget || 0).toLocaleString()}</Text>
                     </View>
                   </View>
                   <View style={{ flexDirection: 'row', gap: 16 }}>
@@ -268,107 +321,46 @@ export default function GigDetailsScreen() {
               <View style={styles.applicantsContainer}>
                 <Text style={[styles.applicantsTitle, { color: colors.textSecondary }]}>APPLICANTS LIST</Text>
 
-                {/* Applicant Card 1 */}
-                <View style={[styles.applicantCard, { backgroundColor: colors.surface, marginBottom: 8 }]}>
-                  <View style={styles.applicantHeader}>
-                    <Image source={{ uri: 'https://i.pravatar.cc/100?img=12' }} style={styles.applicantImage} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>The Rock Band</Text>
-                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Rock • 5 members</Text>
-                    </View>
-                    <View style={[styles.starRatingBadge, { backgroundColor: 'rgba(250, 204, 21, 0.2)' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Ionicons name="star" size={12} color="#FBBF24" />
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#FACC15' : '#D97706' }}>4.8</Text>
+                {applications.length === 0 ? (
+                  <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 20 }}>No applications yet.</Text>
+                ) : (
+                  applications.map((app) => (
+                    <View key={app.id} style={[styles.applicantCard, { backgroundColor: colors.surface, marginBottom: 12 }]}>
+                      <View style={styles.applicantHeader}>
+                        <Image source={{ uri: app.group?.images?.[0] || app.applicant?.avatar_url || 'https://i.pravatar.cc/100' }} style={styles.applicantImage} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>
+                            {app.group?.name || app.applicant?.full_name || 'Unknown Applicant'}
+                          </Text>
+                          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>
+                            {app.group?.genre || 'Musician'} • {app.status}
+                          </Text>
+                        </View>
                       </View>
+
+                      <Text style={[styles.applicantMessage, { color: colors.textSecondary }]}>
+                        {app.cover_letter || "No cover letter provided."}
+                      </Text>
+
+                      {app.status === 'pending' && (
+                        <View style={styles.actionButtons}>
+                          <TouchableOpacity
+                            onPress={() => confirmAction(app.id, 'rejected')}
+                            style={[styles.declineButton, { borderColor: colors.border }]}
+                          >
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => confirmAction(app.id, 'approved')}
+                            style={[styles.acceptButton, { backgroundColor: colors.primary }]}
+                          >
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
-                  </View>
-
-                  <Text style={[styles.applicantMessage, { color: colors.textSecondary }]}>"We're a professional rock band with 5 years of experience. We'd love to perform at your event!"</Text>
-
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity
-                      onPress={() => handleAction('decline')}
-                      style={[styles.declineButton, { borderColor: colors.border }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleAction('accept')}
-                      style={[styles.acceptButton, { backgroundColor: colors.primary }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Applicant Card 2 */}
-                <View style={[styles.applicantCard, { backgroundColor: colors.surface }]}>
-                  <View style={styles.applicantHeader}>
-                    <Image source={{ uri: 'https://i.pravatar.cc/100?img=24' }} style={styles.applicantImage} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Jazz Vibes Collective</Text>
-                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Jazz • 4 members</Text>
-                    </View>
-                    <View style={[styles.starRatingBadge, { backgroundColor: 'rgba(250, 204, 21, 0.2)' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Ionicons name="star" size={12} color="#FBBF24" />
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#FACC15' : '#D97706' }}>4.9</Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  <Text style={[styles.applicantMessage, { color: colors.textSecondary }]}>"Smooth jazz quartet specializing in contemporary and classic jazz. We bring sophistication to any event."</Text>
-
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity
-                      onPress={() => handleAction('decline')}
-                      style={[styles.declineButton, { borderColor: colors.border }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleAction('accept')}
-                      style={[styles.acceptButton, { backgroundColor: colors.primary }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Applicant Card 3 */}
-                <View style={[styles.applicantCard, { backgroundColor: colors.surface, marginTop: 8 }]}>
-                  <View style={styles.applicantHeader}>
-                    <Image source={{ uri: 'https://i.pravatar.cc/100?img=33' }} style={styles.applicantImage} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>Acoustic Souls</Text>
-                      <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.textSecondary }}>Acoustic • 3 members</Text>
-                    </View>
-                    <View style={[styles.starRatingBadge, { backgroundColor: 'rgba(250, 204, 21, 0.2)' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Ionicons name="star" size={12} color="#FBBF24" />
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#FACC15' : '#D97706' }}>4.7</Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  <Text style={[styles.applicantMessage, { color: colors.textSecondary }]}>"Intimate acoustic performances perfect for creating a cozy atmosphere."</Text>
-
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity
-                      onPress={() => handleAction('decline')}
-                      style={[styles.declineButton, { borderColor: colors.border }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleAction('accept')}
-                      style={[styles.acceptButton, { backgroundColor: colors.primary }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                  ))
+                )}
               </View>
             )}
 
@@ -409,6 +401,7 @@ export default function GigDetailsScreen() {
       <Modal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
+        onConfirm={modalAction}
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}

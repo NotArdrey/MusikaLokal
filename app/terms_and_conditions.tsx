@@ -18,79 +18,74 @@ export default function TermsAndConditionsScreen() {
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            These terms and conditions outline the rules and regulations for using the Musika Lokal platform.
+            This document is a legally binding agreement between you and Musika Lokal. By using our platform, you confirm you are at least 18 years of age.
           </Text>
 
-          <Text style={[styles.textLargeMargin, { color: colors.textSecondary }]}>
-            By accessing and using our app or website, you agree to these terms. Do not continue to use Musika Lokal if you do not agree with any part of these conditions.
-          </Text>
-
+          {/* 1. BOOKING & PAYMENTS */}
           <Text style={[styles.subHeader, { color: colors.text }]}>
-            Booking & Payments
+            1. Booking & Payments (Escrow)
           </Text>
-
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            • All bookings are processed through the Musika Lokal Wallet system.{'\n'}
-            • Payments are held in escrow until the event/session is completed or released after 48–72 hours if no dispute is raised.{'\n'}
-            • Refunds and penalties follow the cancellation policy below.
+            • All transactions are processed via the Musika Lokal Wallet.{"\n"}
+            • Funds are held in escrow and released 48–72 hours after event completion if no dispute is raised.{"\n"}
+            • Musika Lokal acts only as a facilitator and is not a party to the actual performance contract.
           </Text>
 
+          {/* 2. CANCELLATION & FORCE MAJEURE */}
           <Text style={[styles.subHeader, { color: colors.text }]}>
-            Cancellation Policy
+            2. Cancellation & Force Majeure
           </Text>
-
           <Text style={[styles.smallHeader, { color: colors.text }]}>
-            Venues & Musicians
+            Standard Penalties
           </Text>
-
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            • 7 days before event: 80% refund to client, 20% to performer.{'\n'}
-            • 3–7 days before event: 70% refund to client, 30% to performer.{'\n'}
-            • {'<'}3 days or same day: 100% to performer.
+            • {'>'}7 days: 80% refund to client.{"\n"}
+            • 3–7 days: 70% refund to client.{"\n"}
+            • {'<'}3 days: No refund; 100% to provider.
           </Text>
-
           <Text style={[styles.smallHeader, { color: colors.text }]}>
-            Studios & Musicians
+            Acts of God (Force Majeure)
           </Text>
-
-          <Text style={[styles.textSmallMargin, { color: colors.textSecondary }]}>
-            Studio cancels:{'\n'}
-            • 100% refund to musician (120% if cancelled same day).
-          </Text>
-
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            Musician cancels:{'\n'}
-            • 3 days: 100% refund.{'\n'}
-            • 1–3 days: 70% refund, 30% to studio.{'\n'}
-            • {'<'}24 hours: No refund.
+            In cases of extreme weather (typhoons), government-mandated lockdowns, or national emergencies, either party may cancel without penalty. Musika Lokal reserves the right to verify these claims.
           </Text>
 
+          {/* 3. LIMITATION OF LIABILITY */}
           <Text style={[styles.subHeader, { color: colors.text }]}>
-            Wallet & Withdrawals
+            3. Limitation of Liability
           </Text>
-
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            • Funds remain in Pending Balance until released.{'\n'}
-            • Available Balance can be withdrawn to GCash, Maya, or Bank Transfer.{'\n'}
-            • Transaction fees may apply depending on payment method.
+            Musika Lokal is provided "as-is." We are NOT liable for:{"\n"}
+            • Personal injury or property damage during a session/event.{"\n"}
+            • Technical failures of the GCash, Maya, or banking systems.{"\n"}
+            • Loss of income due to app downtime.
           </Text>
 
+          {/* 4. INTELLECTUAL PROPERTY */}
           <Text style={[styles.subHeader, { color: colors.text }]}>
-            Disputes
+            4. User Content & Intellectual Property
           </Text>
-
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            • Proof may be requested (attendance check-in, real-time evidence).{'\n'}
-            • Musika Lokal reserves the right to decide outcomes fairly.
+            You retain ownership of any music or media you upload. However, you grant Musika Lokal a non-exclusive license to display this content on the platform for promotional and operational purposes.
           </Text>
 
+          {/* 5. PROHIBITED CONDUCT */}
           <Text style={[styles.subHeader, { color: colors.text }]}>
-            Completion Rate
+            5. Prohibited Conduct
+          </Text>
+          <Text style={[styles.text, { color: colors.textSecondary }]}>
+            Users are strictly prohibited from:{"\n"}
+            • Circumventing the platform to pay "under the table."{"\n"}
+            • Harassing other users or posting defamatory content.{"\n"}
+            • Creating multiple accounts for fraudulent reviews.
           </Text>
 
+          {/* 6. GOVERNING LAW */}
+          <Text style={[styles.subHeader, { color: colors.text }]}>
+            6. Governing Law
+          </Text>
           <Text style={[styles.textLargeMarginBottom, { color: colors.textSecondary }]}>
-            • Cancellations affect your completion rate.{'\n'}
-            • Repeated cancellations may reduce bookings or lead to account suspension.
+            These terms are governed by the laws of the Republic of the Philippines. Any legal disputes shall be settled exclusively in the courts of Metro Manila.
           </Text>
         </View>
       </ScrollView>
@@ -103,64 +98,13 @@ export default function TermsAndConditionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 150,
-    paddingHorizontal: 24,
-  },
-  contentContainer: {
-    paddingTop: 24,
-  },
-  headerText: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  text: {
-    fontSize: 14,
-    lineHeight: 24,
-    marginBottom: 12, // mb-3 based on original code, though some were mb-4. Adjusting to average or explicit if needed.
-    fontFamily: 'Poppins_400Regular',
-  },
-  textLargeMargin: {
-    fontSize: 14,
-    lineHeight: 24,
-    marginBottom: 20, // mb-5
-    fontFamily: 'Poppins_400Regular',
-  },
-  textSmallMargin: {
-    fontSize: 14,
-    lineHeight: 24,
-    marginBottom: 4, // mb-1
-    fontFamily: 'Poppins_400Regular',
-  },
-  textLargeMarginBottom: {
-    fontSize: 14,
-    lineHeight: 24,
-    marginBottom: 24, // mb-6
-    fontFamily: 'Poppins_400Regular',
-  },
-  subHeader: {
-    fontSize: 16, // text-base
-    fontWeight: '600',
-    marginTop: 16,
-    marginBottom: 8,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  smallHeader: {
-    fontSize: 14, // text-sm
-    fontWeight: '600',
-    marginTop: 8,
-    marginBottom: 4,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  navbarContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
+  container: { flex: 1 },
+  scrollContent: { paddingBottom: 120, paddingHorizontal: 24 },
+  contentContainer: { paddingTop: 24 },
+  headerText: { fontSize: 20, fontWeight: '700', marginBottom: 12, fontFamily: 'Poppins_700Bold' },
+  subHeader: { fontSize: 16, fontWeight: '600', marginTop: 20, marginBottom: 8, color: '#333' },
+  smallHeader: { fontSize: 14, fontWeight: '600', marginTop: 10, marginBottom: 4 },
+  text: { fontSize: 14, lineHeight: 22, marginBottom: 12, fontFamily: 'Poppins_400Regular' },
+  textLargeMarginBottom: { fontSize: 14, lineHeight: 22, marginBottom: 40 },
+  navbarContainer: { position: 'absolute', bottom: 0, left: 0, right: 0 },
 });

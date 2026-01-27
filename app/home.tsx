@@ -21,22 +21,27 @@ import ListingDetailsSheet from '../src/components/ListingDetailsSheet';
 import Navbar from '../src/components/navbar';
 import SearchBottomSheet from '../src/components/SearchBottomSheet';
 import { useTheme } from '../src/context/ThemeContext';
-import { MOCK_LISTINGS } from '../src/data/mockData';
 
 const { width, height } = Dimensions.get('window');
 
-// Refined Categories
-const CATEGORIES = ['All', 'Musicians', 'Venues', 'Studios'];
+import { useAuth } from '../src/context/AuthContext';
 
 export default function HomeScreen() {
     const { colors, isDark } = useTheme();
+    const { userRole } = useAuth();
     const insets = useSafeAreaInsets();
     const [loading, setLoading] = useState(true);
     const [activeCategory, setActiveCategory] = useState('All');
+    // State for different sections
     const [featured, setFeatured] = useState<any[]>([]);
-    const [userName, setUserName] = useState('Martin');
+    const [discover, setDiscover] = useState<any[]>([]);
+    const [userName, setUserName] = useState('Guest');
 
-    // Bottom Sheet
+    // Refined Categories based on Role
+    const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
+    const CATEGORIES = isOwner ? ['All', 'Musicians'] : ['All', 'Musicians', 'Venues', 'Studios'];
+
+    // ... refs ...
     const bottomSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
     const searchSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
     const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
@@ -46,30 +51,27 @@ export default function HomeScreen() {
         ? featured
         : featured.filter(item => {
             if (activeCategory === 'Musicians') return item.type === 'Group';
-            if (activeCategory === 'Venues') return item.type === 'Venue';
+            if (activeCategory === 'Venues') return item.type === 'Venue' || item.type === 'Gig' || (item.type === 'Studio' && item.amenities?.includes('Stage'));
             if (activeCategory === 'Studios') return item.type === 'Studio';
-            return true;
+            return item.type === activeCategory; // Fallback
         });
-
-    // Mock "Discover New" items
-    const discoverItems = [
-        { id: 'd1', title: 'Hidden Valley', location: 'Rizal', image: 'https://images.unsplash.com/photo-1510784722466-f2aa9c52fff6?w=800&fit=crop' },
-        { id: 'd2', title: 'Coastal Vibes', location: 'La Union', image: 'https://images.unsplash.com/photo-1520116468816-95b69f847357?w=800&fit=crop' },
-        { id: 'd3', title: 'Mountain Retreat', location: 'Baguio', image: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=800&fit=crop' },
-    ];
 
     useEffect(() => {
         fetchHomeData();
         fetchUserProfile();
-    }, []);
+    }, [userRole]); // Re-fetch if role changes (e.g. login)
 
     const fetchUserProfile = async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
-            const { data } = await supabase.functions.invoke('manage-profile', {
-                body: { action: 'fetch', userId: user.id }
-            });
+
+            const { data } = await supabase
+                .from('profiles')
+                .select('full_name')
+                .eq('id', user.id)
+                .single();
+
             if (data?.full_name) {
                 setUserName(data.full_name.split(' ')[0]);
             }
@@ -79,17 +81,124 @@ export default function HomeScreen() {
     };
 
     const fetchHomeData = async () => {
+        setLoading(true);
         try {
-            const { data, error } = await supabase.functions.invoke('home-feed');
-            let fetchedItems: any[] = [];
-            if (data?.featured || data?.newArrivals) {
-                fetchedItems = [...(data?.featured || []), ...(data?.newArrivals || [])];
+            // Fetch based on Role
+            // If Owner, ONLY fetch groups (musicians)
+            let groups: any[] = [];
+            let studios: any[] = [];
+            let gigs: any[] = [];
+
+            const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
+
+            // Always fetch groups
+            const { data: gData } = await supabase.from('groups_with_stats').select('*').limit(20);
+            groups = gData || [];
+
+            if (!isOwner) {
+                const { data: sData } = await supabase.from('studios_with_stats').select('*').limit(20);
+                studios = sData || [];
+                const { data: gigData } = await supabase.from('gigs_with_stats').select('*').limit(20);
+                gigs = gigData || [];
             }
-            const uniqueItems = Array.from(new Map(fetchedItems.map(item => [item.id, item])).values());
-            setFeatured([...uniqueItems, ...MOCK_LISTINGS]);
+
+            // Normalize
+            const normalize = (items: any[], type: string) => items.map(item => ({
+                id: item.id,
+                type,
+                name: item.name,
+                image: item.images?.[0] || 'https://via.placeholder.com/300',
+                rating: item.rating || 0,
+                review_count: item.review_count || 0,
+                // Explicitly pass rate fields
+                hourly_rate: item.hourly_rate?.toString(),
+                budget: item.budget?.toString(),
+                rate: item.rate || item.hourly_rate?.toString() || item.budget?.toString(),
+                location: item.location || item.address || '',
+                amenities: item.amenities || [],
+                embedding: item.embedding
+            }));
+
+            const allGroups = normalize(groups, 'Group');
+            const allStudios = normalize(studios, 'Studio');
+            const allGigs = normalize(gigs, 'Gig');
+
+            const allItems = [...allGroups, ...allStudios, ...allGigs];
+
+            // AI Personalization
+            // Strategy:
+            // 1. "Featured": If we have a selectedListingId (last viewed), find similar items.
+            // 2. "Discover": Random mix of high-rated items (Exploration)
+
+            let recommended = [...allItems]; // Default: all items
+
+            // Simulating "Last Viewed" text/embedding context
+            // In a real app, this would come from a user_history table or local storage
+            // For now, if we have selectedListingId, we could try to find it in the list and use its embedding
+            // But selectedListingId is local to this session's tap, so it might not be set on first load.
+            // Let's rely on a randomized Sort for "Discover" and maybe a Rating Sort for "Featured" for now,
+            // as true history needs persistent tracking which is another task.
+
+            // However, we CAN demonstration the vector match if we pick a random "Seed" item
+            // effectively "Simulating" that the user likes one item.
+
+            if (allItems.length > 0) {
+                const seed = allItems[Math.floor(Math.random() * allItems.length)];
+                // console.log('Personalizing based on seed:', seed.name);
+
+                // If seed has embedding, sort others by similarity (approximate JS cosine if not doing DB RPC query for feed)
+                // Since we fetched `embedding` column, we can do client-side sort for small lists
+                // or fetches from DB for cleaner approach. 
+                // Let's keep it simple: Random shuffle for Discover, Rating for Featured.
+                // Actually the user asked for "AI". Let's try to fetch using the RPC if possible, 
+                // or just enable the capability. 
+
+                // Real Implementation:
+                // The `ListingDetailsSheet` handles the item-to-item AI.
+                // This Home feed is User-to-Item. Without user history vectors, we can't do User personalization yet.
+                // So we will stick to:
+                // Featured = Highest Rated (Popularity)
+                // Discover = Randomized (Exploration)
+            }
+
+            // AI Personalization (Long-Term Learning)
+            const { data: { user } } = await supabase.auth.getUser();
+            let sortedItems = [...allItems];
+            let usedPersonalization = false;
+
+            if (user) {
+                // Fetch Profile Vector
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('interest_vector')
+                    .eq('id', user.id)
+                    .single();
+
+                if (profile && profile.interest_vector) {
+                    usedPersonalization = true;
+                    const dot = (a: number[], b: number[]) => a.reduce((acc, cur, i) => acc + cur * b[i], 0);
+                    const pVec = typeof profile.interest_vector === 'string' ? JSON.parse(profile.interest_vector) : profile.interest_vector;
+
+                    if (pVec && Array.isArray(pVec)) {
+                        sortedItems.sort((a, b) => {
+                            if (!a.embedding || !b.embedding) return 0;
+                            const aVec = typeof a.embedding === 'string' ? JSON.parse(a.embedding) : a.embedding;
+                            const bVec = typeof b.embedding === 'string' ? JSON.parse(b.embedding) : b.embedding;
+                            return dot(pVec, bVec) - dot(pVec, aVec); // Descending
+                        });
+                    }
+                }
+            }
+
+            if (!usedPersonalization) {
+                sortedItems.sort(() => 0.5 - Math.random());
+            }
+
+            setFeatured(sortedItems.slice(0, 10)); // Top 10 Personalized
+            setDiscover(sortedItems.slice(10, 20)); // Next 10
+
         } catch (e) {
             console.log('Error fetching home feed:', e);
-            setFeatured([...MOCK_LISTINGS]);
         } finally {
             setLoading(false);
         }
@@ -190,7 +299,7 @@ export default function HomeScreen() {
                 decelerationRate="fast"
                 snapToInterval={width * 0.6 + 16}
             >
-                {filteredItems.slice(0, 5).map(item => renderUnifiedCard(item))}
+                {filteredItems.slice(0, 10).map(item => renderUnifiedCard(item))}
             </ScrollView>
         </View>
     );
@@ -208,8 +317,12 @@ export default function HomeScreen() {
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingLeft: 24, paddingRight: 8 }}
+                decelerationRate="fast"
+                snapToInterval={width * 0.6 + 16}
             >
-                {discoverItems.map(item => renderUnifiedCard(item))}
+                {discover.length > 0 ? discover.map(item => renderUnifiedCard(item)) : (
+                    <Text style={{ marginLeft: 24, color: colors.textSecondary }}>No items found.</Text>
+                )}
             </ScrollView>
         </View>
     );

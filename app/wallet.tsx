@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -10,13 +12,69 @@ export default function WalletScreen() {
   const { colors, isDark } = useTheme();
   const [modalVisible, setModalVisible] = useState(false);
 
-  // Mock transaction data
-  const transactions = [
-    { id: 1, date: 'June 15, 2024', type: 'Booking Payment', amount: 500.00, isCredit: true },
-    { id: 2, date: 'June 10, 2024', type: 'Refund', amount: 250.00, isCredit: true },
-    { id: 3, date: 'June 5, 2024', type: 'Withdrawal', amount: 500.00, isCredit: false },
-    { id: 4, date: 'May 20, 2024', type: 'Booking Payment', amount: 1000.00, isCredit: true },
-  ];
+  const [balance, setBalance] = useState(0.00);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [transactions, setTransactions] = useState<any[]>([]);
+
+  const fetchWallet = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1. Get Wallet
+      let { data: wallet, error: walletError } = await supabase
+        .from('wallets')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (walletError && walletError.code === 'PGRST116') {
+        // Create wallet if doesn't exist
+        const { data: newWallet, error: createError } = await supabase
+          .from('wallets')
+          .insert([{ user_id: user.id, balance: 0 }])
+          .select()
+          .single();
+
+        if (createError) throw createError;
+        wallet = newWallet;
+      } else if (walletError) {
+        throw walletError;
+      }
+
+      setBalance(wallet?.balance || 0);
+
+      // 2. Get Transactions
+      if (wallet?.id) {
+        const { data: txs, error: txError } = await supabase
+          .from('wallet_transactions')
+          .select('*')
+          .eq('wallet_id', wallet.id)
+          .order('created_at', { ascending: false });
+
+        if (txError) throw txError;
+        setTransactions(txs || []);
+      }
+
+    } catch (e) {
+      console.log('Error fetching wallet:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchWallet();
+    }, [])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchWallet();
+  };
 
   const handleWithdraw = () => {
     setModalVisible(false);
@@ -28,7 +86,11 @@ export default function WalletScreen() {
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         <Header title="Wallet" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
 
           {/* Balance Card */}
           <View style={styles.cardWrapper}>
@@ -43,7 +105,7 @@ export default function WalletScreen() {
               <View style={styles.decoBottomLeft} />
 
               <Text style={styles.balanceLabel}>Current Balance</Text>
-              <Text style={styles.balanceValue}>₱ 1,250.00</Text>
+              <Text style={styles.balanceValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
 
               <View style={styles.balanceRow}>
                 <View>
@@ -53,7 +115,7 @@ export default function WalletScreen() {
                 <View style={[styles.balanceDivider, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
                 <View>
                   <Text style={styles.balanceSubLabel}>Available</Text>
-                  <Text style={styles.balanceSubValue}>₱ 750.00</Text>
+                  <Text style={styles.balanceSubValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
               </View>
             </View>
@@ -105,37 +167,49 @@ export default function WalletScreen() {
             <Text style={[styles.historyTitle, { color: colors.text }]}>Transaction History</Text>
 
             <View style={[styles.historyContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              {transactions.map((tx, index) => (
-                <View
-                  key={tx.id}
-                  style={[
-                    styles.transactionItem,
-                    { borderBottomWidth: index === transactions.length - 1 ? 0 : 1, borderBottomColor: colors.border }
-                  ]}
-                >
-                  <View style={styles.transactionLeft}>
-                    <View
-                      style={[
-                        styles.transactionIcon,
-                        { backgroundColor: tx.isCredit ? '#DCFCE7' : '#FEE2E2' } // green-100 / red-100
-                      ]}
-                    >
-                      <Ionicons
-                        name={tx.isCredit ? 'arrow-down' : 'arrow-up'}
-                        size={18}
-                        color={tx.isCredit ? '#10B981' : '#EF4444'}
-                      />
-                    </View>
-                    <View>
-                      <Text style={[styles.transactionType, { color: colors.text }]}>{tx.type}</Text>
-                      <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>{tx.date}</Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.transactionAmount, { color: tx.isCredit ? '#10B981' : '#EF4444' }]}>
-                    {tx.isCredit ? '+' : '-'}₱ {tx.amount.toFixed(2)}
-                  </Text>
+              {loading ? (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
                 </View>
-              ))}
+              ) : transactions.length === 0 ? (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No transaction history</Text>
+                </View>
+              ) : (
+                transactions.map((tx, index) => (
+                  <View
+                    key={tx.id}
+                    style={[
+                      styles.transactionItem,
+                      { borderBottomWidth: index === transactions.length - 1 ? 0 : 1, borderBottomColor: colors.border }
+                    ]}
+                  >
+                    <View style={styles.transactionLeft}>
+                      <View
+                        style={[
+                          styles.transactionIcon,
+                          { backgroundColor: tx.is_credit ? '#DCFCE7' : '#FEE2E2' } // green-100 / red-100
+                        ]}
+                      >
+                        <Ionicons
+                          name={tx.is_credit ? 'arrow-down' : 'arrow-up'}
+                          size={18}
+                          color={tx.is_credit ? '#10B981' : '#EF4444'}
+                        />
+                      </View>
+                      <View>
+                        <Text style={[styles.transactionType, { color: colors.text }]}>{tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</Text>
+                        <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
+                          {new Date(tx.created_at).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={[styles.transactionAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
+                      {tx.is_credit ? '+' : '-'}₱ {tx.amount.toFixed(2)}
+                    </Text>
+                  </View>
+                ))
+              )}
             </View>
           </View>
 

@@ -24,18 +24,32 @@ serve(async (req: Request) => {
 
         const { action, ...params } = await req.json()
 
-        // 1. FETCH BOOKINGS (using view with computed cost)
+        // 1. FETCH BOOKINGS & APPLICATIONS
         if (action === 'fetch') {
             const { userId } = params
 
-            // Fetch Studio Bookings using the view that computes duration and cost
-            const { data: bookings, error } = await supabaseClient
+            // A. Fetch Studio Bookings
+            const { data: bookings, error: bookingError } = await supabaseClient
                 .from('studio_bookings_with_cost')
                 .select('*')
                 .eq('user_id', userId)
                 .order('booking_date', { ascending: false })
 
-            if (error) throw error
+            if (bookingError) throw bookingError
+
+            // B. Fetch Gig Applications (Personal)
+            // Assuming 'gig_applications' has 'musician_id' and joins to 'gigs'
+            const { data: gigApps, error: gigError } = await supabaseClient
+                .from('gig_applications')
+                .select('*, gigs(name, event_date, image_url)') // Adjusted fields based on assumption
+                .eq('musician_id', userId)
+                .order('created_at', { ascending: false })
+
+            if (gigError) {
+                console.log('Error fetching gig apps:', gigError)
+                // Don't fail entire request if just gig apps fail? Or throw?
+                // throw gigError
+            }
 
             const categorized = {
                 Pending: [],
@@ -46,6 +60,7 @@ serve(async (req: Request) => {
 
             const now = new Date()
 
+            // Process Studio Bookings
             // @ts-ignore
             bookings?.forEach((b: any) => {
                 const bookingDate = new Date(`${b.booking_date}T${b.start_time}`)
@@ -53,6 +68,8 @@ serve(async (req: Request) => {
 
                 const item = {
                     id: b.id,
+                    type_id: 'studio_booking', // internal type identifier
+                    raw_date: b.booking_date,
                     name: b.studio_name || 'Unknown Studio',
                     date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
                     image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
@@ -62,7 +79,6 @@ serve(async (req: Request) => {
                     type: 'Studio Booking',
                     isCancelled: b.status === 'cancelled',
                     action: b.status === 'pending' ? 'View Details' : 'Details',
-                    // Values from view (already named correctly)
                     duration_hours: b.duration_hours,
                     total_cost: b.total_cost
                 }
@@ -82,10 +98,48 @@ serve(async (req: Request) => {
                         categorized.Upcoming.push(item)
                     }
                 } else if (b.status === 'cancelled') {
-                    // Include cancelled in Upcoming for visibility? Or separate? 
-                    // Mock data put cancelled in Upcoming.
                     // @ts-ignore
                     categorized.Upcoming.push(item)
+                }
+            })
+
+            // Process Gig Applications
+            // @ts-ignore
+            gigApps?.forEach((g: any) => {
+                const gig = g.gigs;
+                const dateStr = gig?.event_date || g.created_at?.split('T')[0] || 'TBA'; // Fallback
+                // For gig apps, 'pending' is awaiting organizer decision
+                // 'accepted' -> Upcoming?
+
+                const item = {
+                    id: g.id,
+                    type_id: 'gig_application',
+                    raw_date: dateStr,
+                    name: gig?.name || 'Unknown Gig',
+                    date: dateStr,
+                    image: gig?.image_url || 'https://picsum.photos/400/300',
+                    status: g.status === 'pending' ? 'Applied' :
+                        g.status === 'accepted' ? 'Accepted' :
+                            g.status === 'rejected' ? 'Rejected' : g.status,
+                    type: 'Gig Application',
+                    isCancelled: g.status === 'cancelled' || g.status === 'rejected',
+                    action: g.status === 'accepted' ? 'View Details' : 'Details',
+                }
+
+                if (g.status === 'pending') {
+                    // @ts-ignore
+                    categorized.Pending.push(item)
+                } else if (g.status === 'accepted') {
+                    // @ts-ignore
+                    categorized.Upcoming.push(item) // Treat accepted gig as upcoming?
+                } else {
+                    // @ts-ignore
+                    categorized.Review.push(item) // Rejected or other? Or put in Upcoming as cancelled?
+                    // Let's put rejected in Upcoming/History but marked cancelled
+                    if (g.status === 'rejected' || g.status === 'cancelled') {
+                        // @ts-ignore
+                        categorized.Upcoming.push({ ...item, isCancelled: true })
+                    }
                 }
             })
 
@@ -95,18 +149,17 @@ serve(async (req: Request) => {
             })
         }
 
-        // 2. CREATE BOOKING (no longer stores duration_hours or total_cost)
+        // 2. CREATE BOOKING (Studio)
         if (action === 'create') {
             const { studio_id, user_id, date, start_time, end_time } = params
 
             // Overlap Check
-            // Overlap if: (RequestStart < ExistingEnd) AND (RequestEnd > ExistingStart)
             const { data: overlaps, error: overlapError } = await supabaseClient
                 .from('studio_bookings')
                 .select('id')
                 .eq('studio_id', studio_id)
                 .eq('booking_date', date)
-                .eq('status', 'confirmed') // Only check confirmed bookings? Or pending too? Safer to check pending too if we want to avoid double booking
+                .eq('status', 'confirmed')
                 .or(`and(start_time.lt.${end_time},end_time.gt.${start_time})`)
 
             if (overlapError) throw overlapError
@@ -119,7 +172,6 @@ serve(async (req: Request) => {
                 })
             }
 
-            // Insert booking without derived columns (they are computed via view)
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
                 .insert({
@@ -135,26 +187,7 @@ serve(async (req: Request) => {
 
             if (error) throw error
 
-            // Fetch the created booking with computed values from view
-            const { data: bookingWithCost, error: fetchError } = await supabaseClient
-                .from('studio_bookings_with_cost')
-                .select('*')
-                .eq('id', data.id)
-                .single()
-
-            if (fetchError) {
-                // Return basic data if view fetch fails
-                return new Response(JSON.stringify(data), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 201,
-                })
-            }
-
-            return new Response(JSON.stringify({
-                ...bookingWithCost,
-                duration_hours: bookingWithCost.duration_hours,
-                total_cost: bookingWithCost.total_cost
-            }), {
+            return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 201,
             })
@@ -162,10 +195,13 @@ serve(async (req: Request) => {
 
         // 3. UPDATE STATUS (Cancel/Confirm)
         if (action === 'update_status') {
-            const { booking_id, new_status } = params
+            const { booking_id, new_status, type_id } = params // type_id: 'studio_booking' or 'gig_application'
+
+            let table = 'studio_bookings'
+            if (type_id === 'gig_application') table = 'gig_applications'
 
             const { data, error } = await supabaseClient
-                .from('studio_bookings')
+                .from(table)
                 .update({ status: new_status })
                 .eq('id', booking_id)
                 .select()

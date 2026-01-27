@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
+import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -12,6 +13,10 @@ export default function AddGroupScreen() {
   const { colors, isDark } = useTheme();
   const [step, setStep] = useState(1);
   const [groupName, setGroupName] = useState('');
+  const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [genre, setGenre] = useState('');
   const [description, setDescription] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
@@ -75,9 +80,12 @@ export default function AddGroupScreen() {
 
       const payload = {
         name: groupName,
+        location: address,
         genre,
         description,
         members,
+        latitude,
+        longitude,
       };
 
       const { error } = await supabase.functions.invoke('manage-listings', {
@@ -218,6 +226,26 @@ export default function AddGroupScreen() {
                 Tell us about your group
               </Text>
               {renderInput('Group Name', groupName, setGroupName, 'e.g. The Sunday Collective')}
+
+              <View style={styles.inputContainer}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Based Location</Text>
+                <TouchableOpacity
+                  onPress={() => setLocationPickerVisible(true)}
+                  style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
+                    <Text style={{
+                      flex: 1,
+                      color: address ? colors.text : colors.textSecondary,
+                      fontFamily: 'Poppins_400Regular'
+                    }}>
+                      {address || 'Tap to select location on map'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
               {renderInput('Genre', genre, setGenre, 'e.g. Indie Folk, Jazz')}
               {renderInput('Description', description, setDescription, 'Brief bio about your band...', true)}
             </View>
@@ -338,6 +366,17 @@ export default function AddGroupScreen() {
         message={`Group "${groupName}" has been successfully created.`}
         buttonText="View Group"
         onClose={handleConfirm}
+      />
+
+      <LocationPicker
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        onSelect={(location) => {
+          setAddress(location.address);
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationPickerVisible(false);
+        }}
       />
     </>
   );

@@ -25,6 +25,8 @@ serve(async (req: Request) => {
         const { action, ...params } = await req.json()
         const { userId } = params
 
+        // --- FETCH LISTS (MY GIGS, GROUPS, STUDIOS) ---
+
         // FETCH MY GIGS (using view with computed stats)
         if (action === 'fetch_my_gigs') {
             const { data, error } = await supabaseClient
@@ -159,6 +161,110 @@ serve(async (req: Request) => {
 
             if (error) throw error
             return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+        }
+
+        // --- MANAGE DASHBOARD ACTIONS ---
+
+        // FETCH STUDIO BOOKINGS
+        if (action === 'fetch_studio_bookings') {
+            const { studioId } = params;
+            // Join with profiles to get user info
+            const { data, error } = await supabaseClient
+                .from('studio_bookings')
+                .select(`
+                    *,
+                    user:profiles!user_id(full_name, avatar_url, email)
+                `)
+                .eq('studio_id', studioId)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // FETCH GIG APPLICATIONS
+        if (action === 'fetch_gig_applications') {
+            const { gigId } = params;
+            const { data, error } = await supabaseClient
+                .from('gig_applications')
+                .select(`
+                    *,
+                    applicant:profiles!applicant_id(full_name, avatar_url, role, skills, genres),
+                    group:groups!group_id(name, genre, images, members)
+                `)
+                .eq('gig_id', gigId)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // FETCH GROUP APPLICATIONS (My applications as a group/musician)
+        if (action === 'fetch_group_applications') {
+            const { groupId } = params;
+            // Fetch applications where group_id matches OR applicant_id matches the user (if personal)
+            // Prioritize group_id if provided
+            let query = supabaseClient.from('gig_applications').select(`
+                *,
+                gig:gigs!gig_id(name, location, budget, event_date, status, images)
+             `);
+
+            if (groupId) {
+                query = query.eq('group_id', groupId);
+            } else {
+                query = query.eq('applicant_id', userId);
+            }
+
+            const { data, error } = await query.order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // UPDATE BOOKING STATUS
+        if (action === 'update_booking_status') {
+            const { bookingId, status } = params;
+            const { data, error } = await supabaseClient
+                .from('studio_bookings')
+                .update({ status })
+                .eq('id', bookingId)
+                .select()
+                .single();
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // UPDATE APPLICATION STATUS
+        if (action === 'update_application_status') {
+            const { applicationId, status } = params;
+            const { data, error } = await supabaseClient
+                .from('gig_applications')
+                .update({ status })
+                .eq('id', applicationId)
+                .select()
+                .single();
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // FETCH REVIEWS
+        if (action === 'fetch_reviews') {
+            const { type, id } = params; // type: 'studio', 'gig', 'group'
+            const field = type + '_id'; // e.g., studio_id
+
+            const { data, error } = await supabaseClient
+                .from('reviews')
+                .select(`
+                    *,
+                    author:profiles!author_id(full_name, avatar_url)
+                `)
+                .eq(field, id)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         throw new Error('Invalid action')

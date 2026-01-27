@@ -8,15 +8,25 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
+import { useLocalSearchParams } from 'expo-router';
+
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { id } = useLocalSearchParams(); // Get Studio ID
   const [activeTab, setActiveTab] = useState('About');
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
   const [modalMessage, setModalMessage] = useState('');
   const [modalButtonText, setModalButtonText] = useState('');
+  const [modalAction, setModalAction] = useState<() => Promise<void> | void>(() => { });
+
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const [studio, setStudio] = useState<any>(null);
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Role-based access control
   useEffect(() => {
@@ -42,6 +52,7 @@ export default function StudioDetailsScreen() {
       }
 
       setAuthorized(true);
+      if (id) fetchData(user.id);
     } catch (e) {
       console.error('Authorization check failed:', e);
       router.replace('/home');
@@ -50,18 +61,62 @@ export default function StudioDetailsScreen() {
     }
   };
 
-  const handleAction = (action: string) => {
-    if (action === 'accept') {
-      setModalTitle('Accept Booking');
-      setModalMessage('Are you sure you want to accept this booking request?');
-      setModalButtonText('Accept');
-    } else {
-      setModalTitle('Decline Booking');
-      setModalMessage('Are you sure you want to decline this booking request?');
-      setModalButtonText('Decline');
+  const fetchData = async (userId: string) => {
+    setLoading(true);
+    try {
+      // Fetch Studio Details
+      const { data: studioData, error: studioError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_one', type: 'studio', id: id, userId }
+      });
+      if (studioError) throw studioError;
+      setStudio(studioData);
+
+      // Fetch Bookings
+      const { data: bookingData, error: bookingError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_studio_bookings', studioId: id, userId }
+      });
+      if (bookingError) throw bookingError;
+      setBookings(bookingData || []);
+
+      // Fetch Reviews
+      const { data: reviewData, error: reviewError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_reviews', type: 'studio', id: id, userId }
+      });
+      if (reviewError) throw reviewError;
+      setReviews(reviewData || []);
+
+    } catch (e) {
+      console.log('Error fetching data:', e);
+      Alert.alert('Error', 'Failed to load studio data');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const confirmAction = (bookingId: string, status: string) => {
+    setModalTitle(status === 'confirmed' ? 'Accept Booking' : 'Decline Booking');
+    setModalMessage(`Are you sure you want to ${status === 'confirmed' ? 'accept' : 'decline'} this booking request?`);
+    setModalButtonText(status === 'confirmed' ? 'Accept' : 'Decline');
+    setModalAction(() => async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { error } = await supabase.functions.invoke('manage-listings', {
+          body: { action: 'update_booking_status', bookingId, status, userId: user.id }
+        });
+        if (error) throw error;
+
+        // Update local state
+        setBookings(bookings.map(b => b.id === bookingId ? { ...b, status } : b));
+        setModalVisible(false);
+      } catch (e) {
+        console.log('Error updating booking:', e);
+        Alert.alert('Error', 'Failed to update booking status');
+      }
+    });
     setModalVisible(true);
-  }
+  };
 
   const tabs = ['About', 'Setup', 'Bookings', 'Review'];
 
@@ -107,8 +162,8 @@ export default function StudioDetailsScreen() {
               <View style={styles.headerImageGradient} />
             </View>
 
-            <Text style={[styles.headerTitle, { color: colors.text }]}>SoundWave Recording Studio</Text>
-            <Text style={[styles.headerLocation, { color: colors.textSecondary }]}>Professional Recording Studio • Malolos City</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>{studio?.name || 'Loading...'}</Text>
+            <Text style={[styles.headerLocation, { color: colors.textSecondary }]}>{studio?.address || 'Location N/A'}</Text>
           </View>
 
           {/* Segmented Control Tabs */}
@@ -149,18 +204,20 @@ export default function StudioDetailsScreen() {
               <View style={styles.aboutContainer}>
                 <View>
                   <Text style={[styles.aboutText, { color: colors.textSecondary }]}>
-                    SoundWave Recording Studio is a professional recording facility located in Malolos City, Bulacan. We offer state-of-the-art equipment including condenser microphones, acoustic treatment, mixing console, and monitoring systems. Perfect for musicians, bands, podcasters, and voice-over artists.
+                    {studio?.description || 'No description available.'}
                   </Text>
                 </View>
 
                 <View style={{ flexDirection: 'row', gap: 16 }}>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Size</Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}>30 sqm</Text>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Rate</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>₱{studio?.hourly_rate}/hr</Text>
                   </View>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Equipment</Text>
-                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }}>Full Suite, Mixing Board</Text>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Amenities</Text>
+                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }} numberOfLines={2}>
+                      {studio?.amenities?.join(', ') || 'None'}
+                    </Text>
                   </View>
                 </View>
 
@@ -181,27 +238,20 @@ export default function StudioDetailsScreen() {
 
             {activeTab === 'Setup' && (
               <View style={styles.aboutContainer}>
-                {/* Search / Filter Placeholder */}
-                <View style={[styles.searchContainer, { backgroundColor: colors.inputBackground }]}>
-                  <Ionicons name="search" size={20} color={colors.textSecondary} />
-                  <Text style={[styles.searchText, { color: colors.textSecondary }]}>Search microphones, amps...</Text>
+                <Text style={[styles.categoryTitle, { color: colors.primary }]}>Amenities & Equipment</Text>
+                <View style={styles.tagsContainer}>
+                  {studio?.amenities?.map((item: string, i: number) => (
+                    <View key={i} style={[styles.tag, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                      <Text style={[styles.tagText, { color: colors.text }]}>{item}</Text>
+                    </View>
+                  ))}
+                  {(!studio?.amenities || studio.amenities.length === 0) && (
+                    <Text style={{ color: colors.textSecondary }}>No amenities listed.</Text>
+                  )}
                 </View>
 
-                {['Microphones', 'Instruments', 'Monitoring', 'DAW & Interfaces'].map((category, idx) => (
-                  <View key={idx}>
-                    <Text style={[styles.categoryTitle, { color: colors.primary }]}>{category}</Text>
-                    <View style={styles.tagsContainer}>
-                      {['Shure SM57', 'Neumann U87', 'Fender Twin Reverb', 'Logic Pro X', 'Apollo Twin'].slice(0, 4).map((item, i) => (
-                        <View key={i} style={[styles.tag, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-                          <Text style={[styles.tagText, { color: colors.text }]}>{item}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  </View>
-                ))}
-
-                <TouchableOpacity style={[styles.addGearButton, { borderColor: colors.primary }]}>
-                  <Text style={[styles.addGearText, { color: colors.primary }]}>+ Add Gear Item</Text>
+                <TouchableOpacity onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio?.id } })} style={[styles.addGearButton, { borderColor: colors.primary, marginTop: 20 }]}>
+                  <Text style={[styles.addGearText, { color: colors.primary }]}>Edit Setup</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -228,7 +278,6 @@ export default function StudioDetailsScreen() {
                     <Text style={[styles.roomProfileStatValue, { color: colors.text }]}>5m x 4m x 3m</Text>
                   </View>
                   <View style={[styles.roomProfileStat, { borderColor: colors.border }]}>
-                    <Text style={[styles.roomProfileStatLabel, { color: colors.textSecondary }]}>Isolation</Text>
                     <Text style={[styles.roomProfileStatValue, { color: colors.text }]}>-60dB</Text>
                   </View>
                 </View>
@@ -242,110 +291,84 @@ export default function StudioDetailsScreen() {
 
             {activeTab === 'Bookings' && (
               <View style={styles.aboutContainer}>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: colors.textSecondary, letterSpacing: 0.5 }}>PENDING REQUESTS</Text>
+                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: colors.textSecondary, letterSpacing: 0.5 }}>BOOKING REQUESTS</Text>
 
-                {/* Booking Card 1 */}
-                <View style={[styles.bookingCard, { backgroundColor: colors.surface, marginBottom: 8 }]}>
-                  <View style={styles.bookingHeader}>
-                    <Image source={{ uri: 'https://i.pravatar.cc/100?img=3' }} style={styles.bookingImage} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.bookingTitle, { color: colors.text }]}>Marcus Rivera</Text>
-                      <Text style={[styles.bookingSubtitle, { color: colors.textSecondary }]}>Solo Artist • Singer-Songwriter</Text>
+                {bookings.length === 0 ? (
+                  <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 20 }}>No bookings found.</Text>
+                ) : (
+                  bookings.map((booking) => (
+                    <View key={booking.id} style={[styles.bookingCard, { backgroundColor: colors.surface, marginBottom: 12 }]}>
+                      <View style={styles.bookingHeader}>
+                        <Image source={{ uri: booking.user?.avatar_url || 'https://i.pravatar.cc/100' }} style={styles.bookingImage} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.bookingTitle, { color: colors.text }]}>{booking.user?.full_name || 'Unknown User'}</Text>
+                          <Text style={[styles.bookingSubtitle, { color: colors.textSecondary }]}>{booking.user?.email}</Text>
+                        </View>
+                        <View style={styles.bookingPriceContainer}>
+                          <Text style={[styles.bookingPrice, { color: colors.primary }]}>₱{(booking.total_price || 0).toLocaleString()}</Text>
+                          <Text style={[styles.bookingDuration, { color: colors.textSecondary }]}>{booking.status}</Text>
+                        </View>
+                      </View>
+
+                      <View style={[styles.bookingDateContainer, { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB' }]}>
+                        <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+                        <Text style={[styles.bookingDate, { color: colors.text }]}>
+                          {new Date(booking.start_time).toLocaleDateString()} • {new Date(booking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(booking.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
+
+                      {/* Only show buttons if pending */}
+                      {booking.status === 'pending' && (
+                        <View style={styles.actionButtons}>
+                          <TouchableOpacity
+                            onPress={() => confirmAction(booking.id, 'cancelled')}
+                            style={[styles.declineButton, { borderColor: colors.border }]}
+                          >
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => confirmAction(booking.id, 'confirmed')}
+                            style={[styles.acceptButton, { backgroundColor: colors.primary }]}
+                          >
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
-                    <View style={styles.bookingPriceContainer}>
-                      <Text style={[styles.bookingPrice, { color: colors.primary }]}>₱2,000</Text>
-                      <Text style={[styles.bookingDuration, { color: colors.textSecondary }]}>4 hours</Text>
-                    </View>
-                  </View>
-
-                  <View style={[styles.bookingDateContainer, { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB' }]}>
-                    <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-                    <Text style={[styles.bookingDate, { color: colors.text }]}>Dec 15, 2025 • 2:00 PM - 6:00 PM</Text>
-                  </View>
-
-                  <Text style={[styles.bookingMessage, { color: colors.textSecondary }]}>"I'd like to record my upcoming EP. I have 5 songs ready."</Text>
-
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity
-                      onPress={() => handleAction('decline')}
-                      style={[styles.declineButton, { borderColor: colors.border }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleAction('accept')}
-                      style={[styles.acceptButton, { backgroundColor: colors.primary }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Booking Card 2 */}
-                <View style={[styles.bookingCard, { backgroundColor: colors.surface }]}>
-                  <View style={styles.bookingHeader}>
-                    <Image source={{ uri: 'https://i.pravatar.cc/100?img=5' }} style={styles.bookingImage} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.bookingTitle, { color: colors.text }]}>The Midnight Echoes</Text>
-                      <Text style={[styles.bookingSubtitle, { color: colors.textSecondary }]}>Band • Indie Rock</Text>
-                    </View>
-                    <View style={styles.bookingPriceContainer}>
-                      <Text style={[styles.bookingPrice, { color: colors.primary }]}>₱3,000</Text>
-                      <Text style={[styles.bookingDuration, { color: colors.textSecondary }]}>6 hours</Text>
-                    </View>
-                  </View>
-
-                  <View style={[styles.bookingDateContainer, { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB' }]}>
-                    <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-                    <Text style={[styles.bookingDate, { color: colors.text }]}>Dec 18, 2025 • 10:00 AM - 4:00 PM</Text>
-                  </View>
-
-                  <Text style={[styles.bookingMessage, { color: colors.textSecondary }]}>"Recording our debut single. We need full suite."</Text>
-
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity
-                      onPress={() => handleAction('decline')}
-                      style={[styles.declineButton, { borderColor: colors.border }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleAction('accept')}
-                      style={[styles.acceptButton, { backgroundColor: colors.primary }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                  ))
+                )}
               </View>
             )}
 
             {activeTab === 'Review' && (
               <View>
                 <View style={styles.reviewHeader}>
-                  <Text style={[styles.ratingText, { color: colors.text }]}>4.5</Text>
+                  <Text style={[styles.ratingText, { color: colors.text }]}>{studio?.rating?.toFixed(1) || '0.0'}</Text>
                   <View style={styles.starsRow}>
-                    {[1, 2, 3, 4].map(i => <Ionicons key={i} name="star" size={20} color={colors.primary} />)}
-                    <Ionicons name="star-half" size={20} color={colors.primary} />
+                    <Ionicons name="star" size={20} color={colors.primary} />
                   </View>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Based on 25 reviews</Text>
+                  <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Based on {studio?.review_count || 0} reviews</Text>
                 </View>
 
-                <View style={[styles.reviewCard, { backgroundColor: colors.surface }]}>
-                  <View style={styles.reviewUserHeader}>
-                    <View style={styles.userInfo}>
-                      <Image source={{ uri: 'https://i.pravatar.cc/100?img=3' }} style={styles.userAvatar} />
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Jared Cariaso</Text>
+                {reviews.map((review) => (
+                  <View key={review.id} style={[styles.reviewCard, { backgroundColor: colors.surface, marginBottom: 12 }]}>
+                    <View style={styles.reviewUserHeader}>
+                      <View style={styles.userInfo}>
+                        <Image source={{ uri: review.author?.avatar_url || 'https://i.pravatar.cc/100' }} style={styles.userAvatar} />
+                        <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{review.author?.full_name || 'User'}</Text>
+                      </View>
+                      <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>{new Date(review.created_at).toLocaleDateString()}</Text>
                     </View>
-                    <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>1 month ago</Text>
+                    <View style={[styles.starsRow, { marginBottom: 8 }]}>
+                      {[...Array(5)].map((_, i) => (
+                        <Ionicons key={i} name={i < review.rating ? "star" : "star-outline"} size={14} color={colors.primary} />
+                      ))}
+                    </View>
+                    <Text style={[styles.reviewText, { color: colors.textSecondary }]}>
+                      {review.comment}
+                    </Text>
                   </View>
-                  <View style={[styles.starsRow, { marginBottom: 8 }]}>
-                    {[1, 2, 3, 4, 5].map(i => <Ionicons key={i} name="star" size={14} color={colors.primary} />)}
-                  </View>
-                  <Text style={[styles.reviewText, { color: colors.textSecondary }]}>
-                    Excellent studio! The acoustic treatment is superb and the equipment is professional-grade.
-                  </Text>
-                </View>
+                ))}
               </View>
             )}
 
@@ -357,6 +380,7 @@ export default function StudioDetailsScreen() {
       <Modal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
+        onConfirm={modalAction}
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}

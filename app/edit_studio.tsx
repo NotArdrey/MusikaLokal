@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -16,6 +17,9 @@ export default function EditStudioScreen() {
   const [studioName, setStudioName] = useState('');
   const [description, setDescription] = useState('');
   const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [cost, setCost] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -91,6 +95,8 @@ export default function EditStudioScreen() {
       setStudioName(data.name);
       setDescription(data.description);
       setAddress(data.address);
+      setLatitude(data.latitude || null);
+      setLongitude(data.longitude || null);
       setCost(data.hourly_rate?.toString() || '');
       setAmenities(data.amenities || []);
       // setSelectedImages(data.images || []);
@@ -114,11 +120,13 @@ export default function EditStudioScreen() {
         address,
         hourly_rate: parseFloat(cost) || 0,
         amenities,
+        latitude,
+        longitude,
         // images: selectedImages,
       };
 
       const { error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'studio', id, userId: user.id, payload }
+        body: { action: 'update', type: 'studio', id: id, userId: user.id, payload }
       });
 
       if (error) throw error;
@@ -213,7 +221,25 @@ export default function EditStudioScreen() {
           {renderSectionHeader('Studio Details', 'business')}
           {renderInput('Studio Name', studioName, setStudioName)}
           {renderInput('Description', description, setDescription, true)}
-          {renderInput('Location', address, setAddress)}
+
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Location</Text>
+            <TouchableOpacity
+              onPress={() => setLocationPickerVisible(true)}
+              style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
+                <Text style={{
+                  flex: 1,
+                  color: address ? colors.text : colors.textSecondary,
+                  fontFamily: 'Poppins_400Regular'
+                }}>
+                  {address || 'Tap to select location on map'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
           {renderInput('Hourly Rate (₱)', cost, setCost, false, true)}
 
           {renderSectionHeader('Facilities & Equipment', 'mic')}
@@ -301,6 +327,18 @@ export default function EditStudioScreen() {
         message="Are you sure you want to update this studio profile?"
         buttonText="Save & Update"
         onConfirm={handleSave}
+      />
+
+      <LocationPicker
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        onSelect={(location) => {
+          setAddress(location.address);
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationPickerVisible(false);
+        }}
+        initialLocation={latitude && longitude ? { lat: latitude, lng: longitude } : undefined}
       />
     </>
   );

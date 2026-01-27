@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useTheme } from '../src/context/ThemeContext';
-import { VerificationStore } from './src/utils/VerificationStore';
+import { VerificationStore } from '../src/utils/VerificationStore';
 
 // Get the Supabase URL for edge functions
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://your-project.supabase.co';

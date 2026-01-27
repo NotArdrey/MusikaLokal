@@ -8,7 +8,7 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
-export default function MyGigScreen() {
+export default function MyVenueScreen() {
     const { colors, isDark } = useTheme();
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -73,7 +73,7 @@ export default function MyGigScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="My Gigs" />
+                <Header title="My Venue" />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -149,6 +149,13 @@ export default function MyGigScreen() {
                     )}
 
                 </ScrollView>
+
+                <TouchableOpacity
+                    style={[styles.fab, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
+                    onPress={() => router.push('/add_gig')}
+                >
+                    <Ionicons name="add" size={24} color="#FFF" />
+                </TouchableOpacity>
 
                 <Navbar />
             </View>
@@ -279,6 +286,23 @@ const styles = StyleSheet.create({
     },
     deleteBtn: {
         padding: 8,
+    },
+    fab: {
+        position: 'absolute',
+        bottom: 90,
+        right: 24,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#7C3AED',
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 6,
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        zIndex: 100,
     },
 });
 

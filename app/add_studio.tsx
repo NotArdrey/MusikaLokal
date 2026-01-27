@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
+import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -14,6 +15,9 @@ export default function AddStudioScreen() {
     const [studioName, setStudioName] = useState('');
     const [description, setDescription] = useState('');
     const [address, setAddress] = useState('');
+    const [latitude, setLatitude] = useState<number | null>(null);
+    const [longitude, setLongitude] = useState<number | null>(null);
+    const [locationPickerVisible, setLocationPickerVisible] = useState(false);
     const [cost, setCost] = useState('');
     const [modalVisible, setModalVisible] = useState(false);
     const [authorized, setAuthorized] = useState(false);
@@ -82,6 +86,8 @@ export default function AddStudioScreen() {
                 address,
                 hourly_rate: parseFloat(cost) || 0,
                 amenities,
+                latitude,
+                longitude,
             };
 
             const { error } = await supabase.functions.invoke('manage-listings', {
@@ -223,7 +229,26 @@ export default function AddStudioScreen() {
                                 Studio Details
                             </Text>
                             {renderInput('Studio Name', studioName, setStudioName, 'e.g. SoundWave Studios')}
-                            {renderInput('Address', address, setAddress, 'e.g. 123 Music St, Manila')}
+
+                            <View style={styles.inputContainer}>
+                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Address / Location</Text>
+                                <TouchableOpacity
+                                    onPress={() => setLocationPickerVisible(true)}
+                                    style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                        <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
+                                        <Text style={{
+                                            flex: 1,
+                                            color: address ? colors.text : colors.textSecondary,
+                                            fontFamily: 'Poppins_400Regular'
+                                        }}>
+                                            {address || 'Tap to select location on map'}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
+                            </View>
+
                             {renderInput('Hourly Rate (PHP)', cost, setCost, 'e.g. 500', false, 'numeric')}
                             {renderInput('Description', description, setDescription, 'Equipment list, vibe, rules...', true)}
                         </View>
@@ -341,6 +366,17 @@ export default function AddStudioScreen() {
                 message={`Studio "${studioName}" has been successfully listed.`}
                 buttonText="View Studio"
                 onClose={handleConfirm}
+            />
+
+            <LocationPicker
+                visible={locationPickerVisible}
+                onClose={() => setLocationPickerVisible(false)}
+                onSelect={(location) => {
+                    setAddress(location.address);
+                    setLatitude(location.lat);
+                    setLongitude(location.lng);
+                    setLocationPickerVisible(false);
+                }}
             />
         </>
     );

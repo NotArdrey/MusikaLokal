@@ -141,6 +141,14 @@ export default function MyGroupScreen() {
                         ))
                     )}
                 </ScrollView>
+
+                <TouchableOpacity
+                    style={[styles.fab, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
+                    onPress={() => router.push('/add_group')}
+                >
+                    <Ionicons name="add" size={24} color="#FFF" />
+                </TouchableOpacity>
+
                 <Navbar />
             </View>
             <Modal
@@ -251,6 +259,23 @@ const styles = StyleSheet.create({
     },
     deleteBtn: {
         padding: 8,
+    },
+    fab: {
+        position: 'absolute',
+        bottom: 90,
+        right: 24,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#7C3AED',
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 6,
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        zIndex: 100,
     },
 });
 

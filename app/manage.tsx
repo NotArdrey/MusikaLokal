@@ -14,27 +14,33 @@ export default function ManageScreen() {
     const checkRoleAndRedirect = async () => {
         try {
             setLoading(true);
-            const { data: { user } } = await supabase.auth.getUser();
+            // Check session first to avoid unnecessary API calls
+            const { data: { session } } = await supabase.auth.getSession();
+            console.log('Manage screen - Session:', !!session);
 
-            if (!user) {
-                // Not logged in?
+            if (!session) {
+                // Not logged in - redirect to login
                 setLoading(false);
                 return;
             }
 
             const { data, error } = await supabase.functions.invoke('manage-profile', {
-                body: { action: 'fetch', userId: user.id }
+                body: { action: 'fetch', userId: session.user.id }
             });
+            
+            console.log('Manage screen - Profile data:', data);
+            console.log('Manage screen - Error:', error);
 
             if (data && data.role) {
                 setRole(data.role);
+                console.log('Manage screen - Role:', data.role);
                 // Attempt redirect
                 if (data.role === 'studio-owner') {
                     router.replace('/my_studio');
-                } else if (data.role === 'manager' || data.role === 'musician-member') {
+                } else if (data.role === 'musician') {
                     router.replace('/my_group');
                 } else if (data.role === 'venue-owner') {
-                    router.replace('/my_gig');
+                    router.replace('/my_venue');
                 } else {
                     // Role exists but unknown? Stay here.
                     setLoading(false);

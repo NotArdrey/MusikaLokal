@@ -2,3 +2,9 @@
 verify_jwt = false
 [functions.didit-webhook]
 verify_jwt = false
+[functions.manage-profile]
+verify_jwt = false
+[functions.manage-bookings]
+verify_jwt = false
+[functions.manage-notifications]
+verify_jwt = false
