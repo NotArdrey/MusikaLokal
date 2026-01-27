@@ -150,7 +150,7 @@ serve(async (req: Request) => {
                         close_time: '22:00'
                     })
                 }
-                
+
                 await supabaseClient.from('studio_operating_hours').insert(operatingHours)
             }
 

@@ -56,7 +56,6 @@ export default function HomeScreen() {
     const [discover, setDiscover] = useState<any[]>([]);
     const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
     const [userName, setUserName] = useState('Guest');
-    const [userStats, setUserStats] = useState<any>(null);
     const [timeGreeting, setTimeGreeting] = useState('Hey');
 
     // Refined Categories based on Role
@@ -83,7 +82,6 @@ export default function HomeScreen() {
         fetchHomeData();
         fetchUserProfile();
         fetchRecentlyViewed();
-        fetchUserStats();
         setTimeBasedGreeting();
     }, [userRole, userId]); // Re-fetch if role changes (e.g. login)
 
@@ -94,48 +92,7 @@ export default function HomeScreen() {
         else setTimeGreeting('Good evening');
     };
 
-    const fetchUserStats = async () => {
-        if (!userId) return;
-        try {
-            // Fetch user-specific stats based on role
-            if (userRole === 'venue-owner') {
-                const { data: gigs } = await supabase
-                    .from('gigs')
-                    .select('id')
-                    .eq('organizer_id', userId);
-                const { data: pending } = await supabase
-                    .from('gig_applications')
-                    .select('id')
-                    .eq('gig_id', gigs?.[0]?.id || '')
-                    .eq('status', 'pending');
-                setUserStats({ listings: gigs?.length || 0, pending: pending?.length || 0 });
-            } else if (userRole === 'studio-owner') {
-                const { data: studios } = await supabase
-                    .from('studios')
-                    .select('id')
-                    .eq('owner_id', userId);
-                const { data: bookings } = await supabase
-                    .from('studio_bookings')
-                    .select('id')
-                    .eq('studio_id', studios?.[0]?.id || '')
-                    .eq('status', 'confirmed')
-                    .gte('date', new Date().toISOString());
-                setUserStats({ listings: studios?.length || 0, bookings: bookings?.length || 0 });
-            } else if (userRole === 'musician') {
-                const { data: groups } = await supabase
-                    .from('groups')
-                    .select('id')
-                    .eq('owner_id', userId);
-                const { data: applications } = await supabase
-                    .from('gig_applications')
-                    .select('id')
-                    .eq('applicant_id', userId);
-                setUserStats({ groups: groups?.length || 0, applications: applications?.length || 0 });
-            }
-        } catch (e) {
-            console.log('Error fetching user stats:', e);
-        }
-    };
+
 
     const fetchUserProfile = async () => {
         try {
@@ -358,13 +315,7 @@ export default function HomeScreen() {
                 {/* Greeting with Stats */}
                 <View>
                     <Text style={styles.heroGreeting}>{timeGreeting}, {userName}!</Text>
-                    {userStats && (
-                        <Text style={styles.heroSubtitle}>
-                            {userRole === 'venue-owner' && `${userStats.listings} venue${userStats.listings !== 1 ? 's' : ''} • ${userStats.pending} pending request${userStats.pending !== 1 ? 's' : ''}`}
-                            {userRole === 'studio-owner' && `${userStats.listings} studio${userStats.listings !== 1 ? 's' : ''} • ${userStats.bookings} upcoming booking${userStats.bookings !== 1 ? 's' : ''}`}
-                            {userRole === 'musician' && `${userStats.groups} group${userStats.groups !== 1 ? 's' : ''} • ${userStats.applications} application${userStats.applications !== 1 ? 's' : ''}`}
-                        </Text>
-                    )}
+
                 </View>
 
                 {/* Glassmorphism Search Pill */}
@@ -390,91 +341,7 @@ export default function HomeScreen() {
 
         return (
             <View style={{ marginTop: 24 }}>
-                {/* Promotional Carousel */}
-                <ScrollView
-                    horizontal
-                    pagingEnabled
-                    showsHorizontalScrollIndicator={false}
-                    decelerationRate="fast"
-                    snapToInterval={width - 48}
-                    contentContainerStyle={styles.carouselContainer}
-                >
-                    {/* Promo 1 */}
-                    <TouchableOpacity
-                        activeOpacity={0.9}
-                        onPress={() => searchSheetRef.current?.present()}
-                        style={[styles.promoCard, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}
-                    >
-                        <LinearGradient
-                            colors={['#8B5CF6', '#EC4899']}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.promoGradient}
-                        >
-                            <View style={styles.promoContent}>
-                                <View style={styles.promoIconBg}>
-                                    <Ionicons name="sparkles" size={28} color="#FFF" />
-                                </View>
-                                <Text style={styles.promoTitle}>Discover Your Sound</Text>
-                                <Text style={styles.promoSubtitle}>{isOwner ? 'Find the perfect musicians for your venue' : 'Explore studios & gigs near you'}</Text>
-                            </View>
-                        </LinearGradient>
-                    </TouchableOpacity>
 
-                    {/* Promo 2 */}
-                    <TouchableOpacity
-                        activeOpacity={0.9}
-                        onPress={() => require('expo-router').router.push(userRole === 'musician' ? '/my_group' : userRole === 'venue-owner' ? '/add_gig' : '/add_studio')}
-                        style={[styles.promoCard, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}
-                    >
-                        <LinearGradient
-                            colors={['#10B981', '#06B6D4']}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.promoGradient}
-                        >
-                            <View style={styles.promoContent}>
-                                <View style={styles.promoIconBg}>
-                                    <Ionicons name="add-circle" size={28} color="#FFF" />
-                                </View>
-                                <Text style={styles.promoTitle}>
-                                    {userRole === 'venue-owner' ? 'Post a Gig' : userRole === 'studio-owner' ? 'Add Your Studio' : 'Create Your Band'}
-                                </Text>
-                                <Text style={styles.promoSubtitle}>Start connecting with the music community</Text>
-                            </View>
-                        </LinearGradient>
-                    </TouchableOpacity>
-
-                    {/* Promo 3 */}
-                    {userStats && (
-                        <View style={[styles.promoCard, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
-                            <LinearGradient
-                                colors={['#F59E0B', '#EF4444']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.promoGradient}
-                            >
-                                <View style={styles.promoContent}>
-                                    <View style={styles.promoIconBg}>
-                                        <Ionicons name="trophy" size={28} color="#FFF" />
-                                    </View>
-                                    <Text style={styles.promoTitle}>Your Progress</Text>
-                                    <View style={styles.promoStats}>
-                                        {userRole === 'venue-owner' && (
-                                            <Text style={styles.promoStatsText}>{userStats.listings} Venues • {userStats.pending} Pending</Text>
-                                        )}
-                                        {userRole === 'studio-owner' && (
-                                            <Text style={styles.promoStatsText}>{userStats.listings} Studios • {userStats.bookings} Bookings</Text>
-                                        )}
-                                        {userRole === 'musician' && (
-                                            <Text style={styles.promoStatsText}>{userStats.groups} Groups • {userStats.applications} Applied</Text>
-                                        )}
-                                    </View>
-                                </View>
-                            </LinearGradient>
-                        </View>
-                    )}
-                </ScrollView>
 
                 {/* Top Picks Grid */}
                 {topItems.length >= 4 && (
