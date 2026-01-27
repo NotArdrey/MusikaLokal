@@ -1,13 +1,32 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import BookingDetailsSheet from '../src/components/BookingDetailsSheet';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Responsive scaling utilities - optimized for iPhone SE and smaller devices
+const scale = (size: number) => {
+    const newSize = (SCREEN_WIDTH / 375) * size;
+    return Math.max(newSize, size * 0.85); // Minimum 85% of original size
+};
+const verticalScale = (size: number) => {
+    const baseHeight = 812;
+    const ratio = SCREEN_HEIGHT / baseHeight;
+    const clampedRatio = Math.max(0.8, Math.min(1.2, ratio));
+    return size * clampedRatio;
+};
+const moderateScale = (size: number, factor = 0.3) => {
+    const scaled = scale(size);
+    return size + (scaled - size) * factor;
+};
 
 type Tab = 'Pending' | 'Upcoming' | 'Ongoing' | 'Review';
 
@@ -17,6 +36,7 @@ export default function BookingsScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('Upcoming');
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const bookingDetailsRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
   const { width } = useWindowDimensions();
 
   // State for fetched data
@@ -41,6 +61,7 @@ export default function BookingsScreen() {
         body: { action: 'fetch', userId: targetUserId }
       });
       if (error) throw error;
+      console.log('Fetched bookings data sample:', bookings?.Upcoming?.[0] || bookings?.Pending?.[0]);
       setData(bookings || { Pending: [], Upcoming: [], Ongoing: [], Review: [] });
     } catch (e) {
       console.log('Error fetching bookings:', e);
@@ -64,6 +85,20 @@ export default function BookingsScreen() {
       alert('Failed to update booking status.');
     }
   }
+
+  const handleDetailsPress = (item: any) => {
+    // Extract the actual listing ID from the booking item
+    setSelectedItem(item);
+    bookingDetailsRef.current?.present();
+  };
+
+  const handleConfirmBooking = async (bookingId: string) => {
+    await handleStatusUpdate(bookingId, 'confirmed', selectedItem?.type_id || 'studio_booking');
+  };
+
+  const handleCancelBooking = async (bookingId: string) => {
+    setModalVisible(true);
+  };
 
   const currentItems = data[activeTab] || [];
 
@@ -204,7 +239,9 @@ export default function BookingsScreen() {
                       ) : (
                         // Default / Upcoming Buttons
                         <View style={styles.defaultButtons}>
-                          <TouchableOpacity style={[styles.outlineButton, { borderColor: colors.border }]}>
+                          <TouchableOpacity 
+                            onPress={() => handleDetailsPress(item)}
+                            style={[styles.outlineButton, { borderColor: colors.border }]}>
                             <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>Details</Text>
                           </TouchableOpacity>
 
@@ -256,9 +293,16 @@ export default function BookingsScreen() {
           if (selectedItem) {
             // If Pending, confirm. If Upcoming/other, cancel.
             const status = activeTab === 'Pending' ? 'confirmed' : 'cancelled';
-            handleStatusUpdate(selectedItem.id, status);
+            handleStatusUpdate(selectedItem.id, status, selectedItem?.type_id);
           }
         }}
+      />
+
+      <BookingDetailsSheet
+        ref={bookingDetailsRef}
+        booking={selectedItem}
+        onConfirm={handleConfirmBooking}
+        onCancel={handleCancelBooking}
       />
     </>
   );
@@ -269,45 +313,45 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tabContainer: {
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingTop: moderateScale(16),
+    paddingBottom: moderateScale(8),
   },
   tabScrollContent: {
-    paddingHorizontal: 24,
+    paddingHorizontal: scale(24),
   },
   tabButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 9999,
-    marginRight: 8,
+    paddingHorizontal: scale(16),
+    paddingVertical: moderateScale(8),
+    borderRadius: moderateScale(9999),
+    marginRight: scale(8),
     borderWidth: 1,
   },
   tabText: {
-    fontSize: 12,
+    fontSize: moderateScale(12),
     fontFamily: 'Poppins_600SemiBold',
   },
   scrollContent: {
-    paddingBottom: 150,
-    paddingHorizontal: 24,
-    paddingTop: 16,
+    paddingBottom: SCREEN_HEIGHT < 700 ? verticalScale(120) : verticalScale(150),
+    paddingHorizontal: scale(24),
+    paddingTop: moderateScale(16),
   },
   centerContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 80,
+    paddingVertical: verticalScale(80),
   },
   loadingText: {
-    fontSize: 14,
+    fontSize: moderateScale(14),
     fontFamily: 'Poppins_400Regular',
   },
   emptyTitle: {
-    marginTop: 16,
-    fontSize: 14,
+    marginTop: moderateScale(16),
+    fontSize: moderateScale(14),
     fontFamily: 'Poppins_400Regular',
   },
   cardContainer: {
-    marginBottom: 16,
-    borderRadius: 16,
+    marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(12) : moderateScale(16),
+    borderRadius: moderateScale(16),
     overflow: 'hidden',
     borderWidth: 1,
     // Shadow
@@ -319,43 +363,43 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: '100%',
-    height: 144, // h-36
+    height: SCREEN_HEIGHT < 700 ? verticalScale(110) : verticalScale(144),
   },
   typeBadge: {
     position: 'absolute',
-    top: 12,
-    left: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 9999,
+    top: moderateScale(12),
+    left: scale(12),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(4),
+    borderRadius: moderateScale(9999),
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
   typeBadgeText: {
     color: 'white',
-    fontSize: 10,
+    fontSize: moderateScale(10),
     fontFamily: 'Poppins_600SemiBold',
   },
   liveBadge: {
     position: 'absolute',
-    top: 12,
-    right: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 9999,
+    top: moderateScale(12),
+    right: scale(12),
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(4),
+    borderRadius: moderateScale(9999),
     backgroundColor: '#22C55E', // green-500
     flexDirection: 'row',
     alignItems: 'center',
   },
   liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: moderateScale(8),
+    height: moderateScale(8),
+    borderRadius: moderateScale(4),
     backgroundColor: 'white',
-    marginRight: 6,
+    marginRight: scale(6),
   },
   liveText: {
     color: 'white',
-    fontSize: 10,
+    fontSize: moderateScale(10),
     fontWeight: 'bold',
     textTransform: 'uppercase',
   },
@@ -370,45 +414,45 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.2)',
   },
   cancelledBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingHorizontal: scale(12),
+    paddingVertical: moderateScale(4),
     backgroundColor: '#EF4444', // red-500
-    borderRadius: 8,
+    borderRadius: moderateScale(8),
   },
   cancelledText: {
     color: 'white',
-    fontSize: 12,
+    fontSize: moderateScale(12),
     fontWeight: 'bold',
     textTransform: 'uppercase',
   },
   cardContent: {
-    padding: 16,
+    padding: SCREEN_HEIGHT < 700 ? moderateScale(12) : moderateScale(16),
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: moderateScale(8),
   },
   cardTitleContainer: {
     flex: 1,
-    marginRight: 8,
+    marginRight: scale(8),
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: moderateScale(16),
     fontFamily: 'Poppins_600SemiBold',
   },
   cardDate: {
-    fontSize: 12,
-    marginTop: 4,
+    fontSize: moderateScale(12),
+    marginTop: moderateScale(4),
     fontFamily: 'Poppins_400Regular',
   },
   cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 8,
-    paddingTop: 12,
+    marginTop: moderateScale(8),
+    paddingTop: moderateScale(12),
     borderTopWidth: 1,
   },
   statusContainer: {
@@ -416,44 +460,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statusText: {
-    fontSize: 12,
-    marginLeft: 6,
+    fontSize: moderateScale(12),
+    marginLeft: scale(6),
     fontFamily: 'Poppins_500Medium',
   },
   actionButtonsContainer: {
     flexDirection: 'row',
-    gap: 8,
+    gap: scale(8),
   },
   actionButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: scale(16),
+    paddingVertical: moderateScale(8),
+    borderRadius: moderateScale(8),
   },
   actionButtonText: {
-    fontSize: 12,
+    fontSize: moderateScale(12),
     fontFamily: 'Poppins_600SemiBold',
   },
   outlineButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1, // Default border width for outline buttons
+    paddingHorizontal: scale(16),
+    paddingVertical: moderateScale(8),
+    borderRadius: moderateScale(8),
+    borderWidth: 1,
   },
   outlineButtonText: {
-    fontSize: 12,
+    fontSize: moderateScale(12),
     fontFamily: 'Poppins_500Medium',
   },
   defaultButtons: {
     flexDirection: 'row',
-    gap: 8,
+    gap: scale(8),
   },
   cancelButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: scale(16),
+    paddingVertical: moderateScale(8),
+    borderRadius: moderateScale(8),
   },
   cancelButtonText: {
-    fontSize: 12,
+    fontSize: moderateScale(12),
     fontFamily: 'Poppins_600SemiBold',
   },
   navbarPosition: {

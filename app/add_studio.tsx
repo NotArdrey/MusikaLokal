@@ -27,10 +27,17 @@ export default function AddStudioScreen() {
     const [amenities, setAmenities] = useState<string[]>([]);
     const [newAmenity, setNewAmenity] = useState('');
 
+    // Availability state
+    const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const [availability, setAvailability] = useState<{ day: string; slots: { start: string; end: string }[] }[]>(
+        daysOfWeek.map(day => ({ day, slots: [] }))
+    );
+
     const steps = [
         { id: 1, title: 'Details', icon: 'business' },
         { id: 2, title: 'Amenities', icon: 'mic' },
-        { id: 3, title: 'Review', icon: 'checkmark-circle' },
+        { id: 3, title: 'Availability', icon: 'time' },
+        { id: 4, title: 'Review', icon: 'checkmark-circle' },
     ];
 
     // Role-based access control
@@ -86,6 +93,7 @@ export default function AddStudioScreen() {
                 address,
                 hourly_rate: parseFloat(cost) || 0,
                 amenities,
+                availability: availability.filter(day => day.slots.length > 0), // Only include days with slots
                 latitude,
                 longitude,
             };
@@ -305,6 +313,103 @@ export default function AddStudioScreen() {
                     {step === 3 && (
                         <View>
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                                Set Your Availability
+                            </Text>
+                            <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 16 }]}>
+                                Choose the days and times when your studio is available for booking
+                            </Text>
+
+                            {availability.map((daySchedule, dayIndex) => (
+                                <View key={daySchedule.day} style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                        <Text style={[styles.dayLabel, { color: colors.text }]}>{daySchedule.day}</Text>
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                const newAvailability = [...availability];
+                                                if (newAvailability[dayIndex].slots.length === 0) {
+                                                    newAvailability[dayIndex].slots.push({ start: '09:00', end: '17:00' });
+                                                } else {
+                                                    newAvailability[dayIndex].slots = [];
+                                                }
+                                                setAvailability(newAvailability);
+                                            }}
+                                            style={[styles.toggleBtn, { backgroundColor: daySchedule.slots.length > 0 ? colors.primary : (isDark ? '#374151' : '#E5E7EB') }]}
+                                        >
+                                            <Text style={{ color: daySchedule.slots.length > 0 ? '#FFFFFF' : colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>
+                                                {daySchedule.slots.length > 0 ? 'Available' : 'Closed'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {daySchedule.slots.map((slot, slotIndex) => (
+                                        <View key={slotIndex} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>START</Text>
+                                                <TextInput
+                                                    value={slot.start}
+                                                    onChangeText={(text) => {
+                                                        const newAvailability = [...availability];
+                                                        newAvailability[dayIndex].slots[slotIndex].start = text;
+                                                        setAvailability(newAvailability);
+                                                    }}
+                                                    placeholder="09:00"
+                                                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text }]}
+                                                />
+                                            </View>
+                                            <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} style={{ marginTop: 20 }} />
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>END</Text>
+                                                <TextInput
+                                                    value={slot.end}
+                                                    onChangeText={(text) => {
+                                                        const newAvailability = [...availability];
+                                                        newAvailability[dayIndex].slots[slotIndex].end = text;
+                                                        setAvailability(newAvailability);
+                                                    }}
+                                                    placeholder="17:00"
+                                                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text }]}
+                                                />
+                                            </View>
+                                            {daySchedule.slots.length > 1 && (
+                                                <TouchableOpacity
+                                                    onPress={() => {
+                                                        const newAvailability = [...availability];
+                                                        newAvailability[dayIndex].slots.splice(slotIndex, 1);
+                                                        setAvailability(newAvailability);
+                                                    }}
+                                                    style={{ marginTop: 20 }}
+                                                >
+                                                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                    ))}
+
+                                    {daySchedule.slots.length > 0 && daySchedule.slots.length < 3 && (
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                const newAvailability = [...availability];
+                                                const lastSlot = newAvailability[dayIndex].slots[newAvailability[dayIndex].slots.length - 1];
+                                                newAvailability[dayIndex].slots.push({ 
+                                                    start: lastSlot.end, 
+                                                    end: '21:00' 
+                                                });
+                                                setAvailability(newAvailability);
+                                            }}
+                                            style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                                        >
+                                            <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
+                                            <Text style={{ color: colors.primary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Time Slot</Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            ))}
+                        </View>
+                    )}
+
+                    {step === 4 && (
+                        <View>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
                                 Review Details
                             </Text>
 
@@ -327,6 +432,22 @@ export default function AddStudioScreen() {
                                             </View>
                                         ))}
                                     </View>
+                                </View>
+
+                                <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
+
+                                <View>
+                                    <Text style={styles.reviewLabel}>Availability</Text>
+                                    {availability.filter(d => d.slots.length > 0).map(daySchedule => (
+                                        <View key={daySchedule.day} style={{ marginBottom: 4 }}>
+                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>{daySchedule.day}</Text>
+                                            {daySchedule.slots.map((slot, i) => (
+                                                <Text key={i} style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 8 }}>
+                                                    {slot.start} - {slot.end}
+                                                </Text>
+                                            ))}
+                                        </View>
+                                    ))}
                                 </View>
                             </View>
 
@@ -351,7 +472,7 @@ export default function AddStudioScreen() {
                             style={[styles.nextBtn, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
                         >
                             <Text style={styles.nextBtnText}>
-                                {step === 3 ? 'List Studio' : 'Next'}
+                                {step === 4 ? 'List Studio' : 'Next'}
                             </Text>
                         </TouchableOpacity>
                     </View>
@@ -573,5 +694,31 @@ const styles = StyleSheet.create({
     nextBtnText: {
         fontFamily: 'Poppins_600SemiBold',
         color: '#fff',
+    },
+    dayCard: {
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    dayLabel: {
+        fontSize: 16,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    toggleBtn: {
+        paddingHorizontal: 16,
+        paddingVertical: 6,
+        borderRadius: 20,
+    },
+    timeInput: {
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 12,
+        fontSize: 14,
+        fontFamily: 'Poppins_500Medium',
+        textAlign: 'center',
+    },
+    subtitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
     },
 });

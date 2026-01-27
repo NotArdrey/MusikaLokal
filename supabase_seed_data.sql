@@ -237,6 +237,21 @@ BEGIN
     ) RETURNING id INTO temp_id;
     studio_ids := array_append(studio_ids, temp_id);
 
+    -- Create operating hours and settings for all studios
+    FOR i IN 1..array_length(studio_ids, 1) LOOP
+        -- Create default studio settings (30 min buffer, no modifiers)
+        INSERT INTO public.studio_settings (studio_id, buffer_minutes, weekend_multiplier, bulk_discount_threshold_hours, bulk_discount_percentage)
+        VALUES (studio_ids[i], 30, 1.0, 10, 0);
+
+        -- Create operating hours (Mon-Sun, 9 AM - 10 PM)
+        FOR temp_id IN 0..6 LOOP
+            INSERT INTO public.studio_operating_hours (studio_id, day_of_week, is_open, open_time, close_time)
+            VALUES (studio_ids[i], temp_id, true, '09:00', '22:00');
+        END LOOP;
+    END LOOP;
+
+    RAISE NOTICE 'Created operating hours and settings for % studios', array_length(studio_ids, 1);
+
 
     -- 5. Create Gigs
     -- Gig 1
@@ -440,7 +455,8 @@ ON CONFLICT DO NOTHING;
 -- ============================================================
 
 -- Sample Studio Bookings (Musician booked studios)
-INSERT INTO studio_bookings (id, user_id, studio_id, booking_date, start_time, end_time, status, notes)
+-- Schema requires: base_rate, hours, subtotal, modifiers_applied, final_price
+INSERT INTO studio_bookings (id, user_id, studio_id, booking_date, start_time, end_time, base_rate, hours, subtotal, modifiers_applied, final_price, status, notes, buffer_minutes)
 VALUES 
     (
         uuid_generate_v4(), 
@@ -449,8 +465,14 @@ VALUES
         NOW() + INTERVAL '3 days',
         '14:00:00',
         '18:00:00',
+        1500,
+        4,
+        6000,
+        '{}'::jsonb,
+        6000,
         'confirmed',
-        'Need to record drum tracks for new album'
+        'Need to record drum tracks for new album',
+        30
     ),
     (
         uuid_generate_v4(), 
@@ -459,8 +481,14 @@ VALUES
         NOW() + INTERVAL '7 days',
         '10:00:00',
         '14:00:00',
+        800,
+        4,
+        3200,
+        '{}'::jsonb,
+        3200,
         'pending',
-        'Band rehearsal session'
+        'Band rehearsal session',
+        30
     ),
     (
         uuid_generate_v4(), 
@@ -469,8 +497,14 @@ VALUES
         NOW() - INTERVAL '2 days',
         '15:00:00',
         '19:00:00',
+        1500,
+        4,
+        6000,
+        '{}'::jsonb,
+        6000,
         'completed',
-        'Practice for upcoming gig'
+        'Practice for upcoming gig',
+        30
     )
 ON CONFLICT DO NOTHING;
 

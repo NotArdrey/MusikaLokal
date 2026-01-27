@@ -82,17 +82,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 .from('profiles')
                 .select('role')
                 .eq('id', userId)
-                .single();
+                .limit(1);
+            
             if (error) {
-                console.log('❌ Error fetching user role:', error.message);
-            } else if (data) {
-                console.log('✅ User role fetched:', data.role);
-                setUserRole(data.role);
+                console.log('❌ Error fetching user role:', error.message, error);
+                setUserRole(null);
+                return;
+            }
+            
+            if (data && data.length > 0) {
+                console.log('✅ User role fetched:', data[0].role);
+                setUserRole(data[0].role);
             } else {
                 console.log('⚠️ No profile data found for user');
+                setUserRole(null);
             }
         } catch (error) {
             console.log('❌ Exception fetching user role:', error);
+            setUserRole(null);
         }
     };
 

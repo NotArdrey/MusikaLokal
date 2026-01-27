@@ -19,10 +19,29 @@ import Header from '../src/components/header';
 import ListingCard from '../src/components/ListingCard';
 import ListingDetailsSheet from '../src/components/ListingDetailsSheet';
 import Navbar from '../src/components/navbar';
+import RecentlyViewedSheet from '../src/components/RecentlyViewedSheet';
 import SearchBottomSheet from '../src/components/SearchBottomSheet';
 import { useTheme } from '../src/context/ThemeContext';
 
 const { width, height } = Dimensions.get('window');
+
+// Responsive scaling utilities - optimized for iPhone SE and smaller devices
+const scale = (size: number) => {
+    const newSize = (width / 375) * size;
+    return Math.max(newSize, size * 0.85); // Minimum 85% of original size
+};
+const verticalScale = (size: number) => {
+    // Use more conservative scaling for height to prevent over-shrinking on small devices
+    const baseHeight = 812;
+    const ratio = height / baseHeight;
+    // Clamp ratio between 0.8 and 1.2 to prevent extreme scaling
+    const clampedRatio = Math.max(0.8, Math.min(1.2, ratio));
+    return size * clampedRatio;
+};
+const moderateScale = (size: number, factor = 0.3) => {
+    const scaled = scale(size);
+    return size + (scaled - size) * factor; // Reduced factor from 0.5 to 0.3 for less aggressive scaling
+};
 
 import { useAuth } from '../src/context/AuthContext';
 
@@ -47,6 +66,7 @@ export default function HomeScreen() {
     // ... refs ...
     const bottomSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
     const searchSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
+    const recentlyViewedSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
     const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
 
     // Filter items selection
@@ -128,7 +148,7 @@ export default function HomeScreen() {
                 const { data: { user: authUser } } = await supabase.auth.getUser();
                 user = authUser;
             }
-            
+
             if (!user) return;
 
             const { data } = await supabase
@@ -273,7 +293,7 @@ export default function HomeScreen() {
     const handleCardPress = async (item: any) => {
         setSelectedListingId(item.id);
         bottomSheetRef.current?.present();
-        
+
         // Save to recently viewed
         await saveToRecentlyViewed(item);
     };
@@ -283,18 +303,18 @@ export default function HomeScreen() {
             const AsyncStorage = require('@react-native-async-storage/async-storage').default;
             const existingJson = await AsyncStorage.getItem('recently_viewed_items');
             let items = existingJson ? JSON.parse(existingJson) : [];
-            
+
             // Remove if already exists to avoid duplicates
             items = items.filter((i: any) => i.id !== item.id);
-            
+
             // Add to front
             items.unshift(item);
-            
+
             // Keep only last 10
             items = items.slice(0, 10);
-            
+
             await AsyncStorage.setItem('recently_viewed_items', JSON.stringify(items));
-            
+
             // Update state
             setRecentlyViewed(items);
         } catch (e) {
@@ -334,7 +354,7 @@ export default function HomeScreen() {
             </View>
 
             {/* Content within Hero */}
-            <View style={[styles.heroContent, { paddingTop: insets.top + 60 }]}>
+            <View style={styles.heroContent}>
                 {/* Greeting with Stats */}
                 <View>
                     <Text style={styles.heroGreeting}>{timeGreeting}, {userName}!</Text>
@@ -367,7 +387,7 @@ export default function HomeScreen() {
     // 2. Promotional Carousel & Top Picks
     const renderHighlightsSection = () => {
         const topItems = [...featured, ...discover].slice(0, 12);
-        
+
         return (
             <View style={{ marginTop: 24 }}>
                 {/* Promotional Carousel */}
@@ -459,13 +479,13 @@ export default function HomeScreen() {
                 {/* Top Picks Grid */}
                 {topItems.length >= 4 && (
                     <View style={styles.topPicksContainer}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: moderateScale(16) }}>
                             <Text style={[styles.sectionTitle, { marginLeft: 0, marginBottom: 0, color: colors.text }]}>Top Picks</Text>
                             <TouchableOpacity onPress={() => searchSheetRef.current?.present()}>
-                                <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: 12 }}>See all</Text>
+                                <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: moderateScale(12) }}>See all</Text>
                             </TouchableOpacity>
                         </View>
-                        
+
                         <View style={styles.topPicksGrid}>
                             {/* Large Featured */}
                             <TouchableOpacity
@@ -504,10 +524,10 @@ export default function HomeScreen() {
                                             style={styles.topPickOverlay}
                                         >
                                             <View style={styles.topPickBadge}>
-                                                <Ionicons name="star" size={10} color="#FCD34D" />
-                                                <Text style={[styles.topPickBadgeText, { fontSize: 10 }]}>{item.rating?.toFixed(1) || '5.0'}</Text>
+                                                <Ionicons name="star" size={moderateScale(10)} color="#FCD34D" />
+                                                <Text style={styles.topPickBadgeText}>{item.rating?.toFixed(1) || '5.0'}</Text>
                                             </View>
-                                            <Text style={[styles.topPickTitle, { fontSize: 13 }]} numberOfLines={1}>{item.name}</Text>
+                                            <Text style={[styles.topPickTitle, { fontSize: moderateScale(13) }]} numberOfLines={1}>{item.name}</Text>
                                         </LinearGradient>
                                     </TouchableOpacity>
                                 ))}
@@ -515,7 +535,7 @@ export default function HomeScreen() {
                         </View>
 
                         {/* Bottom Row */}
-                        <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+                        <View style={{ flexDirection: 'row', gap: scale(12), marginTop: moderateScale(12) }}>
                             {topItems.slice(3, 5).map((item) => (
                                 <TouchableOpacity
                                     key={item.id}
@@ -529,10 +549,10 @@ export default function HomeScreen() {
                                         style={styles.topPickOverlay}
                                     >
                                         <View style={styles.topPickBadge}>
-                                            <Ionicons name="star" size={10} color="#FCD34D" />
-                                            <Text style={[styles.topPickBadgeText, { fontSize: 10 }]}>{item.rating?.toFixed(1) || '5.0'}</Text>
+                                            <Ionicons name="star" size={moderateScale(10)} color="#FCD34D" />
+                                            <Text style={styles.topPickBadgeText}>{item.rating?.toFixed(1) || '5.0'}</Text>
                                         </View>
-                                        <Text style={[styles.topPickTitle, { fontSize: 12 }]} numberOfLines={1}>{item.name}</Text>
+                                        <Text style={[styles.topPickTitle, { fontSize: moderateScale(12) }]} numberOfLines={1}>{item.name}</Text>
                                     </LinearGradient>
                                 </TouchableOpacity>
                             ))}
@@ -547,7 +567,7 @@ export default function HomeScreen() {
     const renderCategories = () => {
         // Hide categories for studio/venue owners
         if (isOwner) return null;
-        
+
         return (
             <ScrollView
                 horizontal
@@ -597,7 +617,7 @@ export default function HomeScreen() {
     // 4. For You - Smart Feed (Merged Featured + Discover with variety)
     const renderSmartFeed = () => {
         const allItems = [...filteredItems, ...discover];
-        const uniqueItems = allItems.filter((item, index, self) => 
+        const uniqueItems = allItems.filter((item, index, self) =>
             index === self.findIndex((t) => t.id === item.id)
         );
 
@@ -616,16 +636,16 @@ export default function HomeScreen() {
 
         return (
             <View style={styles.sectionContainer}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: 24, marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: scale(24), marginBottom: moderateScale(8) }}>
                     <View>
-                        <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 4 }]}>For You</Text>
+                        <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: moderateScale(4) }]}>For You</Text>
                         <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>Personalized picks based on your taste</Text>
                     </View>
                     <TouchableOpacity onPress={() => searchSheetRef.current?.present()}>
-                        <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: 12 }}>See all</Text>
+                        <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: moderateScale(12) }}>See all</Text>
                     </TouchableOpacity>
                 </View>
-                
+
                 {/* Featured Large Card */}
                 {uniqueItems[0] && (
                     <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
@@ -712,16 +732,16 @@ export default function HomeScreen() {
                 {/* Recently Viewed Section */}
                 {recentlyViewed.length > 0 && (
                     <View style={styles.sectionContainer}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: 24 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: scale(24) }}>
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>Recently Viewed</Text>
-                            <TouchableOpacity onPress={() => searchSheetRef.current?.present()}>
-                                <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: 12 }}>See all</Text>
+                            <TouchableOpacity onPress={() => recentlyViewedSheetRef.current?.present()}>
+                                <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: moderateScale(12) }}>See all</Text>
                             </TouchableOpacity>
                         </View>
                         <ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingLeft: 24, paddingRight: 8 }}
+                            contentContainerStyle={{ paddingLeft: scale(24), paddingRight: scale(8) }}
                             decelerationRate="fast"
                             snapToInterval={width * 0.6 + 16}
                         >
@@ -736,6 +756,7 @@ export default function HomeScreen() {
 
             <ListingDetailsSheet ref={bottomSheetRef} listingId={selectedListingId} />
             <SearchBottomSheet ref={searchSheetRef} />
+            <RecentlyViewedSheet ref={recentlyViewedSheetRef} />
         </View>
     );
 }
@@ -751,7 +772,7 @@ const styles = StyleSheet.create({
     },
     // Hero
     heroContainer: {
-        height: height * 0.45,
+        height: height < 700 ? Math.max(height * 0.45, 340) : Math.max(verticalScale(350), height * 0.38),
         width: '100%',
         position: 'relative',
     },
@@ -764,28 +785,28 @@ const styles = StyleSheet.create({
     },
     heroContent: {
         position: 'absolute',
-        bottom: 40,
-        left: 24,
-        right: 24,
+        bottom: height < 700 ? 16 : 40,
+        left: scale(24),
+        right: scale(24),
         zIndex: 10,
     },
     heroGreeting: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 32,
+        fontSize: height < 700 ? moderateScale(24) : moderateScale(32),
         color: '#FFF',
         textShadowColor: 'rgba(0, 0, 0, 0.3)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 4,
-        marginBottom: 4,
+        marginBottom: height < 700 ? moderateScale(2) : moderateScale(4),
     },
     heroSubtitle: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 14,
+        fontSize: height < 700 ? moderateScale(12) : moderateScale(14),
         color: 'rgba(255,255,255,0.9)',
         textShadowColor: 'rgba(0, 0, 0, 0.3)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 4,
-        marginBottom: 20,
+        marginBottom: height < 700 ? moderateScale(12) : moderateScale(20),
     },
     searchPill: {
         borderRadius: 100,
@@ -797,32 +818,32 @@ const styles = StyleSheet.create({
     searchTouch: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingVertical: 14,
+        paddingHorizontal: height < 700 ? scale(16) : scale(20),
+        paddingVertical: height < 700 ? moderateScale(10) : moderateScale(14),
     },
     searchTexts: {
-        marginLeft: 4,
+        marginLeft: scale(4),
     },
     searchPlaceholder: {
         color: '#FFF',
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 14,
+        fontSize: moderateScale(14),
     },
     searchSubPlaceholder: {
         color: 'rgba(255,255,255,0.8)',
         fontFamily: 'Poppins_400Regular',
-        fontSize: 12,
+        fontSize: moderateScale(12),
     },
 
     // Promotional Carousel
     carouselContainer: {
-        paddingHorizontal: 24,
-        gap: 16,
+        paddingHorizontal: scale(24),
+        gap: scale(16),
     },
     promoCard: {
-        width: width - 48,
-        height: 140,
-        borderRadius: 20,
+        width: width - scale(48),
+        height: height < 700 ? 140 : verticalScale(140), // Increased fixed height for small screens
+        borderRadius: moderateScale(20),
         overflow: 'hidden',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
@@ -832,7 +853,7 @@ const styles = StyleSheet.create({
     },
     promoGradient: {
         flex: 1,
-        padding: 24,
+        padding: height < 700 ? scale(16) : scale(24),
         justifyContent: 'center',
     },
     promoContent: {
@@ -840,23 +861,23 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     promoIconBg: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: height < 700 ? moderateScale(40) : moderateScale(48),
+        height: height < 700 ? moderateScale(40) : moderateScale(48),
+        borderRadius: height < 700 ? moderateScale(20) : moderateScale(24),
         backgroundColor: 'rgba(255,255,255,0.25)',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 12,
+        marginBottom: height < 700 ? moderateScale(8) : moderateScale(12),
     },
     promoTitle: {
         fontFamily: 'Poppins_700Bold',
-        fontSize: 20,
+        fontSize: height < 700 ? moderateScale(16) : moderateScale(20),
         color: '#FFF',
-        marginBottom: 4,
+        marginBottom: moderateScale(4),
     },
     promoSubtitle: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 13,
+        fontSize: moderateScale(13),
         color: 'rgba(255,255,255,0.9)',
     },
     promoStats: {
@@ -864,38 +885,38 @@ const styles = StyleSheet.create({
     },
     promoStatsText: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 16,
+        fontSize: moderateScale(16),
         color: '#FFF',
     },
 
     // Top Picks Grid
     topPicksContainer: {
-        paddingHorizontal: 24,
-        marginTop: 32,
+        paddingHorizontal: scale(24),
+        marginTop: height < 700 ? verticalScale(20) : verticalScale(32),
     },
     topPicksGrid: {
         flexDirection: 'row',
-        gap: 12,
+        gap: scale(12),
     },
     topPickLarge: {
         flex: 2,
-        height: 240,
-        borderRadius: 16,
+        height: height < 700 ? verticalScale(200) : verticalScale(240),
+        borderRadius: moderateScale(16),
         overflow: 'hidden',
     },
     topPickSmallColumn: {
         flex: 1,
-        gap: 12,
+        gap: scale(12),
     },
     topPickSmall: {
-        height: 114,
-        borderRadius: 16,
+        height: height < 700 ? verticalScale(94) : verticalScale(114),
+        borderRadius: moderateScale(16),
         overflow: 'hidden',
     },
     topPickWide: {
         flex: 1,
-        height: 100,
-        borderRadius: 16,
+        height: height < 700 ? verticalScale(85) : verticalScale(100),
+        borderRadius: moderateScale(16),
         overflow: 'hidden',
     },
     topPickImage: {
@@ -905,82 +926,82 @@ const styles = StyleSheet.create({
     topPickOverlay: {
         ...StyleSheet.absoluteFillObject,
         justifyContent: 'flex-end',
-        padding: 12,
+        padding: moderateScale(12),
     },
     topPickBadge: {
         flexDirection: 'row',
         alignItems: 'center',
         alignSelf: 'flex-start',
         backgroundColor: 'rgba(0,0,0,0.6)',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 12,
-        marginBottom: 8,
-        gap: 4,
+        paddingHorizontal: scale(8),
+        paddingVertical: moderateScale(4),
+        borderRadius: moderateScale(12),
+        marginBottom: moderateScale(8),
+        gap: scale(4),
     },
     topPickBadgeText: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 11,
+        fontSize: moderateScale(11),
         color: '#FFF',
     },
     topPickTitle: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 14,
+        fontSize: moderateScale(14),
         color: '#FFF',
     },
     topPickLocation: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 11,
+        fontSize: moderateScale(11),
         color: 'rgba(255,255,255,0.8)',
-        marginTop: 2,
+        marginTop: moderateScale(2),
     },
 
     // Categories
     categoryContainer: {
-        paddingHorizontal: 24,
-        paddingVertical: 8,
-        gap: 10,
+        paddingHorizontal: scale(24),
+        paddingVertical: moderateScale(8),
+        gap: scale(10),
     },
     categoryChip: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 20,
+        paddingHorizontal: scale(16),
+        paddingVertical: moderateScale(8),
+        borderRadius: moderateScale(20),
         borderWidth: 1,
         borderColor: '#E5E7EB',
         backgroundColor: 'transparent',
     },
     categoryText: {
         fontFamily: 'Poppins_500Medium',
-        fontSize: 13,
+        fontSize: moderateScale(13),
         color: '#6B7280',
     },
 
     // Sections
     sectionContainer: {
-        marginTop: 32,
+        marginTop: height < 700 ? moderateScale(20) : moderateScale(32),
     },
     sectionTitle: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 20,
-        marginLeft: 24,
+        fontSize: Math.max(moderateScale(20), 18), // Minimum 18px
+        marginLeft: scale(24),
         marginBottom: 0,
     },
     sectionSubtitle: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 13,
-        marginLeft: 24,
-        marginBottom: 16,
+        fontSize: moderateScale(13),
+        marginLeft: scale(24),
+        marginBottom: moderateScale(16),
     },
     emptyText: {
         fontFamily: 'Poppins_500Medium',
-        fontSize: 16,
-        marginTop: 12,
+        fontSize: moderateScale(16),
+        marginTop: moderateScale(12),
         textAlign: 'center',
     },
     emptySubtext: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 13,
-        marginTop: 4,
+        fontSize: moderateScale(13),
+        marginTop: moderateScale(4),
         textAlign: 'center',
     },
 

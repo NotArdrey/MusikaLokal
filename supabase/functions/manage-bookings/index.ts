@@ -67,7 +67,10 @@ serve(async (req: Request) => {
                     const item = {
                         id: b.id,
                         type_id: 'studio_booking',
+                        studio_id: b.studio_id,
                         raw_date: b.booking_date,
+                        start_time: b.start_time,
+                        end_time: b.end_time,
                         name: b.studio_name || 'Unknown Studio',
                         date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
                         image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
@@ -78,7 +81,8 @@ serve(async (req: Request) => {
                         isCancelled: b.status === 'cancelled',
                         action: b.status === 'pending' ? 'View Details' : 'Details',
                         duration_hours: b.duration_hours,
-                        total_cost: b.total_cost
+                        total_cost: b.total_cost,
+                        notes: b.notes
                     }
 
                     if (b.status === 'pending') {
@@ -110,7 +114,7 @@ serve(async (req: Request) => {
                     .select('id')
                     .eq('owner_id', userId)
 
-                const studioIds = studios?.map(s => s.id) || []
+                const studioIds = studios?.map((s: any) => s.id) || []
 
                 if (studioIds.length > 0) {
                     const { data: bookings, error: bookingError } = await supabaseClient
@@ -130,7 +134,10 @@ serve(async (req: Request) => {
                         const item = {
                             id: b.id,
                             type_id: 'studio_booking',
+                            studio_id: b.studio_id,
                             raw_date: b.booking_date,
+                            start_time: b.start_time,
+                            end_time: b.end_time,
                             name: `Booking by ${b.user_email || 'Guest'}`,
                             date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
                             image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
@@ -142,7 +149,8 @@ serve(async (req: Request) => {
                             action: b.status === 'pending' ? 'Confirm Now' : 'Details',
                             duration_hours: b.duration_hours,
                             total_cost: b.total_cost,
-                            studio_name: b.studio_name
+                            studio_name: b.studio_name,
+                            notes: b.notes
                         }
 
                         if (b.status === 'pending') {
@@ -188,6 +196,7 @@ serve(async (req: Request) => {
                     const item = {
                         id: g.id,
                         type_id: 'gig_application',
+                        gig_id: g.gig_id,
                         raw_date: dateStr,
                         name: gig?.name || 'Unknown Gig',
                         date: dateStr,
@@ -223,26 +232,52 @@ serve(async (req: Request) => {
 
         // 2. CREATE BOOKING (Studio)
         if (action === 'create') {
-            const { studio_id, user_id, date, start_time, end_time } = params
+            const { studio_id, user_id, date, start_time, end_time, notes } = params
 
-            // Overlap Check
-            const { data: overlaps, error: overlapError } = await supabaseClient
-                .from('studio_bookings')
-                .select('id')
-                .eq('studio_id', studio_id)
-                .eq('booking_date', date)
-                .eq('status', 'confirmed')
-                .or(`and(start_time.lt.${end_time},end_time.gt.${start_time})`)
+            // Use the comprehensive is_slot_available function
+            const { data: isAvailable, error: availError } = await supabaseClient
+                .rpc('is_slot_available', {
+                    p_studio_id: studio_id,
+                    p_booking_date: date,
+                    p_start_time: start_time,
+                    p_end_time: end_time,
+                    p_user_id: user_id
+                })
 
-            if (overlapError) throw overlapError
+            if (availError) {
+                console.error('Availability check error:', availError)
+                throw availError
+            }
 
-            // @ts-ignore
-            if (overlaps && overlaps.length > 0) {
-                return new Response(JSON.stringify({ error: 'Time slot overlaps with an existing booking.' }), {
+            if (!isAvailable) {
+                return new Response(JSON.stringify({ 
+                    error: 'This time slot is not available. It may be outside operating hours, overlap with another booking, or the studio may be closed on this date.' 
+                }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 409, // Conflict
                 })
             }
+
+            // Calculate proper pricing with modifiers (REQUIRED)
+            const { data: pricing, error: pricingError } = await supabaseClient
+                .rpc('calculate_booking_price', {
+                    p_studio_id: studio_id,
+                    p_booking_date: date,
+                    p_start_time: start_time,
+                    p_end_time: end_time
+                })
+
+            if (pricingError || !pricing || pricing.length === 0) {
+                console.error('Pricing calculation error:', pricingError)
+                return new Response(JSON.stringify({ 
+                    error: 'Unable to calculate booking price. Please try again or contact support.' 
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 500,
+                })
+            }
+
+            const pricingData = pricing[0]
 
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
@@ -252,7 +287,14 @@ serve(async (req: Request) => {
                     booking_date: date,
                     start_time,
                     end_time,
-                    status: 'pending'
+                    notes: notes || null,
+                    status: 'pending',
+                    // Store pricing details (REQUIRED fields)
+                    base_rate: pricingData.base_rate,
+                    hours: pricingData.hours,
+                    subtotal: pricingData.subtotal,
+                    modifiers_applied: pricingData.modifiers || {},
+                    final_price: pricingData.final_price
                 })
                 .select()
                 .single()

@@ -43,9 +43,16 @@ serve(async (req: Request) => {
                 .from('profiles_with_stats')
                 .select('*')
                 .eq('id', userId)
-                .single()
+                .maybeSingle()
 
             if (error) throw error
+
+            if (!profile) {
+                return new Response(JSON.stringify({ error: 'Profile not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
 
             // Map computed fields to expected names for frontend compatibility
             const mappedProfile = {

@@ -3,6 +3,7 @@ import { BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
 import React, { forwardRef, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
@@ -17,11 +18,28 @@ import {
     View
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import Modal from './modal';
 
 const { width, height } = Dimensions.get('window');
-const IMG_HEIGHT = height * 0.4;
+const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
+
+// Responsive scaling utilities - optimized for iPhone SE and smaller devices
+const scale = (size: number) => {
+    const newSize = (width / 375) * size;
+    return Math.max(newSize, size * 0.85);
+};
+const verticalScale = (size: number) => {
+    const baseHeight = 812;
+    const ratio = height / baseHeight;
+    const clampedRatio = Math.max(0.8, Math.min(1.2, ratio));
+    return size * clampedRatio;
+};
+const moderateScale = (size: number, factor = 0.3) => {
+    const scaled = scale(size);
+    return size + (scaled - size) * factor;
+};
 
 interface ListingDetailsSheetProps {
     listingId: string | null;
@@ -29,10 +47,12 @@ interface ListingDetailsSheetProps {
 
 const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProps>(({ listingId }, ref) => {
     const { colors, isDark } = useTheme();
+    const { userId } = useAuth();
     const [loading, setLoading] = useState(false);
     const [group, setGroup] = useState<any>(null);
     const [isFavorited, setIsFavorited] = useState(false);
     const [modalVisible, setModalVisible] = useState(false);
+    const [bookingNotes, setBookingNotes] = useState('');
 
     // Review State
     const [reviews, setReviews] = useState<any[]>([]);
@@ -52,9 +72,19 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
     const [activeField, setActiveField] = useState<'date' | 'start' | 'end'>('date');
     const [duration, setDuration] = useState(4);
+    
+    // Multiple bookings state with pricing
+    const [bookings, setBookings] = useState<{ date: Date; startTime: Date; endTime: Date; pricing?: any }[]>([]);
+    const [showAddBooking, setShowAddBooking] = useState(false);
+    const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
 
     // Auto-calculate duration
     useEffect(() => {
+        if (!date || !endTime) {
+            setDuration(0);
+            return;
+        }
+        
         const start = new Date(date).getTime();
         const end = new Date(endTime).getTime();
         // Handle cross-day or invalid times? For now simple diff
@@ -89,11 +119,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             fetchGroupDetails();
             setActiveTab('About');
             // Reset booking state
-            const now = new Date();
-            setDate(now);
-            const next = new Date(now);
-            next.setHours(now.getHours() + 4);
-            setEndTime(next);
+            setDate(null as any);
+            setEndTime(null as any);
+            setBookings([]);
+            setBookingNotes('');
+            setShowAddBooking(false);
         }
     }, [listingId]);
 
@@ -104,51 +134,62 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
             let data = null;
             let type = 'Group';
+            let ownerId = null;
 
             // Try Group
             const { data: groupData } = await supabase
                 .from('groups_with_stats')
-                .select('*, owner_profile:owner_id(full_name, avatar_url, role)')
+                .select('*')
                 .eq('id', listingId)
                 .single();
 
             if (groupData) {
                 data = groupData;
                 type = 'Group';
+                ownerId = groupData.owner_id;
             } else {
                 // Try Studio
                 const { data: studioData } = await supabase
                     .from('studios_with_stats')
-                    .select('*, owner_profile:owner_id(full_name, avatar_url, role)')
+                    .select('*')
                     .eq('id', listingId)
                     .single();
 
                 if (studioData) {
                     data = studioData;
                     type = 'Studio';
+                    ownerId = studioData.owner_id;
                     if (studioData.amenities?.includes('Stage')) type = 'Venue';
                 } else {
                     // Try Gig
                     const { data: gigData } = await supabase
                         .from('gigs_with_stats')
-                        .select('*, organizer_profile:organizer_id(full_name, avatar_url, role)')
+                        .select('*')
                         .eq('id', listingId)
                         .single();
 
                     if (gigData) {
                         data = gigData;
                         type = 'Gig';
+                        ownerId = gigData.organizer_id;
                     }
                 }
             }
 
-            if (data) {
+            if (data && ownerId) {
+                // Fetch owner profile separately
+                const { data: ownerProfile } = await supabase
+                    .from('profiles')
+                    .select('full_name, avatar_url, role')
+                    .eq('id', ownerId)
+                    .single();
+
                 const normalizedData = {
                     ...data,
                     type,
-                    owner_name: data.owner_profile?.full_name || data.organizer_profile?.full_name || 'Unknown',
-                    owner_avatar: data.owner_profile?.avatar_url || data.organizer_profile?.avatar_url,
-                    role: data.owner_profile?.role || data.organizer_profile?.role,
+                    owner_name: ownerProfile?.full_name || 'Unknown',
+                    owner_avatar: ownerProfile?.avatar_url,
+                    role: ownerProfile?.role,
                     rate: data.hourly_rate?.toString() || data.budget?.toString() || data.rate || '0',
                     review_count: data.review_count || 0,
                     rating: data.rating || 0
@@ -333,19 +374,38 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     );
 
     const onChangePicker = (event: any, selectedValue?: Date) => {
-        if (Platform.OS === 'android') {
-            setShowPicker(false);
+        // Dismiss picker after selection
+        if (event.type === 'dismissed' || event.type === 'set') {
+            if (Platform.OS === 'ios' && event.type === 'set') {
+                // iOS: Keep open until user taps outside or confirms
+                // We'll close it manually after a delay
+                setTimeout(() => setShowPicker(false), 100);
+            } else if (Platform.OS === 'android') {
+                setShowPicker(false);
+            }
         }
-        if (selectedValue) {
+        
+        if (selectedValue && event.type === 'set') {
             if (activeField === 'date') {
-                // Update both start and end date components, keep times
-                const newStart = new Date(date);
-                newStart.setFullYear(selectedValue.getFullYear(), selectedValue.getMonth(), selectedValue.getDate());
-                setDate(newStart);
+                // First time selecting date - initialize with default times
+                if (!date) {
+                    const newDate = new Date(selectedValue);
+                    newDate.setHours(9, 0, 0, 0); // Default to 9:00 AM
+                    setDate(newDate);
+                    
+                    const newEnd = new Date(selectedValue);
+                    newEnd.setHours(13, 0, 0, 0); // Default to 1:00 PM (4 hours later)
+                    setEndTime(newEnd);
+                } else {
+                    // Update date, keep existing times
+                    const newStart = new Date(date);
+                    newStart.setFullYear(selectedValue.getFullYear(), selectedValue.getMonth(), selectedValue.getDate());
+                    setDate(newStart);
 
-                const newEnd = new Date(endTime);
-                newEnd.setFullYear(selectedValue.getFullYear(), selectedValue.getMonth(), selectedValue.getDate());
-                setEndTime(newEnd);
+                    const newEnd = new Date(endTime);
+                    newEnd.setFullYear(selectedValue.getFullYear(), selectedValue.getMonth(), selectedValue.getDate());
+                    setEndTime(newEnd);
+                }
 
             } else if (activeField === 'start') {
                 const newDate = new Date(date);
@@ -362,73 +422,125 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     };
 
     const showPickerBtn = (field: 'date' | 'start' | 'end') => {
+        console.log('showPickerBtn called with field:', field);
         setActiveField(field);
         setPickerMode(field === 'date' ? 'date' : 'time');
         setShowPicker(true);
+        console.log('Picker should be visible now');
     };
 
     const renderBookingControls = () => (
         <View style={styles.pickerSection}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Schedule Session</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Schedule Session</Text>
+                <View style={[styles.durationBadge, { backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)' }]}>
+                    <Ionicons name="time-outline" size={16} color={colors.primary} />
+                    <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, marginLeft: 4, fontSize: 13 }}>
+                        {duration}h
+                    </Text>
+                </View>
+            </View>
 
+            {/* Date Card */}
+            <TouchableOpacity
+                style={[styles.dateTimeCard, { 
+                    borderColor: colors.border, 
+                    backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
+                    marginBottom: 12
+                }]}
+                onPress={() => showPickerBtn('date')}
+            >
+                <View style={[styles.dateIconContainer, { backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)' }]}>
+                    <Ionicons name="calendar" size={24} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                    <Text style={[styles.dateTimeLabel, { color: colors.textSecondary }]}>Session Date</Text>
+                    <Text style={[styles.dateTimeValue, { color: date ? colors.text : colors.textSecondary }]}>
+                        {date ? date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : 'Select a date'}
+                    </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            {/* Time Cards Row */}
             <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
                 <TouchableOpacity
-                    style={[styles.nativePickerBtn, { borderColor: colors.border, backgroundColor: isDark ? '#374151' : '#F9FAFB', flex: 1.5 }]}
-                    onPress={() => showPickerBtn('date')}
-                >
-                    <Ionicons name="calendar-outline" size={20} color={colors.primary} />
-                    <View>
-                        <Text style={[styles.pickerLabel, { color: colors.textSecondary }]}>Date</Text>
-                        <Text style={[styles.pickerValue, { color: colors.text }]}>
-                            {date.toLocaleDateString()}
-                        </Text>
-                    </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[styles.nativePickerBtn, { borderColor: colors.border, backgroundColor: isDark ? '#374151' : '#F9FAFB', flex: 1 }]}
+                    style={[styles.timeCard, { 
+                        borderColor: colors.border, 
+                        backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
+                        flex: 1
+                    }]}
                     onPress={() => showPickerBtn('start')}
                 >
-                    <View>
-                        <Text style={[styles.pickerLabel, { color: colors.textSecondary }]}>Start</Text>
-                        <Text style={[styles.pickerValue, { color: colors.text }]}>
-                            {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <View style={[styles.timeIconContainer, { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.1)' }]}>
+                        <Ionicons name="play-circle" size={20} color="#10B981" />
+                    </View>
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                        <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>Start Time</Text>
+                        <Text style={[styles.timeValue, { color: date ? colors.text : colors.textSecondary }]}>
+                            {date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                         </Text>
                     </View>
+                    <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
 
+                <View style={{ justifyContent: 'center', paddingHorizontal: 4 }}>
+                    <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} />
+                </View>
+
                 <TouchableOpacity
-                    style={[styles.nativePickerBtn, { borderColor: colors.border, backgroundColor: isDark ? '#374151' : '#F9FAFB', flex: 1 }]}
+                    style={[styles.timeCard, { 
+                        borderColor: colors.border, 
+                        backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
+                        flex: 1
+                    }]}
                     onPress={() => showPickerBtn('end')}
                 >
-                    <View>
-                        <Text style={[styles.pickerLabel, { color: colors.textSecondary }]}>End</Text>
-                        <Text style={[styles.pickerValue, { color: colors.text }]}>
-                            {endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <View style={[styles.timeIconContainer, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.1)' }]}>
+                        <Ionicons name="stop-circle" size={20} color="#EF4444" />
+                    </View>
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                        <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>End Time</Text>
+                        <Text style={[styles.timeValue, { color: endTime ? colors.text : colors.textSecondary }]}>
+                            {endTime ? endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                         </Text>
                     </View>
+                    <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
                 </TouchableOpacity>
             </View>
 
             {/* Native Picker Component */}
-            {showPicker && (
-                <DateTimePicker
-                    testID="dateTimePicker"
-                    value={activeField === 'end' ? endTime : date}
-                    mode={pickerMode}
-                    is24Hour={true}
-                    onChange={onChangePicker}
-                    minimumDate={activeField === 'date' ? new Date() : undefined}
-                    style={{ backgroundColor: colors.background }}
-                />
+            {showPicker && Platform.OS !== 'web' && (
+                <View style={[styles.pickerContainer, { 
+                    backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+                    borderColor: colors.border,
+                    marginBottom: 16,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    overflow: 'hidden'
+                }]}>
+                    {Platform.OS === 'ios' && (
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', padding: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                            <TouchableOpacity 
+                                onPress={() => setShowPicker(false)}
+                                style={{ paddingHorizontal: 16, paddingVertical: 8 }}
+                            >
+                                <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Done</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+                    <DateTimePicker
+                        testID="dateTimePicker"
+                        value={activeField === 'end' ? (endTime || new Date()) : (date || new Date())}
+                        mode={pickerMode}
+                        is24Hour={true}
+                        onChange={onChangePicker}
+                        minimumDate={activeField === 'date' ? new Date() : undefined}
+                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                        style={{ backgroundColor: 'transparent' }}
+                    />
+                </View>
             )}
-
-            <View style={[styles.durationWrapper, { backgroundColor: isDark ? '#1F2937' : '#EFF6FF', borderColor: colors.primary, borderWidth: 1 }]}>
-                <Ionicons name="time" size={20} color={colors.primary} />
-                <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary, marginLeft: 8 }}>
-                    Duration: {duration} hours
-                </Text>
-            </View>
         </View>
     );
 
@@ -552,106 +664,452 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     );
 
     // Studio: Setup Tab
-    const renderStudioSetup = () => (
-        <View style={styles.tabContent}>
-            <View style={[styles.searchBar, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}>
-                <Ionicons name="search" size={20} color={colors.textSecondary} />
-                <Text style={{ marginLeft: 8, color: colors.textSecondary }}>Search microphones, amps...</Text>
-            </View>
-
-            <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Amenities</Text>
-                <View style={styles.tagsContainer}>
-                    {group.amenities && group.amenities.length > 0 ? group.amenities.map((tag: string) => (
-                        <View key={tag} style={[styles.tag, { borderColor: colors.border }]}>
-                            <Text style={{ color: colors.text, fontSize: 13 }}>{tag}</Text>
-                        </View>
-                    )) : (
-                        <Text style={{ color: colors.textSecondary }}>No specific amenities listed.</Text>
-                    )}
+    const renderStudioSetup = () => {
+        const amenities = group.amenities || [];
+        const equipment: string[] = [];
+        
+        // Categorize amenities as equipment
+        if (amenities.length > 0) {
+            amenities.forEach((item: string) => {
+                const lower = item.toLowerCase();
+                if (lower.includes('mic') || lower.includes('drum') || lower.includes('guitar') || 
+                    lower.includes('bass') || lower.includes('keyboard') || lower.includes('amp') ||
+                    lower.includes('console') || lower.includes('interface')) {
+                    equipment.push(item);
+                }
+            });
+        }
+        
+        return (
+            <View style={styles.tabContent}>
+                <View style={styles.section}>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Studio Amenities</Text>
+                    <View style={styles.tagsContainer}>
+                        {amenities.length > 0 ? amenities.map((tag: string, index: number) => (
+                            <View key={`${tag}-${index}`} style={[styles.tag, { 
+                                borderColor: colors.primary,
+                                backgroundColor: isDark ? 'rgba(124, 58, 237, 0.1)' : 'rgba(124, 58, 237, 0.05)'
+                            }]}>
+                                <Ionicons name="checkmark-circle" size={14} color={colors.primary} style={{ marginRight: 4 }} />
+                                <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_500Medium' }}>{tag}</Text>
+                            </View>
+                        )) : (
+                            <Text style={{ color: colors.textSecondary, fontStyle: 'italic' }}>No amenities listed for this studio.</Text>
+                        )}
+                    </View>
                 </View>
-            </View>
 
-        </View>
-    );
+                {equipment.length > 0 && (
+                    <View style={styles.section}>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Available Equipment</Text>
+                        <View style={{ gap: 12 }}>
+                            {equipment.map((item: string, i: number) => (
+                                <View key={i} style={styles.checkRow}>
+                                    <View style={[styles.equipmentIcon, { backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)' }]}>
+                                        <Ionicons name="musical-notes" size={18} color={colors.primary} />
+                                    </View>
+                                    <Text style={{ color: colors.text, marginLeft: 12, fontFamily: 'Poppins_400Regular' }}>{item}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    </View>
+                )}
+
+                {group.description && (
+                    <View style={styles.section}>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>About the Space</Text>
+                        <Text style={{ color: colors.text, lineHeight: 24, fontFamily: 'Poppins_400Regular' }}>
+                            {group.description}
+                        </Text>
+                    </View>
+                )}
+            </View>
+        );
+    };
 
     // Studio: Book Tab
-    const renderStudioBook = () => (
-        <View style={styles.tabContent}>
+    const renderStudioBook = () => {
+        const availability = group.availability || [];
+        const totalBookingsCost = bookings.reduce((sum, booking) => {
+            // Use calculated pricing if available, otherwise fallback to simple calculation
+            if (booking.pricing?.final_price) {
+                return sum + booking.pricing.final_price;
+            }
+            const start = new Date(booking.startTime).getTime();
+            const end = new Date(booking.endTime).getTime();
+            let hours = (end - start) / (1000 * 60 * 60);
+            if (hours < 0) hours += 24;
+            return sum + (parseInt(displayRate.replace(/,/g, '')) * hours);
+        }, 0);
 
-            {renderBookingControls()}
-
-            <View style={styles.inputContainer}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>Notes</Text>
-                <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#374151' : '#F9FAFB', height: 80 }]}>
-                    <TextInput
-                        style={[styles.input, { color: colors.text, height: '100%' }]}
-                        placeholder="Tell us about your session..."
-                        placeholderTextColor={colors.textSecondary}
-                        multiline
-                        textAlignVertical="top"
-                    />
-                </View>
-            </View>
-
-            <View style={[styles.paymentSummary, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB' }]}>
-                <View style={styles.summaryRow}>
-                    <Text style={{ color: colors.textSecondary }}>Rate</Text>
-                    <Text style={{ color: colors.text }}>₱{displayRate} / hr</Text>
-                </View>
-                <View style={styles.summaryRow}>
-                    <Text style={{ color: colors.textSecondary }}>Duration</Text>
-                    <Text style={{ color: colors.text }}>{duration} hrs</Text>
-                </View>
-                <View style={[styles.divider, { marginVertical: 12 }]} />
-                <View style={styles.summaryRow}>
-                    <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>Total</Text>
-                    <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: 18 }}>₱{(parseInt(displayRate.replace(/,/g, '')) * duration).toLocaleString()}</Text>
-                </View>
-            </View>
-
-            <TouchableOpacity
-                style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
-                onPress={() => handleConfirm(
-                    () => console.log('Confirm Booking'),
-                    'Confirm Booking',
-                    `Book ${group.name} on ${date.toDateString()}\n${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\nTotal: ₱${(parseInt(displayRate.replace(/,/g, '')) * duration).toLocaleString()}`
+        return (
+            <View style={styles.tabContent}>
+                {/* Show Studio Availability */}
+                {availability.length > 0 && (
+                    <View style={[styles.section, { marginBottom: 16 }]}>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Available Hours</Text>
+                        <Text style={{ color: colors.textSecondary, marginBottom: 12, fontSize: 13 }}>
+                            Choose from the studio's available time slots
+                        </Text>
+                        {availability.map((daySchedule: any) => (
+                            <View key={daySchedule.day} style={{ marginBottom: 8 }}>
+                                <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', fontSize: 13 }}>{daySchedule.day}</Text>
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                                    {daySchedule.slots.map((slot: any, i: number) => (
+                                        <View key={i} style={[styles.timeSlotChip, { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderColor: colors.border }]}>
+                                            <Ionicons name="time-outline" size={12} color={colors.primary} />
+                                            <Text style={{ color: colors.text, fontSize: 11, marginLeft: 4 }}>{slot.start} - {slot.end}</Text>
+                                        </View>
+                                    ))}
+                                </View>
+                            </View>
+                        ))}
+                    </View>
                 )}
-            >
-                <Text style={styles.primaryBtnText}>Confirm Booking</Text>
-            </TouchableOpacity>
-        </View>
-    );
+
+                {/* Bookings List */}
+                {bookings.length > 0 && (
+                    <View style={[styles.section, { marginBottom: 16 }]}>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Bookings ({bookings.length})</Text>
+                        {bookings.map((booking, index) => {
+                            const start = new Date(booking.startTime).getTime();
+                            const end = new Date(booking.endTime).getTime();
+                            let hours = (end - start) / (1000 * 60 * 60);
+                            if (hours < 0) hours += 24;
+                            
+                            // Use calculated pricing or fallback
+                            const cost = booking.pricing?.final_price || (parseInt(displayRate.replace(/,/g, '')) * hours);
+                            const hasModifiers = booking.pricing?.modifiers && Object.keys(booking.pricing.modifiers).length > 0;
+                            
+                            return (
+                                <View key={index} style={[styles.bookingCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 8 }]}>
+                                    <View style={{ flex: 1 }}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                            <Ionicons name="calendar" size={14} color={colors.primary} />
+                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', marginLeft: 6, fontSize: 13 }}>
+                                                {booking.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                            </Text>
+                                        </View>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                            <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+                                            <Text style={{ color: colors.textSecondary, marginLeft: 6, fontSize: 12 }}>
+                                                {booking.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {booking.endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h)
+                                            </Text>
+                                        </View>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                                            <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold' }}>₱{cost.toLocaleString()}</Text>
+                                            {hasModifiers && (
+                                                <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.primary + '20', borderRadius: 4 }}>
+                                                    <Text style={{ color: colors.primary, fontSize: 10 }}>Promo Applied</Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                    </View>
+                                    <TouchableOpacity onPress={() => {
+                                        const newBookings = [...bookings];
+                                        newBookings.splice(index, 1);
+                                        setBookings(newBookings);
+                                    }}>
+                                        <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                    </TouchableOpacity>
+                                </View>
+                            );
+                        })}
+                    </View>
+                )}
+
+                {/* Add Booking Section */}
+                {showAddBooking || bookings.length === 0 ? (
+                    <>
+                        {renderBookingControls()}
+
+                        <TouchableOpacity
+                            style={[styles.secondaryBtn, { borderColor: colors.primary, backgroundColor: 'transparent', marginBottom: 16, opacity: isCheckingAvailability ? 0.6 : 1 }]}
+                            disabled={!date || !endTime || isCheckingAvailability}
+                            onPress={async () => {
+                                if (date && endTime) {
+                                    setIsCheckingAvailability(true);
+                                    try {
+                                        const bookingDate = date.toISOString().split('T')[0];
+                                        const startTime = date.toTimeString().slice(0, 5);
+                                        const endTime2 = endTime.toTimeString().slice(0, 5);
+
+                                        // Check availability
+                                        const { data: isAvailable, error: availError } = await supabase.rpc('is_slot_available', {
+                                            p_studio_id: group.id,
+                                            p_booking_date: bookingDate,
+                                            p_start_time: startTime,
+                                            p_end_time: endTime2,
+                                            p_user_id: userId
+                                        });
+
+                                        if (availError) {
+                                            console.error('Availability check error:', availError);
+                                            alert('Failed to check availability. Please try again.');
+                                            setIsCheckingAvailability(false);
+                                            return;
+                                        }
+
+                                        if (!isAvailable) {
+                                            alert('This time slot is not available. Please choose a different time.');
+                                            setIsCheckingAvailability(false);
+                                            return;
+                                        }
+
+                                        // Calculate accurate pricing
+                                        const { data: pricing, error: pricingError } = await supabase.rpc('calculate_booking_price', {
+                                            p_studio_id: group.id,
+                                            p_booking_date: bookingDate,
+                                            p_start_time: startTime,
+                                            p_end_time: endTime2
+                                        });
+
+                                        if (pricingError || !pricing || pricing.length === 0) {
+                                            console.error('Pricing error:', pricingError);
+                                            alert('Failed to calculate price. Please try again.');
+                                            setIsCheckingAvailability(false);
+                                            return;
+                                        }
+
+                                        // Add to cart with pricing data
+                                        setBookings([...bookings, { 
+                                            date: new Date(date), 
+                                            startTime: new Date(date), 
+                                            endTime: new Date(endTime),
+                                            pricing: pricing[0]
+                                        }]);
+                                        setShowAddBooking(false);
+                                        // Reset form
+                                        setDate(null as any);
+                                        setEndTime(null as any);
+                                    } catch (e: any) {
+                                        console.error('Error adding booking:', e);
+                                        alert('An error occurred. Please try again.');
+                                    } finally {
+                                        setIsCheckingAvailability(false);
+                                    }
+                                }
+                            }}
+                        >
+                            {isCheckingAvailability ? (
+                                <ActivityIndicator size="small" color={colors.primary} />
+                            ) : (
+                                <>
+                                    <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+                                    <Text style={[styles.secondaryBtnText, { color: colors.primary, marginLeft: 8 }]}>
+                                        {bookings.length > 0 ? 'Add to Cart' : 'Add Booking'}
+                                    </Text>
+                                </>
+                            )}
+                        </TouchableOpacity>
+                    </>
+                ) : (
+                    <TouchableOpacity
+                        style={[styles.secondaryBtn, { borderColor: colors.primary, backgroundColor: 'transparent', marginBottom: 16 }]}
+                        onPress={() => setShowAddBooking(true)}
+                    >
+                        <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+                        <Text style={[styles.secondaryBtnText, { color: colors.primary, marginLeft: 8 }]}>Add Another Date/Time</Text>
+                    </TouchableOpacity>
+                )}
+
+                {/* Notes */}
+                <View style={styles.inputContainer}>
+                    <Text style={[styles.label, { color: colors.textSecondary }]}>Notes (Optional)</Text>
+                    <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#374151' : '#F9FAFB', height: 80 }]}>
+                        <TextInput
+                            style={[styles.input, { color: colors.text, height: '100%' }]}
+                            placeholder="Tell us about your sessions..."
+                            placeholderTextColor={colors.textSecondary}
+                            multiline
+                            textAlignVertical="top"
+                            value={bookingNotes}
+                            onChangeText={setBookingNotes}
+                        />
+                    </View>
+                </View>
+
+                {/* Payment Summary */}
+                {bookings.length > 0 && (
+                    <View style={[styles.paymentSummary, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB' }]}>
+                        <View style={styles.summaryRow}>
+                            <Text style={{ color: colors.textSecondary }}>Rate</Text>
+                            <Text style={{ color: colors.text }}>₱{displayRate} / hr</Text>
+                        </View>
+                        <View style={styles.summaryRow}>
+                            <Text style={{ color: colors.textSecondary }}>Total Sessions</Text>
+                            <Text style={{ color: colors.text }}>{bookings.length}</Text>
+                        </View>
+                        <View style={[styles.divider, { marginVertical: 12 }]} />
+                        <View style={styles.summaryRow}>
+                            <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>Total</Text>
+                            <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: 18 }}>₱{totalBookingsCost.toLocaleString()}</Text>
+                        </View>
+                    </View>
+                )}
+
+                <TouchableOpacity
+                    style={[styles.primaryBtn, { backgroundColor: bookings.length > 0 ? colors.primary : colors.border, opacity: loading ? 0.6 : 1 }]}
+                    disabled={bookings.length === 0 || loading}
+                    onPress={() => bookings.length > 0 && handleConfirm(
+                        async () => {
+                            if (!userId) {
+                                alert('Please sign in to book a studio');
+                                return;
+                            }
+
+                            try {
+                                setLoading(true);
+                                const results = [];
+                                const errors = [];
+
+                                // Create each booking
+                                for (const booking of bookings) {
+                                    const bookingDate = booking.date.toISOString().split('T')[0];
+                                    const startTime = booking.startTime.toTimeString().slice(0, 5);
+                                    const endTime = booking.endTime.toTimeString().slice(0, 5);
+
+                                    const { data, error } = await supabase.functions.invoke('manage-bookings', {
+                                        body: {
+                                            action: 'create',
+                                            studio_id: group.id,
+                                            user_id: userId,
+                                            date: bookingDate,
+                                            start_time: startTime,
+                                            end_time: endTime,
+                                            notes: bookingNotes
+                                        }
+                                    });
+
+                                    if (error) {
+                                        errors.push({ booking, error });
+                                        console.error('Booking error:', error);
+                                    } else {
+                                        results.push(data);
+                                    }
+                                }
+
+                                setLoading(false);
+
+                                if (errors.length > 0 && results.length === 0) {
+                                    // All failed
+                                    const errorMsg = errors[0].error?.message || 'Failed to create bookings';
+                                    alert(`Error: ${errorMsg}`);
+                                } else if (errors.length > 0) {
+                                    // Partial success
+                                    alert(`${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`);
+                                    // Clear form and close
+                                    setBookings([]);
+                                    setBookingNotes('');
+                                    setModalVisible(false);
+                                    (ref as any)?.current?.dismiss();
+                                } else {
+                                    // All success
+                                    alert(`Successfully created ${results.length} booking(s)! The studio owner will review your request.`);
+                                    // Clear form and close
+                                    setBookings([]);
+                                    setBookingNotes('');
+                                    setModalVisible(false);
+                                    (ref as any)?.current?.dismiss();
+                                    
+                                    // Navigate to bookings page
+                                    setTimeout(() => {
+                                        router.push('/bookings' as any);
+                                    }, 100);
+                                }
+                            } catch (e: any) {
+                                setLoading(false);
+                                console.error('Booking creation error:', e);
+                                alert('An unexpected error occurred. Please try again.');
+                            }
+                        },
+                        'Confirm Bookings',
+                        `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`
+                    )}
+                >
+                    {loading ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                        <Text style={[styles.primaryBtnText, { color: bookings.length > 0 ? '#FFFFFF' : colors.textSecondary }]}>
+                            {bookings.length > 0 ? `Confirm ${bookings.length} Booking${bookings.length > 1 ? 's' : ''}` : 'Add at least one booking'}
+                        </Text>
+                    )}
+                </TouchableOpacity>
+            </View>
+        );
+    };
 
     // Gig: Info Tab
-    const renderGigInfo = () => (
-        <View style={styles.tabContent}>
-            <View style={{ flexDirection: 'row', gap: 16 }}>
-                <View style={[styles.infoCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Capacity</Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}>200pax</Text>
-                </View>
-                <View style={[styles.infoCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Audio</Text>
-                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 13, color: colors.text }}>Full PA</Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}>Full PA</Text>
-                </View>
-            </View>
-
-            <View style={[styles.section, { marginTop: 24 }]}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Tech Specs</Text>
-                {/* TODO: Use real data from group.requirements or amenities */}
-                {group.requirements && Array.isArray(group.requirements) && group.requirements.length > 0 ? group.requirements.map((spec: string, i: number) => (
-                    <View key={i} style={styles.checkRow}>
-                        <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
-                        <Text style={{ color: colors.text, marginLeft: 12 }}>{spec}</Text>
+    const renderGigInfo = () => {
+        // Extract requirements data
+        const requirements = group.requirements || {};
+        const capacity = requirements.capacity || 'Not specified';
+        const audioSetup = requirements.audio || requirements.sound_system || 'Standard PA';
+        
+        // Get tech specs from requirements or amenities
+        const techSpecs = [];
+        if (requirements.lighting) techSpecs.push(`Lighting: ${requirements.lighting}`);
+        if (requirements.stage_size) techSpecs.push(`Stage Size: ${requirements.stage_size}`);
+        if (requirements.backline) techSpecs.push(`Backline: ${requirements.backline}`);
+        if (requirements.sound_check) techSpecs.push('Sound Check Available');
+        if (requirements.green_room) techSpecs.push('Green Room Available');
+        
+        // If no specific requirements, use amenities or generic items
+        if (techSpecs.length === 0 && group.amenities?.length > 0) {
+            group.amenities.forEach((amenity: string) => techSpecs.push(amenity));
+        }
+        
+        return (
+            <View style={styles.tabContent}>
+                <View style={{ flexDirection: 'row', gap: 16 }}>
+                    <View style={[styles.infoCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', flex: 1 }]}>
+                        <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Capacity</Text>
+                        <Text style={[styles.infoValue, { color: colors.text }]}>{capacity}</Text>
                     </View>
-                )) : (
-                    <Text style={{ color: colors.textSecondary }}>No specific tech specs listed.</Text>
+                    <View style={[styles.infoCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', flex: 1 }]}>
+                        <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Audio</Text>
+                        <Text style={[styles.infoValue, { color: colors.text, fontSize: 13 }]} numberOfLines={2}>{audioSetup}</Text>
+                    </View>
+                </View>
+
+                <View style={[styles.section, { marginTop: 24 }]}>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Event Details</Text>
+                    {group.event_date && (
+                        <View style={styles.checkRow}>
+                            <Ionicons name="calendar" size={20} color={colors.primary} />
+                            <Text style={{ color: colors.text, marginLeft: 12 }}>
+                                {new Date(group.event_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                            </Text>
+                        </View>
+                    )}
+                    {group.location && (
+                        <View style={styles.checkRow}>
+                            <Ionicons name="location" size={20} color={colors.primary} />
+                            <Text style={{ color: colors.text, marginLeft: 12 }}>{group.location}</Text>
+                        </View>
+                    )}
+                </View>
+
+                {techSpecs.length > 0 && (
+                    <View style={[styles.section, { marginTop: 24 }]}>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Tech Specs & Amenities</Text>
+                        {techSpecs.map((spec: string, i: number) => (
+                            <View key={i} style={styles.checkRow}>
+                                <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                                <Text style={{ color: colors.text, marginLeft: 12 }}>{spec}</Text>
+                            </View>
+                        ))}
+                    </View>
+                )}
+                
+                {techSpecs.length === 0 && !group.event_date && (
+                    <View style={{ marginTop: 24 }}>
+                        <Text style={{ color: colors.textSecondary, fontStyle: 'italic', textAlign: 'center' }}>No additional specifications provided.</Text>
+                    </View>
                 )}
             </View>
-        </View>
-    );
+        );
+    };
 
     // Gig: Apply Tab
     const renderGigApply = () => (
@@ -1222,21 +1680,21 @@ const styles = StyleSheet.create({
     },
     headerActions: {
         position: 'absolute',
-        top: 16,
-        left: 20,
-        right: 20,
+        top: moderateScale(16),
+        left: scale(20),
+        right: scale(20),
         flexDirection: 'row',
         justifyContent: 'space-between',
         zIndex: 10,
     },
     rightActions: {
         flexDirection: 'row',
-        gap: 12,
+        gap: scale(12),
     },
     roundBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: moderateScale(40),
+        height: moderateScale(40),
+        borderRadius: moderateScale(20),
         backgroundColor: '#FFF',
         alignItems: 'center',
         justifyContent: 'center',
@@ -1248,13 +1706,13 @@ const styles = StyleSheet.create({
     },
     heroIdentity: {
         position: 'absolute',
-        bottom: 24,
-        left: 24,
-        right: 24,
+        bottom: moderateScale(24),
+        left: scale(24),
+        right: scale(24),
     },
     heroTitle: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 28,
+        fontSize: height < 700 ? moderateScale(24) : moderateScale(28),
         color: '#FFF',
         textShadowColor: 'rgba(0,0,0,0.5)',
         textShadowOffset: { width: 0, height: 2 },
@@ -1263,13 +1721,13 @@ const styles = StyleSheet.create({
     heroLocation: {
         color: '#FFF',
         fontFamily: 'Poppins_400Regular',
-        fontSize: 14,
-        marginLeft: 4,
+        fontSize: moderateScale(14),
+        marginLeft: scale(4),
     },
     statusRow: {
         flexDirection: 'row',
-        gap: 8,
-        marginBottom: 8,
+        gap: scale(8),
+        marginBottom: moderateScale(8),
     },
     // Tabs
     tabsContainer: {
@@ -1280,31 +1738,31 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 16,
+        paddingVertical: moderateScale(16),
     },
     tabText: {
         fontFamily: 'Poppins_500Medium',
-        fontSize: 14,
+        fontSize: moderateScale(14),
     },
     contentBody: {
         flex: 1,
-        minHeight: 500,
+        minHeight: verticalScale(500),
     },
     tabContent: {
-        padding: 24,
+        padding: height < 700 ? scale(16) : scale(24),
     },
     // Sections
     section: {
-        marginBottom: 24,
+        marginBottom: height < 700 ? moderateScale(16) : moderateScale(24),
     },
     sectionTitle: {
-        fontSize: 18,
+        fontSize: height < 700 ? moderateScale(16) : moderateScale(18),
         fontFamily: 'Poppins_600SemiBold',
-        marginBottom: 12,
+        marginBottom: moderateScale(12),
     },
     description: {
-        fontSize: 14,
-        lineHeight: 22,
+        fontSize: moderateScale(14),
+        lineHeight: moderateScale(22),
     },
     // Stats
     statCard: {
@@ -1341,6 +1799,79 @@ const styles = StyleSheet.create({
     // Picker / Booking Widgets
     pickerSection: {
         marginBottom: 24,
+    },
+    dateTimeCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+        gap: 16,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+    },
+    dateIconContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    dateTimeLabel: {
+        fontSize: 11,
+        textTransform: 'uppercase',
+        fontFamily: 'Poppins_600SemiBold',
+        letterSpacing: 0.5,
+        marginBottom: 2,
+    },
+    dateTimeValue: {
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    timeCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 12,
+        borderRadius: 16,
+        borderWidth: 1,
+        gap: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+    },
+    timeIconContainer: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    timeLabel: {
+        fontSize: 10,
+        textTransform: 'uppercase',
+        fontFamily: 'Poppins_600SemiBold',
+        letterSpacing: 0.5,
+        marginBottom: 2,
+    },
+    timeValue: {
+        fontSize: 16,
+        fontFamily: 'Poppins_700Bold',
+    },
+    durationBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+    },
+    pickerContainer: {
+        borderRadius: 12,
+        overflow: 'hidden',
     },
     nativePickerBtn: {
         flex: 1,
@@ -1450,22 +1981,22 @@ const styles = StyleSheet.create({
     },
     // Forms
     inputContainer: {
-        marginBottom: 16,
+        marginBottom: moderateScale(16),
     },
     label: {
         fontFamily: 'Poppins_500Medium',
-        marginBottom: 8,
+        marginBottom: moderateScale(8),
     },
     inputWrapper: {
-        borderRadius: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 12, // For text input centering
+        borderRadius: moderateScale(12),
+        paddingHorizontal: scale(16),
+        paddingVertical: moderateScale(12),
         justifyContent: 'center',
     },
     input: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 14,
-        padding: 0, // Remove default padding
+        fontSize: moderateScale(14),
+        padding: 0,
     },
     dateBtn: {
         flex: 1,
@@ -1493,14 +2024,41 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     primaryBtn: {
-        paddingVertical: 16,
-        borderRadius: 16,
+        paddingVertical: moderateScale(16),
+        borderRadius: moderateScale(16),
         alignItems: 'center',
     },
     primaryBtnText: {
         color: '#FFF',
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 16,
+        fontSize: moderateScale(16),
+    },
+    secondaryBtn: {
+        paddingVertical: moderateScale(14),
+        borderRadius: moderateScale(12),
+        alignItems: 'center',
+        flexDirection: 'row',
+        justifyContent: 'center',
+        borderWidth: 1,
+    },
+    secondaryBtnText: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: moderateScale(14),
+    },
+    bookingCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    timeSlotChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+        borderWidth: 1,
     },
     // Gig Info
     infoCard: {
@@ -1523,6 +2081,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 12,
     },
+    equipmentIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     // Upload Box
     uploadBox: {
         borderWidth: 1,
@@ -1535,9 +2100,9 @@ const styles = StyleSheet.create({
     },
     // Bottom Bar (Group)
     bottomBar: {
-        paddingHorizontal: 24,
-        paddingTop: 16,
-        paddingBottom: 32,
+        paddingHorizontal: scale(24),
+        paddingTop: moderateScale(16),
+        paddingBottom: moderateScale(32),
         borderTopWidth: 1,
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -1548,17 +2113,17 @@ const styles = StyleSheet.create({
     },
     priceText: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 18,
+        fontSize: moderateScale(18),
     },
     bookBtn: {
-        paddingHorizontal: 24,
-        paddingVertical: 12,
-        borderRadius: 12,
+        paddingHorizontal: scale(24),
+        paddingVertical: moderateScale(12),
+        borderRadius: moderateScale(12),
     },
     bookBtnText: {
         color: '#FFF',
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 15,
+        fontSize: moderateScale(15),
     },
     rowCenter: {
         flexDirection: 'row',

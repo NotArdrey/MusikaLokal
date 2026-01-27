@@ -126,6 +126,34 @@ serve(async (req: Request) => {
 
             if (error) throw error
 
+            // If creating a studio, automatically create operating hours and settings
+            if (type === 'studio') {
+                const studioId = data.id
+
+                // Create default studio settings (30 min buffer, no modifiers)
+                await supabaseClient.from('studio_settings').insert({
+                    studio_id: studioId,
+                    buffer_minutes: 30,
+                    weekend_multiplier: 1.0,
+                    bulk_discount_threshold_hours: 10,
+                    bulk_discount_percentage: 0
+                })
+
+                // Create default operating hours (Mon-Sun, 9 AM - 10 PM)
+                const operatingHours = []
+                for (let day = 0; day <= 6; day++) {
+                    operatingHours.push({
+                        studio_id: studioId,
+                        day_of_week: day,
+                        is_open: true,
+                        open_time: '09:00',
+                        close_time: '22:00'
+                    })
+                }
+                
+                await supabaseClient.from('studio_operating_hours').insert(operatingHours)
+            }
+
             // Return with default stats for new entity
             return new Response(JSON.stringify({ ...data, rating: 0, review_count: 0 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
