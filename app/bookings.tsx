@@ -34,7 +34,7 @@ type Tab = 'Pending' | 'Upcoming' | 'Ongoing' | 'Review';
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
-  const [activeTab, setActiveTab] = useState<Tab>('Upcoming');
+  const [activeTab, setActiveTab] = useState<Tab>('Pending');
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [cancellationReason, setCancellationReason] = useState('');
@@ -260,7 +260,7 @@ export default function BookingsScreen() {
         {/* Tab Navigation */}
         <View style={styles.tabContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScrollContent}>
-            {['Upcoming', 'Pending', 'Ongoing', 'Review'].map((tab) => renderTab(tab as Tab))}
+            {['Pending', 'Upcoming', 'Ongoing', 'Review'].map((tab) => renderTab(tab as Tab))}
           </ScrollView>
         </View>
 
