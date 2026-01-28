@@ -1,11 +1,33 @@
 // @ts-ignore
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
+}
+
+// Helper to decode JWT payload without verification (for getting user ID)
+// Uses base64url decoding which is what JWT uses
+function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
+    try {
+        const parts = token.replace('Bearer ', '').split('.')
+        if (parts.length !== 3) return null
+        
+        // Base64url to base64 conversion
+        let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+        // Add padding if needed
+        while (base64.length % 4) {
+            base64 += '='
+        }
+        
+        const payload = JSON.parse(atob(base64))
+        return payload
+    } catch (e) {
+        console.error('JWT decode error:', e)
+        return null
+    }
 }
 
 serve(async (req: Request) => {
@@ -14,16 +36,50 @@ serve(async (req: Request) => {
     }
 
     try {
+        const authHeader = req.headers.get('Authorization');
+        console.log('Authorization header present:', !!authHeader);
+        
+        if (!authHeader) {
+            return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        // Decode JWT to get user info
+        const jwtPayload = decodeJwtPayload(authHeader)
+        console.log('JWT payload:', { sub: jwtPayload?.sub, email: jwtPayload?.email });
+        
+        if (!jwtPayload || !jwtPayload.sub) {
+            return new Response(JSON.stringify({ error: 'Invalid token' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        const authenticatedUserId = jwtPayload.sub
+
+        // Create supabase client with service role for database operations
         const supabaseClient = createClient(
             // @ts-ignore
             Deno.env.get('SUPABASE_URL') ?? '',
             // @ts-ignore
-            Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-            { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
         )
 
         const { action, ...params } = await req.json()
         const { userId } = params
+
+        // Verify userId matches authenticated user from JWT
+        if (userId && userId !== authenticatedUserId) {
+            return new Response(JSON.stringify({ error: 'Forbidden: userId mismatch' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 403,
+            })
+        }
+
+        // Use the authenticated user ID for all operations
+        const effectiveUserId = userId || authenticatedUserId
 
         // --- FETCH LISTS (MY GIGS, GROUPS, STUDIOS) ---
 
@@ -98,9 +154,14 @@ serve(async (req: Request) => {
                 .select('*')
                 .eq('id', id)
                 .eq(ownerField, userId)
-                .single()
+                .maybeSingle()
 
             if (error) throw error
+
+            // Return null if not found (user doesn't own this entity or doesn't exist)
+            if (!data) {
+                return new Response(JSON.stringify(null), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
+            }
 
             // View columns already named 'rating' and 'review_count'
             const mapped = {
@@ -118,15 +179,24 @@ serve(async (req: Request) => {
             const table = type + 's'
             const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
 
+            // Extract availability only if type is studio, to prevent it from being sent to studios table insert
+            let studioAvailability = null;
+            let insertPayload = { ...payload };
+
+            if (type === 'studio' && insertPayload.availability) {
+                studioAvailability = insertPayload.availability;
+                delete insertPayload.availability; // Remove from payload so it doesn't fail insert
+            }
+
             const { data, error } = await supabaseClient
                 .from(table)
-                .insert({ ...payload, [ownerField]: userId })
+                .insert({ ...insertPayload, [ownerField]: userId })
                 .select()
                 .single()
 
             if (error) throw error
 
-            // If creating a studio, automatically create operating hours and settings
+            // If creating a studio, create operating hours and settings
             if (type === 'studio') {
                 const studioId = data.id
 
@@ -139,16 +209,60 @@ serve(async (req: Request) => {
                     bulk_discount_percentage: 0
                 })
 
-                // Create default operating hours (Mon-Sun, 9 AM - 10 PM)
-                const operatingHours = []
-                for (let day = 0; day <= 6; day++) {
-                    operatingHours.push({
-                        studio_id: studioId,
-                        day_of_week: day,
-                        is_open: true,
-                        open_time: '09:00',
-                        close_time: '22:00'
-                    })
+                // Create operating hours
+                let operatingHours = []
+
+                if (studioAvailability && Array.isArray(studioAvailability) && studioAvailability.length > 0) {
+                    // Map user provided availability
+                    // Frontend format: { day: 'Monday', slots: [{start, end}] }
+                    // DB format: day_of_week (0-6), open_time, close_time
+                    // We need to map day string to index. Assuming Monday=0 based on frontend array index logic or map correctly.
+                    // Frontend array: ['Monday', 'Tuesday', ... 'Sunday']
+                    // Standard Javascript Day: 0=Sunday, 1=Monday.
+                    // Let's assume standard DB convention: 0=Sunday, 1=Monday... 6=Saturday.
+                    // OR 0=Monday? Let's use a safe map. 
+
+                    const dayMap: { [key: string]: number } = {
+                        'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+                    };
+
+                    for (const daySchedule of studioAvailability) {
+                        const dayIndex = dayMap[daySchedule.day];
+                        if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+                            // Currently DB schema seems to support ONE open/close time per day based on previous default code?
+                            // Previous code: open_time: '09:00', close_time: '22:00'
+                            // If user has multiple slots, we might only be able to store the full range or first slot?
+                            // Let's assume we store the "main" hours which is likely the first slot start to last slot end?
+                            // Or maybe just the first slot for now if table has strict open_time/close_time columns and not an array.
+                            // Given "open_time" and "close_time" naming, it implies a single range.
+
+                            // Let's take the first slot's start and the last slot's end to cover the day.
+                            const slots = daySchedule.slots;
+                            const start = slots[0].start;
+                            const end = slots[slots.length - 1].end;
+
+                            operatingHours.push({
+                                studio_id: studioId,
+                                day_of_week: dayIndex,
+                                is_open: true,
+                                open_time: start,
+                                close_time: end
+                            })
+                        }
+                    }
+                }
+
+                // If no availability provided or parsed, use defaults
+                if (operatingHours.length === 0) {
+                    for (let day = 0; day <= 6; day++) {
+                        operatingHours.push({
+                            studio_id: studioId,
+                            day_of_week: day,
+                            is_open: true,
+                            open_time: '09:00',
+                            close_time: '22:00'
+                        })
+                    }
                 }
 
                 await supabaseClient.from('studio_operating_hours').insert(operatingHours)
@@ -217,8 +331,8 @@ serve(async (req: Request) => {
                 .from('gig_applications')
                 .select(`
                     *,
-                    applicant:profiles!applicant_id(full_name, avatar_url, role, skills, genres),
-                    group:groups!group_id(name, genre, images, members)
+                    applicant:profiles!applicant_id(id, full_name, avatar_url, role, skills, genres, bio, location, portfolio_urls),
+                    group:groups!group_id(id, name, genre, images, members, description, location, rate)
                 `)
                 .eq('gig_id', gigId)
                 .order('created_at', { ascending: false });
@@ -249,9 +363,24 @@ serve(async (req: Request) => {
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
-        // UPDATE BOOKING STATUS
+        // UPDATE BOOKING STATUS (Studio Bookings)
         if (action === 'update_booking_status') {
             const { bookingId, status } = params;
+            
+            // First get the booking details to send notification
+            const { data: bookingDetails, error: bookingError } = await supabaseClient
+                .from('studio_bookings')
+                .select(`
+                    *,
+                    studio:studio_id(name, owner_id),
+                    user:user_id(full_name, email)
+                `)
+                .eq('id', bookingId)
+                .single();
+
+            if (bookingError) throw bookingError;
+
+            // Update the booking status
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
                 .update({ status })
@@ -260,12 +389,65 @@ serve(async (req: Request) => {
                 .single();
 
             if (error) throw error;
+
+            // Send notification to the user who made the booking
+            const studioName = bookingDetails.studio?.name || 'the studio';
+            const bookingDate = bookingDetails.booking_date || 'your requested date';
+            
+            let notificationType = 'info';
+            let notificationTitle = '';
+            let notificationMessage = '';
+
+            if (status === 'cancelled') {
+                notificationType = 'warning';
+                notificationTitle = 'Booking Declined';
+                notificationMessage = `Your booking request for "${studioName}" on ${bookingDate} has been declined.`;
+            } else if (status === 'confirmed') {
+                notificationType = 'success';
+                notificationTitle = 'Booking Confirmed! 🎉';
+                notificationMessage = `Great news! Your booking for "${studioName}" on ${bookingDate} has been confirmed.`;
+            }
+
+            // Insert notification for the user
+            if (notificationTitle) {
+                await supabaseClient
+                    .from('notifications')
+                    .insert({
+                        user_id: bookingDetails.user_id,
+                        type: notificationType,
+                        title: notificationTitle,
+                        message: notificationMessage,
+                        meta: {
+                            studio_id: bookingDetails.studio_id,
+                            booking_id: bookingId,
+                            status: status,
+                            booking_date: bookingDate
+                        }
+                    });
+            }
+
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
         // UPDATE APPLICATION STATUS
         if (action === 'update_application_status') {
             const { applicationId, status } = params;
+            
+            // First get the application details to send notification
+            const { data: appDetails, error: appError } = await supabaseClient
+                .from('gig_applications')
+                .select(`
+                    *,
+                    gig:gig_id(name, organizer_id),
+                    applicant:applicant_id(full_name),
+                    group:group_id(name)
+                `)
+                .eq('id', applicationId)
+                .single();
+
+            if (appError) throw appError;
+
+            // Update the application status
             const { data, error } = await supabaseClient
                 .from('gig_applications')
                 .update({ status })
@@ -274,6 +456,42 @@ serve(async (req: Request) => {
                 .single();
 
             if (error) throw error;
+
+            // Send notification to the applicant
+            const applicantName = appDetails.group?.name || appDetails.applicant?.full_name || 'Applicant';
+            const gigName = appDetails.gig?.name || 'the gig';
+            
+            let notificationType = 'info';
+            let notificationTitle = '';
+            let notificationMessage = '';
+
+            if (status === 'rejected') {
+                notificationType = 'warning';
+                notificationTitle = 'Application Declined';
+                notificationMessage = `Your application for "${gigName}" has been declined.`;
+            } else if (status === 'approved' || status === 'accepted') {
+                notificationType = 'success';
+                notificationTitle = 'Application Accepted! 🎉';
+                notificationMessage = `Congratulations! Your application for "${gigName}" has been accepted.`;
+            }
+
+            // Insert notification for the applicant
+            if (notificationTitle) {
+                await supabaseClient
+                    .from('notifications')
+                    .insert({
+                        user_id: appDetails.applicant_id,
+                        type: notificationType,
+                        title: notificationTitle,
+                        message: notificationMessage,
+                        meta: {
+                            gig_id: appDetails.gig_id,
+                            application_id: applicationId,
+                            status: status
+                        }
+                    });
+            }
+
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
@@ -298,7 +516,17 @@ serve(async (req: Request) => {
         throw new Error('Invalid action')
 
     } catch (error: any) {
-        return new Response(JSON.stringify({ error: error.message }), {
+        console.error('❌ Edge Function Error:', error);
+        console.error('❌ Error message:', error.message);
+        console.error('❌ Error stack:', error.stack);
+        console.error('❌ Error details:', JSON.stringify(error, null, 2));
+        
+        return new Response(JSON.stringify({ 
+            error: error.message,
+            details: error.toString(),
+            hint: error.hint || null,
+            code: error.code || null
+        }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 400,
         })

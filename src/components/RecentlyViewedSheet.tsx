@@ -6,7 +6,6 @@ import { ActivityIndicator, Dimensions, StyleSheet, Text, TouchableOpacity, View
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import ListingCard from './ListingCard';
-import ListingDetailsSheet from './ListingDetailsSheet';
 
 const { width, height } = Dimensions.get('window');
 
@@ -28,17 +27,15 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 interface RecentlyViewedSheetProps {
     onClose?: () => void;
+    onItemPress?: (listingId: string) => void;
 }
 
-const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose }, ref) => {
+const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress }, ref) => {
     const { colors, isDark } = useTheme();
     const snapPoints = useMemo(() => ['94%'], []);
 
-    const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
-
-    const detailsRef = React.useRef<BottomSheetModal>(null);
 
     const renderBackdrop = useCallback(
         (props: any) => (
@@ -59,8 +56,10 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
     };
 
     const handleCardPress = (item: any) => {
-        setSelectedListingId(item.id);
-        detailsRef.current?.present();
+        if (onItemPress) {
+            handleDismiss();
+            onItemPress(item.id);
+        }
     };
 
     // Fetch recently viewed items
@@ -135,6 +134,13 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                 });
 
                 setData(sortedData);
+
+                // Clean up AsyncStorage - remove IDs that no longer exist
+                const existingIds = combined.map((item: any) => item.id);
+                const validIds = recentIds.filter((id: string) => existingIds.includes(id));
+                if (validIds.length !== recentIds.length) {
+                    await AsyncStorage.setItem('recently_viewed', JSON.stringify(validIds));
+                }
             } catch (error) {
                 console.error('Error fetching recently viewed:', error);
                 setData([]);
@@ -172,6 +178,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                 onDismiss={handleDismiss}
                 backgroundStyle={{ backgroundColor: colors.background }}
                 handleIndicatorStyle={{ backgroundColor: colors.textSecondary }}
+                enablePanDownToClose={true}
             >
                 <View style={[styles.header, { borderBottomColor: colors.border }]}>
                     <View style={styles.headerContent}>
@@ -208,8 +215,6 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                     />
                 )}
             </BottomSheetModal>
-
-            <ListingDetailsSheet ref={detailsRef} listingId={selectedListingId} />
         </>
     );
 });

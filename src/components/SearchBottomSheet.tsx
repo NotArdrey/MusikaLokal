@@ -5,19 +5,19 @@ import { Dimensions, StyleSheet, Text, TextInput, TouchableOpacity, View } from 
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import ListingCard from './ListingCard';
-import ListingDetailsSheet from './ListingDetailsSheet';
 
 const { width } = Dimensions.get('window');
 
 interface SearchBottomSheetProps {
     onClose?: () => void;
+    onItemPress?: (listingId: string) => void;
 }
 
 import { useAuth } from '../context/AuthContext';
 
 // ... imports
 
-const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(({ onClose }, ref) => {
+const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(({ onClose, onItemPress }, ref) => {
     const { colors, isDark } = useTheme();
     const { userRole } = useAuth();
     const snapPoints = useMemo(() => ['94%'], []);
@@ -29,10 +29,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>((
 
     const [activeFilter, setActiveFilter] = useState('All');
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
-
-    // Detail Sheet Ref (for opening nested details from search)
-    const detailsRef = React.useRef<BottomSheetModal>(null);
 
     const renderBackdrop = useCallback(
         (props: any) => (
@@ -53,8 +49,10 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>((
     };
 
     const handleCardPress = (item: any) => {
-        setSelectedListingId(item.id);
-        detailsRef.current?.present();
+        if (onItemPress) {
+            handleDismiss();
+            onItemPress(item.id);
+        }
     };
 
     // Data State
@@ -238,8 +236,10 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>((
 
     // Handle invite action - opens the details sheet for booking/connecting
     const handleInvite = (item: any) => {
-        setSelectedListingId(item.id);
-        detailsRef.current?.present();
+        if (onItemPress) {
+            handleDismiss();
+            onItemPress(item.id);
+        }
     };
 
     const renderItem = ({ item }: { item: any }) => (
@@ -262,6 +262,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>((
             handleIndicatorStyle={{ backgroundColor: isDark ? '#4B5563' : '#E5E7EB', width: 40 }}
             keyboardBehavior="interactive"
             keyboardBlurBehavior="restore"
+            enablePanDownToClose={true}
         >
             <View style={{ flex: 1, minHeight: '100%' }}>
                 {/* 1. Modal Header & Controls */}
@@ -339,9 +340,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>((
                         </View>
                     }
                 />
-
-                {/* Nested Listing Details Sheet */}
-                <ListingDetailsSheet ref={detailsRef} listingId={selectedListingId} />
             </View>
         </BottomSheetModal>
     );

@@ -1,23 +1,101 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function SubmitReviewScreen() {
   const { colors, isDark } = useTheme();
+  const { userId, isAuthenticated } = useRequireAuth();
+  const params = useLocalSearchParams<{
+    studioId?: string;
+    gigId?: string;
+    targetUserId?: string;
+    bookingId?: string;
+    bookingType?: string;
+    entityName?: string;
+    entityType?: string;
+    reviewerRole?: string;
+  }>();
+
   const [selectedValue, setSelectedValue] = useState<number>(0);
   const ratingOptions = [1, 2, 3, 4, 5];
   const [modalVisible, setModalVisible] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  // Determine what we're reviewing based on params
+  const entityName = params.entityName || 'this booking';
+  const isReviewingUser = !!params.targetUserId;
+  const reviewTitle = isReviewingUser
+    ? `Rate ${entityName}`
+    : `Rate your experience`;
+  const reviewSubtitle = isReviewingUser
+    ? `How was your interaction with ${entityName}?`
+    : `How was your booking with ${entityName}?`;
+
+  const handleSubmitReview = async () => {
+    if (!userId || !isAuthenticated) {
+      Alert.alert('Error', 'You must be logged in to submit a review.');
+      return;
+    }
+
+    if (selectedValue === 0) {
+      Alert.alert('Error', 'Please select a rating.');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const reviewPayload: any = {
+        action: 'create_review',
+        userId,
+        rating: selectedValue,
+        content: feedback || null,
+        bookingId: params.bookingId,
+        bookingType: params.bookingType,
+        reviewerRole: params.reviewerRole,
+      };
+
+      // Set the target entity
+      if (params.studioId) reviewPayload.studioId = params.studioId;
+      if (params.gigId) reviewPayload.gigId = params.gigId;
+      if (params.targetUserId) reviewPayload.targetUserId = params.targetUserId;
+
+      const { data, error } = await supabase.functions.invoke('manage-bookings', {
+        body: reviewPayload
+      });
+
+      if (error) throw error;
+
+      if (data?.error) {
+        Alert.alert('Error', data.error);
+        return;
+      }
+
+      // Success - close modal and go back
+      setModalVisible(false);
+      Alert.alert('Success', 'Your review has been submitted!', [
+        { text: 'OK', onPress: () => router.back() }
+      ]);
+    } catch (e: any) {
+      console.error('Review submission error:', e);
+      Alert.alert('Error', 'Failed to submit review. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Submit Feedback" />
+        <Header title="Submit Review" />
 
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -26,10 +104,10 @@ export default function SubmitReviewScreen() {
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
             <View style={styles.header}>
               <Text style={[styles.title, { color: colors.text }]}>
-                Rate your experience
+                {reviewTitle}
               </Text>
               <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-                How was your booking with SoundWave Studio Malolos?
+                {reviewSubtitle}
               </Text>
             </View>
 
@@ -55,7 +133,7 @@ export default function SubmitReviewScreen() {
                 style={[
                   styles.textArea,
                   {
-                    borderColor: isDark ? '#374151' : '#E5E7EB', // border-gray-700 : border-gray-200
+                    borderColor: isDark ? '#374151' : '#E5E7EB',
                     backgroundColor: colors.inputBackground,
                     color: colors.text
                   }
@@ -71,15 +149,15 @@ export default function SubmitReviewScreen() {
             <TouchableOpacity
               style={[
                 styles.submitButton,
-                { backgroundColor: colors.primary, opacity: selectedValue === 0 ? 0.5 : 1 }
+                { backgroundColor: colors.primary, opacity: selectedValue === 0 || submitting ? 0.5 : 1 }
               ]}
               onPress={() => {
-                if (selectedValue > 0) setModalVisible(true)
+                if (selectedValue > 0 && !submitting) setModalVisible(true)
               }}
-              disabled={selectedValue === 0}
+              disabled={selectedValue === 0 || submitting}
             >
               <Text style={styles.submitButtonText}>
-                Submit Review
+                {submitting ? 'Submitting...' : 'Submit Review'}
               </Text>
             </TouchableOpacity>
           </ScrollView>
@@ -93,13 +171,10 @@ export default function SubmitReviewScreen() {
       <Modal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        title="Confirm Feedback"
-        message="Are you sure you want to submit this feedback?"
-        buttonText="Submit"
-        onConfirm={() => {
-          setModalVisible(false);
-          router.back();
-        }}
+        title="Confirm Review"
+        message={`Are you sure you want to submit this ${selectedValue}-star review?`}
+        buttonText={submitting ? "Submitting..." : "Submit"}
+        onConfirm={handleSubmitReview}
       />
     </>
   );
@@ -119,12 +194,12 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   title: {
-    fontSize: 20, // text-xl
+    fontSize: 20,
     marginBottom: 8,
     fontFamily: 'Poppins_600SemiBold',
   },
   subtitle: {
-    fontSize: 14, // text-sm
+    fontSize: 14,
     textAlign: 'center',
     paddingHorizontal: 16,
     fontFamily: 'Poppins_400Regular',
@@ -136,7 +211,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   label: {
-    fontSize: 14, // text-sm
+    fontSize: 14,
     marginBottom: 8,
     marginLeft: 4,
     fontFamily: 'Poppins_500Medium',
@@ -145,7 +220,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     padding: 16,
-    fontSize: 16, // text-base
+    fontSize: 16,
     height: 150,
     textAlignVertical: 'top',
     fontFamily: 'Poppins_400Regular',
@@ -158,12 +233,12 @@ const styles = StyleSheet.create({
     shadowColor: '#6366f1',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
-    shadowRadius: 3, // approximate shadow-md intent
+    shadowRadius: 3,
     elevation: 4,
   },
   submitButtonText: {
     color: 'white',
-    fontSize: 16, // text-base
+    fontSize: 16,
     fontFamily: 'Poppins_600SemiBold',
   },
   navbar: {

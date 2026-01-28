@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react'; // Added useEffect
 import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
@@ -96,13 +96,68 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
     </html>
     `;
 
+
+    useEffect(() => {
+        if (visible && startLocation) {
+            // Fetch initial address
+            fetchAddress(startLocation.lat, startLocation.lng);
+        }
+    }, [visible]);
+
+    const fetchAddress = async (lat: number, lng: number) => {
+        try {
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`, {
+                headers: {
+                    'User-Agent': 'MusikaLokalApp/1.0 (internal-test)'
+                }
+            });
+
+            const text = await response.text();
+            try {
+                const addrData = JSON.parse(text);
+                const locationData = {
+                    lat,
+                    lng,
+                    address: addrData.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+                };
+                setCurrentSelection(locationData);
+            } catch (parseError) {
+                console.log('Error parsing JSON from reverse geocode:', parseError);
+                console.log('Response text:', text);
+                throw parseError;
+            }
+        } catch (e) {
+            console.log('Error fetching initial address:', e);
+            // Fallback
+            setCurrentSelection({
+                lat,
+                lng,
+                address: `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+            });
+        }
+    };
+
     const handleSearch = async () => {
         if (!searchText.trim()) return;
         setLoading(true);
         try {
             // Use Nominatim API for geocoding (Free, subject to usage policy)
-            const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText)}`);
-            const data = await response.json();
+            const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchText)}`, {
+                headers: {
+                    'User-Agent': 'MusikaLokalApp/1.0 (internal-test)'
+                }
+            });
+
+            const text = await response.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseError) {
+                console.log('Error parsing JSON from search:', parseError);
+                console.log('Response text:', text);
+                alert('Search Error: Invalid response from server');
+                return;
+            }
 
             if (data && data.length > 0) {
                 const { lat, lon, display_name } = data[0];
@@ -117,8 +172,12 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                 }));
 
                 // Immediately consider this a selection so we have the address text
-                // But we wait for user to confirm via button in the UI usually
-                // For now, let's just move the map. User can refine pin.
+                const newSelection = {
+                    lat: latitude,
+                    lng: longitude,
+                    address: display_name
+                };
+                setCurrentSelection(newSelection);
             } else {
                 alert('Location not found');
             }
@@ -135,23 +194,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
             const data = JSON.parse(event.nativeEvent.data);
             if (data.type === 'locationSelected') {
                 // Reverse geocode to get address text
-                const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${data.lat}&lon=${data.lng}`);
-                const addrData = await response.json();
-
-                const locationData = {
-                    lat: data.lat,
-                    lng: data.lng,
-                    address: addrData.display_name || `${data.lat.toFixed(5)}, ${data.lng.toFixed(5)}`
-                };
-
-                // We don't auto-close, we let user confirm with button
-                // But we need to store this state in parent? 
-                // Actually the prompt says "pin their location", so let's pass it up on "Confirm" button press.
-                // For now, let's store it locally in a ref or state if needed, but since we want the "Confirm" button to pass it back
-                // We'll trust the parent to handle the final state. 
-                // Wait, the "Confirm" button needs the current marker pos.
-                // Let's store current selected pos here.
-                setCurrentSelection(locationData);
+                await fetchAddress(data.lat, data.lng);
             }
         } catch (e) {
             console.log("Error parsing message", e);
@@ -182,6 +225,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                             value={searchText}
                             onChangeText={setSearchText}
                             onSubmitEditing={handleSearch}
+                            returnKeyType="search"
                         />
                         {loading && <ActivityIndicator size="small" color="#666" style={{ marginLeft: 8 }} />}
                     </View>
@@ -194,12 +238,15 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                     style={styles.webview}
                     onMessage={handleMessage}
                     onLoadEnd={() => setLoading(false)}
+                    javaScriptEnabled={true}
+                    domStorageEnabled={true}
+                    originWhitelist={['*']}
                 />
 
                 {/* Confirm Button */}
                 <View style={styles.footer}>
-                    <Text style={styles.addressPreview} numberOfLines={1}>
-                        {currentSelection ? currentSelection.address : 'Tap or drag map to select'}
+                    <Text style={styles.addressPreview} numberOfLines={2}>
+                        {currentSelection ? currentSelection.address : 'Loading location...'}
                     </Text>
                     <TouchableOpacity
                         style={[styles.confirmBtn, !currentSelection && styles.disabledBtn]}
@@ -215,6 +262,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
 }
 
 const styles = StyleSheet.create({
+
     container: {
         flex: 1,
         backgroundColor: '#fff',

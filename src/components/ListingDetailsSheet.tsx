@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { forwardRef, useEffect, useMemo, useState } from 'react';
@@ -9,7 +8,6 @@ import {
     ActivityIndicator,
     Dimensions,
     Image,
-    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -17,10 +15,13 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { Calendar } from 'react-native-calendars';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import CustomAlert from './CustomAlert';
 import Modal from './modal';
+import VideoUploader from './VideoUploader';
 
 const { width, height } = Dimensions.get('window');
 const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
@@ -45,6 +46,15 @@ interface ListingDetailsSheetProps {
     listingId: string | null;
 }
 
+const formatTime12 = (time24: string) => {
+    if (!time24) return '';
+    const [hours, minutes] = time24.split(':');
+    const h = parseInt(hours, 10);
+    const suffix = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${minutes} ${suffix}`;
+};
+
 const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProps>(({ listingId }, ref) => {
     const { colors, isDark } = useTheme();
     const { userId } = useAuth();
@@ -54,8 +64,33 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const [modalVisible, setModalVisible] = useState(false);
     const [bookingNotes, setBookingNotes] = useState('');
 
+    // Application State (for Gig applications)
+    const [pitchMessage, setPitchMessage] = useState('');
+    const [videoUrl, setVideoUrl] = useState('');
+    const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
+    const [hasExistingApplication, setHasExistingApplication] = useState(false);
+    const [existingApplicationStatus, setExistingApplicationStatus] = useState<string | null>(null);
+
+    // Studio Booking State (prevent spam)
+    const [hasExistingStudioBooking, setHasExistingStudioBooking] = useState(false);
+    const [existingStudioBookingStatus, setExistingStudioBookingStatus] = useState<string | null>(null);
+
+    // Group Selection State (for gig applications)
+    const [userGroups, setUserGroups] = useState<any[]>([]);
+    const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+    const [loadingGroups, setLoadingGroups] = useState(false);
+
+    // Alert State
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: 'success' | 'error' | 'warning' | 'info';
+        title: string;
+        message: string;
+    }>({ type: 'info', title: '', message: '' });
+
     // Review State
     const [reviews, setReviews] = useState<any[]>([]);
+    const [existingBookings, setExistingBookings] = useState<any[]>([]); // Bookings from DB
     const [relatedListings, setRelatedListings] = useState<any[]>([]);
 
     // Tab State
@@ -68,11 +103,14 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         d.setHours(d.getHours() + 4);
         return d;
     });
-    const [showPicker, setShowPicker] = useState(false);
-    const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
-    const [activeField, setActiveField] = useState<'date' | 'start' | 'end'>('date');
     const [duration, setDuration] = useState(4);
-    
+
+    // New Calendar and Slot State
+    const [selectedDate, setSelectedDate] = useState('');
+    const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+    const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+    const [markedDates, setMarkedDates] = useState<any>({});
+
     // Multiple bookings state with pricing
     const [bookings, setBookings] = useState<{ date: Date; startTime: Date; endTime: Date; pricing?: any }[]>([]);
     const [showAddBooking, setShowAddBooking] = useState(false);
@@ -84,7 +122,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             setDuration(0);
             return;
         }
-        
+
         const start = new Date(date).getTime();
         const end = new Date(endTime).getTime();
         // Handle cross-day or invalid times? For now simple diff
@@ -105,17 +143,199 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const [confirmTitle, setConfirmTitle] = useState('');
 
     const handleConfirm = (action: () => void, title: string, message: string) => {
+        console.log('🔵 handleConfirm called');
+        console.log('Title:', title);
+        console.log('Message:', message);
+        console.log('Action function:', action.name || 'anonymous');
         setConfirmAction(() => action);
         setConfirmTitle(title);
         setConfirmMessage(message);
         setModalVisible(true);
+        console.log('Modal should now be visible');
+    };
+
+    // Check if user has already applied to this gig
+    const checkExistingApplication = async () => {
+        if (!userId || !listingId || !group || group.type !== 'Gig') return;
+
+        try {
+            // Check for any existing application by this user (either personal or via any group)
+            const { data, error } = await supabase
+                .from('gig_applications')
+                .select('id, status, group_id')
+                .eq('applicant_id', userId)
+                .eq('gig_id', listingId)
+                .maybeSingle();
+
+            if (error) {
+                console.error('Error checking existing application:', error);
+                return;
+            }
+
+            if (data) {
+                console.log('📋 User has already applied to this gig:', data);
+                setHasExistingApplication(true);
+                setExistingApplicationStatus(data.status);
+            } else {
+                setHasExistingApplication(false);
+                setExistingApplicationStatus(null);
+            }
+        } catch (err) {
+            console.error('Error checking application:', err);
+        }
+    };
+
+    // Fetch user's groups for gig application
+    const fetchUserGroups = async () => {
+        if (!userId || !group || group.type !== 'Gig') return;
+        
+        setLoadingGroups(true);
+        try {
+            const { data, error } = await supabase
+                .from('groups')
+                .select('id, name, images, genre')
+                .eq('owner_id', userId);
+
+            if (error) {
+                console.error('Error fetching user groups:', error);
+                return;
+            }
+
+            setUserGroups(data || []);
+        } catch (err) {
+            console.error('Error fetching groups:', err);
+        } finally {
+            setLoadingGroups(false);
+        }
+    };
+
+    // Check if user has an existing booking for this studio
+    const checkExistingStudioBooking = async () => {
+        if (!userId || !listingId || !group || group.type !== 'Studio') return;
+
+        try {
+            // Check for any recent booking (pending, confirmed, or cancelled)
+            const { data, error } = await supabase
+                .from('studio_bookings')
+                .select('id, status, booking_date')
+                .eq('user_id', userId)
+                .eq('studio_id', listingId)
+                .in('status', ['pending', 'confirmed', 'cancelled'])
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (error) {
+                console.error('Error checking existing studio booking:', error);
+                return;
+            }
+
+            if (data) {
+                console.log('📋 User has an existing booking for this studio:', data);
+                setHasExistingStudioBooking(true);
+                setExistingStudioBookingStatus(data.status);
+            } else {
+                setHasExistingStudioBooking(false);
+                setExistingStudioBookingStatus(null);
+            }
+        } catch (err) {
+            console.error('Error checking studio booking:', err);
+        }
+    };
+
+    // Handle Submit Application for Gigs
+    const handleSubmitApplication = async () => {
+        console.log('=== handleSubmitApplication CALLED ===');
+        console.log('userId:', userId);
+        console.log('listingId:', listingId);
+        console.log('group:', group);
+        console.log('pitchMessage:', pitchMessage);
+        console.log('videoUrl:', videoUrl);
+
+        if (!userId || !listingId || !group) {
+            console.error('Missing required data for application:', { userId, listingId, group });
+            return;
+        }
+
+        // Check if user already applied
+        if (hasExistingApplication) {
+            setAlertConfig({
+                type: 'warning',
+                title: 'Already Applied',
+                message: `You have already submitted an application for this gig. Status: ${existingApplicationStatus || 'pending'}.`
+            });
+            setAlertVisible(true);
+            return;
+        }
+
+        setIsSubmittingApplication(true);
+        console.log('Inserting application into database...');
+        
+        try {
+            const { data, error } = await supabase
+                .from('gig_applications')
+                .insert({
+                    applicant_id: userId,
+                    gig_id: listingId,
+                    group_id: selectedGroupId || null,
+                    pitch_message: pitchMessage,
+                    video_url: videoUrl || null,
+                    status: 'pending'
+                })
+                .select()
+                .single();
+
+            if (error) {
+                console.error('Error submitting application:', error);
+                console.error('Error details:', JSON.stringify(error, null, 2));
+                setAlertConfig({
+                    type: 'error',
+                    title: 'Submission Failed',
+                    message: error.message || 'Failed to submit application. Please try again.'
+                });
+                setAlertVisible(true);
+                return;
+            }
+
+            console.log('✅ Application submitted successfully!', data);
+            
+            // Update application status
+            setHasExistingApplication(true);
+            setExistingApplicationStatus('pending');
+            
+            // Show success alert
+            setAlertConfig({
+                type: 'success',
+                title: 'Application Submitted!',
+                message: 'Your application has been submitted successfully. The venue owner will review it and get back to you soon.'
+            });
+            setAlertVisible(true);
+            
+            // Clear form
+            setPitchMessage('');
+            setVideoUrl('');
+            
+            // Close the bottom sheet after alert is dismissed
+            setTimeout(() => {
+                if (ref && 'current' in ref && ref.current) {
+                    ref.current.dismiss();
+                }
+            }, 2500);
+        } catch (err) {
+            console.error('Unexpected error:', err);
+        } finally {
+            setIsSubmittingApplication(false);
+        }
     };
 
     // Snap points
     const snapPoints = useMemo(() => ['50%', '95%'], []);
 
     useEffect(() => {
+        console.log('=== ListingDetailsSheet useEffect triggered ===');
+        console.log('listingId:', listingId);
         if (listingId) {
+            console.log('Fetching group details for:', listingId);
             fetchGroupDetails();
             setActiveTab('About');
             // Reset booking state
@@ -123,14 +343,56 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             setEndTime(null as any);
             setBookings([]);
             setBookingNotes('');
+            // Reset application state
+            setPitchMessage('');
+            setVideoUrl('');
+            setHasExistingApplication(false);
+            setExistingApplicationStatus(null);
+            // Reset studio booking state
+            setHasExistingStudioBooking(false);
+            setExistingStudioBookingStatus(null);
+            // Reset group selection state
+            setSelectedGroupId(null);
+            setUserGroups([]);
+            console.log('Application form reset');
             setShowAddBooking(false);
         }
     }, [listingId]);
 
+    // Check for existing application when group data is loaded
+    useEffect(() => {
+        if (group && userId && group.type === 'Gig') {
+            checkExistingApplication();
+            fetchUserGroups();
+        }
+    }, [group, userId]);
+
+    // Check for existing studio booking when group data is loaded
+    useEffect(() => {
+        if (group && userId && group.type === 'Studio') {
+            checkExistingStudioBooking();
+        }
+    }, [group, userId]);
+
+    // Debug effect to monitor application state changes
+    useEffect(() => {
+        console.log('📝 Application State Updated:');
+        console.log('  - pitchMessage:', pitchMessage);
+        console.log('  - videoUrl:', videoUrl);
+        console.log('  - isSubmittingApplication:', isSubmittingApplication);
+    }, [pitchMessage, videoUrl, isSubmittingApplication]);
+
+    // Debug effect to monitor userId changes
+    useEffect(() => {
+        console.log('👤 userId changed:', userId);
+    }, [userId]);
+
     const fetchGroupDetails = async () => {
+        console.log('=== fetchGroupDetails called ===');
         setLoading(true);
         try {
             const { data: { user } } = await supabase.auth.getUser();
+            console.log('User:', user?.id);
 
             let data = null;
             let type = 'Group';
@@ -177,12 +439,14 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             }
 
             if (data && ownerId) {
+                console.log('Found data:', { type, id: data.id, name: data.name });
                 // Fetch owner profile separately
                 const { data: ownerProfile } = await supabase
                     .from('profiles')
                     .select('full_name, avatar_url, role')
                     .eq('id', ownerId)
                     .single();
+                console.log('Owner profile:', ownerProfile);
 
                 const normalizedData = {
                     ...data,
@@ -194,16 +458,172 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     review_count: data.review_count || 0,
                     rating: data.rating || 0
                 };
+                
+                console.log('Setting group data:', normalizedData);
                 setGroup(normalizedData);
+                
+                // Fetch existing bookings for availability calculation
+                const { data: bookingData } = await supabase.functions.invoke('manage-listings', {
+                    body: { action: 'fetch_studio_bookings', studioId: data.id }
+                });
+                const fetchedBookings = bookingData || [];
+                setExistingBookings(fetchedBookings);
+
+                // Process availability (Availability + Bookings)
+                if (normalizedData.availability) {
+                    processAvailability(normalizedData.availability, fetchedBookings);
+                }
+            } else {
+                console.log('No data found for listingId:', listingId);
             }
 
         } catch (e) {
             console.log('Error fetching details:', e);
         } finally {
             setLoading(false);
+            console.log('fetchGroupDetails complete, loading:', false);
         }
     };
 
+
+    const processAvailability = (availability: any[], bookings: any[]) => {
+        const marked: any = {};
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Map availability for easier lookup
+        const availabilityMap: { [key: number]: any } = {};
+        availability.forEach((daySchedule: any) => {
+            const dayIndex = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].indexOf(daySchedule.day.toLowerCase());
+            if (dayIndex !== -1) availabilityMap[dayIndex] = daySchedule;
+        });
+
+        // Loop next 90 days to ensure coverage
+        for (let i = 0; i < 90; i++) {
+            const date = new Date(today);
+            date.setDate(today.getDate() + i);
+            const dateStr = date.toISOString().split('T')[0];
+            const dayIndex = date.getDay();
+
+            const daySchedule = availabilityMap[dayIndex];
+
+            // Check if Open
+            if (daySchedule && daySchedule.slots && daySchedule.slots.length > 0) {
+                // Calculate if Fully Booked
+                // 1. Generate all potential slots for this day
+                const potentialSlots: string[] = [];
+                daySchedule.slots.forEach((slot: any) => {
+                    const start = new Date(`${dateStr}T${slot.start}`);
+                    const end = new Date(`${dateStr}T${slot.end}`);
+                    const current = new Date(start);
+                    while (current < end) {
+                        potentialSlots.push(current.toTimeString().slice(0, 5));
+                        current.setHours(current.getHours() + 1);
+                    }
+                });
+
+                // 2. Check bookings for this day (Confirmed OR Pending should block)
+                const dayBookings = bookings.filter((b: any) =>
+                    b.status !== 'cancelled' && new Date(b.start_time).toISOString().split('T')[0] === dateStr
+                );
+
+                // 3. Mark slots as taken
+                // Simple logic: If booking starts at X, that slot is taken.
+                // NOTE: This assumes 1-hour alignment. For robust check, we need range overlap.
+                const bookedSlots = dayBookings.map((b: any) =>
+                    new Date(b.start_time).toTimeString().slice(0, 5)
+                );
+
+                // If duration > 1, we might need to block multiple slots, but stored bookings have start_time.
+                // Robustness: A booking usually blocks its entire duration.
+                // Let's refine: For each booking, block all slots covered by it.
+                const blockedTimes = new Set<string>();
+                dayBookings.forEach((b: any) => {
+                    const bStart = new Date(b.start_time);
+                    const bEnd = new Date(b.end_time);
+                    const current = new Date(bStart);
+                    while (current < bEnd) {
+                        blockedTimes.add(current.toTimeString().slice(0, 5));
+                        current.setHours(current.getHours() + 1);
+                    }
+                });
+
+                const availableCount = potentialSlots.filter(s => !blockedTimes.has(s)).length;
+
+                if (availableCount > 0) {
+                    marked[dateStr] = {
+                        marked: true,
+                        dotColor: colors.primary
+                    };
+                } else {
+                    // Fully Booked
+                    marked[dateStr] = {
+                        disabled: true,
+                        disableTouchEvent: true,
+                        textColor: isDark ? '#4B5563' : '#D1D5DB',
+                    };
+                }
+            } else {
+                // Close / Unavailable
+                marked[dateStr] = {
+                    disabled: true,
+                    disableTouchEvent: true,
+                    textColor: isDark ? '#4B5563' : '#D1D5DB', // Gray out
+                };
+            }
+        }
+
+        setMarkedDates(marked);
+    };
+
+    const fetchAvailableSlots = async (dateStr: string) => {
+        if (!group?.availability) return;
+
+        const selectedDate = new Date(dateStr);
+        const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][selectedDate.getDay()];
+
+        const daySchedule = group.availability.find((a: any) => a.day.toLowerCase() === dayName);
+        if (!daySchedule || !daySchedule.slots) {
+            setAvailableSlots([]);
+            return;
+        }
+
+        // Generate time slots from the availability
+        const slots: string[] = [];
+
+        // Identify blocked times from existing bookings (Confirmed OR Pending)
+        const dayBookings = existingBookings.filter((b: any) =>
+            b.status !== 'cancelled' && new Date(b.start_time).toISOString().split('T')[0] === dateStr
+        );
+        const blockedTimes = new Set<string>();
+        dayBookings.forEach((b: any) => {
+            const bStart = new Date(b.start_time);
+            const bEnd = new Date(b.end_time);
+            const current = new Date(bStart);
+            while (current < bEnd) {
+                blockedTimes.add(current.toTimeString().slice(0, 5));
+                current.setHours(current.getHours() + 1);
+            }
+        });
+
+        daySchedule.slots.forEach((slot: any) => {
+            const start = new Date(`${dateStr}T${slot.start}`);
+            const end = new Date(`${dateStr}T${slot.end}`);
+
+            // Generate hourly slots or based on duration
+            const current = new Date(start);
+            while (current < end) {
+                const timeStr = current.toTimeString().slice(0, 5); // HH:MM
+                // Only add if not blocked
+                if (!blockedTimes.has(timeStr)) {
+                    slots.push(timeStr);
+                }
+                current.setHours(current.getHours() + 1); // Assuming 1-hour slots
+            }
+        });
+
+        setAvailableSlots(slots);
+    };
 
     const toggleFavorite = async () => {
         const nextState = !isFavorited;
@@ -315,7 +735,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
     const renderBackdrop = React.useCallback(
         (props: any) => (
-            <BottomSheetModal
+            <BottomSheetBackdrop
                 {...props}
                 disappearsOnIndex={-1}
                 appearsOnIndex={0}
@@ -373,172 +793,137 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         </View>
     );
 
-    const onChangePicker = (event: any, selectedValue?: Date) => {
-        // Dismiss picker after selection
-        if (event.type === 'dismissed' || event.type === 'set') {
-            if (Platform.OS === 'ios' && event.type === 'set') {
-                // iOS: Keep open until user taps outside or confirms
-                // We'll close it manually after a delay
-                setTimeout(() => setShowPicker(false), 100);
-            } else if (Platform.OS === 'android') {
-                setShowPicker(false);
-            }
-        }
-        
-        if (selectedValue && event.type === 'set') {
-            if (activeField === 'date') {
-                // First time selecting date - initialize with default times
-                if (!date) {
-                    const newDate = new Date(selectedValue);
-                    newDate.setHours(9, 0, 0, 0); // Default to 9:00 AM
-                    setDate(newDate);
-                    
-                    const newEnd = new Date(selectedValue);
-                    newEnd.setHours(13, 0, 0, 0); // Default to 1:00 PM (4 hours later)
-                    setEndTime(newEnd);
-                } else {
-                    // Update date, keep existing times
-                    const newStart = new Date(date);
-                    newStart.setFullYear(selectedValue.getFullYear(), selectedValue.getMonth(), selectedValue.getDate());
-                    setDate(newStart);
-
-                    const newEnd = new Date(endTime);
-                    newEnd.setFullYear(selectedValue.getFullYear(), selectedValue.getMonth(), selectedValue.getDate());
-                    setEndTime(newEnd);
-                }
-
-            } else if (activeField === 'start') {
-                const newDate = new Date(date);
-                newDate.setHours(selectedValue.getHours(), selectedValue.getMinutes());
-                setDate(newDate);
-            } else if (activeField === 'end') {
-                const newEnd = new Date(endTime);
-                newEnd.setHours(selectedValue.getHours(), selectedValue.getMinutes());
-                // If end time is earlier than start, maybe it's next day? 
-                // For UI simplicity, we just update the time part. Logic handles diff.
-                setEndTime(newEnd);
-            }
-        }
-    };
-
-    const showPickerBtn = (field: 'date' | 'start' | 'end') => {
-        console.log('showPickerBtn called with field:', field);
-        setActiveField(field);
-        setPickerMode(field === 'date' ? 'date' : 'time');
-        setShowPicker(true);
-        console.log('Picker should be visible now');
-    };
-
     const renderBookingControls = () => (
-        <View style={styles.pickerSection}>
+        <View style={[styles.bookingContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: colors.border, borderWidth: 1, borderRadius: 16, overflow: 'hidden', padding: 16, marginBottom: 24 }]}>
+            {/* Header */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Schedule Session</Text>
-                <View style={[styles.durationBadge, { backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)' }]}>
-                    <Ionicons name="time-outline" size={16} color={colors.primary} />
-                    <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, marginLeft: 4, fontSize: 13 }}>
-                        {duration}h
-                    </Text>
-                </View>
-            </View>
-
-            {/* Date Card */}
-            <TouchableOpacity
-                style={[styles.dateTimeCard, { 
-                    borderColor: colors.border, 
-                    backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
-                    marginBottom: 12
-                }]}
-                onPress={() => showPickerBtn('date')}
-            >
-                <View style={[styles.dateIconContainer, { backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)' }]}>
-                    <Ionicons name="calendar" size={24} color={colors.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                    <Text style={[styles.dateTimeLabel, { color: colors.textSecondary }]}>Session Date</Text>
-                    <Text style={[styles.dateTimeValue, { color: date ? colors.text : colors.textSecondary }]}>
-                        {date ? date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : 'Select a date'}
-                    </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-
-            {/* Time Cards Row */}
-            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-                <TouchableOpacity
-                    style={[styles.timeCard, { 
-                        borderColor: colors.border, 
-                        backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
-                        flex: 1
-                    }]}
-                    onPress={() => showPickerBtn('start')}
-                >
-                    <View style={[styles.timeIconContainer, { backgroundColor: isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.1)' }]}>
-                        <Ionicons name="play-circle" size={20} color="#10B981" />
-                    </View>
-                    <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>Start Time</Text>
-                        <Text style={[styles.timeValue, { color: date ? colors.text : colors.textSecondary }]}>
-                            {date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 16, marginBottom: 0 }]}>Select Date & Time</Text>
+                {duration > 0 && (
+                    <View style={[styles.durationBadge, { backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)' }]}>
+                        <Ionicons name="time-outline" size={14} color={colors.primary} />
+                        <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, marginLeft: 4, fontSize: 12 }}>
+                            {duration}h Session
                         </Text>
                     </View>
-                    <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
-                </TouchableOpacity>
-
-                <View style={{ justifyContent: 'center', paddingHorizontal: 4 }}>
-                    <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} />
-                </View>
-
-                <TouchableOpacity
-                    style={[styles.timeCard, { 
-                        borderColor: colors.border, 
-                        backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
-                        flex: 1
-                    }]}
-                    onPress={() => showPickerBtn('end')}
-                >
-                    <View style={[styles.timeIconContainer, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.1)' }]}>
-                        <Ionicons name="stop-circle" size={20} color="#EF4444" />
-                    </View>
-                    <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>End Time</Text>
-                        <Text style={[styles.timeValue, { color: endTime ? colors.text : colors.textSecondary }]}>
-                            {endTime ? endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                        </Text>
-                    </View>
-                    <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
-                </TouchableOpacity>
+                )}
             </View>
 
-            {/* Native Picker Component */}
-            {showPicker && Platform.OS !== 'web' && (
-                <View style={[styles.pickerContainer, { 
-                    backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
-                    borderColor: colors.border,
-                    marginBottom: 16,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    overflow: 'hidden'
-                }]}>
-                    {Platform.OS === 'ios' && (
-                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', padding: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                            <TouchableOpacity 
-                                onPress={() => setShowPicker(false)}
-                                style={{ paddingHorizontal: 16, paddingVertical: 8 }}
-                            >
-                                <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>Done</Text>
-                            </TouchableOpacity>
+            {/* 1. The Calendar (The Anchor) */}
+            <Calendar
+                current={new Date().toISOString().split('T')[0]}
+                minDate={new Date().toISOString().split('T')[0]}
+                markedDates={{
+                    ...markedDates,
+                    [selectedDate]: {
+                        selected: true,
+                        selectedColor: colors.primary,
+                        selectedTextColor: '#FFFFFF',
+                        customStyles: {
+                            container: {
+                                backgroundColor: colors.primary,
+                                elevation: 2
+                            },
+                            text: {
+                                fontWeight: 'bold'
+                            }
+                        }
+                    }
+                }}
+                onDayPress={(day) => {
+                    setSelectedDate(day.dateString);
+                    setSelectedSlot(null);
+                    fetchAvailableSlots(day.dateString);
+                    // Update date state
+                    const selectedDateObj = new Date(day.dateString);
+                    setDate(selectedDateObj);
+                }}
+                theme={{
+                    backgroundColor: 'transparent',
+                    calendarBackground: 'transparent',
+                    textSectionTitleColor: colors.textSecondary,
+                    selectedDayBackgroundColor: colors.primary,
+                    selectedDayTextColor: '#FFFFFF',
+                    todayTextColor: colors.primary,
+                    dayTextColor: colors.text,
+                    textDisabledColor: isDark ? '#4B5563' : '#D1D5DB',
+                    dotColor: colors.primary,
+                    selectedDotColor: '#FFFFFF',
+                    arrowColor: colors.primary,
+                    monthTextColor: colors.text,
+                    indicatorColor: colors.primary,
+                    textDayFontFamily: 'Poppins_500Medium',
+                    textMonthFontFamily: 'Poppins_600SemiBold',
+                    textDayHeaderFontFamily: 'Poppins_500Medium',
+                    textDayFontSize: 14,
+                    textMonthFontSize: 16,
+                    textDayHeaderFontSize: 12
+                }}
+                enableSwipeMonths={true}
+                style={{
+                    marginBottom: selectedDate ? 16 : 0
+                }}
+            />
+
+            {/* 2. The Slot Grid (The Action) - Reveals on Date Selection */}
+            {selectedDate && (
+                <View style={[styles.slotGridContainer, { borderTopWidth: 1, borderTopColor: isDark ? '#374151' : '#F3F4F6', paddingTop: 16 }]}>
+                    <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
+                        Available Slots for {new Date(selectedDate).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                    </Text>
+
+                    {availableSlots.length > 0 ? (
+                        <View style={styles.slotGrid}>
+                            {availableSlots.map((slot, index) => {
+                                const isSelected = selectedSlot === slot;
+                                return (
+                                    <TouchableOpacity
+                                        key={index}
+                                        style={[
+                                            styles.slotButton,
+                                            {
+                                                backgroundColor: isSelected ? (isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)') : (isDark ? '#374151' : '#F3F4F6'),
+                                                borderColor: isSelected ? (colors.primary === '#7c3aed' ? '#FFD700' : colors.primary) : 'transparent', // Gold-ish border if primary is purple, or just primary
+                                                borderWidth: isSelected ? 2 : 0,
+                                                shadowColor: isSelected ? (colors.primary === '#7c3aed' ? '#FFD700' : colors.primary) : 'transparent',
+                                                shadowOffset: { width: 0, height: 0 },
+                                                shadowOpacity: isSelected ? 0.5 : 0,
+                                                shadowRadius: 8,
+                                                elevation: isSelected ? 5 : 0
+                                            }
+                                        ]}
+                                        onPress={() => {
+                                            setSelectedSlot(slot);
+                                            // Update start time
+                                            const [hours, minutes] = slot.split(':');
+                                            const startDate = new Date(selectedDate);
+                                            startDate.setHours(parseInt(hours), parseInt(minutes));
+                                            setDate(startDate); // Update main date state with time
+
+                                            // Set end time default duration (e.g. 4 hours)
+                                            // Re-calculate end time logic here or rely on prev
+                                            const endDate = new Date(startDate);
+                                            endDate.setHours(startDate.getHours() + duration);
+                                            setEndTime(endDate);
+                                        }}
+                                    >
+                                        <Text style={{
+                                            color: isSelected ? colors.primary : colors.text,
+                                            fontFamily: isSelected ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
+                                            fontSize: 13
+                                        }}>
+                                            {formatTime12(slot)}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                    ) : (
+                        <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+                            <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 13 }}>
+                                No available slots for this date.
+                            </Text>
                         </View>
                     )}
-                    <DateTimePicker
-                        testID="dateTimePicker"
-                        value={activeField === 'end' ? (endTime || new Date()) : (date || new Date())}
-                        mode={pickerMode}
-                        is24Hour={true}
-                        onChange={onChangePicker}
-                        minimumDate={activeField === 'date' ? new Date() : undefined}
-                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                        style={{ backgroundColor: 'transparent' }}
-                    />
                 </View>
             )}
         </View>
@@ -550,20 +935,24 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
     // --- SUB-SECTIONS ---
 
-    const renderGallery = () => (
-        <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Gallery</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryContainer}>
-                {[1, 2, 3, 4].map((i) => (
-                    <Image
-                        key={i}
-                        source={{ uri: group.images?.[i % (group.images?.length || 1)] || `https://picsum.photos/300/200?random=${i + 10}` }}
-                        style={styles.galleryImage}
-                    />
-                ))}
-            </ScrollView>
-        </View>
-    );
+    const renderGallery = () => {
+        if (!group.images || group.images.length === 0) return null;
+
+        return (
+            <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Gallery</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryContainer}>
+                    {group.images.map((img: string, i: number) => (
+                        <Image
+                            key={i}
+                            source={{ uri: img }}
+                            style={styles.galleryImage}
+                        />
+                    ))}
+                </ScrollView>
+            </View>
+        );
+    };
 
     // Responsive Review Card Width
     const CARD_WIDTH = width * 0.85;
@@ -667,26 +1056,26 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const renderStudioSetup = () => {
         const amenities = group.amenities || [];
         const equipment: string[] = [];
-        
+
         // Categorize amenities as equipment
         if (amenities.length > 0) {
             amenities.forEach((item: string) => {
                 const lower = item.toLowerCase();
-                if (lower.includes('mic') || lower.includes('drum') || lower.includes('guitar') || 
+                if (lower.includes('mic') || lower.includes('drum') || lower.includes('guitar') ||
                     lower.includes('bass') || lower.includes('keyboard') || lower.includes('amp') ||
                     lower.includes('console') || lower.includes('interface')) {
                     equipment.push(item);
                 }
             });
         }
-        
+
         return (
             <View style={styles.tabContent}>
                 <View style={styles.section}>
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>Studio Amenities</Text>
                     <View style={styles.tagsContainer}>
                         {amenities.length > 0 ? amenities.map((tag: string, index: number) => (
-                            <View key={`${tag}-${index}`} style={[styles.tag, { 
+                            <View key={`${tag}-${index}`} style={[styles.tag, {
                                 borderColor: colors.primary,
                                 backgroundColor: isDark ? 'rgba(124, 58, 237, 0.1)' : 'rgba(124, 58, 237, 0.05)'
                             }]}>
@@ -744,6 +1133,39 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
         return (
             <View style={styles.tabContent}>
+                {/* Status display for existing booking */}
+                {hasExistingStudioBooking && (
+                    <View style={[
+                        styles.infoBox, 
+                        { 
+                            backgroundColor: existingStudioBookingStatus === 'cancelled' ? '#EF444420' : 
+                                            existingStudioBookingStatus === 'confirmed' ? '#10B98120' :
+                                            colors.primary + '20', 
+                            borderColor: existingStudioBookingStatus === 'cancelled' ? '#EF4444' : 
+                                        existingStudioBookingStatus === 'confirmed' ? '#10B981' :
+                                        colors.primary,
+                            marginBottom: 16 
+                        }
+                    ]}>
+                        <Ionicons 
+                            name={existingStudioBookingStatus === 'cancelled' ? 'close-circle' : 
+                                  existingStudioBookingStatus === 'confirmed' ? 'checkmark-circle' :
+                                  'information-circle'} 
+                            size={20} 
+                            color={existingStudioBookingStatus === 'cancelled' ? '#EF4444' : 
+                                   existingStudioBookingStatus === 'confirmed' ? '#10B981' :
+                                   colors.primary} 
+                        />
+                        <Text style={[styles.infoText, { color: colors.text }]}>
+                            {existingStudioBookingStatus === 'cancelled' 
+                                ? 'Your booking request was declined by the studio owner.' 
+                                : existingStudioBookingStatus === 'confirmed'
+                                ? 'Your booking has been confirmed! Check your bookings page for details.'
+                                : 'You already have a pending booking for this studio. Please wait for the owner to respond before creating another booking.'}
+                        </Text>
+                    </View>
+                )}
+
                 {/* Show Studio Availability */}
                 {availability.length > 0 && (
                     <View style={[styles.section, { marginBottom: 16 }]}>
@@ -758,7 +1180,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                     {daySchedule.slots.map((slot: any, i: number) => (
                                         <View key={i} style={[styles.timeSlotChip, { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderColor: colors.border }]}>
                                             <Ionicons name="time-outline" size={12} color={colors.primary} />
-                                            <Text style={{ color: colors.text, fontSize: 11, marginLeft: 4 }}>{slot.start} - {slot.end}</Text>
+                                            <Text style={{ color: colors.text, fontSize: 11, marginLeft: 4 }}>{formatTime12(slot.start)} - {formatTime12(slot.end)}</Text>
                                         </View>
                                     ))}
                                 </View>
@@ -776,11 +1198,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             const end = new Date(booking.endTime).getTime();
                             let hours = (end - start) / (1000 * 60 * 60);
                             if (hours < 0) hours += 24;
-                            
+
                             // Use calculated pricing or fallback
                             const cost = booking.pricing?.final_price || (parseInt(displayRate.replace(/,/g, '')) * hours);
                             const hasModifiers = booking.pricing?.modifiers && Object.keys(booking.pricing.modifiers).length > 0;
-                            
+
                             return (
                                 <View key={index} style={[styles.bookingCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 8 }]}>
                                     <View style={{ flex: 1 }}>
@@ -793,7 +1215,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                             <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
                                             <Text style={{ color: colors.textSecondary, marginLeft: 6, fontSize: 12 }}>
-                                                {booking.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {booking.endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h)
+                                                {booking.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} - {booking.endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} ({booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h)
                                             </Text>
                                         </View>
                                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
@@ -819,7 +1241,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 )}
 
                 {/* Add Booking Section */}
-                {showAddBooking || bookings.length === 0 ? (
+                {!hasExistingStudioBooking && (showAddBooking || bookings.length === 0) ? (
                     <>
                         {renderBookingControls()}
 
@@ -872,9 +1294,9 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         }
 
                                         // Add to cart with pricing data
-                                        setBookings([...bookings, { 
-                                            date: new Date(date), 
-                                            startTime: new Date(date), 
+                                        setBookings([...bookings, {
+                                            date: new Date(date),
+                                            startTime: new Date(date),
                                             endTime: new Date(endTime),
                                             pricing: pricing[0]
                                         }]);
@@ -903,7 +1325,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             )}
                         </TouchableOpacity>
                     </>
-                ) : (
+                ) : !hasExistingStudioBooking ? (
                     <TouchableOpacity
                         style={[styles.secondaryBtn, { borderColor: colors.primary, backgroundColor: 'transparent', marginBottom: 16 }]}
                         onPress={() => setShowAddBooking(true)}
@@ -911,7 +1333,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
                         <Text style={[styles.secondaryBtnText, { color: colors.primary, marginLeft: 8 }]}>Add Another Date/Time</Text>
                     </TouchableOpacity>
-                )}
+                ) : null}
 
                 {/* Notes */}
                 <View style={styles.inputContainer}>
@@ -930,7 +1352,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 </View>
 
                 {/* Payment Summary */}
-                {bookings.length > 0 && (
+                {bookings.length > 0 && !hasExistingStudioBooking && (
                     <View style={[styles.paymentSummary, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB' }]}>
                         <View style={styles.summaryRow}>
                             <Text style={{ color: colors.textSecondary }}>Rate</Text>
@@ -948,25 +1370,26 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     </View>
                 )}
 
-                <TouchableOpacity
-                    style={[styles.primaryBtn, { backgroundColor: bookings.length > 0 ? colors.primary : colors.border, opacity: loading ? 0.6 : 1 }]}
-                    disabled={bookings.length === 0 || loading}
-                    onPress={() => bookings.length > 0 && handleConfirm(
-                        async () => {
-                            if (!userId) {
-                                alert('Please sign in to book a studio');
-                                return;
-                            }
+                {!hasExistingStudioBooking && (
+                    <TouchableOpacity
+                        style={[styles.primaryBtn, { backgroundColor: bookings.length > 0 ? colors.primary : colors.border, opacity: loading ? 0.6 : 1 }]}
+                        disabled={bookings.length === 0 || loading}
+                        onPress={() => bookings.length > 0 && handleConfirm(
+                            async () => {
+                                if (!userId) {
+                                    alert('Please sign in to book a studio');
+                                    return;
+                                }
 
-                            try {
-                                setLoading(true);
-                                const results = [];
-                                const errors = [];
+                                try {
+                                    setLoading(true);
+                                    const results = [];
+                                    const errors = [];
 
-                                // Create each booking
-                                for (const booking of bookings) {
-                                    const bookingDate = booking.date.toISOString().split('T')[0];
-                                    const startTime = booking.startTime.toTimeString().slice(0, 5);
+                                    // Create each booking
+                                    for (const booking of bookings) {
+                                        const bookingDate = booking.date.toISOString().split('T')[0];
+                                        const startTime = booking.startTime.toTimeString().slice(0, 5);
                                     const endTime = booking.endTime.toTimeString().slice(0, 5);
 
                                     const { data, error } = await supabase.functions.invoke('manage-bookings', {
@@ -1011,7 +1434,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                     setBookingNotes('');
                                     setModalVisible(false);
                                     (ref as any)?.current?.dismiss();
-                                    
+
                                     // Navigate to bookings page
                                     setTimeout(() => {
                                         router.push('/bookings' as any);
@@ -1035,6 +1458,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         </Text>
                     )}
                 </TouchableOpacity>
+                )}
             </View>
         );
     };
@@ -1045,7 +1469,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         const requirements = group.requirements || {};
         const capacity = requirements.capacity || 'Not specified';
         const audioSetup = requirements.audio || requirements.sound_system || 'Standard PA';
-        
+
         // Get tech specs from requirements or amenities
         const techSpecs = [];
         if (requirements.lighting) techSpecs.push(`Lighting: ${requirements.lighting}`);
@@ -1053,12 +1477,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         if (requirements.backline) techSpecs.push(`Backline: ${requirements.backline}`);
         if (requirements.sound_check) techSpecs.push('Sound Check Available');
         if (requirements.green_room) techSpecs.push('Green Room Available');
-        
+
         // If no specific requirements, use amenities or generic items
         if (techSpecs.length === 0 && group.amenities?.length > 0) {
             group.amenities.forEach((amenity: string) => techSpecs.push(amenity));
         }
-        
+
         return (
             <View style={styles.tabContent}>
                 <View style={{ flexDirection: 'row', gap: 16 }}>
@@ -1071,6 +1495,17 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         <Text style={[styles.infoValue, { color: colors.text, fontSize: 13 }]} numberOfLines={2}>{audioSetup}</Text>
                     </View>
                 </View>
+
+                {requirements.experience_level && (
+                    <View style={[styles.section, { marginTop: 16 }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Ionicons name="ribbon-outline" size={20} color={colors.primary} />
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text, fontSize: 14 }}>
+                                Experience Level: <Text style={{ color: colors.primary }}>{requirements.experience_level}</Text>
+                            </Text>
+                        </View>
+                    </View>
+                )}
 
                 <View style={[styles.section, { marginTop: 24 }]}>
                     <Text style={[styles.sectionTitle, { color: colors.text }]}>Event Details</Text>
@@ -1101,7 +1536,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         ))}
                     </View>
                 )}
-                
+
                 {techSpecs.length === 0 && !group.event_date && (
                     <View style={{ marginTop: 24 }}>
                         <Text style={{ color: colors.textSecondary, fontStyle: 'italic', textAlign: 'center' }}>No additional specifications provided.</Text>
@@ -1112,8 +1547,55 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     };
 
     // Gig: Apply Tab
-    const renderGigApply = () => (
+    const renderGigApply = () => {
+        console.log('🎨 renderGigApply called');
+        console.log('Current state:', { pitchMessage, videoUrl, isSubmittingApplication, userId, listingId });
+        
+        return (
         <View style={styles.tabContent}>
+            {/* Group Selection (if user has groups) */}
+            {userGroups.length > 0 && !hasExistingApplication && (
+                <View style={styles.inputContainer}>
+                    <Text style={[styles.label, { color: colors.textSecondary }]}>Apply as</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                        <TouchableOpacity
+                            style={[
+                                styles.groupSelectChip,
+                                { 
+                                    backgroundColor: selectedGroupId === null ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                    borderColor: selectedGroupId === null ? colors.primary : colors.border,
+                                }
+                            ]}
+                            onPress={() => setSelectedGroupId(null)}
+                        >
+                            <Ionicons name="person" size={16} color={selectedGroupId === null ? '#FFF' : colors.text} />
+                            <Text style={{ color: selectedGroupId === null ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
+                                Individual
+                            </Text>
+                        </TouchableOpacity>
+                        {userGroups.map((g) => (
+                            <TouchableOpacity
+                                key={g.id}
+                                style={[
+                                    styles.groupSelectChip,
+                                    { 
+                                        backgroundColor: selectedGroupId === g.id ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                        borderColor: selectedGroupId === g.id ? colors.primary : colors.border,
+                                        marginLeft: 8,
+                                    }
+                                ]}
+                                onPress={() => setSelectedGroupId(g.id)}
+                            >
+                                <Ionicons name="people" size={16} color={selectedGroupId === g.id ? '#FFF' : colors.text} />
+                                <Text style={{ color: selectedGroupId === g.id ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
+                                    {g.name}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                </View>
+            )}
+
             <View style={styles.inputContainer}>
                 <Text style={[styles.label, { color: colors.textSecondary }]}>Pitch Message</Text>
                 <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#374151' : '#F9FAFB', height: 100 }]}>
@@ -1123,33 +1605,119 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         placeholderTextColor={colors.textSecondary}
                         multiline
                         textAlignVertical="top"
+                        value={pitchMessage}
+                        onChangeText={(text) => {
+                            console.log('📝 Pitch message changed to:', text);
+                            setPitchMessage(text);
+                        }}
                     />
                 </View>
             </View>
 
-            <TouchableOpacity style={[styles.uploadBox, { borderColor: colors.border }]}>
-                <Ionicons name="videocam-outline" size={32} color={colors.primary} />
-                <Text style={{ color: colors.text, marginTop: 8, fontFamily: 'Poppins_500Medium' }}>Upload Performance Sample</Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Max 50MB</Text>
-            </TouchableOpacity>
+            <VideoUploader
+                videoUrl={videoUrl}
+                onVideoChange={setVideoUrl}
+                userId={userId || ''}
+                bucketName="documents"
+                folder="performance-videos"
+                maxSizeMB={50}
+            />
 
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
                 <Ionicons name="document-text-outline" size={18} color={colors.primary} />
                 <Text style={{ color: colors.primary, marginLeft: 8, textDecorationLine: 'underline' }}>Review Terms & Conditions</Text>
             </View>
 
+            {hasExistingApplication && (
+                <View style={[
+                    styles.infoBox, 
+                    { 
+                        backgroundColor: existingApplicationStatus === 'rejected' ? '#EF444420' : 
+                                        existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B98120' :
+                                        colors.primary + '20', 
+                        borderColor: existingApplicationStatus === 'rejected' ? '#EF4444' : 
+                                    existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
+                                    colors.primary 
+                    }
+                ]}>
+                    <Ionicons 
+                        name={existingApplicationStatus === 'rejected' ? 'close-circle' : 
+                              existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? 'checkmark-circle' :
+                              'information-circle'} 
+                        size={20} 
+                        color={existingApplicationStatus === 'rejected' ? '#EF4444' : 
+                               existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
+                               colors.primary} 
+                    />
+                    <Text style={[styles.infoText, { color: colors.text }]}>
+                        {existingApplicationStatus === 'rejected' 
+                            ? 'Your application has been declined.' 
+                            : existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved'
+                            ? 'Your application has been accepted! 🎉'
+                            : `You have already applied to this gig. Status: `}
+                        {existingApplicationStatus !== 'rejected' && existingApplicationStatus !== 'accepted' && existingApplicationStatus !== 'approved' && (
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{existingApplicationStatus}</Text>
+                        )}
+                    </Text>
+                </View>
+            )}
+
             <TouchableOpacity
-                style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
-                onPress={() => handleConfirm(
-                    () => console.log('Submitted Application'),
-                    'Confirm Application',
-                    'Are you sure you want to submit this application including your pitch and video?'
-                )}
+                style={[
+                    styles.primaryBtn,
+                    { backgroundColor: colors.primary },
+                    (isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication) && { opacity: 0.5 }
+                ]}
+                onPress={() => {
+                    console.log('🟡 SUBMIT APPLICATION BUTTON PRESSED');
+                    console.log('pitchMessage:', pitchMessage);
+                    console.log('pitchMessage.trim():', pitchMessage.trim());
+                    console.log('isSubmittingApplication:', isSubmittingApplication);
+                    console.log('hasExistingApplication:', hasExistingApplication);
+                    console.log('userId:', userId);
+                    console.log('listingId:', listingId);
+                    
+                    if (hasExistingApplication) {
+                        setAlertConfig({
+                            type: 'warning',
+                            title: 'Already Applied',
+                            message: `You have already submitted an application for this gig. Status: ${existingApplicationStatus || 'pending'}.`
+                        });
+                        setAlertVisible(true);
+                        return;
+                    }
+                    
+                    if (!pitchMessage.trim()) {
+                        console.log('❌ Pitch message is empty, returning');
+                        return;
+                    }
+                    
+                    console.log('✅ Validation passed, calling handleConfirm...');
+                    handleConfirm(
+                        handleSubmitApplication,
+                        'Confirm Application',
+                        'Are you sure you want to submit this application?'
+                    );
+                }}
+                disabled={isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication}
             >
-                <Text style={styles.primaryBtnText}>Submit Application</Text>
+                {isSubmittingApplication ? (
+                    <ActivityIndicator color="#fff" />
+                ) : (
+                    <Text style={styles.primaryBtnText}>
+                        {hasExistingApplication 
+                            ? existingApplicationStatus === 'rejected' 
+                                ? 'Application Declined' 
+                                : existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved'
+                                ? 'Application Accepted'
+                                : 'Already Applied' 
+                            : 'Submit Application'}
+                    </Text>
+                )}
             </TouchableOpacity>
         </View>
-    );
+        );
+    };
 
     // --- GROUP TABS ---
 
@@ -1186,7 +1754,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 .select('id')
                 .eq('organizer_id', userId)
                 .limit(1);
-            
+
             if (!error && data && data.length > 0) {
                 setHasExistingVenue(true);
             } else {
@@ -1257,7 +1825,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 <View style={[styles.managerCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}>
                     <View style={{ marginBottom: 16 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                            <Image source={{ uri: group.owner_avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&fit=crop' }} style={styles.hostAvatar} />
+                            <Image source={{ uri: group.owner_avatar || null }} style={[styles.hostAvatar, { backgroundColor: colors.border }]} />
                             <View>
                                 <Text style={[styles.managerLabel, { color: colors.textSecondary }]}>Managed by</Text>
                                 <Text style={[styles.managerName, { color: colors.text }]}>{group.owner_name || 'Unknown User'}</Text>
@@ -1381,13 +1949,13 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             )}
 
             {/* Show Audition for Musicians OR if role is unknown */}
-            {(!currentUserRole || currentUserRole === 'musician') && (
+            {(!currentUserRole || currentUserRole === 'musician') && group.requirements?.audition && (
                 <View style={[styles.section, (!currentUserRole || currentUserRole === 'venue-owner') && { marginTop: 32 }]}>
                     {currentUserRole === 'musician' && (
                         <>
                             <View style={[styles.auditionBanner, { borderColor: isDark ? '#065F46' : '#86EFAC' }]}>
-                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Active Audition: Keyboardist</Text>
-                                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>We are looking for a keys player for our upcoming tour.</Text>
+                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Active Audition: {group.requirements.audition_role || 'Musician'}</Text>
+                                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>{group.requirements.audition_desc || 'Open audition for this project.'}</Text>
                             </View>
 
                             <View style={{ marginTop: 16 }}>
@@ -1396,7 +1964,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                     onPress={() => handleConfirm(
                                         () => console.log('Applied for Audition'),
                                         'Apply for Audition',
-                                        'Confirm your application for the Keyboardist position?'
+                                        `Confirm your application for the ${group.requirements.audition_role || 'Musician'} position?`
                                     )}
                                 >
                                     <Text style={[styles.primaryBtnText, { color: colors.primary }]}>Apply for Audition</Text>
@@ -1410,30 +1978,31 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     );
 
     return (
-        <BottomSheetModal
-            ref={ref}
-            index={1} // Open at 95%
-            snapPoints={snapPoints}
-            backdropComponent={renderBackdrop}
-            backgroundStyle={{ backgroundColor: colors.background }}
-            handleComponent={null} // Remove the default handle to remove gap
-        >
-            {loading ? (
-                <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-                    <ActivityIndicator size="large" color={colors.primary} />
-                </View>
-            ) : group ? (
-                <View style={{ flex: 1 }}>
+        <>
+            <BottomSheetModal
+                ref={ref}
+                index={0}
+                snapPoints={snapPoints}
+                backdropComponent={renderBackdrop}
+                backgroundStyle={{ backgroundColor: colors.background }}
+                handleIndicatorStyle={{ backgroundColor: isDark ? '#4B5563' : '#E5E7EB', width: 40 }}
+                enablePanDownToClose={true}
+            >
+                {loading ? (
+                    <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+                        <ActivityIndicator size="large" color={colors.primary} />
+                    </View>
+                ) : group ? (
                     <BottomSheetScrollView
                         contentContainerStyle={styles.scrollContent}
                         showsVerticalScrollIndicator={false}
                         showsHorizontalScrollIndicator={false}
                     >
-                        {/* Immersive Hero Image */}
-                        <View style={styles.imageContainer}>
+                    {/* Immersive Hero Image */}
+                    <View style={styles.imageContainer}>
                             <Image
-                                source={{ uri: (group.images && group.images[0]) || group.image || 'https://images.unsplash.com/photo-1511735111819-a3f7709049c?w=800&fit=crop' }}
-                                style={styles.image}
+                                source={{ uri: (group.images && group.images[0]) || group.image || null }}
+                                style={[styles.image, { backgroundColor: colors.border }]}
                                 resizeMode="cover"
                             />
                             <LinearGradient
@@ -1549,7 +2118,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                             <View style={[styles.managerCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, marginBottom: 24 }]}>
                                                 <View style={{ marginBottom: 16 }}>
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                                        <Image source={{ uri: group.owner_avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&fit=crop' }} style={styles.hostAvatar} />
+                                                        <Image source={{ uri: group.owner_avatar || undefined }} style={[styles.hostAvatar, { backgroundColor: colors.border }]} />
                                                         <View>
                                                             <Text style={[styles.managerLabel, { color: colors.textSecondary }]}>
                                                                 {group.type === 'Gig' ? 'Organized by' : 'Managed by'}
@@ -1611,43 +2180,68 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             )}
 
                         </View>
-                    </BottomSheetScrollView>
 
-                    {/* Bottom Bar for GROUP/Default only - Tabs have their own CTAs */}
-                    {!showTabs && (
-                        <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border }]}>
-                            <View style={styles.priceContainer}>
-                                <Text style={[styles.priceText, { color: colors.text }]}>
-                                    ₱{displayRate} <Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>{labels.unit}</Text>
-                                </Text>
+                        {/* Bottom Bar for GROUP/Default only - Tabs have their own CTAs */}
+                        {!showTabs && (
+                            <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border }]}>
+                                <View style={styles.priceContainer}>
+                                    <Text style={[styles.priceText, { color: colors.text }]}>
+                                        ₱{displayRate} <Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>{labels.unit}</Text>
+                                    </Text>
+                                </View>
+                                <TouchableOpacity
+                                    style={[styles.bookBtn, { backgroundColor: colors.primary }]}
+                                    onPress={() => handleConfirm(
+                                        () => console.log('Group Reserved'),
+                                        'Reserve Artist',
+                                        'Confirm reservation request?'
+                                    )}
+                                >
+                                    <Text style={styles.bookBtnText}>Reserve</Text>
+                                </TouchableOpacity>
                             </View>
-                            <TouchableOpacity
-                                style={[styles.bookBtn, { backgroundColor: colors.primary }]}
-                                onPress={() => handleConfirm(
-                                    () => console.log('Group Reserved'),
-                                    'Reserve Artist',
-                                    'Confirm reservation request?'
-                                )}
-                            >
-                                <Text style={styles.bookBtnText}>Reserve</Text>
-                            </TouchableOpacity>
-                        </View>
-                    )}
+                        )}
+                    </BottomSheetScrollView>
+                ) : null}
+            </BottomSheetModal>
 
-                    <Modal
-                        visible={modalVisible}
-                        onClose={() => setModalVisible(false)}
-                        onConfirm={() => {
-                            setModalVisible(false);
-                            confirmAction();
-                        }}
-                        title={confirmTitle}
-                        message={confirmMessage}
-                        buttonText="Confirm"
-                    />
-                </View>
-            ) : null}
-        </BottomSheetModal>
+            <CustomAlert
+                visible={alertVisible}
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={[
+                    {
+                        text: 'OK',
+                        style: 'default',
+                        onPress: () => setAlertVisible(false)
+                    }
+                ]}
+                onClose={() => setAlertVisible(false)}
+            />
+
+            <Modal
+                visible={modalVisible}
+                onClose={() => {
+                    console.log('🔴 Modal closed without confirmation');
+                    setModalVisible(false);
+                }}
+                onConfirm={() => {
+                    console.log('🟢 Modal CONFIRMED - executing action');
+                    console.log('confirmAction:', confirmAction);
+                    setModalVisible(false);
+                    try {
+                        confirmAction();
+                        console.log('✅ confirmAction executed successfully');
+                    } catch (error) {
+                        console.error('❌ Error executing confirmAction:', error);
+                    }
+                }}
+                title={confirmTitle}
+                message={confirmMessage}
+                buttonText="Confirm"
+            />
+        </>
     );
 });
 
@@ -2045,6 +2639,14 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_600SemiBold',
         fontSize: moderateScale(14),
     },
+    groupSelectChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 20,
+        borderWidth: 1,
+    },
     bookingCard: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -2059,6 +2661,21 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
         borderRadius: 8,
         borderWidth: 1,
+    },
+    // Info Box (for warnings/notices)
+    infoBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        gap: 12,
+    },
+    infoText: {
+        flex: 1,
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 13,
+        lineHeight: 20,
     },
     // Gig Info
     infoCard: {
@@ -2192,6 +2809,84 @@ const styles = StyleSheet.create({
         backgroundColor: 'transparent',
         borderWidth: 1,
         borderStyle: 'dashed',
+    },
+    // Integrated Picker Styles
+    integratedCard: {
+        borderRadius: 16,
+        borderWidth: 1,
+        overflow: 'hidden',
+        marginBottom: 16,
+    },
+    pickerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        justifyContent: 'space-between',
+    },
+    iconBox: {
+        width: 40,
+        height: 40,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 16,
+    },
+    rowContent: {
+        flex: 1,
+    },
+    rowLabel: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        marginBottom: 2,
+    },
+    rowValue: {
+        fontSize: 15,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    timeContainer: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+    },
+    timeButton: {
+        alignItems: 'center',
+    },
+    slotGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    slotButton: {
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        minWidth: 80,
+        alignItems: 'center',
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    durationText: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 13,
+        marginLeft: 4,
+    },
+    bookingContainer: {
+        borderRadius: 16,
+        borderWidth: 1,
+        overflow: 'hidden',
+        padding: 16,
+        marginBottom: 24
+    },
+    slotGridContainer: {
+        borderTopWidth: 1,
+        paddingTop: 16,
+        marginTop: 8
     }
 });
 

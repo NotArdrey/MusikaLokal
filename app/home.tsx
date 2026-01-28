@@ -52,6 +52,7 @@ export default function HomeScreen() {
     const [loading, setLoading] = useState(true);
     const [activeCategory, setActiveCategory] = useState('All');
     // State for different sections
+    const [allItems, setAllItems] = useState<any[]>([]); // Store all fetched items for filtering
     const [featured, setFeatured] = useState<any[]>([]);
     const [discover, setDiscover] = useState<any[]>([]);
     const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
@@ -71,7 +72,7 @@ export default function HomeScreen() {
     // Filter items selection
     const filteredItems = activeCategory === 'All'
         ? featured
-        : featured.filter(item => {
+        : allItems.filter((item) => {
             if (activeCategory === 'Musicians') return item.type === 'Group';
             if (activeCategory === 'Venues') return item.type === 'Venue' || item.type === 'Gig' || (item.type === 'Studio' && item.amenities?.includes('Stage'));
             if (activeCategory === 'Studios') return item.type === 'Studio';
@@ -150,7 +151,8 @@ export default function HomeScreen() {
                 id: item.id,
                 type,
                 name: item.name,
-                image: item.images?.[0] || 'https://via.placeholder.com/300',
+                image: item.images?.[0] || null,
+                images: item.images || [],
                 rating: item.rating || 0,
                 review_count: item.review_count || 0,
                 // Explicitly pass rate fields
@@ -159,6 +161,7 @@ export default function HomeScreen() {
                 rate: item.rate || item.hourly_rate?.toString() || item.budget?.toString(),
                 location: item.location || item.address || '',
                 amenities: item.amenities || [],
+                experience_level: item.requirements?.experience_level || null,
                 embedding: item.embedding
             }));
 
@@ -166,14 +169,15 @@ export default function HomeScreen() {
             const allStudios = normalize(studios, 'Studio');
             const allGigs = normalize(gigs, 'Gig');
 
-            const allItems = [...allGroups, ...allStudios, ...allGigs];
+            const allItemsList = [...allGroups, ...allStudios, ...allGigs];
+            setAllItems(allItemsList);
 
             // AI Personalization
             // Strategy:
             // 1. "Featured": If we have a selectedListingId (last viewed), find similar items.
             // 2. "Discover": Random mix of high-rated items (Exploration)
 
-            let recommended = [...allItems]; // Default: all items
+            let recommended = [...allItemsList]; // Default: all items
 
             // Simulating "Last Viewed" text/embedding context
             // In a real app, this would come from a user_history table or local storage
@@ -185,8 +189,8 @@ export default function HomeScreen() {
             // However, we CAN demonstration the vector match if we pick a random "Seed" item
             // effectively "Simulating" that the user likes one item.
 
-            if (allItems.length > 0) {
-                const seed = allItems[Math.floor(Math.random() * allItems.length)];
+            if (allItemsList.length > 0) {
+                const seed = allItemsList[Math.floor(Math.random() * allItemsList.length)];
                 // console.log('Personalizing based on seed:', seed.name);
 
                 // If seed has embedding, sort others by similarity (approximate JS cosine if not doing DB RPC query for feed)
@@ -206,7 +210,7 @@ export default function HomeScreen() {
 
             // AI Personalization (Long-Term Learning)
             const { data: { user } } = await supabase.auth.getUser();
-            let sortedItems = [...allItems];
+            let sortedItems = [...allItemsList];
             let usedPersonalization = false;
 
             if (user) {
@@ -248,8 +252,25 @@ export default function HomeScreen() {
     };
 
     const handleCardPress = async (item: any) => {
+        console.log('=== handleCardPress called ===');
+        console.log('Item:', item);
+        console.log('Item ID:', item.id);
+        console.log('bottomSheetRef.current:', bottomSheetRef.current);
+        
         setSelectedListingId(item.id);
-        bottomSheetRef.current?.present();
+        console.log('selectedListingId set to:', item.id);
+        
+        // Small delay to ensure state is updated before presenting
+        setTimeout(() => {
+            console.log('Attempting to present bottom sheet...');
+            console.log('bottomSheetRef.current before present:', bottomSheetRef.current);
+            try {
+                bottomSheetRef.current?.present();
+                console.log('present() called successfully');
+            } catch (error) {
+                console.error('Error calling present():', error);
+            }
+        }, 100);
 
         // Save to recently viewed
         await saveToRecentlyViewed(item);
@@ -366,8 +387,14 @@ export default function HomeScreen() {
                                     style={styles.topPickOverlay}
                                 >
                                     <View style={styles.topPickBadge}>
-                                        <Ionicons name="star" size={12} color="#FCD34D" />
-                                        <Text style={styles.topPickBadgeText}>{topItems[0].rating?.toFixed(1) || '5.0'}</Text>
+                                        {(topItems[0].rating > 0 && (topItems[0].review_count || 0) > 0) ? (
+                                            <>
+                                                <Ionicons name="star" size={12} color="#FCD34D" />
+                                                <Text style={styles.topPickBadgeText}>{topItems[0].rating.toFixed(1)}</Text>
+                                            </>
+                                        ) : (
+                                            <Text style={styles.topPickBadgeText}>No ratings yet</Text>
+                                        )}
                                     </View>
                                     <Text style={styles.topPickTitle} numberOfLines={1}>{topItems[0].name}</Text>
                                     <Text style={styles.topPickLocation} numberOfLines={1}>
@@ -391,8 +418,14 @@ export default function HomeScreen() {
                                             style={styles.topPickOverlay}
                                         >
                                             <View style={styles.topPickBadge}>
-                                                <Ionicons name="star" size={moderateScale(10)} color="#FCD34D" />
-                                                <Text style={styles.topPickBadgeText}>{item.rating?.toFixed(1) || '5.0'}</Text>
+                                                {(item.rating > 0 && (item.review_count || 0) > 0) ? (
+                                                    <>
+                                                        <Ionicons name="star" size={moderateScale(10)} color="#FCD34D" />
+                                                        <Text style={styles.topPickBadgeText}>{item.rating.toFixed(1)}</Text>
+                                                    </>
+                                                ) : (
+                                                    <Text style={[styles.topPickBadgeText, { fontSize: moderateScale(9) }]}>No ratings yet</Text>
+                                                )}
                                             </View>
                                             <Text style={[styles.topPickTitle, { fontSize: moderateScale(13) }]} numberOfLines={1}>{item.name}</Text>
                                         </LinearGradient>
@@ -416,8 +449,14 @@ export default function HomeScreen() {
                                         style={styles.topPickOverlay}
                                     >
                                         <View style={styles.topPickBadge}>
-                                            <Ionicons name="star" size={moderateScale(10)} color="#FCD34D" />
-                                            <Text style={styles.topPickBadgeText}>{item.rating?.toFixed(1) || '5.0'}</Text>
+                                            {(item.rating > 0 && (item.review_count || 0) > 0) ? (
+                                                <>
+                                                    <Ionicons name="star" size={moderateScale(10)} color="#FCD34D" />
+                                                    <Text style={styles.topPickBadgeText}>{item.rating.toFixed(1)}</Text>
+                                                </>
+                                            ) : (
+                                                <Text style={[styles.topPickBadgeText, { fontSize: moderateScale(9) }]}>No ratings yet</Text>
+                                            )}
                                         </View>
                                         <Text style={[styles.topPickTitle, { fontSize: moderateScale(12) }]} numberOfLines={1}>{item.name}</Text>
                                     </LinearGradient>
@@ -534,8 +573,14 @@ export default function HomeScreen() {
                                     <Ionicons name="location" size={14} color="rgba(255,255,255,0.9)" />
                                     <Text style={styles.featuredLocation}>{uniqueItems[0].location}</Text>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 12 }}>
-                                        <Ionicons name="star" size={14} color="#FCD34D" />
-                                        <Text style={styles.featuredRating}>{uniqueItems[0].rating?.toFixed(1) || '0.0'}</Text>
+                                        {(uniqueItems[0].rating > 0 && (uniqueItems[0].review_count || 0) > 0) ? (
+                                            <>
+                                                <Ionicons name="star" size={14} color="#FCD34D" />
+                                                <Text style={styles.featuredRating}>{uniqueItems[0].rating.toFixed(1)}</Text>
+                                            </>
+                                        ) : (
+                                            <Text style={[styles.featuredRating, { fontSize: 11 }]}>No ratings yet</Text>
+                                        )}
                                     </View>
                                 </View>
                             </LinearGradient>
@@ -622,8 +667,44 @@ export default function HomeScreen() {
             <Navbar />
 
             <ListingDetailsSheet ref={bottomSheetRef} listingId={selectedListingId} />
-            <SearchBottomSheet ref={searchSheetRef} />
-            <RecentlyViewedSheet ref={recentlyViewedSheetRef} />
+            <SearchBottomSheet 
+                ref={searchSheetRef} 
+                onClose={() => searchSheetRef.current?.dismiss()} 
+                onItemPress={(id) => {
+                    console.log('=== SearchBottomSheet onItemPress ===');
+                    console.log('Item ID from search:', id);
+                    setSelectedListingId(id);
+                    setTimeout(() => {
+                        console.log('Presenting bottom sheet from search...');
+                        console.log('bottomSheetRef.current:', bottomSheetRef.current);
+                        try {
+                            bottomSheetRef.current?.present();
+                            console.log('present() called from search');
+                        } catch (error) {
+                            console.error('Error presenting from search:', error);
+                        }
+                    }, 150);
+                }}
+            />
+            <RecentlyViewedSheet 
+                ref={recentlyViewedSheetRef} 
+                onClose={() => recentlyViewedSheetRef.current?.dismiss()}
+                onItemPress={(id) => {
+                    console.log('=== RecentlyViewedSheet onItemPress ===');
+                    console.log('Item ID from recently viewed:', id);
+                    setSelectedListingId(id);
+                    setTimeout(() => {
+                        console.log('Presenting bottom sheet from recently viewed...');
+                        console.log('bottomSheetRef.current:', bottomSheetRef.current);
+                        try {
+                            bottomSheetRef.current?.present();
+                            console.log('present() called from recently viewed');
+                        } catch (error) {
+                            console.error('Error presenting from recently viewed:', error);
+                        }
+                    }, 150);
+                }}
+            />
         </View>
     );
 }
@@ -708,7 +789,7 @@ const styles = StyleSheet.create({
         gap: scale(16),
     },
     promoCard: {
-        width: width - scale(48),
+        width: Math.min(width - scale(48), 400),
         height: height < 700 ? 140 : verticalScale(140), // Increased fixed height for small screens
         borderRadius: moderateScale(20),
         overflow: 'hidden',

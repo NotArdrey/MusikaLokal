@@ -39,8 +39,12 @@ export default function GroupDetailsScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       const userId = user?.id;
 
+      // Ensure id is a string, not an array
+      const groupId = Array.isArray(id) ? id[0] : id;
+      const finalId = groupId || 'bd9552d7-b827-449e-8c43-2a4439c2c62c';
+
       const { data, error } = await supabase.functions.invoke('manage-details', {
-        body: { action: 'fetch', type: 'group', id: id || 'bd9552d7-b827-449e-8c43-2a4439c2c62c', userId }
+        body: { action: 'fetch', type: 'group', id: finalId, userId }
       });
 
       if (error) throw error;
@@ -77,8 +81,8 @@ export default function GroupDetailsScreen() {
         {/* Immersive Hero Image */}
         <View style={styles.imageContainer}>
           <Image
-            source={{ uri: (group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop' }}
-            style={styles.image}
+            source={{ uri: (group.images && group.images[0]) || group.image || null }}
+            style={[styles.image, { backgroundColor: colors.border }]}
             resizeMode="cover"
           />
           <LinearGradient
@@ -134,8 +138,8 @@ export default function GroupDetailsScreen() {
               <Text style={[styles.hostSub, { color: colors.textSecondary }]}>Joined in 2021</Text>
             </View>
             <Image
-              source={{ uri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&fit=crop' }}
-              style={styles.hostAvatar}
+              source={{ uri: group.owner_avatar || null }}
+              style={[styles.hostAvatar, { backgroundColor: colors.border }]}
             />
           </View>
 
@@ -177,64 +181,46 @@ export default function GroupDetailsScreen() {
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          {/* Reviews Preview (Static for now) */}
+          {/* Reviews Section */}
           <View style={styles.section}>
             <View style={styles.reviewHeader}>
               <Ionicons name="star" size={20} color={colors.text} />
               <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                {group.rating?.toFixed(2) || '4.95'} · {group.review_count || 12} reviews
+                {group.rating?.toFixed(2) || '0.0'} · {group.review_count || 0} reviews
               </Text>
             </View>
+            <Text style={{ color: colors.textSecondary, fontStyle: 'italic' }}>
+              Reviews are not available in this preview.
+            </Text>
+          </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.reviewsScroll}>
-              {[1, 2].map((i) => (
-                <View key={i} style={[styles.reviewCard, { borderColor: colors.border }]}>
-                  <View style={styles.reviewUser}>
-                    <Image source={{ uri: `https://i.pravatar.cc/100?img=${i + 5}` }} style={styles.reviewAvatar} />
-                    <View>
-                      <Text style={[styles.reviewName, { color: colors.text }]}>Jane Doe</Text>
-                      <Text style={[styles.reviewDate, { color: colors.textSecondary }]}>Oct 2025</Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.reviewBody, { color: colors.text }]} numberOfLines={3}>
-                    Absolutely amazing performance! The crowd loved them and they were super professional to work with.
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
-
-            <TouchableOpacity style={[styles.showAllBtn, { borderColor: colors.text }]}>
-              <Text style={[styles.showAllText, { color: colors.text }]}>Show all reviews</Text>
+          {/* Sticky Bottom Bar */}
+          <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.priceContainer}>
+              <Text style={[styles.priceText, { color: colors.text }]}>
+                ₱{group.rate || '1,500'} <Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>night</Text>
+              </Text>
+              <Text style={{ fontSize: 12, textDecorationLine: 'underline', color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
+                Oct 25 - 30
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.bookBtn, { backgroundColor: colors.primary }]}
+              onPress={() => setModalVisible(true)}
+            >
+              <Text style={styles.bookBtnText}>Reserve</Text>
             </TouchableOpacity>
           </View>
+
+          <Modal
+            visible={modalVisible}
+            onClose={() => setModalVisible(false)}
+            title="Confirm Booking"
+            message="This will send a booking request to the artist."
+            buttonText="Send Request"
+          />
         </View>
       </ScrollView>
-
-      {/* Sticky Bottom Bar */}
-      <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: insets.bottom + 16 }]}>
-        <View style={styles.priceContainer}>
-          <Text style={[styles.priceText, { color: colors.text }]}>
-            ₱{group.rate || '1,500'} <Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>night</Text>
-          </Text>
-          <Text style={{ fontSize: 12, textDecorationLine: 'underline', color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
-            Oct 25 - 30
-          </Text>
-        </View>
-        <TouchableOpacity
-          style={[styles.bookBtn, { backgroundColor: colors.primary }]}
-          onPress={() => setModalVisible(true)}
-        >
-          <Text style={styles.bookBtnText}>Reserve</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Modal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Confirm Booking"
-        message="This will send a booking request to the artist."
-        buttonText="Send Request"
-      />
     </View>
   );
 }

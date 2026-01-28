@@ -541,3 +541,78 @@ ON CONFLICT DO NOTHING;
 -- 4. Replace the placeholder UUIDs above with the real ones
 -- 5. Run this SQL in Supabase SQL Editor
 -- ============================================================
+-- FIX SCRIPT: Dynamic Ownership Assignment
+-- usage: Run this in Supabase SQL Editor to link existing data to your actual users.
+
+DO $$
+DECLARE
+    -- Variable to hold the actual User IDs found in auth.users
+    v_studio_owner_id UUID;
+    v_musician_id UUID;
+    v_manager_id UUID;
+BEGIN
+    -- 1. GET ACTUAL USER IDs (based on email)
+    SELECT id INTO v_studio_owner_id FROM auth.users WHERE email = 'studio@test.com' LIMIT 1;
+    SELECT id INTO v_musician_id FROM auth.users WHERE email = 'musician@test.com' LIMIT 1;  -- Note: Seed used 'musician@tet.com' in one place, verify which one user uses. User said 'musician@test.com'.
+    -- Try 'musician@tet.com' if 'musician@test.com' not found
+    IF v_musician_id IS NULL THEN
+        SELECT id INTO v_musician_id FROM auth.users WHERE email = 'musician@tet.com' LIMIT 1;
+    END IF;
+    
+    SELECT id INTO v_manager_id FROM auth.users WHERE email = 'manager@test.com' LIMIT 1;
+
+    -- 2. UPDATE PROFILES (Ensure they have the correct ROLE)
+    -- Studio Owner
+    IF v_studio_owner_id IS NOT NULL THEN
+        RAISE NOTICE 'Found Studio Owner: %', v_studio_owner_id;
+        INSERT INTO public.profiles (id, email, full_name, role, verification_status)
+        VALUES (v_studio_owner_id, 'studio@test.com', 'Maria Santos', 'studio-owner', 'APPROVED')
+        ON CONFLICT (id) DO UPDATE SET role = 'studio-owner'; -- Enforce role
+        
+        -- Link All Studios (that were likely created by the seed)
+        -- We'll assume ANY studio named like 'Santos%' or generic ones belong to them, 
+        -- OR update ALL studios that currently don't have a valid owner (optional).
+        -- Strategies:
+        -- A. Update specific named studios from seed
+        UPDATE public.studios 
+        SET owner_id = v_studio_owner_id 
+        WHERE name IN ('Santos Recording Studio', 'Pocket Studio QC', 'SoundLab Manila', 'Basement Beats', 'The Red Room', 'ProAudio Hub', 'Garage Jam') 
+           OR owner_id = '00000000-0000-0000-0000-000000000003'; -- Catch the dummy ID
+    ELSE
+        RAISE NOTICE 'WARNING: studio@test.com not found';
+    END IF;
+
+    -- Musician
+    IF v_musician_id IS NOT NULL THEN
+        RAISE NOTICE 'Found Musician: %', v_musician_id;
+        INSERT INTO public.profiles (id, email, full_name, role, verification_status)
+        VALUES (v_musician_id, 'musician@test.com', 'Juan Dela Cruz', 'musician', 'APPROVED')
+        ON CONFLICT (id) DO UPDATE SET role = 'musician';
+
+        -- Link Groups
+        UPDATE public.groups 
+        SET owner_id = v_musician_id 
+        WHERE name IN ('The Manila Sound', 'Indie Vibes', 'The Neon Lights', 'Midnight Jazz Trio', 'Sonic Boom', 'Acoustic Soul', 'Electric Dreams')
+           OR owner_id = '00000000-0000-0000-0000-000000000002'
+           OR owner_id = '14d2e916-8d1c-4c04-9877-7ccd9bea6149'; -- Catch the other dummy ID
+    ELSE
+        RAISE NOTICE 'WARNING: musician@test.com not found';
+    END IF;
+
+    -- Venue Owner
+    IF v_manager_id IS NOT NULL THEN
+        RAISE NOTICE 'Found Manager: %', v_manager_id;
+        INSERT INTO public.profiles (id, email, full_name, role, verification_status)
+        VALUES (v_manager_id, 'manager@test.com', 'Pedro Reyes', 'venue-owner', 'APPROVED')
+        ON CONFLICT (id) DO UPDATE SET role = 'venue-owner';
+
+        -- Link Gigs
+        UPDATE public.gigs 
+        SET organizer_id = v_manager_id 
+        WHERE name IN ('Friday Night Live', 'Acoustic Sunday', 'Acoustic Nights at The Hive', 'Wedding Reception Band', 'Corporate Event Opener', 'Bar gig: Friday Night', 'Private Party')
+           OR organizer_id = '00000000-0000-0000-0000-000000000001';
+    ELSE
+        RAISE NOTICE 'WARNING: manager@test.com not found';
+    END IF;
+
+END $$;

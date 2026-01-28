@@ -27,8 +27,10 @@ export default function ProfileScreen() {
   async function fetchProfile() {
     try {
       // Determine target ID: param OR current user
-      let targetId = params.userId || currentUserId;
-      console.log('👤 Profile - Param userId:', params.userId);
+      // Handle case where userId might be an array
+      const paramUserId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
+      let targetId = paramUserId || currentUserId;
+      console.log('👤 Profile - Param userId:', paramUserId);
       console.log('👤 Profile - Context userId:', currentUserId);
 
       // If still no targetId, try to get from auth directly
@@ -176,7 +178,12 @@ export default function ProfileScreen() {
             </View>
 
             <Text style={[styles.nameText, { color: colors.text }]}>{profile?.full_name || 'User'}</Text>
-            <Text style={[styles.roleText, { color: colors.textSecondary }]}>{profile?.skills?.join(', ') || 'Musician'} • {profile?.location || 'Unknown'}</Text>
+            <Text style={[styles.roleText, { color: colors.textSecondary }]}>
+              {profile?.role === 'musician' ? (profile?.skills?.join(', ') || 'Musician') :
+                profile?.role === 'studio-owner' ? 'Studio Owner' :
+                  profile?.role === 'venue-owner' ? 'Venue Owner' :
+                    (profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : 'User')} • {profile?.location || 'Unknown'}
+            </Text>
 
             <View style={styles.genreRow}>
               {(profile?.genres || ['Rock', 'Indie']).map((genre: string) => (

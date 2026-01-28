@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -21,7 +22,8 @@ export default function EditGroupScreen() {
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-  const [selectedImage, setSelectedImage] = useState('');
+  const [images, setImages] = useState<string[]>([]);
+  const [thumbnailIndex, setThumbnailIndex] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
@@ -77,8 +79,16 @@ export default function EditGroupScreen() {
         return;
       }
 
+      // Ensure id is a string, not an array
+      const groupId = Array.isArray(id) ? id[0] : id;
+      if (!groupId) {
+        Alert.alert('Error', 'Invalid group ID');
+        router.replace('/home');
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'fetch_one', type: 'group', id, userId: user.id }
+        body: { action: 'fetch_one', type: 'group', id: groupId, userId: user.id }
       });
 
       if (error) throw error;
@@ -107,10 +117,45 @@ export default function EditGroupScreen() {
     }
   };
 
+  const validateForm = (): boolean => {
+    if (!groupName.trim()) {
+      Alert.alert('Required Field', 'Please enter a group name');
+      return false;
+    }
+    if (!genre.trim()) {
+      Alert.alert('Required Field', 'Please enter a genre');
+      return false;
+    }
+    if (!description.trim()) {
+      Alert.alert('Required Field', 'Please enter a description');
+      return false;
+    }
+    if (!address || !latitude || !longitude) {
+      Alert.alert('Required Field', 'Please select a location on the map');
+      return false;
+    }
+    if (images.length === 0) {
+      Alert.alert('Required Field', 'Please upload at least one group photo');
+      return false;
+    }
+    return true;
+  };
+
   const handleSave = async () => {
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      // Ensure id is a string, not an array
+      const groupId = Array.isArray(id) ? id[0] : id;
+      if (!groupId) {
+        alert('Invalid group ID');
+        return;
+      }
 
       const payload = {
         name: groupName,
@@ -120,10 +165,11 @@ export default function EditGroupScreen() {
         latitude,
         longitude,
         members,
+        images: images,
       };
 
       const { error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'group', id: id, userId: user.id, payload }
+        body: { action: 'update', type: 'group', id: groupId, userId: user.id, payload }
       });
 
       if (error) throw error;
@@ -212,7 +258,7 @@ export default function EditGroupScreen() {
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Group" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} style={styles.flex1}>
 
           {renderSectionHeader('Group Details', 'people')}
           {renderInput('Group Name', groupName, setGroupName)}
@@ -257,31 +303,16 @@ export default function EditGroupScreen() {
           {renderInput('Description', description, setDescription, true)}
 
           {renderSectionHeader('Visuals', 'image')}
-          {selectedImage ? (
-            <View style={styles.imageContainer}>
-              <Image source={{ uri: selectedImage }} style={styles.image} resizeMode="cover" />
-              <TouchableOpacity
-                style={[styles.removeImageButton, { borderColor: 'white' }]}
-                onPress={() => setSelectedImage('')}
-              >
-                <Ionicons name="trash" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={[
-                styles.uploadPlaceholder,
-                {
-                  borderColor: colors.border,
-                  backgroundColor: isDark ? colors.card : '#F9FAFB'
-                }
-              ]}
-              onPress={() => setSelectedImage('https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&h=300&fit=crop')} // Simulating upload
-            >
-              <Ionicons name="cloud-upload-outline" size={32} color={colors.textSecondary} />
-              <Text style={[styles.uploadText, { color: colors.textSecondary }]}>Upload Group Photo</Text>
-            </TouchableOpacity>
-          )}
+          <ImageUploader
+            images={images}
+            onImagesChange={setImages}
+            thumbnailIndex={thumbnailIndex}
+            onThumbnailChange={setThumbnailIndex}
+            maxImages={10}
+            bucketName="listings"
+            userId={id as string}
+            folder="groups"
+          />
 
           {renderSectionHeader('Band Members', 'person')}
           <View style={styles.addMemberContainer}>
@@ -332,9 +363,7 @@ export default function EditGroupScreen() {
 
         </ScrollView>
 
-        <View style={styles.bottomNavbarOverlay}>
-          <Navbar />
-        </View>
+        <Navbar />
       </View>
 
       <Modal
@@ -370,7 +399,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 40,
     paddingHorizontal: 24,
   },
   sectionHeader: {
@@ -402,7 +431,6 @@ const styles = StyleSheet.create({
   input: {
     padding: 16,
     textAlignVertical: 'center',
-    paddingVertical: 0,
   },
   genreSelector: {
     flexDirection: 'row',
@@ -414,41 +442,6 @@ const styles = StyleSheet.create({
   },
   genreText: {
     fontFamily: 'Poppins_400Regular',
-  },
-  imageContainer: {
-    position: 'relative',
-    marginBottom: 16,
-  },
-  image: {
-    width: '100%',
-    height: 192,
-    borderRadius: 16,
-  },
-  removeImageButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#EF4444',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-  },
-  uploadPlaceholder: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    padding: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  uploadText: {
-    marginTop: 8,
-    fontSize: 12,
-    fontFamily: 'Poppins_500Medium',
   },
   addMemberContainer: {
     flexDirection: 'row',
@@ -486,6 +479,7 @@ const styles = StyleSheet.create({
   },
   footerActions: {
     marginTop: 32,
+    marginBottom: 20,
   },
   saveButton: {
     borderRadius: 12,
@@ -509,11 +503,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 16,
     borderWidth: 1,
-  },
-  bottomNavbarOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
   },
 });

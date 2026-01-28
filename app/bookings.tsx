@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import BookingDetailsSheet from '../src/components/BookingDetailsSheet';
 import Header from '../src/components/header';
@@ -14,18 +15,18 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices
 const scale = (size: number) => {
-    const newSize = (SCREEN_WIDTH / 375) * size;
-    return Math.max(newSize, size * 0.85); // Minimum 85% of original size
+  const newSize = (SCREEN_WIDTH / 375) * size;
+  return Math.max(newSize, size * 0.85); // Minimum 85% of original size
 };
 const verticalScale = (size: number) => {
-    const baseHeight = 812;
-    const ratio = SCREEN_HEIGHT / baseHeight;
-    const clampedRatio = Math.max(0.8, Math.min(1.2, ratio));
-    return size * clampedRatio;
+  const baseHeight = 812;
+  const ratio = SCREEN_HEIGHT / baseHeight;
+  const clampedRatio = Math.max(0.8, Math.min(1.2, ratio));
+  return size * clampedRatio;
 };
 const moderateScale = (size: number, factor = 0.3) => {
-    const scaled = scale(size);
-    return size + (scaled - size) * factor;
+  const scaled = scale(size);
+  return size + (scaled - size) * factor;
 };
 
 type Tab = 'Pending' | 'Upcoming' | 'Ongoing' | 'Review';
@@ -36,6 +37,7 @@ export default function BookingsScreen() {
   const [activeTab, setActiveTab] = useState<Tab>('Upcoming');
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [cancellationReason, setCancellationReason] = useState('');
   const bookingDetailsRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
   const { width } = useWindowDimensions();
 
@@ -47,6 +49,7 @@ export default function BookingsScreen() {
     Review: []
   });
   const [loading, setLoading] = useState(false);
+  const [userRole, setUserRole] = useState<string>('');
 
   React.useEffect(() => {
     if (isAuthenticated && userId) {
@@ -57,6 +60,18 @@ export default function BookingsScreen() {
   async function fetchBookings(targetUserId: string) {
     try {
       setLoading(true);
+
+      // Fetch user role first
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', targetUserId)
+        .single();
+
+      if (profile?.role) {
+        setUserRole(profile.role);
+      }
+
       const { data: bookings, error } = await supabase.functions.invoke('manage-bookings', {
         body: { action: 'fetch', userId: targetUserId }
       });
@@ -70,10 +85,16 @@ export default function BookingsScreen() {
     }
   }
 
-  async function handleStatusUpdate(bookingId: string, newStatus: string, typeId: string = 'studio_booking') {
+  async function handleStatusUpdate(bookingId: string, newStatus: string, typeId: string = 'studio_booking', reason?: string) {
     try {
       const { error } = await supabase.functions.invoke('manage-bookings', {
-        body: { action: 'update_status', booking_id: bookingId, new_status: newStatus, type_id: typeId }
+        body: {
+          action: 'update_status',
+          booking_id: bookingId,
+          new_status: newStatus,
+          type_id: typeId,
+          cancellation_reason: reason
+        }
       });
       if (error) throw error;
 
@@ -87,7 +108,6 @@ export default function BookingsScreen() {
   }
 
   const handleDetailsPress = (item: any) => {
-    // Extract the actual listing ID from the booking item
     setSelectedItem(item);
     bookingDetailsRef.current?.present();
   };
@@ -97,7 +117,112 @@ export default function BookingsScreen() {
   };
 
   const handleCancelBooking = async (bookingId: string) => {
+    setCancellationReason('');
     setModalVisible(true);
+  };
+
+  // Upload Proof handler
+  const handleUploadProof = async (item: any) => {
+    try {
+      // Request permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Please allow access to your photo library to upload proof.');
+        return;
+      }
+
+      // Pick image
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (result.canceled) return;
+
+      const image = result.assets[0];
+
+      // Upload to Supabase Storage
+      const fileName = `proof_${item.id}_${Date.now()}.jpg`;
+      const filePath = `booking-proofs/${fileName}`;
+
+      // Read file as base64
+      const response = await fetch(image.uri);
+      const blob = await response.blob();
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('uploads')
+        .upload(filePath, blob, {
+          contentType: 'image/jpeg',
+          upsert: true
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage.from('uploads').getPublicUrl(filePath);
+      const proofUrl = urlData.publicUrl;
+
+      // Update booking with proof URL
+      const { error: updateError } = await supabase.functions.invoke('manage-bookings', {
+        body: {
+          action: 'upload_proof',
+          bookingId: item.id,
+          proofUrl
+        }
+      });
+
+      if (updateError) throw updateError;
+
+      Alert.alert('Success', 'Proof uploaded successfully!');
+      if (userId) fetchBookings(userId);
+    } catch (e: any) {
+      console.error('Upload proof error:', e);
+      Alert.alert('Error', 'Failed to upload proof. Please try again.');
+    }
+  };
+
+  // Leave Review handler with proper params
+  const handleLeaveReview = (item: any) => {
+    // Determine reviewer role based on user role and item type
+    const isOwner = item.type_id === 'studio_booking' && userRole === 'studio-owner';
+    const isOrganizer = item.type_id === 'gig_application' && userRole === 'venue-owner';
+
+    const reviewerRole = item.type_id === 'studio_booking'
+      ? (isOwner ? 'owner' : 'customer')
+      : (isOrganizer ? 'organizer' : 'applicant');
+
+    // For studio owners reviewing musicians, target the user
+    // For musicians reviewing studios, target the studio
+    const params: any = {
+      bookingId: item.id,
+      bookingType: item.type_id,
+      entityName: item.name,
+      reviewerRole
+    };
+
+    if (item.type_id === 'studio_booking') {
+      if (isOwner) {
+        // Owner reviews the musician (user)
+        params.targetUserId = item.user_id;
+      } else {
+        // Musician reviews the studio
+        params.studioId = item.studio_id;
+      }
+    } else if (item.type_id === 'gig_application') {
+      if (isOrganizer) {
+        // Venue owner reviews the applicant
+        params.targetUserId = item.applicant_id;
+      } else {
+        // Musician reviews the gig
+        params.gigId = item.gig_id;
+      }
+    }
+
+    router.push({
+      pathname: '/submit_review',
+      params
+    } as any);
   };
 
   const currentItems = data[activeTab] || [];
@@ -189,7 +314,9 @@ export default function BookingsScreen() {
                   <View style={styles.cardHeader}>
                     <View style={styles.cardTitleContainer}>
                       <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
-                      <Text style={[styles.cardDate, { color: colors.textSecondary }]}>{item.date}</Text>
+                      <Text style={[styles.cardDate, { color: colors.textSecondary }]}>
+                        {new Date(item.start_time).toLocaleDateString()} • {new Date(item.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                      </Text>
                     </View>
                   </View>
 
@@ -229,17 +356,23 @@ export default function BookingsScreen() {
                           <Text style={[styles.actionButtonText, { color: 'white' }]}>Confirm Now</Text>
                         </TouchableOpacity>
                       ) : activeTab === 'Ongoing' ? (
-                        <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.primary }]}>
+                        <TouchableOpacity
+                          onPress={() => handleUploadProof(item)}
+                          style={[styles.actionButton, { backgroundColor: colors.primary }]}
+                        >
                           <Text style={[styles.actionButtonText, { color: 'white' }]}>Upload Proof</Text>
                         </TouchableOpacity>
                       ) : activeTab === 'Review' ? (
-                        <TouchableOpacity onPress={() => router.push('/submit_review' as any)} style={[styles.outlineButton, { borderColor: colors.primary }]}>
+                        <TouchableOpacity
+                          onPress={() => handleLeaveReview(item)}
+                          style={[styles.outlineButton, { borderColor: colors.primary }]}
+                        >
                           <Text style={[styles.outlineButtonText, { color: colors.primary }]}>Leave Review</Text>
                         </TouchableOpacity>
                       ) : (
                         // Default / Upcoming Buttons
                         <View style={styles.defaultButtons}>
-                          <TouchableOpacity 
+                          <TouchableOpacity
                             onPress={() => handleDetailsPress(item)}
                             style={[styles.outlineButton, { borderColor: colors.border }]}>
                             <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>Details</Text>
@@ -289,11 +422,13 @@ export default function BookingsScreen() {
             })()
         }
         buttonText={activeTab === 'Pending' ? "Confirm" : "Yes, Cancel Booking"}
+        showInput={activeTab !== 'Pending'} // Show input only for cancellation
+        onInputChange={setCancellationReason}
         onConfirm={() => {
           if (selectedItem) {
             // If Pending, confirm. If Upcoming/other, cancel.
             const status = activeTab === 'Pending' ? 'confirmed' : 'cancelled';
-            handleStatusUpdate(selectedItem.id, status, selectedItem?.type_id);
+            handleStatusUpdate(selectedItem.id, status, selectedItem?.type_id, cancellationReason);
           }
         }}
       />

@@ -44,7 +44,7 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
         priceLabel = 'Inquire for rates'; // Fallback
     }
 
-    const cardWidth = variant === 'horizontal' ? width * 0.7 : '100%';
+    const cardWidth = variant === 'horizontal' ? Math.min(width * 0.8, 300) : '100%'; // Increased from 0.7/280 to 0.8/300
     const imageHeight = variant === 'horizontal' ? 180 : 240;
 
     const handleShare = async () => {
@@ -61,6 +61,22 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
         setIsLiked(!isLiked);
     };
 
+    // Robust Image Logic
+    const getInitialImage = () => {
+        const uri = item.images?.[0] || item.image;
+        if (uri && typeof uri === 'string' && uri.length > 0) {
+            return { uri };
+        }
+        return undefined;
+    };
+
+    const [imageSource, setImageSource] = useState(getInitialImage());
+
+    const handleImageError = () => {
+        // Fallback to a reliable placeholder or local asset if available
+        setImageSource(undefined);
+    };
+
     return (
         <Pressable
             onPress={() => onPress(item)}
@@ -74,19 +90,24 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
             {/* Image Section */}
             <View style={[styles.imageContainer, { height: imageHeight }]}>
                 <Image
-                    source={{ uri: item.images?.[0] || item.image || 'https://via.placeholder.com/400x300?text=No+Image' }}
+                    source={imageSource}
                     style={styles.image}
                     resizeMode="cover"
+                    onError={handleImageError}
                 />
 
                 {/* Top Actions: Rating & Share/Heart */}
                 <View style={[styles.topActions]}>
-                    {item.rating > 0 ? (
+                    {item.rating > 0 && (item.review_count || 0) > 0 ? (
                         <View style={styles.ratingBadge}>
                             <Ionicons name="star" size={12} color="#FBBF24" />
                             <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
                         </View>
-                    ) : <View />}
+                    ) : (
+                        <View style={[styles.ratingBadge, { backgroundColor: 'rgba(148, 163, 184, 0.9)' }]}>
+                            <Text style={styles.ratingText}>No ratings yet</Text>
+                        </View>
+                    )}
 
                     <View style={{ flexDirection: 'row', gap: 8 }}>
                         {canInvite && onInvite && (
@@ -117,9 +138,58 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                     </View>
 
                     <Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {subtitle}
+                        {item.type === 'Gig' && item.event_date 
+                            ? `${new Date(item.event_date).toLocaleDateString()} • ${subtitle}` 
+                            : subtitle}
                     </Text>
                 </View>
+
+                {item.experience_level && (
+                    <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+                        <View style={{
+                            backgroundColor: isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF',
+                            paddingHorizontal: 8,
+                            paddingVertical: 2,
+                            borderRadius: 4,
+                            borderWidth: 1,
+                            borderColor: isDark ? 'rgba(59, 130, 246, 0.4)' : '#DBEAFE'
+                        }}>
+                            <Text style={{
+                                fontSize: 10,
+                                color: isDark ? '#60A5FA' : '#2563EB',
+                                fontFamily: 'Poppins_500Medium'
+                            }}>
+                                {item.experience_level}
+                            </Text>
+                        </View>
+                    </View>
+                )}
+
+                {/* Contract Badge for Studios and Gigs */}
+                {item.contract_url && (item.type === 'Studio' || item.type === 'Gig') && (
+                    <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+                        <View style={{
+                            backgroundColor: isDark ? 'rgba(139, 92, 246, 0.2)' : '#F5F3FF',
+                            paddingHorizontal: 8,
+                            paddingVertical: 2,
+                            borderRadius: 4,
+                            borderWidth: 1,
+                            borderColor: isDark ? 'rgba(139, 92, 246, 0.4)' : '#DDD6FE',
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 4,
+                        }}>
+                            <Ionicons name="document-text" size={10} color={isDark ? '#A78BFA' : '#7C3AED'} />
+                            <Text style={{
+                                fontSize: 10,
+                                color: isDark ? '#A78BFA' : '#7C3AED',
+                                fontFamily: 'Poppins_500Medium'
+                            }}>
+                                Contract Available
+                            </Text>
+                        </View>
+                    </View>
+                )}
 
                 <View style={styles.priceRow}>
                     <Text style={[styles.price, { color: colors.text }]}>{priceLabel}</Text>
@@ -145,14 +215,14 @@ const styles = StyleSheet.create({
     card: {
         marginBottom: 20,
         marginRight: 16,
-        borderRadius: 16,
+        borderRadius: 20,
         overflow: 'hidden',
         // Subtle shadow directly on card container now
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
+        shadowOpacity: 0.1,
         shadowRadius: 8,
-        elevation: 2,
+        elevation: 3,
         borderWidth: 1,
         borderColor: 'rgba(0,0,0,0.05)'
     },

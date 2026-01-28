@@ -110,7 +110,8 @@ export default function MyVenueScreen() {
                                 <View style={styles.cardContent}>
                                     <Text style={[styles.cardTitle, { color: colors.text }]}>{gig.name}</Text>
                                     <Text style={[styles.cardSubTitle, { color: colors.primary }]}>
-                                        {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'} • {gig.location}
+                                        {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'}
+                                        {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} • {gig.location}
                                     </Text>
 
                                     <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>

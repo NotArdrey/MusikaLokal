@@ -8,3 +8,13 @@ verify_jwt = false
 verify_jwt = false
 [functions.manage-notifications]
 verify_jwt = false
+[functions.manage-listings]
+verify_jwt = false
+[functions.manage-details]
+verify_jwt = false
+[functions.verify-identity]
+verify_jwt = false
+[functions.home-feed]
+verify_jwt = false
+[functions.search-content]
+verify_jwt = false
