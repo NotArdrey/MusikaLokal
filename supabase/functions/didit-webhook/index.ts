@@ -127,7 +127,19 @@ serve(async (req) => {
 
         // The reference should be the user's UUID (passed during verification initiation)
         // Didit returns vendor_data that we passed when creating the session
-        const userReference = payload.vendor_data || payload.reference || payload.external_id || payload.metadata?.user_id;
+        let userReference = payload.vendor_data || payload.reference || payload.external_id || payload.metadata?.user_id;
+
+        // HANDLE COMPOSITE REFERENCE (Fix for 400 Error)
+        // If we used a randomized reference like "UUID_TIMESTAMP_RANDOM", we need to extract the UUID part.
+        if (userReference && typeof userReference === 'string' && userReference.includes('_')) {
+            const parts = userReference.split('_');
+            // Check if first part is a UUID
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (uuidRegex.test(parts[0])) {
+                console.log(`Extracted real User ID from composite reference: ${parts[0]} (Original: ${userReference})`);
+                userReference = parts[0];
+            }
+        }
 
         console.log('=== USER REFERENCE DEBUG ===');
         console.log('vendor_data:', payload.vendor_data);
@@ -188,12 +200,13 @@ serve(async (req) => {
 
             // Check if userReference is a valid UUID
             const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userReference || '');
+            const isTempRef = userReference && String(userReference).startsWith('TEMP_');
 
-            // If valid UUID, use it directly; otherwise try to find user by session ID
-            let finalUserReference: string | null = isValidUUID ? userReference : null;
+            // If valid UUID or TEMP ref, use it directly; otherwise try to find user by session ID
+            let finalUserReference: string | null = (isValidUUID || isTempRef) ? userReference : null;
 
-            if (!isValidUUID && sessionId) {
-                console.log('vendor_data is not a UUID, looking up user by session ID:', sessionId);
+            if (!isValidUUID && !isTempRef && sessionId) {
+                console.log('vendor_data is not a UUID or TEMP ref, looking up user by session ID:', sessionId);
                 const { data: profileData, error: profileError } = await supabaseAdmin
                     .from('profiles')
                     .select('id')
@@ -216,12 +229,44 @@ serve(async (req) => {
                 });
             }
 
-            // Get the user's auth info
-            const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(finalUserReference);
-            if (authError) {
-                console.log('Failed to get auth user:', authError.message);
+            // Get the user's auth info ONLY if it's a real user (UUID)
+            let authUser = null;
+            let authError = null;
+
+            if (!isTempRef) {
+                const result = await supabaseAdmin.auth.admin.getUserById(finalUserReference);
+                authUser = result.data;
+                authError = result.error;
+
+                if (authError) {
+                    console.log('Failed to get auth user:', authError.message);
+                }
+            } else {
+                console.log('Skipping auth lookup for TEMP session:', finalUserReference);
             }
-            const userEmail = authUser?.user?.email;
+
+            // ROBUST EMAIL FALLBACK STRATEGY
+            // 1. Try to get email from Auth User
+            let userEmail = authUser?.user?.email;
+
+            // 2. If missing, look up in Profiles table (where we store it during signup)
+            if (!userEmail) {
+                console.log('Email not found in Auth User. Checking profiles table...');
+                const { data: profileWithEmail } = await supabaseAdmin
+                    .from('profiles')
+                    .select('email')
+                    .eq('id', finalUserReference)
+                    .single();
+
+                if (profileWithEmail?.email) {
+                    userEmail = profileWithEmail.email;
+                    console.log('Recovered email from profiles table:', userEmail);
+                } else {
+                    console.error('CRITICAL: Email not found in Auth OR Profiles. Verification email cannot be sent.');
+                }
+            } else {
+                console.log('Email found in Auth User:', userEmail);
+            }
 
             // Extract warnings for duplicate detection
             // Warnings can be at multiple levels in the decision object:
@@ -408,7 +453,7 @@ async function sendVerificationEmail(
                     email: userEmail,
                     options: {
                         // This becomes {{ .RedirectTo }} in your template
-                        redirectTo: 'musikalokal://verified',
+                        redirectTo: 'musikalokal://?verified=true',
                         // Pass custom data that might be available in template
                         data: {
                             full_name: fullName,
@@ -438,7 +483,7 @@ async function sendVerificationEmail(
                     body: JSON.stringify({
                         email: userEmail,
                         options: {
-                            redirectTo: 'musikalokal://verified',
+                            redirectTo: 'musikalokal://?verified=true',
                             data: {
                                 full_name: fullName,
                                 verification_complete: true,
@@ -541,31 +586,47 @@ async function handleApproved(
     authUser: any
 ) {
     // Extract ID document data directly from idVerification object
-    // Based on Didit documentation:
-    // - first_name: payload.decision.id_verifications[0].first_name
-    // - last_name: payload.decision.id_verifications[0].last_name
-    // - For Spanish/Latin American IDs: extra_fields.first_surname
-
     const firstName = idVerification?.first_name || '';
     const lastName = idVerification?.last_name || idVerification?.extra_fields?.first_surname || '';
     const fullName = firstName && lastName ? `${firstName} ${lastName}` : (firstName || lastName || '');
 
     const documentExpiry = idVerification?.expiration_date || null;
-    const dateOfBirth = idVerification?.date_of_birth || null;
-    const nationality = idVerification?.nationality || null;
-    const documentNumber = idVerification?.document_number || null;
 
     console.log('Approving user - extracted data:', {
         userReference,
         fullName,
         firstName,
         lastName,
-        documentExpiry,
-        dateOfBirth,
-        nationality,
-        documentNumber,
-        rawIdVerification: JSON.stringify(idVerification)
+        documentExpiry
     });
+
+    // CHECK IF THIS IS A TEMPORARY SESSION (User doesn't exist yet)
+    if (userReference.startsWith('TEMP_')) {
+        console.log('Storing verification result for TEMP session:', userReference);
+
+        const { error: insertError } = await supabaseAdmin
+            .from('verification_sessions')
+            .upsert({
+                session_ref: userReference,
+                verification_data: {
+                    full_name: fullName,
+                    first_name: firstName,
+                    last_name: lastName,
+                    id_document_expiry: documentExpiry,
+                    id_verified_at: new Date().toISOString()
+                },
+                status: 'APPROVED'
+            });
+
+        if (insertError) {
+            console.error('Failed to store temp verification session:', insertError.message);
+        } else {
+            console.log('Temp verification session stored successfully.');
+        }
+        return;
+    }
+
+    // --- LEGACY/EXISTING USER FLOW (User already exists) ---
 
     // Confirm the email in auth system and update user metadata with display name
     if (userEmail) {
@@ -574,6 +635,7 @@ async function handleApproved(
             const { error: confirmError } = await supabaseAdmin.auth.admin.updateUserById(userReference, {
                 email_confirm: true,
                 user_metadata: {
+                    is_verified: true,
                     full_name: fullName || null,
                     first_name: firstName || null,
                     last_name: lastName || null,
@@ -596,9 +658,6 @@ async function handleApproved(
 
 
     // NOW store the full profile with verified ID details
-    // Only update columns that exist in the profiles table schema:
-    // id, email, full_name, avatar_url, role, bio, location, skills, genres, rating, review_count,
-    // is_verified, verification_status, didit_session_id, id_document_expiry, id_verified_at, created_at
     console.log('Updating profile with verified data:', {
         userReference,
         fullName,
@@ -633,6 +692,7 @@ async function handleApproved(
             .from('profiles')
             .upsert({
                 id: userReference,
+                role: authUser?.user?.user_metadata?.role || null,
                 email: userEmail || '',
                 full_name: fullName || null,
                 is_verified: true,
