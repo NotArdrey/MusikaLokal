@@ -8,7 +8,6 @@ import VerificationModal from '../src/components/VerificationModal';
 import { useTheme } from '../src/context/ThemeContext';
 
 
-import { VerificationStore } from '../src/utils/VerificationStore';
 
 interface AlertState {
     visible: boolean;
@@ -22,6 +21,30 @@ export default function LoginScreen() {
     const { colors, isDark } = useTheme();
     const { verified } = useLocalSearchParams();
 
+    // Check for verification success from deep link
+    useEffect(() => {
+        if (verified === 'true') {
+            const checkPendingSignup = async () => {
+                try {
+                    const savedState = await import('@react-native-async-storage/async-storage').then(m => m.default.getItem('signup_current_session'));
+                    if (savedState) {
+                        console.log('Pending signup detected, redirecting to signup flow...');
+                        // Clear the param from here to prevent loops if we come back, though router.replace should handle it
+                        router.replace({ pathname: '/signup', params: { verified: 'true' } });
+                        return;
+                    }
+                } catch (e) {
+                    console.log('Error checking pending signup:', e);
+                }
+
+                // Only show this alert if we are NOT in a signup flow (e.g. standalone verification)
+                // But user requested to remove it entirely for now to avoid the confusion.
+                // VerificationStore.setSuccess(true);
+            };
+            checkPendingSignup();
+        }
+    }, [verified]);
+
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
@@ -31,6 +54,7 @@ export default function LoginScreen() {
     // Verification Modal State
     const [showVerification, setShowVerification] = useState(false);
     const [verificationUrl, setVerificationUrl] = useState('');
+    const [loginMessage, setLoginMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null);
 
     // Custom Alert State
     const [alertState, setAlertState] = useState<AlertState>({
@@ -76,6 +100,7 @@ export default function LoginScreen() {
 
     const handleLogin = async () => {
         setErrors({}); // Clear previous errors
+        setLoginMessage(null);
         const newErrors: { email?: string; password?: string } = {};
 
         if (!email) {
@@ -95,55 +120,96 @@ export default function LoginScreen() {
 
         setLoading(true);
         try {
+            console.log('Attempting login for:', email);
             const { error } = await supabase.auth.signInWithPassword({
                 email,
                 password,
             });
 
             if (error) {
+                console.log('Login error:', error.message);
                 // Handle specific error cases
                 if (error.message.includes('Invalid login credentials')) {
-                    showAlert(
-                        'error',
-                        'Login Failed',
-                        'The email or password you entered is incorrect. Please try again.',
-                        [{ text: 'Try Again', style: 'default' }]
-                    );
+                    setLoginMessage({ type: 'error', text: 'Invalid email or password.' });
                 } else if (error.message.includes('Email not confirmed')) {
-                    showAlert(
-                        'warning',
-                        'Email Not Verified',
-                        'Please check your inbox and click the verification link we sent you.',
-                        [{ text: 'OK', style: 'default' }]
-                    );
+                    setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox.' });
                 } else if (error.message.includes('rate') || error.status === 429) {
-                    showAlert(
-                        'warning',
-                        'Too Many Attempts',
-                        "You've tried logging in too many times. Please wait a minute and try again.",
-                        [{ text: 'OK', style: 'default' }]
-                    );
+                    setLoginMessage({ type: 'error', text: 'Too many attempts. Please wait.' });
                 } else {
-                    showAlert('error', 'Login Failed', error.message);
+                    setLoginMessage({ type: 'error', text: error.message });
                 }
             } else {
-                // Check if user is verified
+                // Login succeeded - VALIDATE VERIFICATION STATUS
+                console.log('Auth success. Validating verification status...');
                 const { data: { user } } = await supabase.auth.getUser();
+
                 if (user) {
-                    const { data: profile } = await supabase
+                    // 1. Check Metadata (Fastest)
+                    const metaVerified = user.user_metadata?.is_verified;
+                    console.log('Metadata check:', { metaVerified });
+
+                    if (metaVerified === false) {
+                        console.log('Blocked by metadata check.');
+                        await supabase.auth.signOut();
+                        setLoginMessage({ type: 'error', text: 'Account not verified. Please complete verification.' });
+                        Alert.alert(
+                            'Verification Required',
+                            'Your account is not verified. Please complete verification to continue.',
+                            [
+                                { text: 'Verify Now', onPress: () => startVerification(user.id) },
+                                { text: 'Cancel', style: 'cancel' }
+                            ]
+                        );
+                        return;
+                    }
+
+                    // 2. Check Profile (Source of Truth)
+                    let { data: profile, error: profileError } = await supabase
                         .from('profiles')
                         .select('is_verified, id_document_expiry')
                         .eq('id', user.id)
-                        .single();
+                        .maybeSingle();
 
-                    if (profile && !profile.is_verified) {
-                        // Sign out immediately to prevent access
+                    console.log('Profile check:', { profile, profileError });
+
+                    // SELF-HEALING: If profile is missing but Auth Metadata says verified, recreate the profile
+                    if (!profile && metaVerified) {
+                        console.log('Profile missing but Metadata Verified. Attempting to repair profile...');
+                        const { error: upsertError } = await supabase
+                            .from('profiles')
+                            .upsert({
+                                id: user.id,
+                                email: user.email,
+                                full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
+                                role: user.user_metadata?.role || 'musician',
+                                is_verified: true,
+                                verification_status: 'APPROVED',
+                                didit_session_id: user.user_metadata?.didit_session_id
+                            });
+
+                        if (upsertError) {
+                            console.error('Failed to repair profile:', upsertError);
+                        } else {
+                            console.log('Profile repaired successfully. Re-fetching...');
+                            const { data: newProfile } = await supabase
+                                .from('profiles')
+                                .select('is_verified')
+                                .eq('id', user.id)
+                                .maybeSingle();
+                            profile = newProfile;
+                        }
+                    }
+
+                    // If profile is STILL missing OR unverified -> BLOCK
+                    if (!profile || !profile.is_verified) {
+                        console.log('Blocked by profile check. Profile Missing:', !profile, 'Verified:', profile?.is_verified);
                         await supabase.auth.signOut();
 
-                        showAlert(
-                            'warning',
+                        setLoginMessage({ type: 'error', text: !profile ? 'Account setup incomplete. Verify identity.' : 'Identity verification required.' });
+
+                        Alert.alert(
                             'Verification Required',
-                            'You need to verify your identity before accessing the app.',
+                            !profile ? 'Account setup incomplete. Please verify your identity.' : 'You need to verify your identity before accessing the app.',
                             [
                                 {
                                     text: 'Verify Now',
@@ -177,7 +243,9 @@ export default function LoginScreen() {
                             ]
                         );
                     } else {
-                        router.replace('/home' as any);
+                        // Verified & Profile Exists -> Allow Entry
+                        console.log('Verification passed. Redirecting to Home.');
+                        router.replace('/home');
                     }
                 }
             }
@@ -194,11 +262,18 @@ export default function LoginScreen() {
         }
     };
 
+
+
     const startVerification = async (userId: string) => {
         try {
-            // Direct URL construction
+            // Direct URL construction with unique reference to prevent stale sessions
             const DIDIT_VERIFICATION_URL = 'https://verify.didit.me/verify/kxYhKHgC1LESNW-TQEmPcw';
-            const url = `${DIDIT_VERIFICATION_URL}?reference=${userId}`;
+
+            // CRITICAL: Randomize BOTH reference and vendor_data to bypass Didit's caching
+            const uniqueRef = `${userId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+            // Use uniqueRef for vendor_data to force new session perception
+            const url = `${DIDIT_VERIFICATION_URL}?reference=${uniqueRef}&vendor_data=${uniqueRef}`;
 
             setVerificationUrl(url);
             setShowVerification(true);
@@ -333,6 +408,14 @@ export default function LoginScreen() {
                                 </Text>
                             )}
                         </TouchableOpacity>
+
+                        {loginMessage && (
+                            <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
+                                <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
+                                    {loginMessage.text}
+                                </Text>
+                            </View>
+                        )}
 
                         <View style={styles.signupLinkContainer}>
                             <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>

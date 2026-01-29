@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -38,7 +39,86 @@ serve(async (req) => {
     }
 
     // Parse request body
-    const { userId, email, callback, redirect_url } = await req.json();
+    const { userId, email, callback, redirect_url, action, session_id } = await req.json();
+
+    // HANDLE GET SESSION ACTION
+    if (action === 'get_session' && session_id) {
+      console.log(`Fetching Didit session: ${session_id}`);
+
+      let sessionData = {};
+
+      // Try /decision/ first (contains verification results)
+      try {
+        console.log(`Attempting /decision/ endpoint...`);
+        const decisionResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}/decision/`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json", "X-Api-Key": DIDIT_API_KEY }
+        });
+        if (decisionResponse.ok) {
+          const decision = await decisionResponse.json();
+          console.log('Decision fetched successfully');
+          sessionData = { ...sessionData, ...decision };
+        } else {
+          console.warn(`Decision endpoint failed: ${decisionResponse.status}`);
+        }
+      } catch (err) {
+        console.error('Error fetching decision:', err);
+      }
+
+      // Try base /session/ endpoint (contains metadata)
+      try {
+        console.log(`Attempting /session/ endpoint...`);
+        const baseResponse = await fetch(`https://verification.didit.me/v3/session/${session_id}`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json", "X-Api-Key": DIDIT_API_KEY }
+        });
+        if (baseResponse.ok) {
+          const base = await baseResponse.json();
+          console.log('Base session fetched successfully');
+          // Merge, but don't overwrite decision data if it exists
+          sessionData = { ...base, ...sessionData };
+        } else {
+          console.warn(`Base session endpoint failed: ${baseResponse.status}`);
+        }
+      } catch (err) {
+        console.error('Error fetching base session:', err);
+      }
+
+      // FALLBACK: Check local 'verification_sessions' table
+      // This is crucial if we are using a TEMP_ ref that the Webhook has processed
+      if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+        try {
+          const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+          const { data: localData } = await supabaseAdmin
+            .from('verification_sessions')
+            .select('verification_data')
+            .eq('session_ref', session_id)
+            .maybeSingle();
+
+          if (localData?.verification_data) {
+            console.log('Found data in verification_sessions table!', localData.verification_data);
+            // Merge local data (extracted by webhook) into sessionData
+            // We map the local fields to what the frontend expects
+            sessionData = {
+              ...sessionData,
+              extracted_data: {
+                ...sessionData.extracted_data,
+                ...localData.verification_data, // fullName, first_name, etc.
+                // Frontend looks for:
+                firstName: localData.verification_data.first_name,
+                lastName: localData.verification_data.last_name
+              }
+            };
+          }
+        } catch (dbErr) {
+          console.error('Database fallback error:', dbErr);
+        }
+      }
+
+      return new Response(JSON.stringify(sessionData), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
 
     if (!userId) {
       return new Response(JSON.stringify({ error: "userId is required" }), {
@@ -113,7 +193,8 @@ serve(async (req) => {
     */
 
     // Update user profile with the session ID
-    if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+    // SKIP if it's a temp ID (user not created yet)
+    if (userId && !userId.startsWith('TEMP_') && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
       const { error: updateError } = await supabase

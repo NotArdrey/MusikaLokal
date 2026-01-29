@@ -1,7 +1,13 @@
 [functions.verification-redirect]
 verify_jwt = false
+
 [functions.didit-webhook]
 verify_jwt = false
+
+[functions.create-didit-session]
+verify_jwt = false
+
+[functions.login-redirect]
 [functions.manage-profile]
 verify_jwt = false
 [functions.manage-bookings]

@@ -1,3 +1,4 @@
+
 import { Session } from '@supabase/supabase-js';
 import { router } from 'expo-router';
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -42,27 +43,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [userRole, setUserRole] = useState<string | null>(null);
 
     useEffect(() => {
+        // Helper to filter/block unverified sessions (prevents auto-login during signup)
+        const filterSession = (currentSession: Session | null) => {
+            // If user exists but has explicit is_verified: false, mimic logged out state
+            if (currentSession?.user?.user_metadata?.is_verified === false) {
+                return null;
+            }
+            return currentSession;
+        };
+
         // Check active session
         supabase.auth.getSession().then(({ data: { session } }) => {
-            console.log('🔐 Auth Session:', session ? `User ID: ${session.user.id}, Email: ${session.user.email}` : 'No session');
-            setSession(session);
-            if (session) {
-                checkAdmin(session.user.id);
-                fetchUserRole(session.user.id);
-            }
+            const secureSession = filterSession(session);
+            setSession(secureSession);
+            if (secureSession) checkAdmin(secureSession.user.id);
             setLoading(false);
         });
 
         // Listen for changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
-            if (session) {
-                checkAdmin(session.user.id);
-                fetchUserRole(session.user.id);
-            } else {
-                setIsAdmin(false);
-                setUserRole(null);
-            }
+            const secureSession = filterSession(session);
+            setSession(secureSession);
+            if (secureSession) checkAdmin(secureSession.user.id);
+            else setIsAdmin(false);
             setLoading(false);
         });
 
@@ -71,7 +74,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const checkAdmin = async (userId: string) => {
         // Optional: If you have an 'admin' role in your profiles table or metadata
-        // For now, we'll just leave it false or fetch from profile if needed
         setIsAdmin(false);
     };
 
