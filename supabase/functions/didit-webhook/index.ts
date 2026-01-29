@@ -315,7 +315,7 @@ serve(async (req) => {
             // Handle different decision statuses
             switch (faceMatchStatus) {
                 case 'Approved':
-                    await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser);
+                    await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId);
                     break;
 
                 case 'Declined':
@@ -342,7 +342,7 @@ serve(async (req) => {
                     console.log('Unknown face match status:', faceMatchStatus);
                     // Check if there's an overall approval despite unknown face status
                     if (idVerification?.status === 'Approved') {
-                        await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser);
+                        await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId);
                     }
             }
         }
@@ -583,7 +583,8 @@ async function handleApproved(
     userReference: string,
     userEmail: string | undefined,
     idVerification: any,
-    authUser: any
+    authUser: any,
+    sessionId: string | null
 ) {
     // Extract ID document data directly from idVerification object
     const firstName = idVerification?.first_name || '';
@@ -600,29 +601,40 @@ async function handleApproved(
         documentExpiry
     });
 
-    // CHECK IF THIS IS A TEMPORARY SESSION (User doesn't exist yet)
-    if (userReference.startsWith('TEMP_')) {
-        console.log('Storing verification result for TEMP session:', userReference);
+    // ALWAYS Store verification result in verification_sessions table
+    // This provides a persistent record for both TEMP and Registered users.
+    // create-didit-session checks this table using the Didit Session ID.
+    if (sessionId) {
+        console.log('Storing verification session details:', { sessionId, userReference });
 
-        const { error: insertError } = await supabaseAdmin
+        const { error: sessionError } = await supabaseAdmin
             .from('verification_sessions')
             .upsert({
-                session_ref: userReference,
+                session_ref: sessionId, // Must use Didit Session ID as key
                 verification_data: {
                     full_name: fullName,
                     first_name: firstName,
                     last_name: lastName,
                     id_document_expiry: documentExpiry,
-                    id_verified_at: new Date().toISOString()
+                    id_verified_at: new Date().toISOString(),
+                    user_ref: userReference, // Store the user ID reference inside data
+                    email: userEmail
                 },
                 status: 'APPROVED'
             });
 
-        if (insertError) {
-            console.error('Failed to store temp verification session:', insertError.message);
+        if (sessionError) {
+            console.error('Failed to store verification_sessions record:', sessionError.message);
         } else {
-            console.log('Temp verification session stored successfully.');
+            console.log('Verification session recorded successfully.');
         }
+    } else {
+        console.warn('No sessionId available, skipping verification_sessions storage');
+    }
+
+    // CHECK IF THIS IS A TEMPORARY SESSION (User doesn't exist yet)
+    if (userReference.startsWith('TEMP_')) {
+        console.log('TEMP session processed. Stopping here since no profile exists to update.');
         return;
     }
 

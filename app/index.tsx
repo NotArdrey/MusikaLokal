@@ -115,15 +115,43 @@ export default function LoginScreen() {
                     }
 
                     // 2. Check Profile (Source of Truth)
-                    const { data: profile, error: profileError } = await supabase
+                    let { data: profile, error: profileError } = await supabase
                         .from('profiles')
                         .select('is_verified')
                         .eq('id', user.id)
-                        .maybeSingle(); // Use maybeSingle to handle missing profiles safely
+                        .maybeSingle();
 
                     console.log('Profile check:', { profile, profileError });
 
-                    // If profile is missing OR unverified -> BLOCK
+                    // SELF-HEALING: If profile is missing but Auth Metadata says verified, recreate the profile
+                    if (!profile && metaVerified) {
+                        console.log('Profile missing but Metadata Verified. Attempting to repair profile...');
+                        const { error: upsertError } = await supabase
+                            .from('profiles')
+                            .upsert({
+                                id: user.id,
+                                email: user.email,
+                                full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
+                                role: user.user_metadata?.role || 'musician',
+                                is_verified: true,
+                                verification_status: 'APPROVED',
+                                didit_session_id: user.user_metadata?.didit_session_id
+                            });
+
+                        if (upsertError) {
+                            console.error('Failed to repair profile:', upsertError);
+                        } else {
+                            console.log('Profile repaired successfully. Re-fetching...');
+                            const { data: newProfile } = await supabase
+                                .from('profiles')
+                                .select('is_verified')
+                                .eq('id', user.id)
+                                .maybeSingle();
+                            profile = newProfile;
+                        }
+                    }
+
+                    // If profile is STILL missing OR unverified -> BLOCK
                     if (!profile || !profile.is_verified) {
                         console.log('Blocked by profile check. Profile Missing:', !profile, 'Verified:', profile?.is_verified);
                         await supabase.auth.signOut();
