@@ -133,7 +133,7 @@ export default function BookingsScreen() {
 
       // Pick image
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: 'images',
         allowsEditing: true,
         quality: 0.8,
       });
@@ -315,7 +315,13 @@ export default function BookingsScreen() {
                     <View style={styles.cardTitleContainer}>
                       <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
                       <Text style={[styles.cardDate, { color: colors.textSecondary }]}>
-                        {new Date(item.start_time).toLocaleDateString()} • {new Date(item.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        {item.raw_date ? new Date(item.raw_date).toLocaleDateString() : new Date(item.start_time).toLocaleDateString()} • {item.start_time && item.start_time.includes(':') ? (() => {
+                          const [hours, minutes] = item.start_time.split(':');
+                          const h = parseInt(hours);
+                          const period = h >= 12 ? 'PM' : 'AM';
+                          const h12 = h % 12 || 12;
+                          return `${h12}:${minutes} ${period}`;
+                        })() : new Date(item.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
                       </Text>
                     </View>
                   </View>

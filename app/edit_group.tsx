@@ -107,7 +107,10 @@ export default function EditGroupScreen() {
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
       setMembers(data.members || []);
-      // setSelectedImage(data.images?.[0] || '');
+      setSelectedImages(data.images || []);
+      if (data.images && data.images.length > 0) {
+        setThumbnailIndex(0);
+      }
     } catch (e) {
       console.log('Error fetching group details:', e);
       Alert.alert('Error', 'Failed to load group details.');

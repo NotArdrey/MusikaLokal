@@ -14,14 +14,14 @@ function decodeJwtPayload(token: string): { sub?: string; email?: string } | nul
     try {
         const parts = token.replace('Bearer ', '').split('.')
         if (parts.length !== 3) return null
-        
+
         // Base64url to base64 conversion
         let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
         // Add padding if needed
         while (base64.length % 4) {
             base64 += '='
         }
-        
+
         const payload = JSON.parse(atob(base64))
         return payload
     } catch (e) {
@@ -38,7 +38,7 @@ serve(async (req: Request) => {
     try {
         const authHeader = req.headers.get('Authorization');
         console.log('Authorization header present:', !!authHeader);
-        
+
         if (!authHeader) {
             return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -49,7 +49,7 @@ serve(async (req: Request) => {
         // Decode JWT to get user info
         const jwtPayload = decodeJwtPayload(authHeader)
         console.log('JWT payload:', { sub: jwtPayload?.sub, email: jwtPayload?.email });
-        
+
         if (!jwtPayload || !jwtPayload.sub) {
             return new Response(JSON.stringify({ error: 'Invalid token' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -163,6 +163,30 @@ serve(async (req: Request) => {
                 return new Response(JSON.stringify(null), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
             }
 
+            // If studio, also fetch operating hours and convert to availability format
+            if (type === 'studio') {
+                const { data: operatingHours, error: hoursError } = await supabaseClient
+                    .from('studio_operating_hours')
+                    .select('*')
+                    .eq('studio_id', id);
+
+                if (!hoursError && operatingHours) {
+                    // Convert operating hours to availability format
+                    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    const availability = dayNames.map((dayName, index) => {
+                        const dayHours = operatingHours.filter((h: any) => h.day_of_week === index && h.is_open);
+                        return {
+                            day: dayName,
+                            slots: dayHours.map((h: any) => ({
+                                start: h.open_time,
+                                end: h.close_time
+                            }))
+                        };
+                    });
+                    data.availability = availability;
+                }
+            }
+
             // View columns already named 'rating' and 'review_count'
             const mapped = {
                 ...data,
@@ -182,6 +206,40 @@ serve(async (req: Request) => {
             // Extract availability only if type is studio, to prevent it from being sent to studios table insert
             let studioAvailability = null;
             let insertPayload = { ...payload };
+
+            // SPAM PREVENTION: Check for blocking rule for Gig Applications
+            if (type === 'gig_application') {
+                const { gig_id } = insertPayload;
+
+                // 1. Get the organizer_id of the gig
+                const { data: gigData, error: gigError } = await supabaseClient
+                    .from('gigs')
+                    .select('organizer_id')
+                    .eq('id', gig_id)
+                    .single();
+
+                if (gigError || !gigData) throw new Error('Gig not found');
+                const organizerId = gigData.organizer_id;
+
+                // 2. Count cancellations for this user against this organizer in last 30 days
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+                const { count, error: countError } = await supabaseClient
+                    .from('gig_applications')
+                    .select('id, gig:gigs!inner(organizer_id)', { count: 'exact', head: true })
+                    .eq('status', 'cancelled')
+                    .eq('applicant_id', userId)
+                    .eq('gig.organizer_id', organizerId)
+                    .gte('updated_at', thirtyDaysAgo.toISOString());
+
+                if (countError) throw countError;
+
+                if (count !== null && count >= 3) { // Threshold: 3 cancellations
+                    throw new Error('You are temporarily blocked from applying to this organizer due to frequent cancellations.');
+                }
+            }
+
 
             if (type === 'studio' && insertPayload.availability) {
                 studioAvailability = insertPayload.availability;
@@ -278,15 +336,65 @@ serve(async (req: Request) => {
             const table = type + 's'
             const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
 
+            // Handle availability for studios - store in operating_hours table
+            let studioAvailability = null;
+            let updatePayload = { ...payload };
+
+            if (type === 'studio' && updatePayload.availability) {
+                studioAvailability = updatePayload.availability;
+                // Keep availability in payload if column exists in table
+                // If you want to use normalized tables instead, uncomment the line below:
+                // delete updatePayload.availability;
+            }
+
             const { data, error } = await supabaseClient
                 .from(table)
-                .update(payload)
+                .update(updatePayload)
                 .eq('id', id)
                 .eq(ownerField, userId)
                 .select()
                 .single()
 
             if (error) throw error
+
+            // Update studio operating hours if availability was provided
+            if (type === 'studio' && studioAvailability && Array.isArray(studioAvailability)) {
+                const studioId = id;
+
+                // Delete existing operating hours for this studio
+                await supabaseClient
+                    .from('studio_operating_hours')
+                    .delete()
+                    .eq('studio_id', studioId);
+
+                // Create new operating hours
+                const dayMap: { [key: string]: number } = {
+                    'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+                };
+
+                let operatingHours = [];
+                for (const daySchedule of studioAvailability) {
+                    const dayIndex = dayMap[daySchedule.day];
+                    if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+                        const slots = daySchedule.slots;
+                        const start = slots[0].start;
+                        const end = slots[slots.length - 1].end;
+
+                        operatingHours.push({
+                            studio_id: studioId,
+                            day_of_week: dayIndex,
+                            is_open: true,
+                            open_time: start,
+                            close_time: end
+                        });
+                    }
+                }
+
+                if (operatingHours.length > 0) {
+                    await supabaseClient.from('studio_operating_hours').insert(operatingHours);
+                }
+            }
+
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
@@ -366,7 +474,7 @@ serve(async (req: Request) => {
         // UPDATE BOOKING STATUS (Studio Bookings)
         if (action === 'update_booking_status') {
             const { bookingId, status } = params;
-            
+
             // First get the booking details to send notification
             const { data: bookingDetails, error: bookingError } = await supabaseClient
                 .from('studio_bookings')
@@ -393,7 +501,7 @@ serve(async (req: Request) => {
             // Send notification to the user who made the booking
             const studioName = bookingDetails.studio?.name || 'the studio';
             const bookingDate = bookingDetails.booking_date || 'your requested date';
-            
+
             let notificationType = 'info';
             let notificationTitle = '';
             let notificationMessage = '';
@@ -432,7 +540,7 @@ serve(async (req: Request) => {
         // UPDATE APPLICATION STATUS
         if (action === 'update_application_status') {
             const { applicationId, status } = params;
-            
+
             // First get the application details to send notification
             const { data: appDetails, error: appError } = await supabaseClient
                 .from('gig_applications')
@@ -460,7 +568,7 @@ serve(async (req: Request) => {
             // Send notification to the applicant
             const applicantName = appDetails.group?.name || appDetails.applicant?.full_name || 'Applicant';
             const gigName = appDetails.gig?.name || 'the gig';
-            
+
             let notificationType = 'info';
             let notificationTitle = '';
             let notificationMessage = '';
@@ -513,6 +621,128 @@ serve(async (req: Request) => {
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 
+        // FETCH MY BOOKINGS (Studio Bookings made by the user)
+        if (action === 'fetch_my_bookings') {
+            // Join with studio to get studio details
+            const { data, error } = await supabaseClient
+                .from('studio_bookings')
+                .select(`
+                    *,
+                    studio:studios!studio_id(name, images, location, rate_per_hour)
+                `)
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // CHECK ELIGIBILITY (Spam Block Check)
+        if (action === 'check_eligibility') {
+            const { organizerId } = params;
+
+            // Count cancellations in last 30 days
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            const { count, error: countError } = await supabaseClient
+                .from('gig_applications')
+                .select('id, gig:gigs!inner(organizer_id)', { count: 'exact', head: true })
+                .eq('status', 'cancelled')
+                .eq('applicant_id', userId)
+                .eq('gig.organizer_id', organizerId)
+                .gte('updated_at', thirtyDaysAgo.toISOString());
+
+            if (countError) throw countError;
+
+            const blocked = (count || 0) >= 3;
+            return new Response(JSON.stringify({
+                blocked,
+                reason: blocked ? 'Temporarily blocked due to excessive cancellations.' : null
+            }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // CANCEL APPLICATION
+        if (action === 'cancel_application') {
+            const { applicationId } = params;
+
+            // Verify ownership securely
+            const { data: existingApp, error: fetchError } = await supabaseClient
+                .from('gig_applications')
+                .select('applicant_id, group_id, group:groups!group_id(owner_id)')
+                .eq('id', applicationId)
+                .single();
+
+            if (fetchError) throw fetchError;
+            if (!existingApp) throw new Error('Application not found');
+
+            // Check if consumer is the applicant (individual) OR the owner of the group
+            const isApplicant = existingApp.applicant_id === userId;
+            const isGroupOwner = existingApp.group?.owner_id === userId;
+
+            if (!isApplicant && !isGroupOwner) {
+                return new Response(JSON.stringify({ error: 'Unauthorized to cancel this application' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            // Soft delete: Update status to 'cancelled'
+            const { error: updateError } = await supabaseClient
+                .from('gig_applications')
+                .update({ status: 'cancelled' })
+                .eq('id', applicationId);
+
+            if (updateError) throw updateError;
+
+            // SPAM PREVENTION: Get count to show to user
+            let cancellationCount = 0;
+            try {
+                // Get gig details from existingApp (need to ensure gig_id was fetched)
+                // We initially only fetched select('applicant_id, group_id...').
+                // Let's refetch or improve initial fetch.
+                // Improvement: Update initial fetch to include gig_id
+            } catch (e) {
+                // Ignore count error, just return success
+            }
+
+            // To do this cleanly, let's just fetch the gig_id via the existingApp logic if we update the SELECT above.
+            // But since I can't easily jump back and forth with one replace, I'll do a fresh small query or assume existingApp has it (I will update the SELECT in the next chunk).
+
+            // Re-fetch gig info for counting
+            const { data: appData } = await supabaseClient
+                .from('gig_applications')
+                .select('gig_id') // We know this app exists
+                .eq('id', applicationId)
+                .single();
+
+            if (appData?.gig_id) {
+                const { data: gigData } = await supabaseClient
+                    .from('gigs')
+                    .select('organizer_id')
+                    .eq('id', appData.gig_id)
+                    .single();
+
+                if (gigData) {
+                    const thirtyDaysAgo = new Date();
+                    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+                    const { count } = await supabaseClient
+                        .from('gig_applications')
+                        .select('id, gig:gigs!inner(organizer_id)', { count: 'exact', head: true })
+                        .eq('status', 'cancelled')
+                        .eq('applicant_id', userId)
+                        .eq('gig.organizer_id', gigData.organizer_id)
+                        .gte('updated_at', thirtyDaysAgo.toISOString());
+
+                    cancellationCount = count || 0;
+                }
+            }
+
+            return new Response(JSON.stringify({ success: true, cancellation_count: cancellationCount }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+
         throw new Error('Invalid action')
 
     } catch (error: any) {
@@ -520,8 +750,8 @@ serve(async (req: Request) => {
         console.error('❌ Error message:', error.message);
         console.error('❌ Error stack:', error.stack);
         console.error('❌ Error details:', JSON.stringify(error, null, 2));
-        
-        return new Response(JSON.stringify({ 
+
+        return new Response(JSON.stringify({
             error: error.message,
             details: error.toString(),
             hint: error.hint || null,

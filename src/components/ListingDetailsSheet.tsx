@@ -80,6 +80,10 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
     const [loadingGroups, setLoadingGroups] = useState(false);
 
+    // Spam Block State
+    const [isBlocked, setIsBlocked] = useState(false);
+    const [blockReason, setBlockReason] = useState<string | null>(null);
+
     // Alert State
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
@@ -188,7 +192,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     // Fetch user's groups for gig application
     const fetchUserGroups = async () => {
         if (!userId || !group || group.type !== 'Gig') return;
-        
+
         setLoadingGroups(true);
         try {
             const { data, error } = await supabase
@@ -243,6 +247,27 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         }
     };
 
+    // Check Eligibility (Spam Block)
+    const checkEligibility = async (organizerId: string) => {
+        if (!userId || !organizerId) return;
+        try {
+            const { data, error } = await supabase.functions.invoke('manage-listings', {
+                body: { action: 'check_eligibility', userId, organizerId }
+            });
+            if (error) throw error;
+
+            if (data && data.blocked) {
+                setIsBlocked(true);
+                setBlockReason(data.reason);
+            } else {
+                setIsBlocked(false);
+                setBlockReason(null);
+            }
+        } catch (err) {
+            console.error('Error checking eligibility:', err);
+        }
+    };
+
     // Handle Submit Application for Gigs
     const handleSubmitApplication = async () => {
         console.log('=== handleSubmitApplication CALLED ===');
@@ -270,7 +295,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
         setIsSubmittingApplication(true);
         console.log('Inserting application into database...');
-        
+
         try {
             const { data, error } = await supabase
                 .from('gig_applications')
@@ -298,11 +323,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             }
 
             console.log('✅ Application submitted successfully!', data);
-            
+
             // Update application status
             setHasExistingApplication(true);
             setExistingApplicationStatus('pending');
-            
+
             // Show success alert
             setAlertConfig({
                 type: 'success',
@@ -310,11 +335,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 message: 'Your application has been submitted successfully. The venue owner will review it and get back to you soon.'
             });
             setAlertVisible(true);
-            
+
             // Clear form
             setPitchMessage('');
             setVideoUrl('');
-            
+
             // Close the bottom sheet after alert is dismissed
             setTimeout(() => {
                 if (ref && 'current' in ref && ref.current) {
@@ -371,6 +396,10 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     useEffect(() => {
         if (group && userId && group.type === 'Studio') {
             checkExistingStudioBooking();
+        }
+        // Check eligibility if Gig (uses organizer_id)
+        if (group && userId && group.type === 'Gig' && group.organizer_id) {
+            checkEligibility(group.organizer_id);
         }
     }, [group, userId]);
 
@@ -458,10 +487,44 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     review_count: data.review_count || 0,
                     rating: data.rating || 0
                 };
-                
+
+                // If studio, fetch availability from operating hours
+                if (type === 'Studio') {
+                    console.log('📅 Fetching studio operating hours...');
+                    const { data: operatingHours, error: hoursError } = await supabase
+                        .from('studio_operating_hours')
+                        .select('*')
+                        .eq('studio_id', data.id);
+
+                    if (!hoursError && operatingHours) {
+                        console.log('📅 Operating hours fetched:', operatingHours);
+                        // Convert operating hours to availability format
+                        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                        const availability = dayNames.map((dayName, index) => {
+                            const dayHours = operatingHours.filter((h: any) => h.day_of_week === index && h.is_open);
+                            return {
+                                day: dayName,
+                                slots: dayHours.map((h: any) => ({
+                                    start: h.open_time,
+                                    end: h.close_time
+                                }))
+                            };
+                        });
+                        normalizedData.availability = availability;
+                        console.log('📅 Converted availability:', availability);
+                    } else if (!data.availability) {
+                        console.log('⚠️ No operating hours found, checking availability column...');
+                        // Fallback: check if availability exists in the data (JSONB column)
+                        if (data.availability) {
+                            normalizedData.availability = data.availability;
+                            console.log('📅 Using availability from JSONB column:', data.availability);
+                        }
+                    }
+                }
+
                 console.log('Setting group data:', normalizedData);
                 setGroup(normalizedData);
-                
+
                 // Fetch existing bookings for availability calculation
                 const { data: bookingData } = await supabase.functions.invoke('manage-listings', {
                     body: { action: 'fetch_studio_bookings', studioId: data.id }
@@ -471,7 +534,10 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
                 // Process availability (Availability + Bookings)
                 if (normalizedData.availability) {
+                    console.log('📅 Processing availability for calendar...');
                     processAvailability(normalizedData.availability, fetchedBookings);
+                } else {
+                    console.log('⚠️ No availability data to process');
                 }
             } else {
                 console.log('No data found for listingId:', listingId);
@@ -487,6 +553,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
 
     const processAvailability = (availability: any[], bookings: any[]) => {
+        console.log('📅 processAvailability called with:', { availability, bookingsCount: bookings.length });
         const marked: any = {};
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -495,8 +562,13 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         const availabilityMap: { [key: number]: any } = {};
         availability.forEach((daySchedule: any) => {
             const dayIndex = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].indexOf(daySchedule.day.toLowerCase());
-            if (dayIndex !== -1) availabilityMap[dayIndex] = daySchedule;
+            if (dayIndex !== -1) {
+                availabilityMap[dayIndex] = daySchedule;
+                console.log(`📅 Mapped ${daySchedule.day} (index ${dayIndex}) with ${daySchedule.slots?.length || 0} slots`);
+            }
         });
+
+        console.log('📅 Availability map:', availabilityMap);
 
         // Loop next 90 days to ensure coverage
         for (let i = 0; i < 90; i++) {
@@ -573,17 +645,29 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             }
         }
 
+        console.log('📅 Marked dates count:', Object.keys(marked).length);
+        console.log('📅 Sample marked dates:', Object.keys(marked).slice(0, 5));
         setMarkedDates(marked);
     };
 
     const fetchAvailableSlots = async (dateStr: string) => {
-        if (!group?.availability) return;
+        console.log('🕐 fetchAvailableSlots called for date:', dateStr);
+        console.log('🕐 group.availability:', group?.availability);
+
+        if (!group?.availability) {
+            console.log('⚠️ No availability data in group');
+            return;
+        }
 
         const selectedDate = new Date(dateStr);
         const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][selectedDate.getDay()];
+        console.log('🕐 Looking for day:', dayName);
 
         const daySchedule = group.availability.find((a: any) => a.day.toLowerCase() === dayName);
+        console.log('🕐 Found day schedule:', daySchedule);
+
         if (!daySchedule || !daySchedule.slots) {
+            console.log('⚠️ No slots for this day');
             setAvailableSlots([]);
             return;
         }
@@ -595,6 +679,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         const dayBookings = existingBookings.filter((b: any) =>
             b.status !== 'cancelled' && new Date(b.start_time).toISOString().split('T')[0] === dateStr
         );
+        console.log('🕐 Day bookings:', dayBookings.length);
+
         const blockedTimes = new Set<string>();
         dayBookings.forEach((b: any) => {
             const bStart = new Date(b.start_time);
@@ -607,6 +693,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         });
 
         daySchedule.slots.forEach((slot: any) => {
+            console.log('🕐 Processing slot:', slot);
             const start = new Date(`${dateStr}T${slot.start}`);
             const end = new Date(`${dateStr}T${slot.end}`);
 
@@ -622,6 +709,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             }
         });
 
+        console.log('🕐 Generated slots:', slots);
         setAvailableSlots(slots);
     };
 
@@ -1136,56 +1224,33 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 {/* Status display for existing booking */}
                 {hasExistingStudioBooking && (
                     <View style={[
-                        styles.infoBox, 
-                        { 
-                            backgroundColor: existingStudioBookingStatus === 'cancelled' ? '#EF444420' : 
-                                            existingStudioBookingStatus === 'confirmed' ? '#10B98120' :
-                                            colors.primary + '20', 
-                            borderColor: existingStudioBookingStatus === 'cancelled' ? '#EF4444' : 
-                                        existingStudioBookingStatus === 'confirmed' ? '#10B981' :
-                                        colors.primary,
-                            marginBottom: 16 
+                        styles.infoBox,
+                        {
+                            backgroundColor: existingStudioBookingStatus === 'cancelled' ? '#EF444420' :
+                                existingStudioBookingStatus === 'confirmed' ? '#10B98120' :
+                                    colors.primary + '20',
+                            borderColor: existingStudioBookingStatus === 'cancelled' ? '#EF4444' :
+                                existingStudioBookingStatus === 'confirmed' ? '#10B981' :
+                                    colors.primary,
+                            marginBottom: 16
                         }
                     ]}>
-                        <Ionicons 
-                            name={existingStudioBookingStatus === 'cancelled' ? 'close-circle' : 
-                                  existingStudioBookingStatus === 'confirmed' ? 'checkmark-circle' :
-                                  'information-circle'} 
-                            size={20} 
-                            color={existingStudioBookingStatus === 'cancelled' ? '#EF4444' : 
-                                   existingStudioBookingStatus === 'confirmed' ? '#10B981' :
-                                   colors.primary} 
+                        <Ionicons
+                            name={existingStudioBookingStatus === 'cancelled' ? 'close-circle' :
+                                existingStudioBookingStatus === 'confirmed' ? 'checkmark-circle' :
+                                    'information-circle'}
+                            size={20}
+                            color={existingStudioBookingStatus === 'cancelled' ? '#EF4444' :
+                                existingStudioBookingStatus === 'confirmed' ? '#10B981' :
+                                    colors.primary}
                         />
                         <Text style={[styles.infoText, { color: colors.text }]}>
-                            {existingStudioBookingStatus === 'cancelled' 
-                                ? 'Your booking request was declined by the studio owner.' 
+                            {existingStudioBookingStatus === 'cancelled'
+                                ? 'Your booking request was declined by the studio owner.'
                                 : existingStudioBookingStatus === 'confirmed'
-                                ? 'Your booking has been confirmed! Check your bookings page for details.'
-                                : 'You already have a pending booking for this studio. Please wait for the owner to respond before creating another booking.'}
+                                    ? 'Your booking has been confirmed! Check your bookings page for details.'
+                                    : 'You already have a pending booking for this studio. Please wait for the owner to respond before creating another booking.'}
                         </Text>
-                    </View>
-                )}
-
-                {/* Show Studio Availability */}
-                {availability.length > 0 && (
-                    <View style={[styles.section, { marginBottom: 16 }]}>
-                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Available Hours</Text>
-                        <Text style={{ color: colors.textSecondary, marginBottom: 12, fontSize: 13 }}>
-                            Choose from the studio's available time slots
-                        </Text>
-                        {availability.map((daySchedule: any) => (
-                            <View key={daySchedule.day} style={{ marginBottom: 8 }}>
-                                <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', fontSize: 13 }}>{daySchedule.day}</Text>
-                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                                    {daySchedule.slots.map((slot: any, i: number) => (
-                                        <View key={i} style={[styles.timeSlotChip, { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderColor: colors.border }]}>
-                                            <Ionicons name="time-outline" size={12} color={colors.primary} />
-                                            <Text style={{ color: colors.text, fontSize: 11, marginLeft: 4 }}>{formatTime12(slot.start)} - {formatTime12(slot.end)}</Text>
-                                        </View>
-                                    ))}
-                                </View>
-                            </View>
-                        ))}
                     </View>
                 )}
 
@@ -1386,78 +1451,114 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                     const results = [];
                                     const errors = [];
 
+                                    console.log('🛒 Total bookings to create:', bookings.length);
+                                    console.log('📋 Bookings array:', bookings);
+
                                     // Create each booking
                                     for (const booking of bookings) {
                                         const bookingDate = booking.date.toISOString().split('T')[0];
                                         const startTime = booking.startTime.toTimeString().slice(0, 5);
-                                    const endTime = booking.endTime.toTimeString().slice(0, 5);
+                                        const endTime = booking.endTime.toTimeString().slice(0, 5);
 
-                                    const { data, error } = await supabase.functions.invoke('manage-bookings', {
-                                        body: {
-                                            action: 'create',
+                                        console.log('📤 Creating booking:', {
                                             studio_id: group.id,
                                             user_id: userId,
                                             date: bookingDate,
                                             start_time: startTime,
                                             end_time: endTime,
                                             notes: bookingNotes
+                                        });
+
+                                        const { data, error } = await supabase.functions.invoke('manage-bookings', {
+                                            body: {
+                                                action: 'create',
+                                                studio_id: group.id,
+                                                user_id: userId,
+                                                date: bookingDate,
+                                                start_time: startTime,
+                                                end_time: endTime,
+                                                notes: bookingNotes
+                                            }
+                                        });
+
+                                        console.log('📥 Booking response:', { data, error });
+
+                                        if (error) {
+                                            // Try to extract actual error message
+                                            let errorMessage = error.message || 'Unknown error';
+
+                                            // Check if error has context with response body
+                                            if (error.context && typeof error.context === 'object') {
+                                                try {
+                                                    // Try to read response body
+                                                    const response = error.context;
+                                                    console.log('📥 Error response status:', response.status);
+                                                    console.log('📥 Error response:', response);
+
+                                                    // If it's a 400 error, the body might have details
+                                                    if (response.status === 400 && data) {
+                                                        errorMessage = data.error || data.message || errorMessage;
+                                                        console.error('❌ Server error:', data);
+                                                    }
+                                                } catch (e) {
+                                                    console.error('Failed to parse error:', e);
+                                                }
+                                            }
+
+                                            errors.push({ booking, error: { message: errorMessage } });
+                                            console.error('❌ Booking error:', errorMessage);
+                                        } else {
+                                            results.push(data);
+                                            console.log('✅ Booking created successfully');
                                         }
-                                    });
-
-                                    if (error) {
-                                        errors.push({ booking, error });
-                                        console.error('Booking error:', error);
-                                    } else {
-                                        results.push(data);
                                     }
+
+                                    setLoading(false);
+
+                                    if (errors.length > 0 && results.length === 0) {
+                                        // All failed
+                                        const errorMsg = errors[0].error?.message || 'Failed to create bookings';
+                                        alert(`Error: ${errorMsg}`);
+                                    } else if (errors.length > 0) {
+                                        // Partial success
+                                        alert(`${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`);
+                                        // Clear form and close
+                                        setBookings([]);
+                                        setBookingNotes('');
+                                        setModalVisible(false);
+                                        (ref as any)?.current?.dismiss();
+                                    } else {
+                                        // All success
+                                        alert(`Successfully created ${results.length} booking(s)! The studio owner will review your request.`);
+                                        // Clear form and close
+                                        setBookings([]);
+                                        setBookingNotes('');
+                                        setModalVisible(false);
+                                        (ref as any)?.current?.dismiss();
+
+                                        // Navigate to bookings page
+                                        setTimeout(() => {
+                                            router.push('/bookings' as any);
+                                        }, 100);
+                                    }
+                                } catch (e: any) {
+                                    setLoading(false);
+                                    console.error('Booking creation error:', e);
+                                    alert('An unexpected error occurred. Please try again.');
                                 }
-
-                                setLoading(false);
-
-                                if (errors.length > 0 && results.length === 0) {
-                                    // All failed
-                                    const errorMsg = errors[0].error?.message || 'Failed to create bookings';
-                                    alert(`Error: ${errorMsg}`);
-                                } else if (errors.length > 0) {
-                                    // Partial success
-                                    alert(`${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`);
-                                    // Clear form and close
-                                    setBookings([]);
-                                    setBookingNotes('');
-                                    setModalVisible(false);
-                                    (ref as any)?.current?.dismiss();
-                                } else {
-                                    // All success
-                                    alert(`Successfully created ${results.length} booking(s)! The studio owner will review your request.`);
-                                    // Clear form and close
-                                    setBookings([]);
-                                    setBookingNotes('');
-                                    setModalVisible(false);
-                                    (ref as any)?.current?.dismiss();
-
-                                    // Navigate to bookings page
-                                    setTimeout(() => {
-                                        router.push('/bookings' as any);
-                                    }, 100);
-                                }
-                            } catch (e: any) {
-                                setLoading(false);
-                                console.error('Booking creation error:', e);
-                                alert('An unexpected error occurred. Please try again.');
-                            }
-                        },
-                        'Confirm Bookings',
-                        `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`
-                    )}
-                >
-                    {loading ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                        <Text style={[styles.primaryBtnText, { color: bookings.length > 0 ? '#FFFFFF' : colors.textSecondary }]}>
-                            {bookings.length > 0 ? `Confirm ${bookings.length} Booking${bookings.length > 1 ? 's' : ''}` : 'Add at least one booking'}
-                        </Text>
-                    )}
-                </TouchableOpacity>
+                            },
+                            'Confirm Bookings',
+                            `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`
+                        )}
+                    >
+                        {loading ? (
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                            <Text style={[styles.primaryBtnText, { color: bookings.length > 0 ? '#FFFFFF' : colors.textSecondary }]}>
+                                {bookings.length > 0 ? `Confirm ${bookings.length} Booking${bookings.length > 1 ? 's' : ''}` : 'Add at least one booking'}
+                            </Text>
+                        )}
+                    </TouchableOpacity>
                 )}
             </View>
         );
@@ -1550,172 +1651,199 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const renderGigApply = () => {
         console.log('🎨 renderGigApply called');
         console.log('Current state:', { pitchMessage, videoUrl, isSubmittingApplication, userId, listingId });
-        
+
         return (
-        <View style={styles.tabContent}>
-            {/* Group Selection (if user has groups) */}
-            {userGroups.length > 0 && !hasExistingApplication && (
-                <View style={styles.inputContainer}>
-                    <Text style={[styles.label, { color: colors.textSecondary }]}>Apply as</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-                        <TouchableOpacity
-                            style={[
-                                styles.groupSelectChip,
-                                { 
-                                    backgroundColor: selectedGroupId === null ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
-                                    borderColor: selectedGroupId === null ? colors.primary : colors.border,
-                                }
-                            ]}
-                            onPress={() => setSelectedGroupId(null)}
-                        >
-                            <Ionicons name="person" size={16} color={selectedGroupId === null ? '#FFF' : colors.text} />
-                            <Text style={{ color: selectedGroupId === null ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
-                                Individual
+            <View style={styles.tabContent}>
+                {/* SPAM BLOCK WARNING */}
+                {isBlocked && (
+                    <View style={[styles.infoBox, { backgroundColor: '#EF444420', borderColor: '#EF4444', marginBottom: 24 }]}>
+                        <Ionicons name="alert-circle" size={24} color="#EF4444" />
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.infoText, { color: colors.text, fontFamily: 'Poppins_600SemiBold' }]}>
+                                Action Restricted
                             </Text>
-                        </TouchableOpacity>
-                        {userGroups.map((g) => (
+                            <Text style={[styles.infoText, { color: colors.text }]}>
+                                {blockReason || 'You are temporarily blocked from applying to this organizer.'}
+                            </Text>
+                        </View>
+                    </View>
+                )}
+
+
+                {/* Group Selection (if user has groups) */}
+                {userGroups.length > 0 && !hasExistingApplication && (
+                    <View style={styles.inputContainer}>
+                        <Text style={[styles.label, { color: colors.textSecondary }]}>Apply as</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
                             <TouchableOpacity
-                                key={g.id}
                                 style={[
                                     styles.groupSelectChip,
-                                    { 
-                                        backgroundColor: selectedGroupId === g.id ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
-                                        borderColor: selectedGroupId === g.id ? colors.primary : colors.border,
-                                        marginLeft: 8,
+                                    {
+                                        backgroundColor: selectedGroupId === null ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                        borderColor: selectedGroupId === null ? colors.primary : colors.border,
                                     }
                                 ]}
-                                onPress={() => setSelectedGroupId(g.id)}
+                                onPress={() => setSelectedGroupId(null)}
                             >
-                                <Ionicons name="people" size={16} color={selectedGroupId === g.id ? '#FFF' : colors.text} />
-                                <Text style={{ color: selectedGroupId === g.id ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
-                                    {g.name}
+                                <Ionicons name="person" size={16} color={selectedGroupId === null ? '#FFF' : colors.text} />
+                                <Text style={{ color: selectedGroupId === null ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
+                                    Individual
                                 </Text>
                             </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                </View>
-            )}
-
-            <View style={styles.inputContainer}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>Pitch Message</Text>
-                <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#374151' : '#F9FAFB', height: 100 }]}>
-                    <TextInput
-                        style={[styles.input, { color: colors.text, height: '100%' }]}
-                        placeholder="Why are you a good fit for this gig?"
-                        placeholderTextColor={colors.textSecondary}
-                        multiline
-                        textAlignVertical="top"
-                        value={pitchMessage}
-                        onChangeText={(text) => {
-                            console.log('📝 Pitch message changed to:', text);
-                            setPitchMessage(text);
-                        }}
-                    />
-                </View>
-            </View>
-
-            <VideoUploader
-                videoUrl={videoUrl}
-                onVideoChange={setVideoUrl}
-                userId={userId || ''}
-                bucketName="documents"
-                folder="performance-videos"
-                maxSizeMB={50}
-            />
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
-                <Ionicons name="document-text-outline" size={18} color={colors.primary} />
-                <Text style={{ color: colors.primary, marginLeft: 8, textDecorationLine: 'underline' }}>Review Terms & Conditions</Text>
-            </View>
-
-            {hasExistingApplication && (
-                <View style={[
-                    styles.infoBox, 
-                    { 
-                        backgroundColor: existingApplicationStatus === 'rejected' ? '#EF444420' : 
-                                        existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B98120' :
-                                        colors.primary + '20', 
-                        borderColor: existingApplicationStatus === 'rejected' ? '#EF4444' : 
-                                    existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
-                                    colors.primary 
-                    }
-                ]}>
-                    <Ionicons 
-                        name={existingApplicationStatus === 'rejected' ? 'close-circle' : 
-                              existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? 'checkmark-circle' :
-                              'information-circle'} 
-                        size={20} 
-                        color={existingApplicationStatus === 'rejected' ? '#EF4444' : 
-                               existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
-                               colors.primary} 
-                    />
-                    <Text style={[styles.infoText, { color: colors.text }]}>
-                        {existingApplicationStatus === 'rejected' 
-                            ? 'Your application has been declined.' 
-                            : existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved'
-                            ? 'Your application has been accepted! 🎉'
-                            : `You have already applied to this gig. Status: `}
-                        {existingApplicationStatus !== 'rejected' && existingApplicationStatus !== 'accepted' && existingApplicationStatus !== 'approved' && (
-                            <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{existingApplicationStatus}</Text>
-                        )}
-                    </Text>
-                </View>
-            )}
-
-            <TouchableOpacity
-                style={[
-                    styles.primaryBtn,
-                    { backgroundColor: colors.primary },
-                    (isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication) && { opacity: 0.5 }
-                ]}
-                onPress={() => {
-                    console.log('🟡 SUBMIT APPLICATION BUTTON PRESSED');
-                    console.log('pitchMessage:', pitchMessage);
-                    console.log('pitchMessage.trim():', pitchMessage.trim());
-                    console.log('isSubmittingApplication:', isSubmittingApplication);
-                    console.log('hasExistingApplication:', hasExistingApplication);
-                    console.log('userId:', userId);
-                    console.log('listingId:', listingId);
-                    
-                    if (hasExistingApplication) {
-                        setAlertConfig({
-                            type: 'warning',
-                            title: 'Already Applied',
-                            message: `You have already submitted an application for this gig. Status: ${existingApplicationStatus || 'pending'}.`
-                        });
-                        setAlertVisible(true);
-                        return;
-                    }
-                    
-                    if (!pitchMessage.trim()) {
-                        console.log('❌ Pitch message is empty, returning');
-                        return;
-                    }
-                    
-                    console.log('✅ Validation passed, calling handleConfirm...');
-                    handleConfirm(
-                        handleSubmitApplication,
-                        'Confirm Application',
-                        'Are you sure you want to submit this application?'
-                    );
-                }}
-                disabled={isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication}
-            >
-                {isSubmittingApplication ? (
-                    <ActivityIndicator color="#fff" />
-                ) : (
-                    <Text style={styles.primaryBtnText}>
-                        {hasExistingApplication 
-                            ? existingApplicationStatus === 'rejected' 
-                                ? 'Application Declined' 
-                                : existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved'
-                                ? 'Application Accepted'
-                                : 'Already Applied' 
-                            : 'Submit Application'}
-                    </Text>
+                            {userGroups.map((g) => (
+                                <TouchableOpacity
+                                    key={g.id}
+                                    style={[
+                                        styles.groupSelectChip,
+                                        {
+                                            backgroundColor: selectedGroupId === g.id ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                            borderColor: selectedGroupId === g.id ? colors.primary : colors.border,
+                                            marginLeft: 8,
+                                        }
+                                    ]}
+                                    onPress={() => setSelectedGroupId(g.id)}
+                                >
+                                    <Ionicons name="people" size={16} color={selectedGroupId === g.id ? '#FFF' : colors.text} />
+                                    <Text style={{ color: selectedGroupId === g.id ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
+                                        {g.name}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
                 )}
-            </TouchableOpacity>
-        </View>
+
+                <View style={styles.inputContainer}>
+                    <Text style={[styles.label, { color: colors.textSecondary }]}>Pitch Message</Text>
+                    <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#374151' : '#F9FAFB', height: 100 }]}>
+                        <TextInput
+                            style={[styles.input, { color: colors.text, height: '100%' }]}
+                            placeholder="Why are you a good fit for this gig?"
+                            placeholderTextColor={colors.textSecondary}
+                            multiline
+                            textAlignVertical="top"
+                            value={pitchMessage}
+                            onChangeText={(text) => {
+                                console.log('📝 Pitch message changed to:', text);
+                                setPitchMessage(text);
+                            }}
+                        />
+                    </View>
+                </View>
+
+                <VideoUploader
+                    videoUrl={videoUrl}
+                    onVideoChange={(url) => setVideoUrl(url || '')}
+                    userId={userId || ''}
+                    bucketName="documents"
+                    folder="performance-videos"
+                    maxSizeMB={50}
+                />
+
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}>
+                    <Ionicons name="document-text-outline" size={18} color={colors.primary} />
+                    <Text style={{ color: colors.primary, marginLeft: 8, textDecorationLine: 'underline' }}>Review Terms & Conditions</Text>
+                </View>
+
+                {hasExistingApplication && (
+                    <View style={[
+                        styles.infoBox,
+                        {
+                            backgroundColor: existingApplicationStatus === 'rejected' ? '#EF444420' :
+                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B98120' :
+                                    colors.primary + '20',
+                            borderColor: existingApplicationStatus === 'rejected' ? '#EF4444' :
+                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
+                                    colors.primary
+                        }
+                    ]}>
+                        <Ionicons
+                            name={existingApplicationStatus === 'rejected' ? 'close-circle' :
+                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? 'checkmark-circle' :
+                                    'information-circle'}
+                            size={20}
+                            color={existingApplicationStatus === 'rejected' ? '#EF4444' :
+                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
+                                    colors.primary}
+                        />
+                        <Text style={[styles.infoText, { color: colors.text }]}>
+                            {existingApplicationStatus === 'rejected'
+                                ? 'Your application has been declined.'
+                                : existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved'
+                                    ? 'Your application has been accepted! 🎉'
+                                    : `You have already applied to this gig. Status: `}
+                            {existingApplicationStatus !== 'rejected' && existingApplicationStatus !== 'accepted' && existingApplicationStatus !== 'approved' && (
+                                <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{existingApplicationStatus}</Text>
+                            )}
+                        </Text>
+                    </View>
+                )}
+
+                <TouchableOpacity
+                    style={[
+                        styles.primaryBtn,
+                        { backgroundColor: colors.primary },
+                        (isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication) && { opacity: 0.5 }
+                    ]}
+                    onPress={() => {
+                        console.log('🟡 SUBMIT APPLICATION BUTTON PRESSED');
+                        console.log('pitchMessage:', pitchMessage);
+                        console.log('pitchMessage.trim():', pitchMessage.trim());
+                        console.log('isSubmittingApplication:', isSubmittingApplication);
+                        console.log('hasExistingApplication:', hasExistingApplication);
+                        console.log('userId:', userId);
+                        console.log('listingId:', listingId);
+
+                        if (hasExistingApplication) {
+                            setAlertConfig({
+                                type: 'warning',
+                                title: 'Already Applied',
+                                message: `You have already submitted an application for this gig. Status: ${existingApplicationStatus || 'pending'}.`
+                            });
+                            setAlertVisible(true);
+                            return;
+                        }
+
+                        if (isBlocked) {
+                            setAlertConfig({
+                                type: 'error',
+                                title: 'Restricted',
+                                message: blockReason || 'You are blocked from applying.'
+                            });
+                            setAlertVisible(true);
+                            return;
+                        }
+
+                        if (!pitchMessage.trim()) {
+                            console.log('❌ Pitch message is empty, returning');
+                            return;
+                        }
+
+                        console.log('✅ Validation passed, calling handleConfirm...');
+                        handleConfirm(
+                            handleSubmitApplication,
+                            'Confirm Application',
+                            'Are you sure you want to submit this application?'
+                        );
+                    }}
+                    disabled={isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication || isBlocked}
+                >
+                    {isSubmittingApplication ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <Text style={styles.primaryBtnText}>
+                            {hasExistingApplication
+                                ? existingApplicationStatus === 'rejected'
+                                    ? 'Application Declined'
+                                    : existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved'
+                                        ? 'Application Accepted'
+                                        : 'Already Applied'
+                                : 'Submit Application'}
+                        </Text>
+                    )}
+                </TouchableOpacity>
+            </View >
         );
     };
 
@@ -1998,8 +2126,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         showsVerticalScrollIndicator={false}
                         showsHorizontalScrollIndicator={false}
                     >
-                    {/* Immersive Hero Image */}
-                    <View style={styles.imageContainer}>
+                        {/* Immersive Hero Image */}
+                        <View style={styles.imageContainer}>
                             <Image
                                 source={{ uri: (group.images && group.images[0]) || group.image || null }}
                                 style={[styles.image, { backgroundColor: colors.border }]}

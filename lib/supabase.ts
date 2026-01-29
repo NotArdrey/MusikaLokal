@@ -42,4 +42,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         persistSession: true,
         detectSessionInUrl: Platform.OS === 'web',
     },
+    global: {
+        headers: {
+            'x-client-info': 'musika-lokal',
+        },
+    },
+    db: {
+        schema: 'public',
+    },
+    realtime: {
+        timeout: 30000,
+    },
 });

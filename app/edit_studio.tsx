@@ -166,17 +166,39 @@ export default function EditStudioScreen() {
       }
       
       // Load availability
+      console.log('📅 Loading availability from data:', data.availability);
       if (data.availability && Array.isArray(data.availability)) {
+        // Helper function to convert 24-hour to 12-hour format
+        const convertTo12Hour = (time24: string) => {
+          if (!time24 || !time24.includes(':')) return '09:00 AM';
+          const [hours, minutes] = time24.split(':');
+          const hour = parseInt(hours, 10);
+          const period = hour >= 12 ? 'PM' : 'AM';
+          const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+          return `${String(hour12).padStart(2, '0')}:${minutes} ${period}`;
+        };
+
         const loadedAvailability = daysOfWeek.map(day => {
           const dayData = data.availability.find((a: any) => a.day === day);
           return {
             day,
-            slots: dayData?.slots || []
+            slots: dayData?.slots ? dayData.slots.map((slot: any) => ({
+              start: convertTo12Hour(slot.start),
+              end: convertTo12Hour(slot.end)
+            })) : []
           };
         });
+        console.log('📅 Loaded availability:', loadedAvailability);
         setAvailability(loadedAvailability);
+      } else {
+        console.log('📅 No availability data, using default empty schedule');
+        // Initialize with empty schedule if no availability data
+        setAvailability(daysOfWeek.map(day => ({ day, slots: [] })));
       }
-      // setSelectedImages(data.images || []);
+      setSelectedImages(data.images || []);
+      if (data.images && data.images.length > 0) {
+        setThumbnailIndex(0);
+      }
     } catch (e) {
       console.log('Error fetching studio details:', e);
       Alert.alert('Error', 'Failed to load studio details.');
@@ -238,26 +260,95 @@ export default function EditStudioScreen() {
         contract_url: contractUrl || null,
         availability: availability
           .filter(day => day.slots.length > 0)
-          .map(day => ({
-            day: day.day,
-            slots: day.slots.map(slot => ({
-              start: slot.start,
-              end: slot.end
-            }))
-          }))
+          .map(day => {
+            // Helper function to convert 12-hour to 24-hour format
+            const convertTo24Hour = (time12: string): string => {
+              const [time, modifier] = time12.split(' ');
+              if (!modifier) return time; // Already 24h or invalid
+              let [hours, minutes] = time.split(':');
+              if (hours === '12') {
+                hours = '00';
+              }
+              if (modifier === 'PM') {
+                hours = String(parseInt(hours, 10) + 12);
+              }
+              return `${hours}:${minutes}`;
+            };
+
+            return {
+              ...day,
+              slots: day.slots.map(slot => ({
+                start: convertTo24Hour(slot.start),
+                end: convertTo24Hour(slot.end)
+              }))
+            };
+          })
       };
 
-      console.log('🔵 Updating studio with payload:', JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload }, null, 2));
+      console.log('� RAW availability state:', JSON.stringify(availability, null, 2));
+      console.log('📅 FILTERED availability (days with slots):', payload.availability);
+      console.log('📅 Number of days with availability:', payload.availability.length);
+      console.log('�🔵 Updating studio with payload:', JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload }, null, 2));
 
-      const { data, error } = await supabase.functions.invoke('manage-listings', {
+      const response = await supabase.functions.invoke('manage-listings', {
         body: { action: 'update', type: 'studio', id: studioId, userId: user.id, payload }
       });
 
-      console.log('🔵 Response:', { data, error });
+      console.log('🔵 Response data:', response.data);
+      console.log('🔵 Response error:', response.error);
 
-      if (error) {
-        console.error('❌ Error details:', JSON.stringify(error, null, 2));
-        throw error;
+      if (response.error) {
+        console.error('❌ Error details:', JSON.stringify(response.error, null, 2));
+        
+        // Try to read the actual error message from the response body
+        let errorMessage = 'Unknown error occurred';
+        let errorDetails = null;
+        
+        try {
+          // Check if there's a response context with body
+          if (response.error.context && response.error.context._bodyBlob) {
+            console.log('🔍 Attempting to read error response body...');
+            // Try to read the body as text
+            const errorResponse = await fetch(response.error.context.url, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload })
+            });
+            
+            const errorBody = await errorResponse.text();
+            console.log('🔍 Raw error response:', errorBody);
+            
+            try {
+              errorDetails = JSON.parse(errorBody);
+              errorMessage = errorDetails.error || errorDetails.message || errorMessage;
+              console.error('❌ Server error message:', errorMessage);
+              console.error('❌ Server error details:', errorDetails.details);
+              console.error('❌ Server error code:', errorDetails.code);
+              console.error('❌ Server error hint:', errorDetails.hint);
+            } catch (parseError) {
+              errorMessage = errorBody || errorMessage;
+            }
+          } else if (response.data && typeof response.data === 'object') {
+            errorMessage = response.data.error || response.data.message || errorMessage;
+            console.error('❌ Server error message:', errorMessage);
+            console.error('❌ Server error details:', response.data.details);
+          } else if (response.error.message) {
+            errorMessage = response.error.message;
+          }
+        } catch (readError) {
+          console.error('❌ Failed to read error body:', readError);
+        }
+        
+        console.error('❌ Final error message:', errorMessage);
+        throw new Error(errorMessage);
+      }
+
+      // Check if data indicates an error
+      if (!response.data) {
+        throw new Error('No data returned from server');
       }
 
       setModalVisible(false);
@@ -323,14 +414,12 @@ export default function EditStudioScreen() {
       }
 
       const response = await fetch(fileUri);
-      const blob = await response.blob();
-      const arrayBuffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
+      const arrayBuffer = await response.arrayBuffer();
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
         .from('documents')
-        .upload(filePath, bytes, {
+        .upload(filePath, arrayBuffer, {
           contentType: 'application/pdf',
           upsert: false,
         });

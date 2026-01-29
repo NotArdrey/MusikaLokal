@@ -370,7 +370,7 @@ export default function StudioDetailsScreen() {
                         current={new Date().toISOString().split('T')[0]}
                         markedDates={{
                           ...bookings.reduce((acc, booking) => {
-                            const dateStr = new Date(booking.start_time).toISOString().split('T')[0];
+                            const dateStr = booking.raw_date || booking.booking_date || new Date(booking.start_time).toISOString().split('T')[0];
                             acc[dateStr] = { marked: true, dotColor: colors.primary };
                             return acc;
                           }, {}),
@@ -413,11 +413,15 @@ export default function StudioDetailsScreen() {
                         <Text style={[styles.sectionTitle, { color: colors.text, fontSize: 16, marginBottom: 12 }]}>
                           Schedule for {new Date(selectedDate).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
                         </Text>
-                        {bookings.filter(b => new Date(b.start_time).toISOString().split('T')[0] === selectedDate).length > 0 ? (
+                        {bookings.filter(b => (b.raw_date || b.booking_date || new Date(b.start_time).toISOString().split('T')[0]) === selectedDate).length > 0 ? (
                           <View style={styles.tagsContainer}>
                             {bookings
-                              .filter(b => new Date(b.start_time).toISOString().split('T')[0] === selectedDate)
-                              .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+                              .filter(b => (b.raw_date || b.booking_date || new Date(b.start_time).toISOString().split('T')[0]) === selectedDate)
+                              .sort((a, b) => {
+                                const aTime = a.start_time.includes(':') ? a.start_time : new Date(a.start_time).toTimeString().slice(0, 5);
+                                const bTime = b.start_time.includes(':') ? b.start_time : new Date(b.start_time).toTimeString().slice(0, 5);
+                                return aTime.localeCompare(bTime);
+                              })
                               .map((booking, index) => (
                                 <TouchableOpacity
                                   key={booking.id}
@@ -437,7 +441,13 @@ export default function StudioDetailsScreen() {
                                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                                     <View style={[styles.timeSlotChip, { backgroundColor: colors.primary, borderWidth: 0 }]}>
                                       <Text style={{ color: '#FFF', fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>
-                                        {new Date(booking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                        {booking.start_time && booking.start_time.includes(':') ? (() => {
+                                          const [hours, minutes] = booking.start_time.split(':');
+                                          const h = parseInt(hours);
+                                          const period = h >= 12 ? 'PM' : 'AM';
+                                          const h12 = h % 12 || 12;
+                                          return `${h12}:${minutes} ${period}`;
+                                        })() : new Date(booking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
                                       </Text>
                                     </View>
                                     <View>
@@ -477,7 +487,19 @@ export default function StudioDetailsScreen() {
                         <View style={[styles.bookingDateContainer, { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB' }]}>
                           <Ionicons name="calendar-outline" size={16} color={colors.primary} />
                           <Text style={[styles.bookingDate, { color: colors.text }]}>
-                            {new Date(booking.start_time).toLocaleDateString()} • {new Date(booking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} - {new Date(booking.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                            {booking.raw_date ? new Date(booking.raw_date).toLocaleDateString() : booking.booking_date ? new Date(booking.booking_date).toLocaleDateString() : new Date(booking.start_time).toLocaleDateString()} • {booking.start_time && booking.start_time.includes(':') ? (() => {
+                              const [hours, minutes] = booking.start_time.split(':');
+                              const h = parseInt(hours);
+                              const period = h >= 12 ? 'PM' : 'AM';
+                              const h12 = h % 12 || 12;
+                              return `${h12}:${minutes} ${period}`;
+                            })() : new Date(booking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} - {booking.end_time && booking.end_time.includes(':') ? (() => {
+                              const [hours, minutes] = booking.end_time.split(':');
+                              const h = parseInt(hours);
+                              const period = h >= 12 ? 'PM' : 'AM';
+                              const h12 = h % 12 || 12;
+                              return `${h12}:${minutes} ${period}`;
+                            })() : new Date(booking.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
                           </Text>
                         </View>
 

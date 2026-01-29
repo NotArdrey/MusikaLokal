@@ -338,8 +338,7 @@ export default function AddGigScreen() {
             }
 
             const response = await fetch(fileUri);
-            const blob = await response.blob();
-            const arrayBuffer = await blob.arrayBuffer();
+            const arrayBuffer = await response.arrayBuffer();
             const bytes = new Uint8Array(arrayBuffer);
 
             const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;

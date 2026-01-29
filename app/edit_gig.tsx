@@ -162,7 +162,10 @@ export default function EditGigScreen() {
         const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
         setContractFileName(decodeURIComponent(fileName));
       }
-      // setImages(data.images || []); // If backend has images
+      setImages(data.images || []);
+      if (data.images && data.images.length > 0) {
+        setThumbnailIndex(0);
+      }
     } catch (e) {
       console.log('Error fetching gig details:', e);
       Alert.alert('Error', 'Failed to load gig details.');
@@ -359,9 +362,7 @@ export default function EditGigScreen() {
       }
 
       const response = await fetch(fileUri);
-      const blob = await response.blob();
-      const arrayBuffer = await blob.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
+            const arrayBuffer = await response.arrayBuffer();
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage

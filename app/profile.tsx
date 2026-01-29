@@ -95,7 +95,7 @@ export default function ProfileScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All, // Images + Videos
+        mediaTypes: 'all', // Images + Videos
         allowsEditing: true,
         quality: 0.8,
       });

@@ -220,7 +220,10 @@ export default function AddStudioScreen() {
                 longitude,
             };
 
-            console.log('🔵 Creating studio with payload:', JSON.stringify({ action: 'create', type: 'studio', userId: session.user.id, payload }, null, 2));
+            console.log('� RAW availability state:', JSON.stringify(availability, null, 2));
+            console.log('📅 FILTERED availability (days with slots):', payload.availability);
+            console.log('📅 Number of days with availability:', payload.availability.length);
+            console.log('�🔵 Creating studio with payload:', JSON.stringify({ action: 'create', type: 'studio', userId: session.user.id, payload }, null, 2));
             
             const { data, error } = await supabase.functions.invoke('manage-listings', {
                 body: { action: 'create', type: 'studio', userId: session.user.id, payload }
@@ -324,8 +327,7 @@ export default function AddStudioScreen() {
 
             // Read file as base64
             const response = await fetch(fileUri);
-            const blob = await response.blob();
-            const arrayBuffer = await blob.arrayBuffer();
+            const arrayBuffer = await response.arrayBuffer();
             const bytes = new Uint8Array(arrayBuffer);
 
             // Upload to Supabase Storage

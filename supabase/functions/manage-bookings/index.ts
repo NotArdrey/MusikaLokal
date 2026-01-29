@@ -334,6 +334,8 @@ serve(async (req: Request) => {
         if (action === 'create') {
             const { studio_id, user_id, date, start_time, end_time, notes } = params
 
+            console.log('📥 Creating booking:', { studio_id, user_id, date, start_time, end_time });
+
             // Check if user already has a pending booking for this studio (prevent spam)
             const { data: existingPendingBooking, error: existingError } = await supabaseClient
                 .from('studio_bookings')
@@ -358,6 +360,7 @@ serve(async (req: Request) => {
             }
 
             // Use the comprehensive is_slot_available function
+            console.log('🔍 Checking slot availability...');
             const { data: isAvailable, error: availError } = await supabaseClient
                 .rpc('is_slot_available', {
                     p_studio_id: studio_id,
@@ -368,9 +371,19 @@ serve(async (req: Request) => {
                 })
 
             if (availError) {
-                console.error('Availability check error:', availError)
-                throw availError
+                console.error('❌ Availability check error:', availError);
+                return new Response(JSON.stringify({
+                    error: 'Availability check failed: ' + availError.message,
+                    details: availError.toString(),
+                    hint: 'The is_slot_available function may not exist or has an error',
+                    code: availError.code
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
             }
+
+            console.log('✅ Slot availability:', isAvailable);
 
             if (!isAvailable) {
                 return new Response(JSON.stringify({
@@ -382,6 +395,7 @@ serve(async (req: Request) => {
             }
 
             // Calculate proper pricing with modifiers (REQUIRED)
+            console.log('💰 Calculating booking price...');
             const { data: pricing, error: pricingError } = await supabaseClient
                 .rpc('calculate_booking_price', {
                     p_studio_id: studio_id,
@@ -390,8 +404,21 @@ serve(async (req: Request) => {
                     p_end_time: end_time
                 })
 
-            if (pricingError || !pricing || pricing.length === 0) {
-                console.error('Pricing calculation error:', pricingError)
+            if (pricingError) {
+                console.error('❌ Pricing calculation error:', pricingError);
+                return new Response(JSON.stringify({
+                    error: 'Pricing calculation failed: ' + pricingError.message,
+                    details: pricingError.toString(),
+                    hint: 'The calculate_booking_price function may not exist or has an error',
+                    code: pricingError.code
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            if (!pricing || pricing.length === 0) {
+                console.error('❌ No pricing data returned');
                 return new Response(JSON.stringify({
                     error: 'Unable to calculate booking price. Please try again or contact support.'
                 }), {
@@ -400,8 +427,11 @@ serve(async (req: Request) => {
                 })
             }
 
+            console.log('✅ Pricing calculated:', pricing);
+
             const pricingData = pricing[0]
 
+            console.log('📤 Inserting booking...');
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
                 .insert({

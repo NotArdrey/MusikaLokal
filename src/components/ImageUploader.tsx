@@ -31,6 +31,14 @@ export default function ImageUploader({
 
   const pickAndUploadImages = async () => {
     try {
+      // Check authentication first
+      const { data: { session }, error: authError } = await supabase.auth.getSession();
+      if (authError || !session) {
+        Alert.alert('Authentication Required', 'Please log in to upload images.');
+        console.error('Auth check failed:', authError?.message || 'No session');
+        return;
+      }
+
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
         Alert.alert('Permission needed', 'Please allow access to your photos.');
@@ -38,7 +46,7 @@ export default function ImageUploader({
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: 'images',
         allowsMultipleSelection: true,
         quality: 0.8,
       });
@@ -53,23 +61,53 @@ export default function ImageUploader({
 
       setUploading(true);
       const uploadedUrls: string[] = [];
+      const errors: string[] = [];
 
       for (const asset of result.assets) {
         try {
-          const fileExt = asset.uri.split('.').pop() || 'jpg';
+          const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
           const fileName = `${userId}/${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-          // Fetch the file and convert to blob
-          const response = await fetch(asset.uri);
-          const blob = await response.blob();
+          console.log(`📤 Uploading to: ${bucketName}/${fileName}`);
+          console.log(`📍 Source URI: ${asset.uri}`);
 
-          // Upload to Supabase Storage
+          // For React Native, we need to use FormData or ArrayBuffer
+          const response = await fetch(asset.uri);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image: ${response.statusText}`);
+          }
+          
+          const arrayBuffer = await response.arrayBuffer();
+          const fileSize = arrayBuffer.byteLength;
+          console.log(`📦 File size: ${(fileSize / 1024).toFixed(2)} KB`);
+
+          if (fileSize === 0) {
+            throw new Error('File is empty');
+          }
+
+          // Upload using ArrayBuffer for better React Native compatibility
           const { data, error } = await supabase.storage
             .from(bucketName)
-            .upload(fileName, blob, { contentType: `image/${fileExt}`, upsert: false });
+            .upload(fileName, arrayBuffer, { 
+              contentType: `image/${fileExt}`, 
+              upsert: false 
+            });
 
           if (error) {
-            console.error('Upload error for file:', error);
+            console.error('❌ Upload error for file:', error.message);
+            console.error('Error details:', JSON.stringify(error, null, 2));
+            
+            // Provide specific error messages
+            let errorMsg = error.message || 'Unknown error';
+            if (errorMsg.includes('row-level security') || errorMsg.includes('policy')) {
+              errorMsg = 'Permission denied. Storage policies may not be configured.';
+            } else if (errorMsg.includes('Bucket not found')) {
+              errorMsg = `Storage bucket "${bucketName}" does not exist.`;
+            } else if (errorMsg.includes('Network')) {
+              errorMsg = 'Network error. Check your internet connection.';
+            }
+            
+            errors.push(errorMsg);
             continue;
           }
 
@@ -78,20 +116,25 @@ export default function ImageUploader({
             .from(bucketName)
             .getPublicUrl(data.path);
 
+          console.log(`✅ Upload successful: ${urlData.publicUrl}`);
           uploadedUrls.push(urlData.publicUrl);
-        } catch (e) {
-          console.error('Error processing image:', e);
+        } catch (e: any) {
+          console.error('❌ Error processing image:', e.message || e);
+          errors.push(e.message || 'Processing error');
         }
       }
 
       if (uploadedUrls.length > 0) {
         onImagesChange([...images, ...uploadedUrls]);
-        Alert.alert('Success', `${uploadedUrls.length} image(s) uploaded successfully!`);
+        const message = uploadedUrls.length === result.assets.length
+          ? `${uploadedUrls.length} image(s) uploaded successfully!`
+          : `${uploadedUrls.length} of ${result.assets.length} image(s) uploaded. ${errors.length} failed.`;
+        Alert.alert('Upload Complete', message);
       } else {
-        Alert.alert('Error', 'Failed to upload images. Please try again.');
+        Alert.alert('Upload Failed', errors.length > 0 ? errors[0] : 'Please check your internet connection and try again.');
       }
     } catch (e: any) {
-      console.log('Upload error:', e);
+      console.error('❌ Upload error:', e.message || e);
       Alert.alert('Error', e.message || 'Failed to upload images');
     } finally {
       setUploading(false);

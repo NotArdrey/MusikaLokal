@@ -28,6 +28,14 @@ export default function VideoUploader({
 
   const pickAndUploadVideo = async () => {
     try {
+      // Check authentication first
+      const { data: { session }, error: authError } = await supabase.auth.getSession();
+      if (authError || !session) {
+        Alert.alert('Authentication Required', 'Please log in to upload videos.');
+        console.error('Auth check failed:', authError?.message || 'No session');
+        return;
+      }
+
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
         Alert.alert('Permission needed', 'Please allow access to your media library.');
@@ -35,7 +43,7 @@ export default function VideoUploader({
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        mediaTypes: 'videos',
         allowsMultipleSelection: false,
         quality: 0.8,
       });
@@ -44,10 +52,10 @@ export default function VideoUploader({
 
       const asset = result.assets[0];
       
-      // Check file size (approximate)
+      // Check file size using ArrayBuffer
       const response = await fetch(asset.uri);
-      const blob = await response.blob();
-      const fileSizeMB = blob.size / (1024 * 1024);
+      const arrayBuffer = await response.arrayBuffer();
+      const fileSizeMB = arrayBuffer.byteLength / (1024 * 1024);
       
       if (fileSizeMB > maxSizeMB) {
         Alert.alert('File Too Large', `Video must be under ${maxSizeMB}MB. Your file is ${fileSizeMB.toFixed(1)}MB.`);
@@ -80,21 +88,32 @@ export default function VideoUploader({
         
         const fileName = `${userId}/${folder}/${Date.now()}_video.${fileExt}`;
 
-        console.log('Uploading video:', fileName);
-        console.log('File size:', fileSizeMB.toFixed(2), 'MB');
-        console.log('File extension:', fileExt);
+        console.log('📤 Uploading video:', fileName);
+        console.log('📦 File size:', fileSizeMB.toFixed(2), 'MB');
+        console.log('📍 File extension:', fileExt);
 
-        // Upload to Supabase Storage
+        // Upload using ArrayBuffer for better React Native compatibility
         const { data, error } = await supabase.storage
           .from(bucketName)
-          .upload(fileName, blob, { 
+          .upload(fileName, arrayBuffer, { 
             contentType: asset.mimeType || `video/${fileExt}`, 
             upsert: false 
           });
 
         if (error) {
-          console.error('Upload error:', error);
-          Alert.alert('Upload Failed', error.message || 'Failed to upload video');
+          console.error('❌ Upload error:', error);
+          console.error('Error details:', JSON.stringify(error, null, 2));
+          
+          let errorMsg = error.message || 'Unknown error';
+          if (errorMsg.includes('row-level security') || errorMsg.includes('policy')) {
+            errorMsg = 'Permission denied. Storage policies may not be configured.';
+          } else if (errorMsg.includes('Bucket not found')) {
+            errorMsg = `Storage bucket "${bucketName}" does not exist.`;
+          } else if (errorMsg.includes('Network')) {
+            errorMsg = 'Network error. Check your internet connection.';
+          }
+          
+          Alert.alert('Upload Failed', errorMsg);
           return;
         }
 
