@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
+import ImageUploader from '../src/components/ImageUploader';
+import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -12,13 +14,60 @@ export default function AddGroupScreen() {
   const { colors, isDark } = useTheme();
   const [step, setStep] = useState(1);
   const [groupName, setGroupName] = useState('');
+  const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [genre, setGenre] = useState('');
   const [description, setDescription] = useState('');
+  const [hourlyRate, setHourlyRate] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [members, setMembers] = useState<string[]>([]);
   const [newMember, setNewMember] = useState('');
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Musician search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+
+  const searchMusicians = async (query: string) => {
+    setSearchQuery(query);
+    if (query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, role')
+        .eq('role', 'musician')
+        .ilike('full_name', `%${query}%`)
+        .limit(5);
+
+      if (error) throw error;
+      setSearchResults(data || []);
+    } catch (error) {
+      console.error('Error searching musicians:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const selectMember = (musician: any) => {
+    if (!members.includes(musician.full_name)) {
+      setMembers([...members, musician.full_name]);
+    }
+    setSearchQuery('');
+    setSearchResults([]);
+  };
+
+  // Images state
+  const [images, setImages] = useState<string[]>([]);
+  const [thumbnailIndex, setThumbnailIndex] = useState(0);
 
   const steps = [
     { id: 1, title: 'Group Info', icon: 'people' },
@@ -58,9 +107,49 @@ export default function AddGroupScreen() {
     }
   };
 
-  const handleNext = () => {
-    if (step < 3) setStep(step + 1);
-    else setModalVisible(true);
+  const [creating, setCreating] = useState(false);
+  const [newGroupId, setNewGroupId] = useState<string | null>(null);
+
+  const validateStep = (currentStep: number): boolean => {
+    if (currentStep === 1) {
+      if (!groupName.trim()) {
+        Alert.alert('Required Field', 'Please enter a group name');
+        return false;
+      }
+      if (!genre.trim()) {
+        Alert.alert('Required Field', 'Please enter a genre');
+        return false;
+      }
+      if (!description.trim()) {
+        Alert.alert('Required Field', 'Please enter a description');
+        return false;
+      }
+      if (!address || !latitude || !longitude) {
+        Alert.alert('Required Field', 'Please select a location on the map');
+        return false;
+      }
+      if (!hourlyRate.trim() || parseFloat(hourlyRate) <= 0) {
+        Alert.alert('Required Field', 'Please enter a valid hourly rate');
+        return false;
+      }
+      if (images.length === 0) {
+        Alert.alert('Required Field', 'Please upload at least one group photo');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleNext = async () => {
+    if (!validateStep(step)) {
+      return;
+    }
+    
+    if (step < 3) {
+      setStep(step + 1);
+    } else {
+      await createGroup();
+    }
   };
 
   const handleBack = () => {
@@ -68,30 +157,54 @@ export default function AddGroupScreen() {
     else router.back();
   };
 
-  const handleConfirm = async () => {
+  const createGroup = async () => {
+    if (creating) return;
+    setCreating(true);
+
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      // Refresh session to ensure valid token
+      const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+      if (sessionError || !session || !session.user) {
+        Alert.alert('Session Expired', 'Please log in again.');
+        router.replace('/');
+        return;
+      }
 
       const payload = {
         name: groupName,
+        location: address,
         genre,
         description,
         members,
+        rate: parseFloat(hourlyRate) || 0,
+        images: images,
+        latitude,
+        longitude,
       };
 
-      const { error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'create', type: 'group', userId: user.id, payload }
+      const { data, error } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'create', type: 'group', userId: session.user.id, payload }
       });
 
       if (error) throw error;
 
-      setModalVisible(false);
+      setNewGroupId(data.id);
+      setModalVisible(true);
       console.log('Group Created');
-      router.back();
     } catch (e) {
       console.log('Error creating group:', e);
-      alert('Failed to create group');
+      Alert.alert('Error', 'Failed to create group');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleSuccessRedirect = () => {
+    setModalVisible(false);
+    if (newGroupId) {
+      router.replace({ pathname: '/manage_group', params: { id: newGroupId } });
+    } else {
+      router.back();
     }
   };
 
@@ -123,7 +236,7 @@ export default function AddGroupScreen() {
     setMembers(members.filter((_, i) => i !== index));
   };
 
-  const renderInput = (label: string, value: string, setValue: (text: string) => void, placeholder: string, multiline = false) => (
+  const renderInput = (label: string, value: string, setValue: (text: string) => void, placeholder: string, multiline = false, keyboardType: any = 'default') => (
     <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{label}</Text>
       <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
@@ -134,12 +247,14 @@ export default function AddGroupScreen() {
           placeholderTextColor={colors.textSecondary}
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
+          keyboardType={keyboardType}
           style={[
             styles.textInput,
             {
               color: colors.text,
-              height: multiline ? 120 : 'auto',
-              textAlignVertical: multiline ? 'top' : 'center'
+              minHeight: multiline ? 120 : 56, // Ensure consistent height
+              textAlignVertical: multiline ? 'top' : 'center',
+              paddingVertical: multiline ? 16 : 0, // Symmetric vertical padding
             }
           ]}
         />
@@ -220,6 +335,43 @@ export default function AddGroupScreen() {
               {renderInput('Group Name', groupName, setGroupName, 'e.g. The Sunday Collective')}
               {renderInput('Genre', genre, setGenre, 'e.g. Indie Folk, Jazz')}
               {renderInput('Description', description, setDescription, 'Brief bio about your band...', true)}
+
+              {/* Image Upload */}
+              <View style={styles.inputContainer}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Group Photos</Text>
+                <ImageUploader
+                  images={images}
+                  onImagesChange={setImages}
+                  thumbnailIndex={thumbnailIndex}
+                  onThumbnailChange={setThumbnailIndex}
+                  maxImages={10}
+                  bucketName="listings"
+                  userId={newGroupId || 'temp'}
+                  folder="groups"
+                />
+              </View>
+
+              <View style={styles.inputContainer}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Based Location</Text>
+                <TouchableOpacity
+                  onPress={() => setLocationPickerVisible(true)}
+                  style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', height: 56, justifyContent: 'center', paddingHorizontal: 16 }]}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
+                    <Text style={{
+                      flex: 1,
+                      color: address ? colors.text : colors.textSecondary,
+                      fontFamily: 'Poppins_400Regular',
+                      textAlignVertical: 'center'
+                    }}>
+                      {address || 'Tap to select location on map'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              {renderInput('Hourly Rate (PHP)', hourlyRate, setHourlyRate, 'e.g. 3000', false, 'numeric')}
             </View>
           )}
 
@@ -229,22 +381,46 @@ export default function AddGroupScreen() {
                 Who's in the band?
               </Text>
 
-              <View style={styles.addMemberRow}>
-                <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                  <TextInput
-                    value={newMember}
-                    onChangeText={setNewMember}
-                    placeholder="Add member name..."
-                    placeholderTextColor={colors.textSecondary}
-                    style={[styles.textInput, { color: colors.text, padding: 12, textAlignVertical: 'center', paddingVertical: 0 }]}
-                  />
+              <View style={[styles.addMemberRow, { flexDirection: 'column', alignItems: 'stretch' }]}>
+                <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 }}>
+                    <Ionicons name="search" size={20} color={colors.textSecondary} />
+                    <TextInput
+                      value={searchQuery}
+                      onChangeText={searchMusicians}
+                      placeholder="Search musicians by name..."
+                      placeholderTextColor={colors.textSecondary}
+                      style={[styles.textInput, { color: colors.text, flex: 1, height: 50 }]}
+                    />
+                    {isSearching && <ActivityIndicator size="small" color={colors.primary} />}
+                  </View>
                 </View>
-                <TouchableOpacity
-                  onPress={addMember}
-                  style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                >
-                  <Ionicons name="add" size={24} color="#fff" />
-                </TouchableOpacity>
+
+                {/* Search Results Dropdown */}
+                {searchResults.length > 0 && (
+                  <View style={[styles.searchResultsContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                    {searchResults.map((musician) => (
+                      <TouchableOpacity
+                        key={musician.id}
+                        onPress={() => selectMember(musician)}
+                        style={[styles.searchResultItem, { borderBottomColor: colors.border }]}
+                      >
+                        <View style={[styles.avatarPlaceholder, { backgroundColor: colors.primary + '20', marginRight: 12 }]}>
+                          {musician.avatar_url ? (
+                            <Image source={{ uri: musician.avatar_url }} style={{ width: 32, height: 32, borderRadius: 16 }} />
+                          ) : (
+                            <Text style={{ color: colors.primary, fontWeight: 'bold' }}>{musician.full_name.charAt(0)}</Text>
+                          )}
+                        </View>
+                        <View>
+                          <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>{musician.full_name}</Text>
+                          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Musician</Text>
+                        </View>
+                        <Ionicons name="add-circle-outline" size={24} color={colors.primary} style={{ marginLeft: 'auto' }} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
               </View>
 
               {members.length === 0 ? (
@@ -285,6 +461,7 @@ export default function AddGroupScreen() {
                   <Text style={styles.reviewLabel}>Group Info</Text>
                   <Text style={[styles.reviewValue, { color: colors.text }]}>{groupName || 'No Name'}</Text>
                   <Text style={{ color: colors.textSecondary }}>{genre || 'No Genre'}</Text>
+                  <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', marginTop: 4 }}>Rate: ₱{hourlyRate || '0'}/hr</Text>
                 </View>
 
                 <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
@@ -312,18 +489,24 @@ export default function AddGroupScreen() {
             {step > 1 && (
               <TouchableOpacity
                 onPress={handleBack}
-                style={[styles.backBtn, { borderColor: isDark ? '#374151' : '#E5E7EB' }]}
+                disabled={creating}
+                style={[styles.backBtn, { borderColor: isDark ? '#374151' : '#E5E7EB', opacity: creating ? 0.5 : 1 }]}
               >
                 <Text style={[styles.backBtnText, { color: colors.text }]}>Back</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
               onPress={handleNext}
-              style={[styles.nextBtn, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
+              disabled={creating}
+              style={[styles.nextBtn, { backgroundColor: colors.primary, shadowColor: colors.primary, opacity: creating ? 0.7 : 1 }]}
             >
-              <Text style={styles.nextBtnText}>
-                {step === 3 ? 'Create Group' : 'Next'}
-              </Text>
+              {creating ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.nextBtnText}>
+                  {step === 3 ? 'Create Group' : 'Next'}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
 
@@ -336,8 +519,19 @@ export default function AddGroupScreen() {
         visible={modalVisible}
         title="Success!"
         message={`Group "${groupName}" has been successfully created.`}
-        buttonText="View Group"
-        onClose={handleConfirm}
+        buttonText="Manage Group"
+        onClose={handleSuccessRedirect}
+      />
+
+      <LocationPicker
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        onSelect={(location) => {
+          setAddress(location.address);
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationPickerVisible(false);
+        }}
       />
     </>
   );
@@ -425,7 +619,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   textInput: {
-    padding: 16,
+    paddingHorizontal: 16,
     fontFamily: 'Poppins_400Regular',
   },
   addMemberRow: {
@@ -551,5 +745,22 @@ const styles = StyleSheet.create({
   nextBtnText: {
     fontFamily: 'Poppins_600SemiBold',
     color: '#fff',
+  },
+  searchResultsContainer: {
+    marginTop: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
   },
 });

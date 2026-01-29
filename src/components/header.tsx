@@ -1,15 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 
 interface HeaderProps {
     title: string;
+    transparent?: boolean;
 }
 
-export default function Header({ title }: HeaderProps) {
+export default function Header({ title, transparent }: HeaderProps) {
     const { colors, isDark } = useTheme();
 
     const pathname = usePathname();
@@ -28,18 +29,27 @@ export default function Header({ title }: HeaderProps) {
 
     const checkUnreadNotifications = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            // Check session first to avoid unnecessary API calls
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) return;
 
+            // Check if token is expired - don't make API call if it is
+            const tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
+            if (tokenExpiry && tokenExpiry < Date.now()) return;
+
+            // This can fail with 401 if session is expired, which is fine
             const { data, error } = await supabase.functions.invoke('manage-notifications', {
-                body: { action: 'unread_count', userId: user.id }
+                body: { action: 'unread_count', userId: session.user.id }
             });
 
-            if (!error && data) {
+            // If error (e.g., expired session), do nothing
+            if (error) return;
+
+            if (data) {
                 setHasUnread(data.count > 0);
             }
         } catch (e) {
-            console.log('Error checking notifications:', e);
+            // Silently ignore errors - user likely not logged in
         }
     };
 
@@ -52,7 +62,7 @@ export default function Header({ title }: HeaderProps) {
             setnotifVisible(false)
             setBackVisible(false)
             setaddbtnvisible(false)
-        } else if (pathname === "/my_group" || pathname === "/my_gig" || pathname === "/my_studio") {
+        } else if (pathname === "/my_group" || pathname === "/my_venue" || pathname === "/my_studio") {
             setnotifVisible(false)
             setBackVisible(false)
             setaddbtnvisible(true)
@@ -66,7 +76,7 @@ export default function Header({ title }: HeaderProps) {
 
     useEffect(() => {
 
-        if (addPath === "/my_gig") {
+        if (addPath === "/my_venue") {
             setBtn("/add_gig")
         } else if (addPath === "/my_studio") {
             setBtn("/add_studio")
@@ -77,7 +87,7 @@ export default function Header({ title }: HeaderProps) {
     }, [addPath])
 
     return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.container, { backgroundColor: transparent ? 'transparent' : colors.background }]}>
             <View style={styles.leftContainer}>
                 {backVisible ? (
                     <TouchableOpacity

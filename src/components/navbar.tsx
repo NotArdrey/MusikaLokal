@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { router, useFocusEffect, usePathname } from 'expo-router';
-import React, { useCallback, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 
 export default function Navbar() {
-    const { colors } = useTheme();
+    const { colors, isDark } = useTheme();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
     const [role, setRole] = useState('');
@@ -19,13 +20,22 @@ export default function Navbar() {
 
     const fetchUserRole = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            // Check session first to avoid unnecessary API calls
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) return;
+
+            // Check if token is expired - don't make API call if it is
+            const tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
+            if (tokenExpiry && tokenExpiry < Date.now()) return;
 
             // Fetch generic profile to get role
+            // This can fail with 401 if session is expired, which is fine
             const { data, error } = await supabase.functions.invoke('manage-profile', {
-                body: { action: 'fetch', userId: user.id }
+                body: { action: 'fetch', userId: session.user.id }
             });
+
+            // If error (e.g., expired session), just return silently
+            if (error) return;
 
             if (data && data.role) {
                 setRole(data.role);
@@ -35,7 +45,7 @@ export default function Navbar() {
                 } else if (data.role === 'manager' || data.role === 'musician-member') {
                     setManageRoute('/my_group');
                 } else if (data.role === 'venue-owner') {
-                    setManageRoute('/my_gig');
+                    setManageRoute('/my_venue');
                 } else {
                     setManageRoute('/manage'); // Default fallback page
                 }
@@ -43,14 +53,12 @@ export default function Navbar() {
                 setManageRoute('/manage');
             }
         } catch (e) {
-            console.log('Error fetching role for navbar:', e);
+            // Silently ignore errors - user likely not logged in
             setManageRoute('/manage'); // Fallback on error
         }
     };
 
-    let activeTab = '';
-    const ACTIVE_COLOR = colors.primary;
-    const INACTIVE_COLOR = colors.muted;
+    let activeTab = 'home';
 
     if (pathname.includes('home')) {
         activeTab = 'home';
@@ -58,7 +66,7 @@ export default function Navbar() {
         activeTab = 'activity';
     } else if (
         pathname.includes('my_studio') ||
-        pathname.includes('my_gig') ||
+        pathname.includes('my_venue') ||
         pathname.includes('my_group') ||
         pathname.includes('manage_') ||
         pathname.includes('edit_')
@@ -68,114 +76,107 @@ export default function Navbar() {
         activeTab = 'profile';
     }
 
+    const navItems = [
+        { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+        { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
+        { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
+        { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
+    ];
+
     return (
-        <View
-            style={[
-                styles.container,
-                {
-                    backgroundColor: colors.surface,
-                    shadowColor: "#000",
-                    shadowOffset: {
-                        width: 0,
-                        height: 4,
-                    },
-                    shadowOpacity: 0.1,
-                    shadowRadius: 12,
-                    elevation: 10,
-                }
-            ]}
-        >
-
-            <TouchableOpacity
-                style={[styles.tabButton, activeTab !== "home" && styles.inactiveTab]}
-                onPress={() => router.push("/home")}>
-                <View style={[styles.iconContainer, activeTab === "home" ? { backgroundColor: 'rgba(99, 102, 241, 0.1)' } : null]}>
-                    <Ionicons
-                        name={activeTab === "home" ? "home" : "home-outline"}
-                        size={22}
-                        color={activeTab === "home" ? colors.primary : colors.textSecondary}
-                    />
+        <View style={styles.navbarWrapper}>
+            <BlurView
+                intensity={Platform.OS === 'ios' ? 80 : 100}
+                tint={isDark ? "systemMaterialDark" : "systemMaterialLight"}
+                style={[
+                    styles.blurContainer,
+                    {
+                        backgroundColor: isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.85)',
+                        borderColor: colors.border
+                    }
+                ]}
+            >
+                <View style={styles.container}>
+                    {navItems.map((item) => {
+                        const isActive = activeTab === item.id;
+                        return (
+                            <TouchableOpacity
+                                key={item.id}
+                                style={[
+                                    styles.tabButton,
+                                    isActive && { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }
+                                ]}
+                                onPress={() => router.replace(item.route as any)}
+                            >
+                                <View style={styles.iconWrapper}>
+                                    <Ionicons
+                                        name={isActive ? item.icon as any : `${item.icon}-outline` as any}
+                                        size={24}
+                                        color={isActive ? colors.primary : colors.textSecondary}
+                                    />
+                                    {isActive && <View style={[styles.activeDot, { backgroundColor: colors.primary }]} />}
+                                </View>
+                            </TouchableOpacity>
+                        );
+                    })}
                 </View>
-                {activeTab === "home" && (
-                    <Text style={[styles.label, { color: colors.primary }]}>Home</Text>
-                )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-                style={[styles.tabButton, activeTab !== "activity" && styles.inactiveTab]}
-                onPress={() => router.push("/bookings")}>
-                <View style={[styles.iconContainer, activeTab === "activity" ? { backgroundColor: 'rgba(99, 102, 241, 0.1)' } : null]}>
-                    <Ionicons
-                        name={activeTab === "activity" ? "calendar" : "calendar-outline"}
-                        size={22}
-                        color={activeTab === "activity" ? colors.primary : colors.textSecondary}
-                    />
-                </View>
-                {activeTab === "activity" && (
-                    <Text style={[styles.label, { color: colors.primary }]}>Activity</Text>
-                )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-                style={[styles.tabButton, activeTab !== "manage" && styles.inactiveTab]}
-                onPress={() => router.push(manageRoute as any)}>
-                <View style={[styles.iconContainer, activeTab === "manage" ? { backgroundColor: 'rgba(99, 102, 241, 0.1)' } : null]}>
-                    <Ionicons
-                        name={activeTab === "manage" ? "briefcase" : "briefcase-outline"}
-                        size={22}
-                        color={activeTab === "manage" ? colors.primary : colors.textSecondary}
-                    />
-                </View>
-                {activeTab === "manage" && (
-                    <Text style={[styles.label, { color: colors.primary }]}>Manage</Text>
-                )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-                style={[styles.tabButton, activeTab !== "profile" && styles.inactiveTab]}
-                onPress={() => router.push("/profile")}>
-                <View style={[styles.iconContainer, activeTab === "profile" ? { backgroundColor: 'rgba(99, 102, 241, 0.1)' } : null]}>
-                    <Ionicons
-                        name={activeTab === "profile" ? "person" : "person-outline"}
-                        size={22}
-                        color={activeTab === "profile" ? colors.primary : colors.textSecondary}
-                    />
-                </View>
-                {activeTab === "profile" && (
-                    <Text style={[styles.label, { color: colors.primary }]}>Profile</Text>
-                )}
-            </TouchableOpacity>
+            </BlurView>
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
+    navbarWrapper: {
         position: 'absolute',
-        bottom: 24, // bottom-6 (6 * 4 = 24)
-        left: 16,   // left-4
-        right: 16,  // right-4
-        borderRadius: 24, // rounded-3xl
+        bottom: 24,
+        alignSelf: 'center',
+        width: '90%',
+        maxWidth: 400,
+        borderRadius: 24,
+        shadowColor: "#000",
+        shadowOffset: {
+            width: 0,
+            height: 10,
+        },
+        shadowOpacity: 0.15,
+        shadowRadius: 20,
+        elevation: 10,
+        overflow: 'hidden', // Ensure blur respects border radius
+    },
+    blurContainer: {
+        borderRadius: 24,
+        overflow: 'hidden',
+        borderWidth: 1,
+    },
+    container: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        justifyContent: 'space-around', // Equal spacing
         alignItems: 'center',
-        paddingHorizontal: 24, // px-6
-        paddingVertical: 16,   // py-4
+        paddingVertical: 12,
+        paddingHorizontal: 8,
     },
     tabButton: {
-        justifyContent: 'center',
         alignItems: 'center',
-        gap: 4, // gap-1
+        justifyContent: 'center',
+        padding: 12,
+        borderRadius: 16,
+        // width: 64, 
     },
-    inactiveTab: {
-        opacity: 0.6,
+    iconWrapper: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
     },
-    iconContainer: {
-        padding: 8, // p-2
-        borderRadius: 12, // rounded-xl
+    activeDot: {
+        position: 'absolute',
+        bottom: -8,
+        width: 4,
+        height: 4,
+        borderRadius: 2,
     },
     label: {
-        fontFamily: 'Poppins_600SemiBold',
         fontSize: 10,
-    },
+        marginTop: 4,
+        fontFamily: 'Poppins_500Medium',
+    }
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 
 type CustomModalProps = {
@@ -9,9 +9,20 @@ type CustomModalProps = {
   title?: string;
   message?: string;
   buttonText?: string;
+  showInput?: boolean;
+  onInputChange?: (text: string) => void;
 };
 
-const CustomModal: React.FC<CustomModalProps> = ({ visible, onClose, onConfirm, title, message = '', buttonText = 'Close' }) => {
+const CustomModal: React.FC<CustomModalProps> = ({
+  visible,
+  onClose,
+  onConfirm,
+  title,
+  message = '',
+  buttonText = 'Close',
+  showInput = false,
+  onInputChange
+}) => {
   const { colors } = useTheme();
 
   return (
@@ -28,7 +39,7 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, onClose, onConfirm, 
             {
               backgroundColor: colors.card,
               shadowColor: "#000",
-              shadowOffset: { width: 0, height: 4 }, // Added shadowOffset
+              shadowOffset: { width: 0, height: 4 },
               shadowOpacity: 0.25,
               shadowRadius: 10,
               elevation: 10
@@ -39,6 +50,23 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, onClose, onConfirm, 
             <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
           )}
           <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text>
+
+          {showInput && (
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  color: colors.text,
+                  borderColor: colors.border,
+                  backgroundColor: colors.background
+                }
+              ]}
+              placeholder="Enter reason..."
+              placeholderTextColor={colors.textSecondary}
+              onChangeText={onInputChange}
+              multiline
+            />
+          )}
 
           <View style={styles.buttonContainer}>
             <TouchableOpacity
@@ -111,6 +139,16 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     fontSize: 14, // text-sm
     fontFamily: 'Poppins_500Medium',
+  },
+  input: {
+    width: '100%',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 24,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    fontFamily: 'Poppins_400Regular',
   },
 });
 

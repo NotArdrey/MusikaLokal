@@ -14,11 +14,11 @@ export default function PrivacyPolicyScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <View style={styles.contentContainer}>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            Musika Lokal respects your privacy and is committed to protecting your personal data. When you sign up, we may collect your name, email, phone number, password, and verification details such as uploaded ID, face scan, or profile photo. We also collect information related to wallet transactions, booking history, and device usage such as IP address and location if enabled.
+            Musika Lokal respects your privacy and is committed to protecting your personal data. When you sign up, we may collect your name, email, phone number, password, and verification details such as uploaded ID, face scan, or profile photo. We also collect information related to wallet transactions, booking history, and derived performance metrics such as your booking completion rate and average response time. We also collect device usage data such as IP address and location if enabled.
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            This data is used to create and manage your account, process bookings and payments, handle cancellations and disputes, verify your identity, prevent fraud, and improve our services. We do not sell your information to third parties, and it is only shared when necessary with payment processors, ID verification services, other users (limited profile visibility), or legal authorities when required.
+            This data is used to create and manage your account, process bookings and payments, handle cancellations and disputes, verify your identity, prevent fraud, display public reliability scores (such as completion rates) to other users, and improve our services. We do not sell your information to third parties, and it is only shared when necessary with payment processors, ID verification services, other users (limited profile visibility), or legal authorities when required.
           </Text>
 
           <Text style={[styles.text, { color: colors.textSecondary }]}>

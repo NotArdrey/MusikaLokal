@@ -1,15 +1,15 @@
 import type { PropsWithChildren, ReactElement } from 'react';
-import { StyleSheet } from 'react-native';
+import { Platform, ScrollView, StyleSheet } from 'react-native';
 import Animated, {
-  interpolate,
-  useAnimatedRef,
-  useAnimatedStyle,
-  useScrollOffset,
+    interpolate,
+    useAnimatedRef,
+    useAnimatedStyle,
+    useScrollOffset,
 } from 'react-native-reanimated';
 
-import { ThemedView } from '@/components/themed-view';
-import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useThemeColor } from '@/hooks/use-theme-color';
+import { useColorScheme } from '../../hooks/use-color-scheme';
+import { useThemeColor } from '../../hooks/use-theme-color';
+import { ThemedView } from './themed-view';
 
 const HEADER_HEIGHT = 250;
 
@@ -25,9 +25,16 @@ export default function ParallaxScrollView({
 }: Props) {
   const backgroundColor = useThemeColor({}, 'background');
   const colorScheme = useColorScheme() ?? 'light';
+
+  const isWeb = Platform.OS === 'web';
+
+  // Always call hooks unconditionally
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
   const scrollOffset = useScrollOffset(scrollRef);
+  
   const headerAnimatedStyle = useAnimatedStyle(() => {
+    if (isWeb) return {};
+    
     return {
       transform: [
         {
@@ -44,11 +51,13 @@ export default function ParallaxScrollView({
     };
   });
 
+  const ScrollComponent = isWeb ? ScrollView : Animated.ScrollView;
+
   return (
-    <Animated.ScrollView
-      ref={scrollRef}
+    <ScrollComponent
+      ref={isWeb ? undefined : scrollRef}
       style={{ backgroundColor, flex: 1 }}
-      scrollEventThrottle={16}>
+      scrollEventThrottle={isWeb ? undefined : 16}>
       <Animated.View
         style={[
           styles.header,
@@ -58,7 +67,7 @@ export default function ParallaxScrollView({
         {headerImage}
       </Animated.View>
       <ThemedView style={styles.content}>{children}</ThemedView>
-    </Animated.ScrollView>
+    </ScrollComponent>
   );
 }
 

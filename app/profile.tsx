@@ -6,10 +6,12 @@ import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } fr
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
+  const { session, loading: authLoading, userId: currentUserId } = useAuth();
   const params = useLocalSearchParams<{ userId?: string }>();
 
   const [profile, setProfile] = useState<any>(null);
@@ -17,27 +19,47 @@ export default function ProfileScreen() {
   const [isOwner, setIsOwner] = useState(false);
 
   React.useEffect(() => {
-    fetchProfile();
-  }, [params.userId]);
+    if (!authLoading) {
+      fetchProfile();
+    }
+  }, [params.userId, authLoading, currentUserId]);
 
   async function fetchProfile() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const currentUserId = user?.id;
-
       // Determine target ID: param OR current user
-      const targetId = params.userId || currentUserId;
+      // Handle case where userId might be an array
+      const paramUserId = Array.isArray(params.userId) ? params.userId[0] : params.userId;
+      let targetId = paramUserId || currentUserId;
+      console.log('👤 Profile - Param userId:', paramUserId);
+      console.log('👤 Profile - Context userId:', currentUserId);
+
+      // If still no targetId, try to get from auth directly
+      if (!targetId) {
+        console.log('⚠️ Profile - No userId, fetching from auth...');
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error) {
+          console.log('❌ Profile - Auth error:', error.message);
+        }
+        if (user) {
+          console.log('✅ Profile - Got user from auth:', user.id);
+          targetId = user.id;
+        }
+      }
 
       if (!targetId) {
-        console.log('No user found');
-        setLoading(false);
+        console.log('❌ Profile - No user ID available, redirecting to login');
+        // No user logged in and no userId param - redirect to login
+        router.replace('/');
         return;
       }
+
+      console.log('🎯 Profile - Fetching profile for:', targetId);
 
       // Check ownership
       const ownership = currentUserId && targetId === currentUserId;
       setIsOwner(!!ownership);
 
+      // Fetch profile data
       const { data, error } = await supabase.functions.invoke('manage-profile', {
         body: { action: 'fetch', userId: targetId }
       });
@@ -73,7 +95,7 @@ export default function ProfileScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All, // Images + Videos
+        mediaTypes: 'all', // Images + Videos
         allowsEditing: true,
         quality: 0.8,
       });
@@ -156,7 +178,12 @@ export default function ProfileScreen() {
             </View>
 
             <Text style={[styles.nameText, { color: colors.text }]}>{profile?.full_name || 'User'}</Text>
-            <Text style={[styles.roleText, { color: colors.textSecondary }]}>{profile?.skills?.join(', ') || 'Musician'} • {profile?.location || 'Unknown'}</Text>
+            <Text style={[styles.roleText, { color: colors.textSecondary }]}>
+              {profile?.role === 'musician' ? (profile?.skills?.join(', ') || 'Musician') :
+                profile?.role === 'studio-owner' ? 'Studio Owner' :
+                  profile?.role === 'venue-owner' ? 'Venue Owner' :
+                    (profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : 'User')} • {profile?.location || 'Unknown'}
+            </Text>
 
             <View style={styles.genreRow}>
               {(profile?.genres || ['Rock', 'Indie']).map((genre: string) => (

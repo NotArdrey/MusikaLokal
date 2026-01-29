@@ -6,10 +6,12 @@ import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
-export default function MyGigScreen() {
+export default function MyVenueScreen() {
     const { colors, isDark } = useTheme();
+    const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [gigs, setGigs] = useState<any[]>([]);
@@ -17,12 +19,10 @@ export default function MyGigScreen() {
     const [refreshing, setRefreshing] = useState(false);
 
     const fetchGigs = async () => {
+        if (!userId) return;
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
             const { data, error } = await supabase.functions.invoke('manage-listings', {
-                body: { action: 'fetch_my_gigs', userId: user.id }
+                body: { action: 'fetch_my_gigs', userId }
             });
 
             if (error) throw error;
@@ -37,8 +37,10 @@ export default function MyGigScreen() {
 
     useFocusEffect(
         useCallback(() => {
-            fetchGigs();
-        }, [])
+            if (isAuthenticated && userId) {
+                fetchGigs();
+            }
+        }, [isAuthenticated, userId])
     );
 
     const onRefresh = () => {
@@ -52,13 +54,10 @@ export default function MyGigScreen() {
     };
 
     const handleDelete = async () => {
-        if (!selectedId) return;
+        if (!selectedId || !userId) return;
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
             const { error } = await supabase.functions.invoke('manage-listings', {
-                body: { action: 'delete', type: 'gig', id: selectedId, userId: user.id }
+                body: { action: 'delete', type: 'gig', id: selectedId, userId }
             });
 
             if (error) throw error;
@@ -73,7 +72,7 @@ export default function MyGigScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="My Gigs" />
+                <Header title="My Venue" />
 
                 <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -111,7 +110,8 @@ export default function MyGigScreen() {
                                 <View style={styles.cardContent}>
                                     <Text style={[styles.cardTitle, { color: colors.text }]}>{gig.name}</Text>
                                     <Text style={[styles.cardSubTitle, { color: colors.primary }]}>
-                                        {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'} • {gig.location}
+                                        {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'}
+                                        {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} • {gig.location}
                                     </Text>
 
                                     <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>

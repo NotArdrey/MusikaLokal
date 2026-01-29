@@ -8,8 +8,11 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
+import { useLocalSearchParams } from 'expo-router';
+
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { id } = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState('About');
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
@@ -17,6 +20,11 @@ export default function GroupDetailsScreen() {
   const [modalButtonText, setModalButtonText] = useState('');
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const [group, setGroup] = useState<any>(null);
+  const [applications, setApplications] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Role-based access control
   useEffect(() => {
@@ -42,11 +50,52 @@ export default function GroupDetailsScreen() {
       }
 
       setAuthorized(true);
+      if (id) fetchData(user.id);
     } catch (e) {
       console.error('Authorization check failed:', e);
       router.replace('/home');
     } finally {
       setCheckingAuth(false);
+    }
+  };
+
+  const fetchData = async (userId: string) => {
+    setLoading(true);
+    try {
+      // Ensure id is a string, not an array
+      const groupId = Array.isArray(id) ? id[0] : id;
+      if (!groupId) {
+        Alert.alert('Error', 'Invalid group ID');
+        router.replace('/home');
+        return;
+      }
+
+      // Fetch Group Details
+      const { data: groupData, error: groupError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_one', type: 'group', id: groupId, userId }
+      });
+      if (groupError) throw groupError;
+      setGroup(groupData);
+
+      // Fetch Group Applications (Sent)
+      const { data: appData, error: appError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_group_applications', groupId: groupId, userId }
+      });
+      if (appError) throw appError;
+      setApplications(appData || []);
+
+      // Fetch Reviews
+      const { data: reviewData, error: reviewError } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'fetch_reviews', type: 'group', id: groupId, userId }
+      });
+      if (reviewError) throw reviewError;
+      setReviews(reviewData || []);
+
+    } catch (e) {
+      console.log('Error fetching data:', e);
+      Alert.alert('Error', 'Failed to load group data');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -63,7 +112,7 @@ export default function GroupDetailsScreen() {
     setModalVisible(true);
   }
 
-  const tabs = ['About', 'Setup', 'Connect', 'Review'];
+  const tabs = ['About', 'Applications', 'Review'];
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -100,15 +149,15 @@ export default function GroupDetailsScreen() {
               ]}
             >
               <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=800&fit=crop' }}
-                style={styles.headerImage}
+                source={{ uri: (group?.images && group.images[0]) || group?.image || null }}
+                style={[styles.headerImage, { backgroundColor: colors.border }]}
                 resizeMode="cover"
               />
               <View style={styles.headerImageGradient} />
             </View>
 
-            <Text style={[styles.headerTitle, { color: colors.text }]}>Junction 88 Music Bar</Text>
-            <Text style={[styles.headerLocation, { color: colors.textSecondary }]}>Live Music Venue • Plaridel, Bulacan</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>{group?.name || 'Loading...'}</Text>
+            <Text style={[styles.headerLocation, { color: colors.textSecondary }]}>{group?.genre || 'Genre N/A'} • {group?.location || 'Location N/A'}</Text>
           </View>
 
           {/* Segmented Control Tabs */}
@@ -149,308 +198,113 @@ export default function GroupDetailsScreen() {
               <View style={styles.aboutContainer}>
                 <View>
                   <Text style={[styles.aboutText, { color: colors.textSecondary }]}>
-                    The Junction 88 Music Bar is a premier live music venue in Plaridel, Bulacan, Philippines, known for its intimate atmosphere and diverse lineup of artists. We offer a full bar, stage lighting, and sound equipment for performers.
+                    {group?.description || 'No description available.'}
                   </Text>
                 </View>
 
                 <View style={{ flexDirection: 'row', gap: 16 }}>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Capacity</Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}>69</Text>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Members</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>{group?.members?.length || 0}</Text>
                   </View>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Services</Text>
-                    <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 14 }}>Sound System, Lights</Text>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Genre</Text>
+                    <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 14 }}>{group?.genre || 'N/A'}</Text>
                   </View>
                 </View>
 
-                <View style={[styles.availabilityCard, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Availability Settings</Text>
 
-                  <View style={[styles.availabilityItem, { marginBottom: 16 }]}>
-                    <View>
-                      <Text style={[styles.availabilityTitle, { color: colors.text }]}>Accepting Bookings</Text>
-                      <Text style={[styles.availabilitySubtitle, { color: colors.textSecondary }]}>Allow venues to book this group</Text>
-                    </View>
-                    <TouchableOpacity style={[styles.toggleSwitch, { backgroundColor: colors.primary, alignItems: 'flex-end' }]}>
-                      <View style={styles.toggleThumb} />
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={styles.availabilityItem}>
-                    <View>
-                      <Text style={[styles.availabilityTitle, { color: colors.text }]}>Looking for Members</Text>
-                      <Text style={[styles.availabilitySubtitle, { color: colors.textSecondary }]}>Allow musicians to apply to join</Text>
-                    </View>
-                    <TouchableOpacity style={[styles.toggleSwitch, { backgroundColor: isDark ? '#4B5563' : '#D1D5DB', alignItems: 'flex-start' }]}>
-                      <View style={styles.toggleThumb} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <View style={[styles.completionCard, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Completion Rate</Text>
-                  <View style={styles.completionHeader}>
-                    <Text style={[styles.completionValue, { color: '#10b981' }]}>98%</Text>
-                    <View style={[styles.progressBarContainer, { backgroundColor: isDark ? '#334155' : '#F3F4F6' }]}>
-                      <View style={[styles.progressBarFill, { width: '98%' }]} />
-                    </View>
-                  </View>
-                </View>
 
                 <View>
                   <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Gallery</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryContainer}>
-                    {[1, 2, 3].map((i) => (
-                      <Image
-                        key={i}
-                        source={{ uri: `https://picsum.photos/300/200?random=${i + 20}` }}
-                        style={styles.galleryImage}
-                      />
-                    ))}
+                    {group?.images && group.images.length > 0 ? (
+                      group.images.map((img: string, i: number) => (
+                        <Image
+                          key={i}
+                          source={{ uri: img }}
+                          style={styles.galleryImage}
+                        />
+                      ))
+                    ) : (
+                      <Text style={{ color: colors.textSecondary }}>No images uploaded.</Text>
+                    )}
                   </ScrollView>
                 </View>
               </View>
             )}
 
-            {/* Gigs section moved to About - keeping for reference */}
-            {false && (
-              <View style={{ gap: 16 }}>
-                <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: colors.textSecondary, letterSpacing: 0.5 }}>GIG INVITATIONS</Text>
 
-                {/* Invitation Card 1 */}
-                <View style={[styles.invitationCard, { backgroundColor: colors.surface, marginBottom: 8 }]}>
-                  <View style={styles.invitationHeader}>
-                    <Image source={{ uri: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100&h=100&fit=crop' }} style={styles.invitationImage} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.invitationTitle, { color: colors.text }]}>The Blue Note Bar</Text>
-                      <Text style={[styles.invitationSubtitle, { color: colors.textSecondary }]}>Live Music Venue • Makati City</Text>
-                    </View>
-                    <View style={[styles.starRatingBadge, { backgroundColor: 'rgba(250, 204, 21, 0.2)' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Ionicons name="star" size={12} color="#FBBF24" />
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#FACC15' : '#D97706' }}>4.9</Text>
+
+            {
+              activeTab === 'Applications' && (
+                <View style={styles.aboutContainer}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Sent Applications</Text>
+
+                  {applications.length === 0 ? (
+                    <Text style={{ color: colors.textSecondary }}>No applications sent yet.</Text>
+                  ) : (
+                    applications.map((app) => (
+                      <View key={app.id} style={[styles.setupCard, { backgroundColor: colors.surface, marginBottom: 12 }]}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text style={[styles.setupTitle, { color: colors.text }]}>{app.gig?.name || 'Unknown Gig'}</Text>
+                          <Text style={{ color: app.status === 'approved' ? 'green' : app.status === 'pending' ? 'orange' : 'red', fontWeight: 'bold' }}>
+                            {app.status.toUpperCase()}
+                          </Text>
+                        </View>
+                        <Text style={{ color: colors.textSecondary, marginBottom: 4 }}>{app.gig?.location}</Text>
+                        <Text style={{ color: colors.textSecondary, marginBottom: 8 }}>Budget: ₱{(app.gig?.budget || 0).toLocaleString()}</Text>
+                        <Text style={{ color: colors.textSecondary }}>Applied on: {new Date(app.created_at).toLocaleDateString()}</Text>
                       </View>
-                    </View>
-                  </View>
-
-                  <View style={[styles.invitationDetails, { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB' }]}>
-                    <View style={styles.invitationDetailItem}>
-                      <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.detailText, { color: colors.text }]}>Dec 22 • 8:00 PM</Text>
-                    </View>
-                    <Text style={[styles.invitationPrice, { color: colors.primary }]}>₱8,000</Text>
-                  </View>
-
-                  <Text style={[styles.invitationMessage, { color: colors.textSecondary }]}>"We loved your performance at our sister venue! Would you be interested in a 3-hour set?"</Text>
-
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity
-                      onPress={() => handleAction('decline')}
-                      style={[styles.declineButton, { borderColor: colors.border }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleAction('accept')}
-                      style={[styles.acceptButton, { backgroundColor: colors.primary }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
-                    </TouchableOpacity>
-                  </View>
+                    ))
+                  )}
                 </View>
+              )
+            }
 
-                {/* Invitation Card 2 */}
-                <View style={[styles.invitationCard, { backgroundColor: colors.surface }]}>
-                  <View style={styles.invitationHeader}>
-                    <Image source={{ uri: 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=100&h=100&fit=crop' }} style={styles.invitationImage} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.invitationTitle, { color: colors.text }]}>Sunset Beach Resort</Text>
-                      <Text style={[styles.invitationSubtitle, { color: colors.textSecondary }]}>Resort • Batangas</Text>
-                    </View>
-                    <View style={[styles.starRatingBadge, { backgroundColor: 'rgba(250, 204, 21, 0.2)' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Ionicons name="star" size={12} color="#FBBF24" />
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#FACC15' : '#D97706' }}>4.7</Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  <View style={[styles.invitationDetails, { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB' }]}>
-                    <View style={styles.invitationDetailItem}>
-                      <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.detailText, { color: colors.text }]}>Dec 31 • 9:00 PM</Text>
-                    </View>
-                    <Text style={[styles.invitationPrice, { color: colors.primary }]}>₱15,000</Text>
-                  </View>
-
-                  <Text style={[styles.invitationMessage, { color: colors.textSecondary }]}>"Hosting a New Year's Eve countdown party. Accommodation and meals included!"</Text>
-
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity
-                      onPress={() => handleAction('decline')}
-                      style={[styles.declineButton, { borderColor: colors.border }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => handleAction('accept')}
-                      style={[styles.acceptButton, { backgroundColor: colors.primary }]}
-                    >
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-              </View>
-            )}
-
-            {activeTab === 'Setup' && (
-              <View style={styles.aboutContainer}>
-                <View style={[styles.setupCard, { backgroundColor: colors.surface }]}>
-                  <View style={styles.setupHeader}>
-                    <Text style={[styles.setupTitle, { color: colors.text }]}>Stage Plot</Text>
-                    <TouchableOpacity>
-                      <Text style={[styles.editLink, { color: colors.primary }]}>Edit</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={[styles.stagePlotContainer, { borderColor: colors.border, backgroundColor: isDark ? '#1e293b' : '#f8fafc' }]}>
-                    <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
-                    <Text style={[styles.stagePlotText, { color: colors.textSecondary }]}>Standard 4-Piece Setup</Text>
-                  </View>
-                </View>
-
-                <View style={[styles.setupCard, { backgroundColor: colors.surface }]}>
-                  <View style={styles.setupHeader}>
-                    <Text style={[styles.setupTitle, { color: colors.text }]}>Input List</Text>
-                    <TouchableOpacity>
-                      <Text style={[styles.editLink, { color: colors.primary }]}>Add Input</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {[
-                    { ch: 1, name: 'Kick', mic: 'Beta 52', stand: 'Boom' },
-                    { ch: 2, name: 'Snare Top', mic: 'SM57', stand: 'Clip' },
-                    { ch: 3, name: 'Hi-Hat', mic: 'SM81', stand: 'Boom' },
-                    { ch: 4, name: 'Bass DI', mic: 'J48', stand: '-' },
-                    { ch: 5, name: 'Gtr SL', mic: 'e609', stand: 'Short' },
-                    { ch: 6, name: 'Vox Center', mic: 'SM58', stand: 'Straight' },
-                  ].map((item, index) => (
-                    <View key={index} style={[styles.inputListItem, { borderColor: colors.border }]}>
-                      <View style={[styles.channelNumber, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                        <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{item.ch}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.inputName, { color: colors.text }]}>{item.name}</Text>
-                        <Text style={[styles.inputDetails, { color: colors.textSecondary }]}>{item.mic} • {item.stand}</Text>
-                      </View>
-                      <TouchableOpacity>
-                        <Ionicons name="pencil-outline" size={18} color={colors.textSecondary} />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={[styles.hospitalityCard, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.setupTitle, { color: colors.text, marginBottom: 8 }]}>Hospitality</Text>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
-                    Allergies: Peanuts (Bass Player).{'\n'}
-                    Preferences: 4x Bottled Water, 2x Towels per show.
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {activeTab === 'Connect' && (
-              <View style={styles.aboutContainer}>
-                <View style={[styles.featuredVideoContainer, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.setupTitle, { color: colors.text, marginBottom: 16 }]}>Featured Video</Text>
-                  <View style={styles.featuredVideo}>
-                    <Image
-                      source={{ uri: 'https://images.unsplash.com/photo-1516280440614-6697288d5d38?w=800&fit=crop' }}
-                      style={{ width: '100%', height: '100%' }}
-                      resizeMode="cover"
-                    />
-                    <View style={styles.playIconOverlay}>
-                      <Ionicons name="play-circle" size={64} color="#FFF" />
-                    </View>
-                  </View>
-                  <Text style={[styles.videoTitle, { color: colors.text }]}>Live at The Grand Theater (2025)</Text>
-                  <Text style={[styles.videoViews, { color: colors.textSecondary }]}>1.2M Views</Text>
-                </View>
-
+            {
+              activeTab === 'Review' && (
                 <View>
-                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Press & EPK</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.galleryContainer}>
-                    <View style={[styles.pressCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                      <Text style={[styles.pressMetric, { color: colors.primary }]}>TOP 10</Text>
-                      <Text style={[styles.pressLabel, { color: colors.text }]}>"Acts to Watch in 2026"</Text>
-                      <Text style={styles.pressSource}>- Rolling Stone PH</Text>
+                  <View style={styles.reviewHeader}>
+                    <Text style={[styles.ratingText, { color: colors.text }]}>{group?.rating?.toFixed(1) || '0.0'}</Text>
+                    <View style={styles.starsRow}>
+                      {[...Array(5)].map((_, i) => (
+                        <Ionicons key={i} name={i < Math.round(group?.rating || 0) ? "star" : "star-outline"} size={20} color={colors.primary} />
+                      ))}
                     </View>
-                    <View style={[styles.pressCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                      <Text style={[styles.pressMetric, { color: colors.primary }]}>150+</Text>
-                      <Text style={[styles.pressLabel, { color: colors.text }]}>Shows played last year</Text>
-                      <Text style={styles.pressSource}>- Verified Metric</Text>
-                    </View>
-                  </ScrollView>
-                </View>
+                    <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Based on {group?.review_count || 0} reviews</Text>
+                  </View>
 
-                <View style={[styles.setupCard, { backgroundColor: colors.surface }]}>
-                  <Text style={[styles.setupTitle, { color: colors.text, marginBottom: 12 }]}>Audio Demo</Text>
-                  {[
-                    { title: "Midnight Blues (Demo)", duration: "3:45" },
-                    { title: "City Lights (Live)", duration: "4:20" },
-                    { title: "Acoustic Session Vol. 1", duration: "12:10" }
-                  ].map((track, i) => (
-                    <View key={i} style={[styles.audioDemoItem, { borderColor: colors.border, borderBottomWidth: i === 2 ? 0 : 1 }]}>
-                      <TouchableOpacity style={[styles.playButton, { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.3)' : '#E0E7FF' }]}>
-                        <Ionicons name="play" size={20} color={colors.primary} />
-                      </TouchableOpacity>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.trackTitle, { color: colors.text }]}>{track.title}</Text>
-                        <Text style={[styles.trackDuration, { color: colors.textSecondary }]}>{track.duration}</Text>
+                  {reviews.length > 0 ? reviews.map((review) => (
+                    <View key={review.id} style={[styles.reviewCard, { backgroundColor: colors.surface, marginBottom: 12 }]}>
+                      <View style={styles.reviewUserHeader}>
+                        <View style={styles.userInfo}>
+                          <Image source={{ uri: review.author?.avatar_url || null }} style={[styles.userAvatar, { backgroundColor: colors.border }]} />
+                          <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{review.author?.full_name || 'User'}</Text>
+                        </View>
+                        <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>{new Date(review.created_at).toLocaleDateString()}</Text>
                       </View>
-                      <Ionicons name="ellipsis-vertical" size={20} color={colors.textSecondary} />
+                      <View style={[styles.starsRow, { marginBottom: 8 }]}>
+                        {[...Array(5)].map((_, i) => (
+                          <Ionicons key={i} name={i < review.rating ? "star" : "star-outline"} size={14} color={colors.primary} />
+                        ))}
+                      </View>
+                      <Text style={[styles.reviewText, { color: colors.textSecondary }]}>
+                        {review.comment}
+                      </Text>
                     </View>
-                  ))}
+                  )) : (
+                    <Text style={{ color: colors.textSecondary }}>No reviews yet.</Text>
+                  )}
                 </View>
-              </View>
-            )}
+              )
+            }
 
-            {activeTab === 'Review' && (
-              <View>
-                <View style={styles.reviewHeader}>
-                  <Text style={[styles.ratingText, { color: colors.text }]}>4.5</Text>
-                  <View style={styles.starsRow}>
-                    {[1, 2, 3, 4].map(i => <Ionicons key={i} name="star" size={20} color={colors.primary} />)}
-                    <Ionicons name="star-half" size={20} color={colors.primary} />
-                  </View>
-                  <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>Based on 25 reviews</Text>
-                </View>
-
-                <View style={[styles.reviewCard, { backgroundColor: colors.surface }]}>
-                  <View style={styles.reviewUserHeader}>
-                    <View style={styles.userInfo}>
-                      <Image source={{ uri: 'https://i.pravatar.cc/100?img=3' }} style={styles.userAvatar} />
-                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Jared Cariaso</Text>
-                    </View>
-                    <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>1 month ago</Text>
-                  </View>
-                  <View style={[styles.starsRow, { marginBottom: 8 }]}>
-                    {[1, 2, 3, 4, 5].map(i => <Ionicons key={i} name="star" size={14} color={colors.primary} />)}
-                  </View>
-                  <Text style={[styles.reviewText, { color: colors.textSecondary }]}>
-                    Amazing venue! The sound system was top-notch and the staff was incredibly professional.
-                  </Text>
-                </View>
-              </View>
-            )}
-
-          </View>
-        </ScrollView>
+          </View >
+        </ScrollView >
 
         <Navbar />
-      </View>
+      </View >
       <Modal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}

@@ -15,7 +15,9 @@
       "infoPlist": {
         "CFBundleURLTypes": [
           {
-            "CFBundleURLSchemes": ["musikalokal"]
+            "CFBundleURLSchemes": [
+              "musikalokal"
+            ]
           }
         ]
       }
@@ -42,7 +44,8 @@
           "cameraPermission": "Allow MusikaLokal to access your camera to verify your identity.",
           "microphonePermission": "Allow MusikaLokal to access your microphone for video verification."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "android": {
       "adaptiveIcon": {
@@ -68,7 +71,10 @@
               "scheme": "musikalokal"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },

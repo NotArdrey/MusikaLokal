@@ -60,7 +60,7 @@ export default function EditProfileScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: 'images',
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -138,7 +138,31 @@ export default function EditProfileScreen() {
     }
   };
 
+  const validateForm = (): boolean => {
+    if (!name.trim()) {
+      Alert.alert('Required Field', 'Name cannot be empty');
+      return false;
+    }
+    if (selectedRoles.length === 0) {
+      Alert.alert('Required Field', 'Please select at least one role/instrument');
+      return false;
+    }
+    if (!bio.trim()) {
+      Alert.alert('Required Field', 'Please enter a bio');
+      return false;
+    }
+    if (!avatarUrl) {
+      Alert.alert('Required Field', 'Please upload a profile picture');
+      return false;
+    }
+    return true;
+  };
+
   const handleSave = async () => {
+    if (!validateForm()) {
+      return;
+    }
+    
     if (!userId) return;
     setSaving(true);
     try {
@@ -168,7 +192,7 @@ export default function EditProfileScreen() {
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Profile" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} style={styles.flex1}>
 
           <View style={styles.contentContainer}>
 
@@ -228,7 +252,7 @@ export default function EditProfileScreen() {
             <View style={styles.formContainer}>
               <View>
                 <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Display Name</Text>
-                <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+                <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
                   <Text style={[styles.inputValue, { color: colors.muted }]}>{name}</Text>
                 </View>
                 <Text style={[styles.inputHelper, { color: colors.textSecondary }]}>Display Name cannot be changed.</Text>
@@ -267,7 +291,7 @@ export default function EditProfileScreen() {
 
               <View>
                 <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genres</Text>
-                <View style={[styles.inputWrapper, { borderColor: colors.border, backgroundColor: colors.card }]}>
+                <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
                   <TextInput
                     value={genres}
                     onChangeText={setGenres}
@@ -280,14 +304,14 @@ export default function EditProfileScreen() {
 
               <View>
                 <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Bio</Text>
-                <View style={[styles.inputWrapper, { borderColor: colors.border, backgroundColor: colors.card }]}>
+                <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
                   <TextInput
                     value={bio}
                     onChangeText={setBio}
                     placeholder="Tell us a bit about yourself..."
                     placeholderTextColor={colors.textSecondary}
                     multiline
-                    style={[styles.textInput, { color: colors.text, height: 100, textAlignVertical: 'top' }]}
+                    style={[styles.textInput, { color: colors.text, height: 120, textAlignVertical: 'top' }]}
                   />
                 </View>
               </View>
@@ -304,9 +328,9 @@ export default function EditProfileScreen() {
 
               <TouchableOpacity
                 onPress={() => router.back()}
-                style={styles.cancelButton}
+                style={[styles.cancelButton, { borderColor: colors.border }]}
               >
-                <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>
+                <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
             </View>
 
@@ -332,7 +356,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 40,
   },
   contentContainer: {
     paddingHorizontal: 24,
@@ -427,12 +451,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
   },
   inputWrapper: {
-    padding: 12,
     borderRadius: 12,
     borderWidth: 1,
+    overflow: 'hidden',
   },
   inputValue: {
     fontFamily: 'Poppins_500Medium',
+    padding: 16,
   },
   inputHelper: {
     marginTop: 4,
@@ -457,10 +482,11 @@ const styles = StyleSheet.create({
   textInput: {
     fontFamily: 'Poppins_400Regular',
     textAlignVertical: 'center',
-    paddingVertical: 0,
+    padding: 16,
   },
   actionsContainer: {
     marginTop: 32,
+    marginBottom: 20,
     gap: 12,
   },
   saveButton: {
@@ -483,6 +509,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
+    borderWidth: 1,
   },
   cancelButtonText: {
     fontFamily: 'Poppins_600SemiBold',

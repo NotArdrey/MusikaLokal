@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import ImageUploader from '../src/components/ImageUploader';
+import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -10,12 +12,53 @@ import { useTheme } from '../src/context/ThemeContext';
 import { useLocalSearchParams } from 'expo-router';
 import { supabase } from '../lib/supabase';
 
+// Helper function to format time input
+const formatTimeInput = (text: string): string => {
+    // Remove all non-digit characters except colon
+    let cleaned = text.replace(/[^0-9:]/g, '');
+    
+    // Limit to 5 characters (HH:MM)
+    if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
+    
+    // Auto-add colon after 2 digits
+    if (cleaned.length === 2 && !cleaned.includes(':')) {
+        cleaned = cleaned + ':';
+    }
+    
+    // If user types more than 2 digits before colon, insert colon
+    if (cleaned.length > 2 && !cleaned.includes(':')) {
+        cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
+    }
+    
+    // Validate hour (01-12)
+    const parts = cleaned.split(':');
+    if (parts[0] && parts[0].length === 2) {
+        const hour = parseInt(parts[0]);
+        if (hour < 1 || hour > 12) {
+            return cleaned.substring(0, 1);
+        }
+    }
+    
+    // Validate minute (00-59)
+    if (parts[1] && parts[1].length === 2) {
+        const minute = parseInt(parts[1]);
+        if (minute > 59) {
+            return parts[0] + ':' + parts[1].substring(0, 1);
+        }
+    }
+    
+    return cleaned;
+};
+
 export default function EditStudioScreen() {
   const { colors, isDark } = useTheme();
   const { id } = useLocalSearchParams();
   const [studioName, setStudioName] = useState('');
   const [description, setDescription] = useState('');
   const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [cost, setCost] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -25,6 +68,19 @@ export default function EditStudioScreen() {
   const [amenities, setAmenities] = useState<string[]>([]);
   const [newAmenity, setNewAmenity] = useState('');
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [thumbnailIndex, setThumbnailIndex] = useState(0);
+
+  // Contract state
+  const [contractUrl, setContractUrl] = useState<string>('');
+  const [contractFileName, setContractFileName] = useState<string>('');
+  const [uploadingContract, setUploadingContract] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Availability state
+  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const [availability, setAvailability] = useState<{ day: string; slots: { start: string; end: string }[] }[]>(
+    daysOfWeek.map(day => ({ day, slots: [] }))
+  );
 
   // Role-based access control
   useEffect(() => {
@@ -75,8 +131,16 @@ export default function EditStudioScreen() {
         return;
       }
 
+      // Ensure id is a string, not an array
+      const studioId = Array.isArray(id) ? id[0] : id;
+      if (!studioId) {
+        Alert.alert('Error', 'Invalid studio ID');
+        router.replace('/home');
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'fetch_one', type: 'studio', id, userId: user.id }
+        body: { action: 'fetch_one', type: 'studio', id: studioId, userId: user.id }
       });
 
       if (error) throw error;
@@ -91,9 +155,50 @@ export default function EditStudioScreen() {
       setStudioName(data.name);
       setDescription(data.description);
       setAddress(data.address);
+      setLatitude(data.latitude || null);
+      setLongitude(data.longitude || null);
       setCost(data.hourly_rate?.toString() || '');
       setAmenities(data.amenities || []);
-      // setSelectedImages(data.images || []);
+      setContractUrl(data.contract_url || '');
+      if (data.contract_url) {
+        const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
+        setContractFileName(decodeURIComponent(fileName));
+      }
+      
+      // Load availability
+      console.log('📅 Loading availability from data:', data.availability);
+      if (data.availability && Array.isArray(data.availability)) {
+        // Helper function to convert 24-hour to 12-hour format
+        const convertTo12Hour = (time24: string) => {
+          if (!time24 || !time24.includes(':')) return '09:00 AM';
+          const [hours, minutes] = time24.split(':');
+          const hour = parseInt(hours, 10);
+          const period = hour >= 12 ? 'PM' : 'AM';
+          const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+          return `${String(hour12).padStart(2, '0')}:${minutes} ${period}`;
+        };
+
+        const loadedAvailability = daysOfWeek.map(day => {
+          const dayData = data.availability.find((a: any) => a.day === day);
+          return {
+            day,
+            slots: dayData?.slots ? dayData.slots.map((slot: any) => ({
+              start: convertTo12Hour(slot.start),
+              end: convertTo12Hour(slot.end)
+            })) : []
+          };
+        });
+        console.log('📅 Loaded availability:', loadedAvailability);
+        setAvailability(loadedAvailability);
+      } else {
+        console.log('📅 No availability data, using default empty schedule');
+        // Initialize with empty schedule if no availability data
+        setAvailability(daysOfWeek.map(day => ({ day, slots: [] })));
+      }
+      setSelectedImages(data.images || []);
+      if (data.images && data.images.length > 0) {
+        setThumbnailIndex(0);
+      }
     } catch (e) {
       console.log('Error fetching studio details:', e);
       Alert.alert('Error', 'Failed to load studio details.');
@@ -103,10 +208,45 @@ export default function EditStudioScreen() {
     }
   };
 
+  const validateForm = (): boolean => {
+    if (!studioName.trim()) {
+      Alert.alert('Required Field', 'Please enter a studio name');
+      return false;
+    }
+    if (!description.trim()) {
+      Alert.alert('Required Field', 'Please enter a description');
+      return false;
+    }
+    if (!address || !latitude || !longitude) {
+      Alert.alert('Required Field', 'Please select a location on the map');
+      return false;
+    }
+    if (!cost.trim() || parseFloat(cost) <= 0) {
+      Alert.alert('Required Field', 'Please enter a valid hourly rate');
+      return false;
+    }
+    if (selectedImages.length === 0) {
+      Alert.alert('Required Field', 'Please upload at least one studio photo');
+      return false;
+    }
+    return true;
+  };
+
   const handleSave = async () => {
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      // Ensure id is a string, not an array
+      const studioId = Array.isArray(id) ? id[0] : id;
+      if (!studioId) {
+        alert('Invalid studio ID');
+        return;
+      }
 
       const payload = {
         name: studioName,
@@ -114,21 +254,116 @@ export default function EditStudioScreen() {
         address,
         hourly_rate: parseFloat(cost) || 0,
         amenities,
-        // images: selectedImages,
+        latitude,
+        longitude,
+        images: selectedImages,
+        contract_url: contractUrl || null,
+        availability: availability
+          .filter(day => day.slots.length > 0)
+          .map(day => {
+            // Helper function to convert 12-hour to 24-hour format
+            const convertTo24Hour = (time12: string): string => {
+              const [time, modifier] = time12.split(' ');
+              if (!modifier) return time; // Already 24h or invalid
+              let [hours, minutes] = time.split(':');
+              if (hours === '12') {
+                hours = '00';
+              }
+              if (modifier === 'PM') {
+                hours = String(parseInt(hours, 10) + 12);
+              }
+              return `${hours}:${minutes}`;
+            };
+
+            return {
+              ...day,
+              slots: day.slots.map(slot => ({
+                start: convertTo24Hour(slot.start),
+                end: convertTo24Hour(slot.end)
+              }))
+            };
+          })
       };
 
-      const { error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'studio', id, userId: user.id, payload }
+      console.log('� RAW availability state:', JSON.stringify(availability, null, 2));
+      console.log('📅 FILTERED availability (days with slots):', payload.availability);
+      console.log('📅 Number of days with availability:', payload.availability.length);
+      console.log('�🔵 Updating studio with payload:', JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload }, null, 2));
+
+      const response = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'update', type: 'studio', id: studioId, userId: user.id, payload }
       });
 
-      if (error) throw error;
+      console.log('🔵 Response data:', response.data);
+      console.log('🔵 Response error:', response.error);
+
+      if (response.error) {
+        console.error('❌ Error details:', JSON.stringify(response.error, null, 2));
+        
+        // Try to read the actual error message from the response body
+        let errorMessage = 'Unknown error occurred';
+        let errorDetails = null;
+        
+        try {
+          // Check if there's a response context with body
+          if (response.error.context && response.error.context._bodyBlob) {
+            console.log('🔍 Attempting to read error response body...');
+            // Try to read the body as text
+            const errorResponse = await fetch(response.error.context.url, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload })
+            });
+            
+            const errorBody = await errorResponse.text();
+            console.log('🔍 Raw error response:', errorBody);
+            
+            try {
+              errorDetails = JSON.parse(errorBody);
+              errorMessage = errorDetails.error || errorDetails.message || errorMessage;
+              console.error('❌ Server error message:', errorMessage);
+              console.error('❌ Server error details:', errorDetails.details);
+              console.error('❌ Server error code:', errorDetails.code);
+              console.error('❌ Server error hint:', errorDetails.hint);
+            } catch (parseError) {
+              errorMessage = errorBody || errorMessage;
+            }
+          } else if (response.data && typeof response.data === 'object') {
+            errorMessage = response.data.error || response.data.message || errorMessage;
+            console.error('❌ Server error message:', errorMessage);
+            console.error('❌ Server error details:', response.data.details);
+          } else if (response.error.message) {
+            errorMessage = response.error.message;
+          }
+        } catch (readError) {
+          console.error('❌ Failed to read error body:', readError);
+        }
+        
+        console.error('❌ Final error message:', errorMessage);
+        throw new Error(errorMessage);
+      }
+
+      // Check if data indicates an error
+      if (!response.data) {
+        throw new Error('No data returned from server');
+      }
 
       setModalVisible(false);
-      console.log('Studio Updated');
-      router.back();
-    } catch (e) {
-      console.log('Error updating studio:', e);
-      alert('Failed to update studio');
+      console.log('✅ Studio Updated successfully');
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/manage_studio');
+      }
+    } catch (e: any) {
+      console.error('❌ Error updating studio:', e);
+      console.error('❌ Error message:', e?.message);
+      console.error('❌ Error stack:', e?.stack);
+      console.error('❌ Full error object:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
+      alert(`Failed to update studio: ${e?.message || 'Unknown error'}`);
     }
   };
 
@@ -141,6 +376,117 @@ export default function EditStudioScreen() {
 
   const removeAmenity = (index: number) => {
     setAmenities(amenities.filter((_, i) => i !== index));
+  };
+
+  const handleContractUpload = async () => {
+    try {
+      setUploadingContract(true);
+      
+      if (Platform.OS === 'web') {
+        if (fileInputRef.current) {
+          fileInputRef.current.click();
+        }
+        setUploadingContract(false);
+        return;
+      }
+      
+      // Dynamic import for native platforms only
+      const DocumentPicker = await import('expo-document-picker');
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        setUploadingContract(false);
+        return;
+      }
+
+      const file = result.assets[0];
+      const fileName = file.name;
+      const fileUri = file.uri;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        Alert.alert('Error', 'Session expired. Please log in again.');
+        setUploadingContract(false);
+        return;
+      }
+
+      const response = await fetch(fileUri);
+      const arrayBuffer = await response.arrayBuffer();
+
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from('documents')
+        .upload(filePath, arrayBuffer, {
+          contentType: 'application/pdf',
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('documents')
+        .getPublicUrl(filePath);
+
+      setContractUrl(publicUrl);
+      setContractFileName(fileName);
+      Alert.alert('Success', 'Contract uploaded successfully!');
+    } catch (error) {
+      console.error('Error uploading contract:', error);
+      Alert.alert('Error', 'Failed to upload contract. Please try again.');
+    } finally {
+      setUploadingContract(false);
+    }
+  };
+
+  const removeContract = () => {
+    setContractUrl('');
+    setContractFileName('');
+  };
+
+  const handleWebFileSelect = async (event: any) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingContract(true);
+      const fileName = file.name;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        Alert.alert('Error', 'Session expired. Please log in again.');
+        setUploadingContract(false);
+        return;
+      }
+
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from('documents')
+        .upload(filePath, file, {
+          contentType: 'application/pdf',
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('documents')
+        .getPublicUrl(filePath);
+
+      setContractUrl(publicUrl);
+      setContractFileName(fileName);
+      Alert.alert('Success', 'Contract uploaded successfully!');
+    } catch (error) {
+      console.error('Error uploading contract:', error);
+      Alert.alert('Error', 'Failed to upload contract. Please try again.');
+    } finally {
+      setUploadingContract(false);
+      if (event.target) {
+        event.target.value = '';
+      }
+    }
   };
 
   const renderSectionHeader = (title: string, icon: string) => (
@@ -205,16 +551,91 @@ export default function EditStudioScreen() {
 
   return (
     <>
+      {Platform.OS === 'web' && (
+        <input
+          ref={fileInputRef as any}
+          type="file"
+          accept="application/pdf"
+          onChange={handleWebFileSelect}
+          style={{ display: 'none' }}
+        />
+      )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Studio" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} style={styles.flex1}>
 
           {renderSectionHeader('Studio Details', 'business')}
           {renderInput('Studio Name', studioName, setStudioName)}
           {renderInput('Description', description, setDescription, true)}
-          {renderInput('Location', address, setAddress)}
+
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Location</Text>
+            <TouchableOpacity
+              onPress={() => setLocationPickerVisible(true)}
+              style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
+                <Text style={{
+                  flex: 1,
+                  color: address ? colors.text : colors.textSecondary,
+                  fontFamily: 'Poppins_400Regular'
+                }}>
+                  {address || 'Tap to select location on map'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
           {renderInput('Hourly Rate (₱)', cost, setCost, false, true)}
+
+          {/* Contract Upload */}
+          {renderSectionHeader('Contract', 'document-text')}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
+              Upload a PDF contract that musicians will see before booking
+            </Text>
+            {contractUrl ? (
+              <View style={[styles.contractPreview, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                  <View style={[styles.pdfIcon, { backgroundColor: colors.primary }]}>
+                    <Ionicons name="document-text" size={24} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.contractFileName, { color: colors.text }]} numberOfLines={1}>
+                      {contractFileName}
+                    </Text>
+                    <Text style={[styles.contractFileSize, { color: colors.textSecondary }]}>
+                      PDF Document
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={removeContract} style={styles.removeContractBtn}>
+                  <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={handleContractUpload}
+                disabled={uploadingContract}
+                style={[styles.uploadContractBtn, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}
+              >
+                {uploadingContract ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <Ionicons name="cloud-upload-outline" size={32} color={colors.textSecondary} />
+                    <Text style={[styles.uploadText, { color: colors.text }]}>
+                      Upload Contract (PDF)
+                    </Text>
+                    <Text style={[styles.uploadSubText, { color: colors.textSecondary }]}>
+                      Tap to browse files
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
 
           {renderSectionHeader('Facilities & Equipment', 'mic')}
           <View style={styles.addAmenityContainer}>
@@ -246,30 +667,147 @@ export default function EditStudioScreen() {
             ))}
           </View>
 
-          {renderSectionHeader('Visuals', 'image')}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesContainer}>
-            <View style={styles.imagesRow}>
-              <TouchableOpacity
-                style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6' }]}
-              >
-                <Ionicons name="add" size={24} color={colors.textSecondary} />
-                <Text style={[styles.addImageText, { color: colors.textSecondary }]}>Add Photo</Text>
-              </TouchableOpacity>
+          {renderSectionHeader('Availability', 'time')}
+          <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 16 }]}>
+            Set your studio availability for bookings
+          </Text>
 
-              {selectedImages.map((uri, index) => (
-                <View key={index} style={styles.imageWrapper}>
-                  <Image source={{ uri }} style={styles.imageThumbnail} />
-                  <TouchableOpacity
-                    style={[styles.removeImageButton, { borderColor: isDark ? '#111827' : '#FFFFFF' }]}
-                    onPress={() => setSelectedImages(selectedImages.filter((_, i) => i !== index))}
-                  >
-                    <Ionicons name="close" size={12} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              ))}
+          {availability.map((daySchedule, dayIndex) => (
+            <View key={daySchedule.day} style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={[styles.dayLabel, { color: colors.text }]}>{daySchedule.day}</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    const newAvailability = [...availability];
+                    if (newAvailability[dayIndex].slots.length === 0) {
+                      newAvailability[dayIndex].slots.push({ start: '09:00 AM', end: '05:00 PM' });
+                    } else {
+                      newAvailability[dayIndex].slots = [];
+                    }
+                    setAvailability(newAvailability);
+                  }}
+                  style={[styles.toggleBtn, { backgroundColor: daySchedule.slots.length > 0 ? colors.primary : (isDark ? '#374151' : '#E5E7EB') }]}
+                >
+                  <Text style={{ color: daySchedule.slots.length > 0 ? '#FFFFFF' : colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>
+                    {daySchedule.slots.length > 0 ? 'Available' : 'Closed'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {daySchedule.slots.map((slot, slotIndex) => {
+                const toggleAmPm = (timeStr: string) => {
+                  const [time, period] = timeStr.split(' ');
+                  return `${time} ${period === 'AM' ? 'PM' : 'AM'}`;
+                };
+
+                return (
+                  <View key={slotIndex} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>START</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <TextInput
+                          value={slot.start.split(' ')[0]}
+                          onChangeText={(text) => {
+                            const formatted = formatTimeInput(text);
+                            const newAvailability = [...availability];
+                            const period = slot.start.split(' ')[1];
+                            newAvailability[dayIndex].slots[slotIndex].start = `${formatted} ${period}`;
+                            setAvailability(newAvailability);
+                          }}
+                          placeholder="09:00"
+                          keyboardType="numeric"
+                          maxLength={5}
+                          style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                        />
+                        <TouchableOpacity
+                          onPress={() => {
+                            const newAvailability = [...availability];
+                            newAvailability[dayIndex].slots[slotIndex].start = toggleAmPm(slot.start);
+                            setAvailability(newAvailability);
+                          }}
+                          style={[styles.ampmBtn, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}
+                        >
+                          <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                            {slot.start.split(' ')[1]}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} style={{ marginTop: 20 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>END</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <TextInput
+                          value={slot.end.split(' ')[0]}
+                          onChangeText={(text) => {
+                            const formatted = formatTimeInput(text);
+                            const newAvailability = [...availability];
+                            const period = slot.end.split(' ')[1];
+                            newAvailability[dayIndex].slots[slotIndex].end = `${formatted} ${period}`;
+                            setAvailability(newAvailability);
+                          }}
+                          placeholder="05:00"
+                          keyboardType="numeric"
+                          maxLength={5}
+                          style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                        />
+                        <TouchableOpacity
+                          onPress={() => {
+                            const newAvailability = [...availability];
+                            newAvailability[dayIndex].slots[slotIndex].end = toggleAmPm(slot.end);
+                            setAvailability(newAvailability);
+                          }}
+                          style={[styles.ampmBtn, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}
+                        >
+                          <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                            {slot.end.split(' ')[1]}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {daySchedule.slots.length > 1 && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          const newAvailability = [...availability];
+                          newAvailability[dayIndex].slots.splice(slotIndex, 1);
+                          setAvailability(newAvailability);
+                        }}
+                        style={{ marginTop: 20 }}
+                      >
+                        <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+
+              {daySchedule.slots.length > 0 && daySchedule.slots.length < 3 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    const newAvailability = [...availability];
+                    newAvailability[dayIndex].slots.push({ start: '06:00 PM', end: '09:00 PM' });
+                    setAvailability(newAvailability);
+                  }}
+                  style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                >
+                  <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
+                  <Text style={{ color: colors.primary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Time Slot</Text>
+                </TouchableOpacity>
+              )}
             </View>
-          </ScrollView>
-          <Text style={[styles.imageHelpText, { color: colors.textSecondary }]}>Hold images to reorder or tap to view.</Text>
+          ))}
+
+          {renderSectionHeader('Visuals', 'image')}
+          <ImageUploader
+            images={selectedImages}
+            onImagesChange={setSelectedImages}
+            thumbnailIndex={thumbnailIndex}
+            onThumbnailChange={setThumbnailIndex}
+            maxImages={10}
+            bucketName="listings"
+            userId={id as string}
+            folder="studios"
+          />
 
           <View style={styles.footerActions}>
             <TouchableOpacity
@@ -289,9 +827,7 @@ export default function EditStudioScreen() {
 
         </ScrollView>
 
-        <View style={styles.bottomNavbarOverlay}>
-          <Navbar />
-        </View>
+        <Navbar />
       </View>
 
       <Modal
@@ -301,6 +837,18 @@ export default function EditStudioScreen() {
         message="Are you sure you want to update this studio profile?"
         buttonText="Save & Update"
         onConfirm={handleSave}
+      />
+
+      <LocationPicker
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        onSelect={(location) => {
+          setAddress(location.address);
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationPickerVisible(false);
+        }}
+        initialLocation={latitude && longitude ? { lat: latitude, lng: longitude } : undefined}
       />
     </>
   );
@@ -315,7 +863,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 40,
     paddingHorizontal: 24,
   },
   sectionHeader: {
@@ -347,7 +895,6 @@ const styles = StyleSheet.create({
   input: {
     padding: 16,
     textAlignVertical: 'center',
-    paddingVertical: 0,
   },
   addAmenityContainer: {
     flexDirection: 'row',
@@ -383,55 +930,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
     fontFamily: 'Poppins_500Medium',
   },
-  imagesContainer: {
-    marginBottom: 8,
-  },
-  imagesRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  addImageButton: {
-    width: 96,
-    height: 96,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderStyle: 'dashed',
-  },
-  addImageText: {
-    fontSize: 12,
-    marginTop: 4,
-    fontFamily: 'Poppins_500Medium',
-  },
-  imageWrapper: {
-    position: 'relative',
-  },
-  imageThumbnail: {
-    width: 96,
-    height: 96,
-    borderRadius: 12,
-    backgroundColor: '#E5E7EB',
-  },
-  removeImageButton: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#EF4444',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-  },
-  imageHelpText: {
-    fontSize: 12,
-    marginBottom: 16,
-    fontFamily: 'Poppins_400Regular',
-  },
   footerActions: {
     marginTop: 32,
+    marginBottom: 20,
   },
   saveButton: {
     borderRadius: 12,
@@ -456,11 +957,88 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderWidth: 1,
   },
-  bottomNavbarOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+  inputSubLabel: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+    marginBottom: 8,
+  },
+  uploadContractBtn: {
+    padding: 32,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  uploadText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_600SemiBold',
+    marginTop: 8,
+  },
+  uploadSubText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+  },
+  contractPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 12,
+  },
+  pdfIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contractFileName: {
+    fontSize: 14,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  contractFileSize: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+    marginTop: 2,
+  },
+  removeContractBtn: {
+    padding: 8,
+  },
+  dayCard: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  dayLabel: {
+    fontSize: 14,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  toggleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  timeInput: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 14,
+  },
+  ampmBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  subtitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_400Regular',
   },
 });
 

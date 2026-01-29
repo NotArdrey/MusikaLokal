@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
+import ImageUploader from '../src/components/ImageUploader';
+import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -16,7 +18,12 @@ export default function EditGroupScreen() {
   const [groupName, setGroupName] = useState('');
   const [genre, setGenre] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedImage, setSelectedImage] = useState('');
+  const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  const [images, setImages] = useState<string[]>([]);
+  const [thumbnailIndex, setThumbnailIndex] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
@@ -72,8 +79,16 @@ export default function EditGroupScreen() {
         return;
       }
 
+      // Ensure id is a string, not an array
+      const groupId = Array.isArray(id) ? id[0] : id;
+      if (!groupId) {
+        Alert.alert('Error', 'Invalid group ID');
+        router.replace('/home');
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'fetch_one', type: 'group', id, userId: user.id }
+        body: { action: 'fetch_one', type: 'group', id: groupId, userId: user.id }
       });
 
       if (error) throw error;
@@ -88,8 +103,14 @@ export default function EditGroupScreen() {
       setGroupName(data.name);
       setGenre(data.genre);
       setDescription(data.description);
+      setAddress(data.location || '');
+      setLatitude(data.latitude || null);
+      setLongitude(data.longitude || null);
       setMembers(data.members || []);
-      // setSelectedImage(data.images?.[0] || '');
+      setSelectedImages(data.images || []);
+      if (data.images && data.images.length > 0) {
+        setThumbnailIndex(0);
+      }
     } catch (e) {
       console.log('Error fetching group details:', e);
       Alert.alert('Error', 'Failed to load group details.');
@@ -99,20 +120,59 @@ export default function EditGroupScreen() {
     }
   };
 
+  const validateForm = (): boolean => {
+    if (!groupName.trim()) {
+      Alert.alert('Required Field', 'Please enter a group name');
+      return false;
+    }
+    if (!genre.trim()) {
+      Alert.alert('Required Field', 'Please enter a genre');
+      return false;
+    }
+    if (!description.trim()) {
+      Alert.alert('Required Field', 'Please enter a description');
+      return false;
+    }
+    if (!address || !latitude || !longitude) {
+      Alert.alert('Required Field', 'Please select a location on the map');
+      return false;
+    }
+    if (images.length === 0) {
+      Alert.alert('Required Field', 'Please upload at least one group photo');
+      return false;
+    }
+    return true;
+  };
+
   const handleSave = async () => {
+    if (!validateForm()) {
+      return;
+    }
+    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      // Ensure id is a string, not an array
+      const groupId = Array.isArray(id) ? id[0] : id;
+      if (!groupId) {
+        alert('Invalid group ID');
+        return;
+      }
 
       const payload = {
         name: groupName,
         genre,
         description,
+        location: address,
+        latitude,
+        longitude,
         members,
+        images: images,
       };
 
       const { error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'group', id, userId: user.id, payload }
+        body: { action: 'update', type: 'group', id: groupId, userId: user.id, payload }
       });
 
       if (error) throw error;
@@ -201,10 +261,29 @@ export default function EditGroupScreen() {
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Group" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} style={styles.flex1}>
 
           {renderSectionHeader('Group Details', 'people')}
           {renderInput('Group Name', groupName, setGroupName)}
+
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Based Location</Text>
+            <TouchableOpacity
+              onPress={() => setLocationPickerVisible(true)}
+              style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
+                <Text style={{
+                  flex: 1,
+                  color: address ? colors.text : colors.textSecondary,
+                  fontFamily: 'Poppins_400Regular'
+                }}>
+                  {address || 'Tap to select location on map'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genre</Text>
@@ -227,31 +306,16 @@ export default function EditGroupScreen() {
           {renderInput('Description', description, setDescription, true)}
 
           {renderSectionHeader('Visuals', 'image')}
-          {selectedImage ? (
-            <View style={styles.imageContainer}>
-              <Image source={{ uri: selectedImage }} style={styles.image} resizeMode="cover" />
-              <TouchableOpacity
-                style={[styles.removeImageButton, { borderColor: 'white' }]}
-                onPress={() => setSelectedImage('')}
-              >
-                <Ionicons name="trash" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={[
-                styles.uploadPlaceholder,
-                {
-                  borderColor: colors.border,
-                  backgroundColor: isDark ? colors.card : '#F9FAFB'
-                }
-              ]}
-              onPress={() => setSelectedImage('https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&h=300&fit=crop')} // Simulating upload
-            >
-              <Ionicons name="cloud-upload-outline" size={32} color={colors.textSecondary} />
-              <Text style={[styles.uploadText, { color: colors.textSecondary }]}>Upload Group Photo</Text>
-            </TouchableOpacity>
-          )}
+          <ImageUploader
+            images={images}
+            onImagesChange={setImages}
+            thumbnailIndex={thumbnailIndex}
+            onThumbnailChange={setThumbnailIndex}
+            maxImages={10}
+            bucketName="listings"
+            userId={id as string}
+            folder="groups"
+          />
 
           {renderSectionHeader('Band Members', 'person')}
           <View style={styles.addMemberContainer}>
@@ -302,9 +366,7 @@ export default function EditGroupScreen() {
 
         </ScrollView>
 
-        <View style={styles.bottomNavbarOverlay}>
-          <Navbar />
-        </View>
+        <Navbar />
       </View>
 
       <Modal
@@ -314,6 +376,18 @@ export default function EditGroupScreen() {
         message="Are you sure you want to update this group profile?"
         buttonText="Save & Update"
         onConfirm={handleSave}
+      />
+
+      <LocationPicker
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        onSelect={(location) => {
+          setAddress(location.address);
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationPickerVisible(false);
+        }}
+        initialLocation={latitude && longitude ? { lat: latitude, lng: longitude } : undefined}
       />
     </>
   );
@@ -328,7 +402,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 40,
     paddingHorizontal: 24,
   },
   sectionHeader: {
@@ -360,7 +434,6 @@ const styles = StyleSheet.create({
   input: {
     padding: 16,
     textAlignVertical: 'center',
-    paddingVertical: 0,
   },
   genreSelector: {
     flexDirection: 'row',
@@ -372,41 +445,6 @@ const styles = StyleSheet.create({
   },
   genreText: {
     fontFamily: 'Poppins_400Regular',
-  },
-  imageContainer: {
-    position: 'relative',
-    marginBottom: 16,
-  },
-  image: {
-    width: '100%',
-    height: 192,
-    borderRadius: 16,
-  },
-  removeImageButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#EF4444',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-  },
-  uploadPlaceholder: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    padding: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  uploadText: {
-    marginTop: 8,
-    fontSize: 12,
-    fontFamily: 'Poppins_500Medium',
   },
   addMemberContainer: {
     flexDirection: 'row',
@@ -444,6 +482,7 @@ const styles = StyleSheet.create({
   },
   footerActions: {
     marginTop: 32,
+    marginBottom: 20,
   },
   saveButton: {
     borderRadius: 12,
@@ -468,11 +507,4 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderWidth: 1,
   },
-  bottomNavbarOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
 });
-
