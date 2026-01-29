@@ -56,7 +56,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         supabase.auth.getSession().then(({ data: { session } }) => {
             const secureSession = filterSession(session);
             setSession(secureSession);
-            if (secureSession) checkAdmin(secureSession.user.id);
+            if (secureSession) {
+                checkAdmin(secureSession.user.id);
+                fetchUserRole(secureSession.user.id);
+            }
             setLoading(false);
         });
 
@@ -64,8 +67,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             const secureSession = filterSession(session);
             setSession(secureSession);
-            if (secureSession) checkAdmin(secureSession.user.id);
-            else setIsAdmin(false);
+            if (secureSession) {
+                checkAdmin(secureSession.user.id);
+                fetchUserRole(secureSession.user.id);
+            } else {
+                setIsAdmin(false);
+                setUserRole(null);
+            }
             setLoading(false);
         });
 
@@ -85,13 +93,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 .select('role')
                 .eq('id', userId)
                 .limit(1);
-            
+
             if (error) {
                 console.log('❌ Error fetching user role:', error.message, error);
                 setUserRole(null);
                 return;
             }
-            
+
             if (data && data.length > 0) {
                 console.log('✅ User role fetched:', data[0].role);
                 setUserRole(data[0].role);

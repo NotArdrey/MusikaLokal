@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 150,
   },
   headerContainer: {
     paddingHorizontal: 24,

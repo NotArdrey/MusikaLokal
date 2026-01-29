@@ -4,7 +4,7 @@ import Animated, {
     interpolate,
     useAnimatedRef,
     useAnimatedStyle,
-    useScrollOffset,
+    useScrollViewOffset,
 } from 'react-native-reanimated';
 
 import { useColorScheme } from '../../hooks/use-color-scheme';
@@ -28,13 +28,50 @@ export default function ParallaxScrollView({
 
   const isWeb = Platform.OS === 'web';
 
-  // Always call hooks unconditionally
+  // For web, we don't use animated scroll - render a simple version
+  if (isWeb) {
+    return (
+      <ScrollView style={{ backgroundColor, flex: 1 }}>
+        <Animated.View
+          style={[
+            styles.header,
+            { backgroundColor: headerBackgroundColor[colorScheme] },
+          ]}>
+          {headerImage}
+        </Animated.View>
+        <ThemedView style={styles.content}>{children}</ThemedView>
+      </ScrollView>
+    );
+  }
+
+  // Native implementation with animations
+  return <ParallaxScrollViewNative 
+    headerImage={headerImage} 
+    headerBackgroundColor={headerBackgroundColor}
+    backgroundColor={backgroundColor}
+    colorScheme={colorScheme}
+  >
+    {children}
+  </ParallaxScrollViewNative>;
+}
+
+// Separate component for native to properly use hooks
+function ParallaxScrollViewNative({
+  children,
+  headerImage,
+  headerBackgroundColor,
+  backgroundColor,
+  colorScheme,
+}: PropsWithChildren<{
+  headerImage: ReactElement;
+  headerBackgroundColor: { dark: string; light: string };
+  backgroundColor: string;
+  colorScheme: 'light' | 'dark';
+}>) {
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
-  const scrollOffset = useScrollOffset(scrollRef);
+  const scrollOffset = useScrollViewOffset(scrollRef);
   
   const headerAnimatedStyle = useAnimatedStyle(() => {
-    if (isWeb) return {};
-    
     return {
       transform: [
         {
@@ -51,13 +88,11 @@ export default function ParallaxScrollView({
     };
   });
 
-  const ScrollComponent = isWeb ? ScrollView : Animated.ScrollView;
-
   return (
-    <ScrollComponent
-      ref={isWeb ? undefined : scrollRef}
+    <Animated.ScrollView
+      ref={scrollRef}
       style={{ backgroundColor, flex: 1 }}
-      scrollEventThrottle={isWeb ? undefined : 16}>
+      scrollEventThrottle={16}>
       <Animated.View
         style={[
           styles.header,
@@ -67,7 +102,7 @@ export default function ParallaxScrollView({
         {headerImage}
       </Animated.View>
       <ThemedView style={styles.content}>{children}</ThemedView>
-    </ScrollComponent>
+    </Animated.ScrollView>
   );
 }
 

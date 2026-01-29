@@ -40,6 +40,7 @@ export default function BookingsScreen() {
   const [cancellationReason, setCancellationReason] = useState('');
   const bookingDetailsRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
   const { width } = useWindowDimensions();
+  const [modalMode, setModalMode] = useState<'confirm' | 'cancel' | 'decline'>('confirm');
 
   // State for fetched data
   const [data, setData] = useState({
@@ -87,7 +88,14 @@ export default function BookingsScreen() {
 
   async function handleStatusUpdate(bookingId: string, newStatus: string, typeId: string = 'studio_booking', reason?: string) {
     try {
-      const { error } = await supabase.functions.invoke('manage-bookings', {
+      console.log('📤 handleStatusUpdate called with:', {
+        bookingId,
+        newStatus,
+        typeId,
+        reason
+      });
+      
+      const { data, error } = await supabase.functions.invoke('manage-bookings', {
         body: {
           action: 'update_status',
           booking_id: bookingId,
@@ -96,6 +104,9 @@ export default function BookingsScreen() {
           cancellation_reason: reason
         }
       });
+      
+      console.log('📥 handleStatusUpdate response:', { data, error });
+      
       if (error) throw error;
 
       // Refresh list
@@ -113,11 +124,21 @@ export default function BookingsScreen() {
   };
 
   const handleConfirmBooking = async (bookingId: string) => {
-    await handleStatusUpdate(bookingId, 'confirmed', selectedItem?.type_id || 'studio_booking');
+    // Use 'accepted' for gig applications, 'confirmed' for studio bookings
+    const status = selectedItem?.type_id === 'gig_application' ? 'accepted' : 'confirmed';
+    await handleStatusUpdate(bookingId, status, selectedItem?.type_id || 'studio_booking');
   };
 
   const handleCancelBooking = async (bookingId: string) => {
     setCancellationReason('');
+    setModalMode('cancel');
+    setModalVisible(true);
+  };
+
+  const handleDeclineBooking = (item: any) => {
+    setSelectedItem(item);
+    setCancellationReason('');
+    setModalMode('decline');
     setModalVisible(true);
   };
 
@@ -314,19 +335,67 @@ export default function BookingsScreen() {
                   <View style={styles.cardHeader}>
                     <View style={styles.cardTitleContainer}>
                       <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
+
+                      {/* Booker Info for Studio/Venue Owners */}
+                      {(userRole === 'studio-owner' || userRole === 'venue-owner') && item.customer_name && (
+                        <TouchableOpacity
+                          style={styles.customerInfoContainer}
+                          onPress={() => router.push({ pathname: '/profile', params: { userId: item.user_id } })}
+                        >
+                          <Image
+                            source={{ uri: item.customer_avatar || 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&h=100&fit=crop' }}
+                            style={styles.customerAvatar}
+                          />
+                          <Text style={[styles.customerName, { color: colors.textSecondary }]}>
+                            {item.type_id === 'gig_application' ? 'Applied by ' : 'Booked by '}
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>{item.customer_name}</Text>
+                          </Text>
+                          <Ionicons name="chevron-forward" size={12} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+
+
+
+
                       <Text style={[styles.cardDate, { color: colors.textSecondary }]}>
-                        {item.raw_date ? new Date(item.raw_date).toLocaleDateString() : new Date(item.start_time).toLocaleDateString()} • {item.start_time && item.start_time.includes(':') ? (() => {
-                          const [hours, minutes] = item.start_time.split(':');
-                          const h = parseInt(hours);
-                          const period = h >= 12 ? 'PM' : 'AM';
-                          const h12 = h % 12 || 12;
-                          return `${h12}:${minutes} ${period}`;
-                        })() : new Date(item.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        {(() => {
+                          const dateStr = item.raw_date
+                            ? new Date(item.raw_date).toLocaleDateString()
+                            : new Date(item.start_time).toLocaleDateString();
+
+                          let timeStr = '';
+                          if (item.start_time) {
+                            if (item.start_time.includes('T')) {
+                              // Handle ISO timestamp
+                              timeStr = new Date(item.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+                            } else if (item.start_time.includes(':')) {
+                              // Handle HH:MM format
+                              const [hours, minutes] = item.start_time.split(':');
+                              const h = parseInt(hours);
+                              if (!isNaN(h)) {
+                                const period = h >= 12 ? 'PM' : 'AM';
+                                const h12 = h % 12 || 12;
+                                timeStr = `${h12}:${minutes} ${period}`;
+                              }
+                            }
+                          }
+
+                          return `${dateStr}${timeStr ? ` • ${timeStr}` : ''}`;
+                        })()}
                       </Text>
                     </View>
                   </View>
 
-                  <View style={[styles.cardFooter, { borderColor: isDark ? colors.border : '#F3F4F6' }]}>
+                  <View style={[
+                    styles.cardFooter,
+                    { borderColor: isDark ? colors.border : '#F3F4F6' },
+                    /* pending gig apps specific footer style */
+                    (activeTab === 'Pending' && item.type_id === 'gig_application' && item.action === 'Confirm Now') && {
+                      flexDirection: 'column',
+                      alignItems: 'stretch',
+                      gap: moderateScale(12)
+                    }
+                  ]}>
 
                     {/* Status Text with Icon */}
                     <View style={styles.statusContainer}>
@@ -356,11 +425,34 @@ export default function BookingsScreen() {
 
 
                     {/* Action Buttons */}
-                    <View style={styles.actionButtonsContainer}>
+                    <View style={[
+                      styles.actionButtonsContainer,
+                      (activeTab === 'Pending' && item.type_id === 'gig_application' && item.action === 'Confirm Now') && { width: '100%', marginTop: 0 }
+                    ]}>
                       {activeTab === 'Pending' && item.action === 'Confirm Now' ? (
-                        <TouchableOpacity onPress={() => { setSelectedItem(item); setModalVisible(true); }} style={[styles.actionButton, { backgroundColor: '#16A34A' }]}>
-                          <Text style={[styles.actionButtonText, { color: 'white' }]}>Confirm Now</Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', gap: scale(8), flex: 1 }}>
+                          {/* Details Button */}
+                          <TouchableOpacity
+                            onPress={() => handleDetailsPress(item)}
+                            style={[styles.outlineButton, { borderColor: colors.border, flex: 1, justifyContent: 'center', alignItems: 'center' }]}
+                          >
+                            <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>Details</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={() => handleDeclineBooking(item)}
+                            style={[styles.actionButton, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEF2F2', flex: 1, justifyContent: 'center', alignItems: 'center' }]}
+                          >
+                            <Text style={[styles.actionButtonText, { color: '#EF4444' }]}>Decline</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={() => { setSelectedItem(item); setModalMode('confirm'); setModalVisible(true); }}
+                            style={[styles.actionButton, { backgroundColor: '#16A34A', flex: 1, justifyContent: 'center', alignItems: 'center' }]}
+                          >
+                            <Text style={[styles.actionButtonText, { color: 'white' }]}>Confirm</Text>
+                          </TouchableOpacity>
+                        </View>
                       ) : activeTab === 'Ongoing' ? (
                         <TouchableOpacity
                           onPress={() => handleUploadProof(item)}
@@ -385,7 +477,12 @@ export default function BookingsScreen() {
                           </TouchableOpacity>
 
                           {activeTab === 'Upcoming' && !item.isCancelled && (
-                            <TouchableOpacity onPress={() => { setSelectedItem(item); setModalVisible(true); }} style={[styles.cancelButton, { backgroundColor: isDark ? 'rgba(127, 29, 29, 0.2)' : '#FEF2F2' }]}>
+                            <TouchableOpacity onPress={() => { 
+                              setSelectedItem(item); 
+                              setModalMode('cancel'); 
+                              setCancellationReason('');
+                              setModalVisible(true); 
+                            }} style={[styles.cancelButton, { backgroundColor: isDark ? 'rgba(127, 29, 29, 0.2)' : '#FEF2F2' }]}>
                               <Text style={[styles.cancelButtonText, isDark ? { color: '#F87171' } : { color: '#DC2626' }]}>Cancel</Text>
                             </TouchableOpacity>
                           )}
@@ -409,31 +506,97 @@ export default function BookingsScreen() {
       <Modal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        title={activeTab === 'Pending' ? "Confirm Booking" : "Cancel Booking"}
-        message={
-          activeTab === 'Pending'
-            ? "Are you sure you want to confirm this booking?"
-            : (() => {
-              if (selectedItem?.raw_date) {
-                const eventDate = new Date(selectedItem.raw_date);
-                const now = new Date();
-                const diffTime = eventDate.getTime() - now.getTime();
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-                if (diffDays > 7) return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
-                if (diffDays >= 3) return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
-                return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
-              }
-              return "Are you sure you want to cancel this booking? This action cannot be undone.";
-            })()
+        title={
+          modalMode === 'confirm' 
+            ? (selectedItem?.type_id === 'gig_application' ? "Accept Application" : "Confirm Booking")
+            : modalMode === 'decline' 
+              ? (selectedItem?.type_id === 'gig_application' ? "Decline Application" : "Decline Booking")
+              : (selectedItem?.type_id === 'gig_application' ? "Withdraw from Gig" : "Cancel Booking")
         }
-        buttonText={activeTab === 'Pending' ? "Confirm" : "Yes, Cancel Booking"}
-        showInput={activeTab !== 'Pending'} // Show input only for cancellation
+        message={
+          modalMode === 'confirm'
+            ? (selectedItem?.type_id === 'gig_application' 
+                ? "Are you sure you want to accept this application? The musician will be notified."
+                : "Are you sure you want to confirm this booking?")
+            : modalMode === 'decline'
+              ? (selectedItem?.type_id === 'gig_application'
+                  ? "Are you sure you want to decline this application? The musician will be notified and cannot re-apply to this gig."
+                  : "Are you sure you want to decline this booking? The user will be notified.")
+              : (() => {
+                // Cancel mode
+                if (selectedItem?.type_id === 'gig_application') {
+                  // For gig applications
+                  if (userRole === 'venue-owner') {
+                    return "Are you sure you want to revoke this accepted application? The musician will be notified.";
+                  } else {
+                    // Musician withdrawing
+                    if (selectedItem?.raw_date) {
+                      const eventDate = new Date(selectedItem.raw_date);
+                      const now = new Date();
+                      const diffTime = eventDate.getTime() - now.getTime();
+                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                      if (diffDays > 7) {
+                        return "Warning: You are withdrawing from an accepted gig with more than 7 days notice. This may affect your reputation with this venue.";
+                      } else if (diffDays >= 3) {
+                        return "Warning: You are withdrawing within 3-7 days. This may significantly affect your reputation with this venue.";
+                      }
+                (selectedItem?.type_id === 'gig_application' 
+                  ? (userRole === 'venue-owner' ? "Yes, Revoke" : "Yes, Withdraw")
+                  : "Yes, Cancel Booking"): You are withdrawing with less than 3 days notice. This may severely damage your reputation with this venue.";
+                    }
+                    return "Are you sure you want to withdraw from this gig? The venue owner will be notified.";
+                  }
+                } else {
+                  // For studio bookings - show refund policy
+                  if (selectedItem?.raw_date) {
+                    const eventDate = new Date(selectedItem.raw_date);
+                    const now = new Date();
+                    const diffTime = eventDate.getTime() - now.getTime();
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                    if (diffDays > 7) return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
+                    if (diffDays >= 3) return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
+                    return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
+                  }
+                  return "Are you sure you want to cancel this booking? This action cannot be undone.";
+                }
+              })()
+        }
+        buttonText={
+          modalMode === 'confirm' 
+            ? (selectedItem?.type_id === 'gig_application' ? "Accept" : "Confirm")
+            : modalMode === 'decline' 
+              ? (selectedItem?.type_id === 'gig_application' ? "Decline Application" : "Decline Booking")
+              : "Yes, Cancel Booking"
+        }
+        showInput={modalMode !== 'confirm'} // Show input for cancel AND decline
         onInputChange={setCancellationReason}
         onConfirm={() => {
           if (selectedItem) {
-            // If Pending, confirm. If Upcoming/other, cancel.
-            const status = activeTab === 'Pending' ? 'confirmed' : 'cancelled';
+            console.log('🔍 Modal onConfirm - selectedItem:', selectedItem);
+            console.log('🔍 Modal onConfirm - modalMode:', modalMode);
+            console.log('🔍 Modal onConfirm - selectedItem.type_id:', selectedItem.type_id);
+            
+            let status = 'cancelled'; // Default for studio bookings
+            if (modalMode === 'confirm') {
+              status = selectedItem.type_id === 'gig_application' ? 'accepted' : 'confirmed';
+            } else if (modalMode === 'decline') {
+              status = selectedItem.type_id === 'gig_application' ? 'rejected' : 'cancelled';
+            } else if (modalMode === 'cancel') {
+              // Cancel mode (from Upcoming tab)
+              status = selectedItem.type_id === 'gig_application' ? 'rejected' : 'cancelled';
+            }
+
+            console.log('🔍 Modal onConfirm - Final status:', status);
+            console.log('🔍 Modal onConfirm - Calling handleStatusUpdate with:', {
+              id: selectedItem.id,
+              status,
+              type_id: selectedItem?.type_id,
+              reason: cancellationReason
+            });
+
+            // For decline/cancel, we send cancellationReason
             handleStatusUpdate(selectedItem.id, status, selectedItem?.type_id, cancellationReason);
           }
         }}
@@ -472,7 +635,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
   },
   scrollContent: {
-    paddingBottom: SCREEN_HEIGHT < 700 ? verticalScale(120) : verticalScale(150),
+    paddingBottom: SCREEN_HEIGHT < 700 ? verticalScale(150) : verticalScale(180),
     paddingHorizontal: scale(24),
     paddingTop: moderateScale(16),
   },
@@ -604,6 +767,34 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(12),
     marginLeft: scale(6),
     fontFamily: 'Poppins_500Medium',
+  },
+  customerInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: moderateScale(4),
+    marginBottom: moderateScale(2),
+  },
+  customerAvatar: {
+    width: moderateScale(20),
+    height: moderateScale(20),
+    borderRadius: moderateScale(10),
+    marginRight: scale(6),
+  },
+  customerName: {
+    fontSize: moderateScale(12),
+    fontFamily: 'Poppins_400Regular',
+    marginRight: scale(4),
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: moderateScale(4),
+    gap: scale(4),
+  },
+  locationText: {
+    fontSize: moderateScale(12),
+    fontFamily: 'Poppins_400Regular',
+    flex: 1,
   },
   actionButtonsContainer: {
     flexDirection: 'row',

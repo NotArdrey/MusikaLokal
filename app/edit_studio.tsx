@@ -14,40 +14,40 @@ import { supabase } from '../lib/supabase';
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
-    // Remove all non-digit characters except colon
-    let cleaned = text.replace(/[^0-9:]/g, '');
-    
-    // Limit to 5 characters (HH:MM)
-    if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
-    
-    // Auto-add colon after 2 digits
-    if (cleaned.length === 2 && !cleaned.includes(':')) {
-        cleaned = cleaned + ':';
+  // Remove all non-digit characters except colon
+  let cleaned = text.replace(/[^0-9:]/g, '');
+
+  // Limit to 5 characters (HH:MM)
+  if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
+
+  // Auto-add colon after 2 digits
+  if (cleaned.length === 2 && !cleaned.includes(':')) {
+    cleaned = cleaned + ':';
+  }
+
+  // If user types more than 2 digits before colon, insert colon
+  if (cleaned.length > 2 && !cleaned.includes(':')) {
+    cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
+  }
+
+  // Validate hour (01-12)
+  const parts = cleaned.split(':');
+  if (parts[0] && parts[0].length === 2) {
+    const hour = parseInt(parts[0]);
+    if (hour < 1 || hour > 12) {
+      return cleaned.substring(0, 1);
     }
-    
-    // If user types more than 2 digits before colon, insert colon
-    if (cleaned.length > 2 && !cleaned.includes(':')) {
-        cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
+  }
+
+  // Validate minute (00-59)
+  if (parts[1] && parts[1].length === 2) {
+    const minute = parseInt(parts[1]);
+    if (minute > 59) {
+      return parts[0] + ':' + parts[1].substring(0, 1);
     }
-    
-    // Validate hour (01-12)
-    const parts = cleaned.split(':');
-    if (parts[0] && parts[0].length === 2) {
-        const hour = parseInt(parts[0]);
-        if (hour < 1 || hour > 12) {
-            return cleaned.substring(0, 1);
-        }
-    }
-    
-    // Validate minute (00-59)
-    if (parts[1] && parts[1].length === 2) {
-        const minute = parseInt(parts[1]);
-        if (minute > 59) {
-            return parts[0] + ':' + parts[1].substring(0, 1);
-        }
-    }
-    
-    return cleaned;
+  }
+
+  return cleaned;
 };
 
 export default function EditStudioScreen() {
@@ -164,7 +164,7 @@ export default function EditStudioScreen() {
         const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
         setContractFileName(decodeURIComponent(fileName));
       }
-      
+
       // Load availability
       console.log('📅 Loading availability from data:', data.availability);
       if (data.availability && Array.isArray(data.availability)) {
@@ -236,7 +236,7 @@ export default function EditStudioScreen() {
     if (!validateForm()) {
       return;
     }
-    
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -299,11 +299,11 @@ export default function EditStudioScreen() {
 
       if (response.error) {
         console.error('❌ Error details:', JSON.stringify(response.error, null, 2));
-        
+
         // Try to read the actual error message from the response body
         let errorMessage = 'Unknown error occurred';
         let errorDetails = null;
-        
+
         try {
           // Check if there's a response context with body
           if (response.error.context && response.error.context._bodyBlob) {
@@ -317,10 +317,10 @@ export default function EditStudioScreen() {
               },
               body: JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload })
             });
-            
+
             const errorBody = await errorResponse.text();
             console.log('🔍 Raw error response:', errorBody);
-            
+
             try {
               errorDetails = JSON.parse(errorBody);
               errorMessage = errorDetails.error || errorDetails.message || errorMessage;
@@ -341,7 +341,7 @@ export default function EditStudioScreen() {
         } catch (readError) {
           console.error('❌ Failed to read error body:', readError);
         }
-        
+
         console.error('❌ Final error message:', errorMessage);
         throw new Error(errorMessage);
       }
@@ -381,7 +381,7 @@ export default function EditStudioScreen() {
   const handleContractUpload = async () => {
     try {
       setUploadingContract(true);
-      
+
       if (Platform.OS === 'web') {
         if (fileInputRef.current) {
           fileInputRef.current.click();
@@ -389,7 +389,7 @@ export default function EditStudioScreen() {
         setUploadingContract(false);
         return;
       }
-      
+
       // Dynamic import for native platforms only
       const DocumentPicker = await import('expo-document-picker');
       const result = await DocumentPicker.getDocumentAsync({
@@ -863,7 +863,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 160,
     paddingHorizontal: 24,
   },
   sectionHeader: {
@@ -871,7 +871,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 16,
-    marginTop: 24,
   },
   sectionTitle: {
     fontFamily: 'Poppins_600SemiBold',

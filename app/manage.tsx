@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
@@ -17,7 +17,7 @@ export default function ManageScreen() {
     useEffect(() => {
         // If not authenticated, the hook will redirect
         if (authLoading) return;
-        
+
         if (isAuthenticated && userId) {
             // Try to get role from context first, or fetch directly
             if (userRole) {
@@ -46,12 +46,12 @@ export default function ManageScreen() {
                 .select('role')
                 .eq('id', userId)
                 .single();
-            
+
             if (error) {
                 console.log('❌ Manage - Error fetching role:', error.message);
                 throw error;
             }
-            
+
             if (data?.role) {
                 console.log('✅ Manage - Role fetched:', data.role);
                 setFetchedRole(data.role);
@@ -93,22 +93,24 @@ export default function ManageScreen() {
         <View style={[styles.flex1, { backgroundColor: colors.background }]}>
             <Header title="Manage" />
 
-            <View style={styles.dashboardContainer}>
-                <Text style={[styles.title, { color: colors.text }]}>
-                    Management Dashboard
-                </Text>
-                <Text style={[styles.description, { color: colors.textSecondary }]}>
-                    It seems we couldn't automatically direct you to your specific dashboard.
-                    Please ensure your account has the correct role assigned or contact support for assistance.
-                </Text>
-
-
-                {(userRole || fetchedRole) && (
-                    <Text style={[styles.roleText, { color: colors.textSecondary }]}>
-                        Detected Role: {userRole || fetchedRole}
+            <ScrollView contentContainerStyle={styles.scrollContent}>
+                <View style={styles.dashboardContainer}>
+                    <Text style={[styles.title, { color: colors.text }]}>
+                        Management Dashboard
                     </Text>
-                )}
-            </View>
+                    <Text style={[styles.description, { color: colors.textSecondary }]}>
+                        It seems we couldn't automatically direct you to your specific dashboard.
+                        Please ensure your account has the correct role assigned or contact support for assistance.
+                    </Text>
+
+
+                    {(userRole || fetchedRole) && (
+                        <Text style={[styles.roleText, { color: colors.textSecondary }]}>
+                            Detected Role: {userRole || fetchedRole}
+                        </Text>
+                    )}
+                </View>
+            </ScrollView>
             <Navbar />
         </View>
     );
@@ -122,6 +124,9 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    scrollContent: {
+        paddingBottom: 150,
     },
     dashboardContainer: {
         flex: 1,

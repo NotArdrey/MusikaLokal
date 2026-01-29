@@ -66,6 +66,11 @@ export default function Header({ title, transparent }: HeaderProps) {
             setnotifVisible(false)
             setBackVisible(false)
             setaddbtnvisible(true)
+        } else if (pathname === "/manage_studio" || pathname === "/manage_gig" || pathname === "/manage_group") {
+            // No back button for manage detail pages - users navigate via navbar
+            setnotifVisible(false)
+            setBackVisible(false)
+            setaddbtnvisible(false)
         } else {
             setBackVisible(true)
             setnotifVisible(false)

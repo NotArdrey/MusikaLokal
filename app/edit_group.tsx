@@ -107,7 +107,7 @@ export default function EditGroupScreen() {
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
       setMembers(data.members || []);
-      setSelectedImages(data.images || []);
+      setImages(data.images || []);
       if (data.images && data.images.length > 0) {
         setThumbnailIndex(0);
       }
@@ -148,7 +148,7 @@ export default function EditGroupScreen() {
     if (!validateForm()) {
       return;
     }
-    
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -402,7 +402,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 160,
     paddingHorizontal: 24,
   },
   sectionHeader: {
@@ -410,7 +410,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 16,
-    marginTop: 24,
   },
   sectionTitle: {
     fontFamily: 'Poppins_600SemiBold',

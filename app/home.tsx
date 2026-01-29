@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Dimensions,
     Image,
+    RefreshControl,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -43,6 +44,7 @@ const moderateScale = (size: number, factor = 0.3) => {
     return size + (scaled - size) * factor; // Reduced factor from 0.5 to 0.3 for less aggressive scaling
 };
 
+import { useFocusEffect } from 'expo-router';
 import { useAuth } from '../src/context/AuthContext';
 
 export default function HomeScreen() {
@@ -50,18 +52,13 @@ export default function HomeScreen() {
     const { userRole, userId } = useAuth();
     const insets = useSafeAreaInsets();
     const [loading, setLoading] = useState(true);
-    const [activeCategory, setActiveCategory] = useState('All');
-    // State for different sections
-    const [allItems, setAllItems] = useState<any[]>([]); // Store all fetched items for filtering
+    const [refreshing, setRefreshing] = useState(false);
     const [featured, setFeatured] = useState<any[]>([]);
     const [discover, setDiscover] = useState<any[]>([]);
+    const [newArrivals, setNewArrivals] = useState<any[]>([]); // New Arrivals State
     const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
     const [userName, setUserName] = useState('Guest');
     const [timeGreeting, setTimeGreeting] = useState('Hey');
-
-    // Refined Categories based on Role
-    const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
-    const CATEGORIES = isOwner ? ['All', 'Musicians'] : ['All', 'Musicians', 'Venues', 'Studios'];
 
     // ... refs ...
     const bottomSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
@@ -69,22 +66,88 @@ export default function HomeScreen() {
     const recentlyViewedSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
     const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
 
-    // Filter items selection
-    const filteredItems = activeCategory === 'All'
-        ? featured
-        : allItems.filter((item) => {
-            if (activeCategory === 'Musicians') return item.type === 'Group';
-            if (activeCategory === 'Venues') return item.type === 'Venue' || item.type === 'Gig' || (item.type === 'Studio' && item.amenities?.includes('Stage'));
-            if (activeCategory === 'Studios') return item.type === 'Studio';
-            return item.type === activeCategory; // Fallback
+    // Safe handler for opening search sheet - prevents reanimated timing issues
+    const openSearchSheet = useCallback(() => {
+        requestAnimationFrame(() => {
+            if (searchSheetRef.current) {
+                searchSheetRef.current.present();
+            }
         });
+    }, []);
 
+    // Safe handler for opening details sheet
+    const openDetailsSheet = useCallback(() => {
+        requestAnimationFrame(() => {
+            if (bottomSheetRef.current) {
+                bottomSheetRef.current.present();
+            }
+        });
+    }, []);
+
+    // Safe handler for opening recently viewed sheet
+    const openRecentlyViewedSheet = useCallback(() => {
+        requestAnimationFrame(() => {
+            if (recentlyViewedSheetRef.current) {
+                recentlyViewedSheetRef.current.present();
+            }
+        });
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            // Fetch data silently on focus if data already exists
+            const isFirstLoad = featured.length === 0 && discover.length === 0;
+            fetchHomeData(isFirstLoad);
+            fetchUserProfile();
+            fetchRecentlyViewed();
+            setTimeBasedGreeting();
+        }, [userRole, userId])
+    );
+
+    // Handler for realtime updates - defined before useEffect that uses it
+    const handleRealtimeUpdate = useCallback(() => {
+        console.log('Realtime update received - refreshing home data...');
+        // Debounce or just call it? Basic call for now.
+        // False to silent refresh
+        fetchHomeData(false);
+    }, [userRole, userId]);
+
+    // Realtime Updates
     useEffect(() => {
-        fetchHomeData();
-        fetchUserProfile();
-        fetchRecentlyViewed();
-        setTimeBasedGreeting();
-    }, [userRole, userId]); // Re-fetch if role changes (e.g. login)
+        const channel = supabase
+            .channel('public:home_updates')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'gigs' },
+                () => handleRealtimeUpdate()
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'studios' },
+                () => handleRealtimeUpdate()
+            )
+            // Assuming 'groups' or 'profiles' is the underlying table. Using 'groups' based on views.
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'groups' },
+                () => handleRealtimeUpdate()
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [handleRealtimeUpdate]);
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await Promise.all([
+            fetchHomeData(false),
+            fetchUserProfile(),
+            fetchRecentlyViewed()
+        ]);
+        setRefreshing(false);
+    }, [userRole, userId]);
 
     const setTimeBasedGreeting = () => {
         const hour = new Date().getHours();
@@ -123,8 +186,8 @@ export default function HomeScreen() {
         }
     };
 
-    const fetchHomeData = async () => {
-        setLoading(true);
+    const fetchHomeData = async (showLoading = true) => {
+        if (showLoading) setLoading(true);
         try {
             // Fetch based on Role
             // If Owner, ONLY fetch groups (musicians)
@@ -135,15 +198,33 @@ export default function HomeScreen() {
             const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
 
             // Always fetch groups (musicians)
-            const { data: gData } = await supabase.from('groups_with_stats').select('*').limit(20);
+            const { data: gData } = await supabase
+                .from('groups_with_stats')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(20);
             groups = gData || [];
 
-            // Musicians can see studios and gigs, but owners cannot
-            if (!isOwner && userRole === 'musician') {
-                const { data: sData } = await supabase.from('studios_with_stats').select('*').limit(20);
+            // Musicians and Guests can see studios and gigs, but owners cannot
+            if (!isOwner) {
+                const { data: sData, error: sError } = await supabase
+                    .from('studios_with_stats')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                    .limit(20);
+                if (sError) console.log('Error fetching studios:', sError);
                 studios = sData || [];
-                const { data: gigData } = await supabase.from('gigs_with_stats').select('*').limit(20);
+                const { data: gigData, error: gigError } = await supabase
+                    .from('gigs_with_stats')
+                    .select('*')
+                    .eq('status', 'open')  // Only show open gigs to musicians
+                    .order('created_at', { ascending: false })
+                    .limit(20);
+                if (gigError) console.log('Error fetching gigs:', gigError);
                 gigs = gigData || [];
+                console.log(`📱 Fetched ${gigs.length} open gigs for role: ${userRole}`);
+            } else {
+                console.log(`📱 Skipping gigs fetch - user is owner (role: ${userRole})`);
             }
 
             // Normalize
@@ -162,7 +243,8 @@ export default function HomeScreen() {
                 location: item.location || item.address || '',
                 amenities: item.amenities || [],
                 experience_level: item.requirements?.experience_level || null,
-                embedding: item.embedding
+                embedding: item.embedding,
+                created_at: item.created_at // Added for New Arrivals
             }));
 
             const allGroups = normalize(groups, 'Group');
@@ -170,45 +252,33 @@ export default function HomeScreen() {
             const allGigs = normalize(gigs, 'Gig');
 
             const allItemsList = [...allGroups, ...allStudios, ...allGigs];
-            setAllItems(allItemsList);
+            console.log(`📊 Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`);
 
-            // AI Personalization
-            // Strategy:
-            // 1. "Featured": If we have a selectedListingId (last viewed), find similar items.
-            // 2. "Discover": Random mix of high-rated items (Exploration)
+            // Filter New Arrivals (Sort by created_at desc)
+            const sortedByDate = [...allItemsList].sort((a, b) => {
+                const dateA = new Date(a.created_at || 0).getTime();
+                const dateB = new Date(b.created_at || 0).getTime();
+                return dateB - dateA;
+            });
 
-            let recommended = [...allItemsList]; // Default: all items
+            // Standard Period: 14 days for new arrivals
+            const fourteenDaysAgo = new Date();
+            fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
 
-            // Simulating "Last Viewed" text/embedding context
-            // In a real app, this would come from a user_history table or local storage
-            // For now, if we have selectedListingId, we could try to find it in the list and use its embedding
-            // But selectedListingId is local to this session's tap, so it might not be set on first load.
-            // Let's rely on a randomized Sort for "Discover" and maybe a Rating Sort for "Featured" for now,
-            // as true history needs persistent tracking which is another task.
+            const recentArrivals = sortedByDate.filter(item => {
+                const itemDate = new Date(item.created_at || 0);
+                return itemDate >= fourteenDaysAgo;
+            });
 
-            // However, we CAN demonstration the vector match if we pick a random "Seed" item
-            // effectively "Simulating" that the user likes one item.
-
-            if (allItemsList.length > 0) {
-                const seed = allItemsList[Math.floor(Math.random() * allItemsList.length)];
-                // console.log('Personalizing based on seed:', seed.name);
-
-                // If seed has embedding, sort others by similarity (approximate JS cosine if not doing DB RPC query for feed)
-                // Since we fetched `embedding` column, we can do client-side sort for small lists
-                // or fetches from DB for cleaner approach. 
-                // Let's keep it simple: Random shuffle for Discover, Rating for Featured.
-                // Actually the user asked for "AI". Let's try to fetch using the RPC if possible, 
-                // or just enable the capability. 
-
-                // Real Implementation:
-                // The `ListingDetailsSheet` handles the item-to-item AI.
-                // This Home feed is User-to-Item. Without user history vectors, we can't do User personalization yet.
-                // So we will stick to:
-                // Featured = Highest Rated (Popularity)
-                // Discover = Randomized (Exploration)
+            console.log(`🆕 New Arrivals (last 14 days): ${recentArrivals.length} items`);
+            if (recentArrivals.length > 0) {
+                console.log('📋 New Arrivals preview:', recentArrivals.slice(0, 3).map(i => `${i.type}: ${i.name}`));
             }
 
-            // AI Personalization (Long-Term Learning)
+            setNewArrivals(recentArrivals.slice(0, 10));
+
+
+            // AI Personalization
             const { data: { user } } = await supabase.auth.getUser();
             let sortedItems = [...allItemsList];
             let usedPersonalization = false;
@@ -247,7 +317,7 @@ export default function HomeScreen() {
         } catch (e) {
             console.log('Error fetching home feed:', e);
         } finally {
-            setLoading(false);
+            if (showLoading) setLoading(false);
         }
     };
 
@@ -255,21 +325,14 @@ export default function HomeScreen() {
         console.log('=== handleCardPress called ===');
         console.log('Item:', item);
         console.log('Item ID:', item.id);
-        console.log('bottomSheetRef.current:', bottomSheetRef.current);
-        
+
         setSelectedListingId(item.id);
         console.log('selectedListingId set to:', item.id);
-        
-        // Small delay to ensure state is updated before presenting
+
+        // Use safe handler with requestAnimationFrame for proper timing
         setTimeout(() => {
-            console.log('Attempting to present bottom sheet...');
-            console.log('bottomSheetRef.current before present:', bottomSheetRef.current);
-            try {
-                bottomSheetRef.current?.present();
-                console.log('present() called successfully');
-            } catch (error) {
-                console.error('Error calling present():', error);
-            }
+            openDetailsSheet();
+            console.log('openDetailsSheet called');
         }, 100);
 
         // Save to recently viewed
@@ -314,195 +377,155 @@ export default function HomeScreen() {
     };
 
     // 1. Immersive Hero Section
-    const renderHero = () => (
-        <View style={styles.heroContainer}>
-            <Image
-                source={{ uri: 'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=1200&fit=crop' }}
-                style={styles.heroImage}
-                resizeMode="cover"
-            />
-            <LinearGradient
-                colors={['rgba(0,0,0,0.1)', 'transparent', 'rgba(0,0,0,0.8)']}
-                style={styles.heroGradient}
-            />
+    const renderHero = () => {
+        // Modern System Background (Abstract Dark/Purple)
+        // Using a high-quality abstract gradient/mesh that matches the app's "premium" feel
+        const heroImage = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop';
 
-            {/* Header Component Overlay */}
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 }}>
-                <Header title="MusikaLokal" transparent />
-            </View>
-
-            {/* Content within Hero */}
-            <View style={styles.heroContent}>
-                {/* Greeting with Stats */}
-                <View>
-                    <Text style={styles.heroGreeting}>{timeGreeting}, {userName}!</Text>
-
-                </View>
-
-                {/* Glassmorphism Search Pill */}
-                <BlurView intensity={40} tint="light" style={styles.searchPill}>
-                    <TouchableOpacity
-                        style={styles.searchTouch}
-                        onPress={() => searchSheetRef.current?.present()}
-                    >
-                        <Ionicons name="search" size={20} color="#FFF" style={{ marginRight: 8 }} />
-                        <View style={styles.searchTexts}>
-                            <Text style={styles.searchPlaceholder}>Where to?</Text>
-                            <Text style={styles.searchSubPlaceholder}>Dates • Guests</Text>
-                        </View>
-                    </TouchableOpacity>
-                </BlurView>
-            </View>
-        </View>
-    );
-
-    // 2. Promotional Carousel & Top Picks
-    const renderHighlightsSection = () => {
-        const topItems = [...featured, ...discover].slice(0, 12);
+        // Dynamic Search Text
+        // Musicians -> looking for studios/gigs
+        // Venue/Studio -> looking for musicians
+        const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
+        const searchPlaceholder = isOwner ? "Find musicians, bands..." : "Find studios, gigs, venues...";
+        const searchSubPlaceholder = isOwner ? "Genre • Availability" : "Location • Rate";
 
         return (
-            <View style={{ marginTop: 24 }}>
+            <View style={styles.heroContainer}>
+                <Image
+                    source={{ uri: heroImage }}
+                    style={styles.heroImage}
+                    resizeMode="cover"
+                />
+                <LinearGradient
+                    colors={['rgba(0,0,0,0.3)', 'transparent', 'rgba(0,0,0,0.8)', '#111827']} // Fade into body color (assuming dark mode or just dark contrast)
+                    locations={[0, 0.4, 0.8, 1]}
+                    style={styles.heroGradient}
+                />
 
+                {/* Header Component Overlay */}
+                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 }}>
+                    <Header title="MusikaLokal" transparent />
+                </View>
 
-                {/* Top Picks Grid */}
-                {topItems.length >= 4 && (
-                    <View style={styles.topPicksContainer}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: moderateScale(16) }}>
-                            <Text style={[styles.sectionTitle, { marginLeft: 0, marginBottom: 0, color: colors.text }]}>Top Picks</Text>
-                            <TouchableOpacity onPress={() => searchSheetRef.current?.present()}>
-                                <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: moderateScale(12) }}>See all</Text>
-                            </TouchableOpacity>
-                        </View>
+                {/* Content within Hero */}
+                <View style={styles.heroContent}>
+                    {/* Greeting with Stats */}
+                    <View>
+                        <Text style={styles.heroGreeting}>Welcome, {userName}!</Text>
 
-                        <View style={styles.topPicksGrid}>
-                            {/* Large Featured */}
-                            <TouchableOpacity
-                                activeOpacity={0.9}
-                                onPress={() => handleCardPress(topItems[0])}
-                                style={styles.topPickLarge}
-                            >
-                                <Image source={{ uri: topItems[0].image }} style={styles.topPickImage} />
-                                <LinearGradient
-                                    colors={['transparent', 'rgba(0,0,0,0.7)']}
-                                    style={styles.topPickOverlay}
-                                >
-                                    <View style={styles.topPickBadge}>
-                                        {(topItems[0].rating > 0 && (topItems[0].review_count || 0) > 0) ? (
-                                            <>
-                                                <Ionicons name="star" size={12} color="#FCD34D" />
-                                                <Text style={styles.topPickBadgeText}>{topItems[0].rating.toFixed(1)}</Text>
-                                            </>
-                                        ) : (
-                                            <Text style={styles.topPickBadgeText}>No ratings yet</Text>
-                                        )}
-                                    </View>
-                                    <Text style={styles.topPickTitle} numberOfLines={1}>{topItems[0].name}</Text>
-                                    <Text style={styles.topPickLocation} numberOfLines={1}>
-                                        <Ionicons name="location" size={12} color="rgba(255,255,255,0.8)" /> {topItems[0].location}
-                                    </Text>
-                                </LinearGradient>
-                            </TouchableOpacity>
+                    </View>
 
-                            {/* Small Grid Items */}
-                            <View style={styles.topPickSmallColumn}>
-                                {topItems.slice(1, 3).map((item, index) => (
-                                    <TouchableOpacity
-                                        key={item.id}
-                                        activeOpacity={0.9}
-                                        onPress={() => handleCardPress(item)}
-                                        style={styles.topPickSmall}
-                                    >
-                                        <Image source={{ uri: item.image }} style={styles.topPickImage} />
-                                        <LinearGradient
-                                            colors={['transparent', 'rgba(0,0,0,0.7)']}
-                                            style={styles.topPickOverlay}
-                                        >
-                                            <View style={styles.topPickBadge}>
-                                                {(item.rating > 0 && (item.review_count || 0) > 0) ? (
-                                                    <>
-                                                        <Ionicons name="star" size={moderateScale(10)} color="#FCD34D" />
-                                                        <Text style={styles.topPickBadgeText}>{item.rating.toFixed(1)}</Text>
-                                                    </>
-                                                ) : (
-                                                    <Text style={[styles.topPickBadgeText, { fontSize: moderateScale(9) }]}>No ratings yet</Text>
-                                                )}
-                                            </View>
-                                            <Text style={[styles.topPickTitle, { fontSize: moderateScale(13) }]} numberOfLines={1}>{item.name}</Text>
-                                        </LinearGradient>
-                                    </TouchableOpacity>
-                                ))}
+                    {/* Glassmorphism Search Pill */}
+                    <BlurView intensity={60} tint="light" style={styles.searchPill}>
+                        <TouchableOpacity
+                            style={styles.searchTouch}
+                            onPress={openSearchSheet}
+                        >
+                            <Ionicons name="search" size={20} color="#FFF" style={{ marginRight: 8 }} />
+                            <View style={styles.searchTexts}>
+                                <Text style={styles.searchPlaceholder}>{searchPlaceholder}</Text>
+                                <Text style={styles.searchSubPlaceholder}>{searchSubPlaceholder}</Text>
                             </View>
-                        </View>
+                        </TouchableOpacity>
+                    </BlurView>
+                </View>
+            </View>
+        );
+    };
 
-                        {/* Bottom Row */}
-                        <View style={{ flexDirection: 'row', gap: scale(12), marginTop: moderateScale(12) }}>
-                            {topItems.slice(3, 5).map((item) => (
+    // 2. Promotional Carousel & Top Picks (Redesigned as "Relevant")
+    const renderHighlightsSection = () => {
+        const topItems = [...featured, ...discover].slice(0, 12);
+        if (topItems.length === 0) return null;
+
+        return (
+            <View style={{ marginTop: 24, paddingHorizontal: 24 }}>
+                {/* Header */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16 }}>
+                    <View>
+                        <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Top Picks</Text>
+                        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>Curated just for you</Text>
+                    </View>
+                    <TouchableOpacity onPress={openSearchSheet}>
+                        <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: moderateScale(13) }}>See all</Text>
+                    </TouchableOpacity>
+                </View>
+
+                {/* Modern Masonry / Bento Grid Layout */}
+                {topItems.length >= 3 ? (
+                    <View style={styles.bentoGrid}>
+                        {/* Main Highlight (Large) */}
+                        <TouchableOpacity
+                            activeOpacity={0.9}
+                            onPress={() => handleCardPress(topItems[0])}
+                            style={styles.bentoTouchableLarge}
+                        >
+                            <View style={styles.bentoLarge}>
+                                <Image source={{ uri: topItems[0].image }} style={styles.bentoImage} />
+                                <LinearGradient
+                                    colors={['transparent', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.8)']}
+                                    style={styles.bentoOverlay}
+                                >
+                                    <View style={styles.bentoContent}>
+                                        <View style={[styles.glassBadge, { alignSelf: 'flex-start', marginBottom: 8 }]}>
+                                            <Text style={styles.glassBadgeText}>🔥 Highly Rated</Text>
+                                        </View>
+                                        <Text style={styles.bentoTitleLarge} numberOfLines={2}>{topItems[0].name}</Text>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                                            <Ionicons name="location" size={14} color="rgba(255,255,255,0.8)" />
+                                            <Text style={styles.bentoSubtitle} numberOfLines={1}>{topItems[0].location}</Text>
+                                        </View>
+                                    </View>
+                                </LinearGradient>
+                            </View>
+                        </TouchableOpacity>
+
+                        {/* Side Column (2 Stacked) */}
+                        <View style={styles.bentoColumn}>
+                            {topItems.slice(1, 3).map((item, index) => (
                                 <TouchableOpacity
                                     key={item.id}
                                     activeOpacity={0.9}
                                     onPress={() => handleCardPress(item)}
-                                    style={styles.topPickWide}
+                                    style={styles.bentoTouchableSmall}
                                 >
-                                    <Image source={{ uri: item.image }} style={styles.topPickImage} />
-                                    <LinearGradient
-                                        colors={['transparent', 'rgba(0,0,0,0.7)']}
-                                        style={styles.topPickOverlay}
-                                    >
-                                        <View style={styles.topPickBadge}>
-                                            {(item.rating > 0 && (item.review_count || 0) > 0) ? (
-                                                <>
-                                                    <Ionicons name="star" size={moderateScale(10)} color="#FCD34D" />
-                                                    <Text style={styles.topPickBadgeText}>{item.rating.toFixed(1)}</Text>
-                                                </>
-                                            ) : (
-                                                <Text style={[styles.topPickBadgeText, { fontSize: moderateScale(9) }]}>No ratings yet</Text>
-                                            )}
-                                        </View>
-                                        <Text style={[styles.topPickTitle, { fontSize: moderateScale(12) }]} numberOfLines={1}>{item.name}</Text>
-                                    </LinearGradient>
+                                    <View style={styles.bentoSmall}>
+                                        <Image source={{ uri: item.image }} style={styles.bentoImage} />
+                                        <LinearGradient
+                                            colors={['transparent', 'rgba(0,0,0,0.7)']}
+                                            style={styles.bentoOverlay}
+                                        >
+                                            <Text style={styles.bentoTitleSmall} numberOfLines={1}>{item.name}</Text>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                <Ionicons name="star" size={10} color="#FCD34D" />
+                                                <Text style={styles.bentoRating}>{item.rating > 0 ? item.rating.toFixed(1) : 'New'}</Text>
+                                            </View>
+                                        </LinearGradient>
+                                    </View>
                                 </TouchableOpacity>
                             ))}
                         </View>
                     </View>
+                ) : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 16 }}>
+                        {topItems.map(item => (
+                            <View key={item.id} style={{ width: 200 }}>
+                                {renderUnifiedCard(item)}
+                            </View>
+                        ))}
+                    </ScrollView>
                 )}
             </View>
         );
     };
 
-    // 3. Category Chips - Hidden for owners since they only see musicians
-    const renderCategories = () => {
-        // Hide categories for studio/venue owners
-        if (isOwner) return null;
 
-        return (
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.categoryContainer}
-            >
-                {CATEGORIES.map(cat => (
-                    <TouchableOpacity
-                        key={cat}
-                        onPress={() => setActiveCategory(cat)}
-                        style={[
-                            styles.categoryChip,
-                            activeCategory === cat && { backgroundColor: parseColor(colors.primary), borderColor: 'transparent' }
-                        ]}
-                    >
-                        <Text style={[
-                            styles.categoryText,
-                            activeCategory === cat && { color: '#FFF', fontWeight: '600' }
-                        ]}>{cat}</Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
-        );
-    };
 
     // Handle invite action - opens the details sheet for booking/connecting
     const handleInvite = (item: any) => {
         setSelectedListingId(item.id);
-        bottomSheetRef.current?.present();
+        // Use safe handler with requestAnimationFrame
+        setTimeout(() => openDetailsSheet(), 50);
         // The ListingDetailsSheet will show the "Connect" tab for Groups
         // allowing venue/studio owners to send booking requests
     };
@@ -520,9 +543,42 @@ export default function HomeScreen() {
         );
     };
 
+    // 3. New Arrivals Section
+    const renderNewArrivals = () => {
+        if (newArrivals.length === 0) return null;
+
+        return (
+            <View style={styles.sectionContainer}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', paddingHorizontal: 24, marginBottom: 16 }}>
+                    <View>
+                        <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>New Arrivals</Text>
+                        <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>Fresh on MusikaLokal</Text>
+                    </View>
+                    <TouchableOpacity onPress={openSearchSheet}>
+                        <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: moderateScale(13) }}>See all</Text>
+                    </TouchableOpacity>
+                </View>
+
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingLeft: 24, paddingRight: 24, paddingVertical: 16 }}
+                    decelerationRate="fast"
+                    snapToInterval={Math.min(width * 0.75, 280) + 16}
+                >
+                    {newArrivals.map(item => (
+                        <View key={item.id} style={{ marginRight: 16 }}>
+                            {renderUnifiedCard(item)}
+                        </View>
+                    ))}
+                </ScrollView>
+            </View>
+        );
+    };
+
     // 4. For You - Smart Feed (Merged Featured + Discover with variety)
     const renderSmartFeed = () => {
-        const allItems = [...filteredItems, ...discover];
+        const allItems = [...featured, ...discover];
         const uniqueItems = allItems.filter((item, index, self) =>
             index === self.findIndex((t) => t.id === item.id)
         );
@@ -542,44 +598,52 @@ export default function HomeScreen() {
 
         return (
             <View style={styles.sectionContainer}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: scale(24), marginBottom: moderateScale(8) }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', paddingHorizontal: 24, marginBottom: 16 }}>
                     <View>
-                        <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: moderateScale(4) }]}>For You</Text>
+                        <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>For You</Text>
                         <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>Personalized picks based on your taste</Text>
                     </View>
-                    <TouchableOpacity onPress={() => searchSheetRef.current?.present()}>
-                        <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: moderateScale(12) }}>See all</Text>
+                    <TouchableOpacity onPress={openSearchSheet}>
+                        <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: moderateScale(13) }}>See all</Text>
                     </TouchableOpacity>
                 </View>
 
-                {/* Featured Large Card */}
+                {/* Featured Large Card - New Design */}
                 {uniqueItems[0] && (
-                    <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+                    <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
                         <TouchableOpacity
-                            activeOpacity={0.9}
+                            activeOpacity={0.95}
                             onPress={() => handleCardPress(uniqueItems[0])}
-                            style={[styles.featuredCard, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}
+                            style={[styles.featuredCard, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', elevation: 8, shadowOpacity: 0.15 }]}
                         >
                             <Image source={{ uri: uniqueItems[0].image }} style={styles.featuredImage} />
                             <LinearGradient
-                                colors={['transparent', 'rgba(0,0,0,0.8)']}
+                                colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.9)']}
                                 style={styles.featuredGradient}
                             >
-                                <View style={styles.featuredBadge}>
-                                    <Text style={styles.featuredBadgeText}>⭐ Featured</Text>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                    <View style={styles.featuredBadge}>
+                                        <Text style={styles.featuredBadgeText}>✨ Top Recommendation</Text>
+                                    </View>
+                                    <View style={[styles.glassBadge, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                                        <Ionicons name="star" size={12} color="#FCD34D" />
+                                        <Text style={[styles.glassBadgeText, { color: '#FFF' }]}>{uniqueItems[0].rating.toFixed(1)}</Text>
+                                    </View>
                                 </View>
-                                <Text style={styles.featuredTitle}>{uniqueItems[0].name}</Text>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                                    <Ionicons name="location" size={14} color="rgba(255,255,255,0.9)" />
-                                    <Text style={styles.featuredLocation}>{uniqueItems[0].location}</Text>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 12 }}>
-                                        {(uniqueItems[0].rating > 0 && (uniqueItems[0].review_count || 0) > 0) ? (
-                                            <>
-                                                <Ionicons name="star" size={14} color="#FCD34D" />
-                                                <Text style={styles.featuredRating}>{uniqueItems[0].rating.toFixed(1)}</Text>
-                                            </>
-                                        ) : (
-                                            <Text style={[styles.featuredRating, { fontSize: 11 }]}>No ratings yet</Text>
+
+                                <View style={{ marginTop: 'auto' }}>
+                                    <Text style={styles.featuredTitle}>{uniqueItems[0].name}</Text>
+                                    <Text style={styles.featuredLocation} numberOfLines={1}>
+                                        {uniqueItems[0].location}
+                                    </Text>
+                                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                                        {uniqueItems[0].hourly_rate && (
+                                            <Text style={styles.featuredPrice}>₱{parseInt(uniqueItems[0].hourly_rate).toLocaleString()}/hr</Text>
+                                        )}
+                                        {uniqueItems[0].type && (
+                                            <View style={styles.tagBadge}>
+                                                <Text style={styles.tagText}>{uniqueItems[0].type}</Text>
+                                            </View>
                                         )}
                                     </View>
                                 </View>
@@ -592,17 +656,12 @@ export default function HomeScreen() {
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ paddingLeft: 24, paddingRight: 8 }}
+                    contentContainerStyle={{ paddingLeft: 24, paddingRight: 24, paddingVertical: 16 }} // Added paddingVertical for shadows
                     decelerationRate="fast"
-                    snapToInterval={width * 0.6 + 16}
+                    snapToInterval={Math.min(width * 0.75, 280) + 16}
                 >
                     {uniqueItems.slice(1, 11).map((item, index) => (
-                        <View key={item.id} style={{ position: 'relative' }}>
-                            {index < 3 && (
-                                <View style={[styles.badge, { backgroundColor: index === 0 ? '#10B981' : index === 1 ? '#3B82F6' : '#F59E0B' }]}>
-                                    <Text style={styles.badgeText}>{index === 0 ? '🔥 Hot' : index === 1 ? '⭐ Top' : '✨ New'}</Text>
-                                </View>
-                            )}
+                        <View key={item.id} style={{ marginRight: 16 }}>
                             {renderUnifiedCard(item)}
                         </View>
                     ))}
@@ -628,36 +687,41 @@ export default function HomeScreen() {
 
             <ScrollView
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: 100 }}
-                bounces={false}
+                contentContainerStyle={{ paddingBottom: 180 }}
+                bounces={true}
+                refreshControl={
+                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+                }
             >
                 {renderHero()}
 
                 {renderHighlightsSection()}
 
-                <View style={{ marginTop: 20 }}>
-                    {renderCategories()}
-                </View>
+                {renderNewArrivals()}
 
                 {renderSmartFeed()}
 
                 {/* Recently Viewed Section */}
                 {recentlyViewed.length > 0 && (
                     <View style={styles.sectionContainer}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingRight: scale(24) }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24 }}>
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>Recently Viewed</Text>
-                            <TouchableOpacity onPress={() => recentlyViewedSheetRef.current?.present()}>
+                            <TouchableOpacity onPress={openRecentlyViewedSheet}>
                                 <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: moderateScale(12) }}>See all</Text>
                             </TouchableOpacity>
                         </View>
                         <ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingLeft: scale(24), paddingRight: scale(8) }}
+                            contentContainerStyle={{ paddingLeft: 24, paddingRight: 24, paddingVertical: 16 }} // Added paddingVertical
                             decelerationRate="fast"
-                            snapToInterval={width * 0.6 + 16}
+                            snapToInterval={Math.min(width * 0.8, 300) + 16}
                         >
-                            {recentlyViewed.map(item => renderUnifiedCard(item))}
+                            {recentlyViewed.map(item => (
+                                <View key={item.id} style={{ marginRight: 16 }}>
+                                    {renderUnifiedCard(item)}
+                                </View>
+                            ))}
                         </ScrollView>
                     </View>
                 )}
@@ -667,41 +731,29 @@ export default function HomeScreen() {
             <Navbar />
 
             <ListingDetailsSheet ref={bottomSheetRef} listingId={selectedListingId} />
-            <SearchBottomSheet 
-                ref={searchSheetRef} 
-                onClose={() => searchSheetRef.current?.dismiss()} 
+            <SearchBottomSheet
+                ref={searchSheetRef}
+                onClose={() => { }}
                 onItemPress={(id) => {
                     console.log('=== SearchBottomSheet onItemPress ===');
                     console.log('Item ID from search:', id);
                     setSelectedListingId(id);
                     setTimeout(() => {
-                        console.log('Presenting bottom sheet from search...');
-                        console.log('bottomSheetRef.current:', bottomSheetRef.current);
-                        try {
-                            bottomSheetRef.current?.present();
-                            console.log('present() called from search');
-                        } catch (error) {
-                            console.error('Error presenting from search:', error);
-                        }
+                        openDetailsSheet();
+                        console.log('openDetailsSheet called from search');
                     }, 150);
                 }}
             />
-            <RecentlyViewedSheet 
-                ref={recentlyViewedSheetRef} 
+            <RecentlyViewedSheet
+                ref={recentlyViewedSheetRef}
                 onClose={() => recentlyViewedSheetRef.current?.dismiss()}
                 onItemPress={(id) => {
                     console.log('=== RecentlyViewedSheet onItemPress ===');
                     console.log('Item ID from recently viewed:', id);
                     setSelectedListingId(id);
                     setTimeout(() => {
-                        console.log('Presenting bottom sheet from recently viewed...');
-                        console.log('bottomSheetRef.current:', bottomSheetRef.current);
-                        try {
-                            bottomSheetRef.current?.present();
-                            console.log('present() called from recently viewed');
-                        } catch (error) {
-                            console.error('Error presenting from recently viewed:', error);
-                        }
+                        openDetailsSheet();
+                        console.log('openDetailsSheet called from recently viewed');
                     }, 150);
                 }}
             />
@@ -730,28 +782,29 @@ const styles = StyleSheet.create({
     },
     heroGradient: {
         ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.3)', // Base darken
     },
     heroContent: {
         position: 'absolute',
         bottom: height < 700 ? 16 : 40,
-        left: scale(24),
-        right: scale(24),
+        left: 24, // Standardized alignment
+        right: 24, // Standardized alignment
         zIndex: 10,
     },
     heroGreeting: {
         fontFamily: 'Poppins_600SemiBold',
         fontSize: height < 700 ? moderateScale(24) : moderateScale(32),
         color: '#FFF',
-        textShadowColor: 'rgba(0, 0, 0, 0.3)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 4,
+        textShadowColor: 'rgba(0, 0, 0, 0.5)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 6,
         marginBottom: height < 700 ? moderateScale(2) : moderateScale(4),
     },
     heroSubtitle: {
         fontFamily: 'Poppins_400Regular',
         fontSize: height < 700 ? moderateScale(12) : moderateScale(14),
-        color: 'rgba(255,255,255,0.9)',
-        textShadowColor: 'rgba(0, 0, 0, 0.3)',
+        color: 'rgba(255,255,255,0.95)',
+        textShadowColor: 'rgba(0, 0, 0, 0.5)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 4,
         marginBottom: height < 700 ? moderateScale(12) : moderateScale(20),
@@ -759,303 +812,249 @@ const styles = StyleSheet.create({
     searchPill: {
         borderRadius: 100,
         overflow: 'hidden',
-        backgroundColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(255,255,255,0.15)',
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.3)',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 5,
     },
     searchTouch: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: height < 700 ? scale(16) : scale(20),
-        paddingVertical: height < 700 ? moderateScale(10) : moderateScale(14),
+        paddingHorizontal: height < 700 ? 16 : 20, // Slightly cleaner fixed padding
+        paddingVertical: height < 700 ? moderateScale(12) : moderateScale(16),
     },
     searchTexts: {
-        marginLeft: scale(4),
+        marginLeft: 8,
     },
     searchPlaceholder: {
         color: '#FFF',
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: moderateScale(14),
+        fontSize: moderateScale(15),
     },
     searchSubPlaceholder: {
-        color: 'rgba(255,255,255,0.8)',
+        color: 'rgba(255,255,255,0.9)',
         fontFamily: 'Poppins_400Regular',
         fontSize: moderateScale(12),
     },
 
-    // Promotional Carousel
-    carouselContainer: {
-        paddingHorizontal: scale(24),
-        gap: scale(16),
-    },
-    promoCard: {
-        width: Math.min(width - scale(48), 400),
-        height: height < 700 ? 140 : verticalScale(140), // Increased fixed height for small screens
-        borderRadius: moderateScale(20),
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
-        elevation: 5,
-    },
-    promoGradient: {
-        flex: 1,
-        padding: height < 700 ? scale(16) : scale(24),
-        justifyContent: 'center',
-    },
-    promoContent: {
-        flex: 1,
-        justifyContent: 'center',
-    },
-    promoIconBg: {
-        width: height < 700 ? moderateScale(40) : moderateScale(48),
-        height: height < 700 ? moderateScale(40) : moderateScale(48),
-        borderRadius: height < 700 ? moderateScale(20) : moderateScale(24),
-        backgroundColor: 'rgba(255,255,255,0.25)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: height < 700 ? moderateScale(8) : moderateScale(12),
-    },
-    promoTitle: {
-        fontFamily: 'Poppins_700Bold',
-        fontSize: height < 700 ? moderateScale(16) : moderateScale(20),
-        color: '#FFF',
-        marginBottom: moderateScale(4),
-    },
-    promoSubtitle: {
-        fontFamily: 'Poppins_400Regular',
-        fontSize: moderateScale(13),
-        color: 'rgba(255,255,255,0.9)',
-    },
-    promoStats: {
-        marginTop: 8,
-    },
-    promoStatsText: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: moderateScale(16),
-        color: '#FFF',
-    },
 
-    // Top Picks Grid
-    topPicksContainer: {
-        paddingHorizontal: scale(24),
-        marginTop: height < 700 ? verticalScale(20) : verticalScale(32),
-    },
-    topPicksGrid: {
-        flexDirection: 'row',
-        gap: scale(12),
-    },
-    topPickLarge: {
-        flex: 2,
-        height: height < 700 ? verticalScale(200) : verticalScale(240),
-        borderRadius: moderateScale(16),
-        overflow: 'hidden',
-    },
-    topPickSmallColumn: {
-        flex: 1,
-        gap: scale(12),
-    },
-    topPickSmall: {
-        height: height < 700 ? verticalScale(94) : verticalScale(114),
-        borderRadius: moderateScale(16),
-        overflow: 'hidden',
-    },
-    topPickWide: {
-        flex: 1,
-        height: height < 700 ? verticalScale(85) : verticalScale(100),
-        borderRadius: moderateScale(16),
-        overflow: 'hidden',
-    },
-    topPickImage: {
-        width: '100%',
-        height: '100%',
-    },
-    topPickOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        justifyContent: 'flex-end',
-        padding: moderateScale(12),
-    },
-    topPickBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        alignSelf: 'flex-start',
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        paddingHorizontal: scale(8),
-        paddingVertical: moderateScale(4),
-        borderRadius: moderateScale(12),
-        marginBottom: moderateScale(8),
-        gap: scale(4),
-    },
-    topPickBadgeText: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: moderateScale(11),
-        color: '#FFF',
-    },
-    topPickTitle: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: moderateScale(14),
-        color: '#FFF',
-    },
-    topPickLocation: {
-        fontFamily: 'Poppins_400Regular',
-        fontSize: moderateScale(11),
-        color: 'rgba(255,255,255,0.8)',
-        marginTop: moderateScale(2),
-    },
 
-    // Categories
-    categoryContainer: {
-        paddingHorizontal: scale(24),
-        paddingVertical: moderateScale(8),
-        gap: scale(10),
-    },
-    categoryChip: {
-        paddingHorizontal: scale(16),
-        paddingVertical: moderateScale(8),
-        borderRadius: moderateScale(20),
-        borderWidth: 1,
-        borderColor: '#E5E7EB',
-        backgroundColor: 'transparent',
-    },
-    categoryText: {
-        fontFamily: 'Poppins_500Medium',
-        fontSize: moderateScale(13),
-        color: '#6B7280',
-    },
-
-    // Sections
+    // Section Commons
     sectionContainer: {
-        marginTop: height < 700 ? moderateScale(20) : moderateScale(32),
+        marginTop: 32,
+        marginBottom: 8,
     },
     sectionTitle: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: Math.max(moderateScale(20), 18), // Minimum 18px
-        marginLeft: scale(24),
-        marginBottom: 0,
+        fontSize: moderateScale(20),
+        marginLeft: 0, // Removed double margin
     },
     sectionSubtitle: {
         fontFamily: 'Poppins_400Regular',
         fontSize: moderateScale(13),
-        marginLeft: scale(24),
-        marginBottom: moderateScale(16),
-    },
-    emptyText: {
-        fontFamily: 'Poppins_500Medium',
-        fontSize: moderateScale(16),
-        marginTop: moderateScale(12),
-        textAlign: 'center',
-    },
-    emptySubtext: {
-        fontFamily: 'Poppins_400Regular',
-        fontSize: moderateScale(13),
-        marginTop: moderateScale(4),
-        textAlign: 'center',
+        marginLeft: 0,
+        marginTop: -2,
     },
 
-    // Featured Card
-    featuredCard: {
-        height: 240,
-        borderRadius: 20,
-        overflow: 'hidden',
-        shadowColor: '#000',
+    // Bento Grid Styles
+    bentoGrid: {
+        flexDirection: 'row',
+        gap: 12,
+        height: 280, // Fixed height for the bento block
+    },
+    bentoTouchableLarge: {
+        flex: 1.5,
+        borderRadius: 24,
+        // Shadow
+        shadowColor: "#000",
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
+        shadowOpacity: 0.2,
         shadowRadius: 12,
-        elevation: 5,
+        elevation: 6,
+        backgroundColor: '#FFF', // Needed for shadow
+    },
+    bentoTouchableSmall: {
+        flex: 1,
+        borderRadius: 24,
+        // Shadow
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 12,
+        elevation: 6,
+        backgroundColor: '#FFF', // Needed for shadow
+    },
+    bentoLarge: {
+        flex: 1,
+        position: 'relative',
+        backgroundColor: '#f3f4f6',
+        borderRadius: 24, // Re-apply for safety
+        overflow: 'hidden',
+    },
+    bentoColumn: {
+        flex: 1,
+        flexDirection: 'column',
+        gap: 12,
+    },
+    bentoSmall: {
+        flex: 1,
+        position: 'relative',
+        backgroundColor: '#f3f4f6',
+        borderRadius: 24, // Re-apply for safety
+        overflow: 'hidden',
+    },
+    bentoImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+        borderRadius: 24, // Re-apply for safety
+    },
+    bentoOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'flex-end',
+        padding: 12,
+        borderRadius: 24, // Re-apply for safety
+    },
+    bentoContent: {
+        gap: 4,
+    },
+    bentoTitleLarge: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 18,
+        lineHeight: 24,
+        textShadowColor: 'rgba(0,0,0,0.5)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 4,
+    },
+    bentoTitleSmall: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 14,
+        marginBottom: 2,
+    },
+    bentoSubtitle: {
+        color: 'rgba(255,255,255,0.9)',
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 12,
+    },
+    bentoRating: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 11,
+        marginLeft: 4,
+    },
+    glassBadge: {
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
+        alignSelf: 'flex-start',
+    },
+    glassBadgeText: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 10,
+    },
+
+    // Featured Card (For You)
+    featuredCard: {
+        width: '100%',
+        height: verticalScale(320), // Taller
+        borderRadius: 32, // Parent has 32
+        // Shadow
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.25,
+        shadowRadius: 16,
+        elevation: 10,
+        position: 'relative',
+        backgroundColor: '#FFF', // Needed for shadow
     },
     featuredImage: {
         width: '100%',
         height: '100%',
+        resizeMode: 'cover',
+        borderRadius: 32, // Match parent
     },
     featuredGradient: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: '70%',
-        justifyContent: 'flex-end',
-        padding: 20,
+        ...StyleSheet.absoluteFillObject,
+        padding: 24,
+        justifyContent: 'space-between',
+        borderRadius: 32, // Match parent
     },
     featuredBadge: {
-        backgroundColor: 'rgba(255,255,255,0.95)',
+        backgroundColor: '#7C3AED',
         paddingHorizontal: 12,
         paddingVertical: 6,
-        borderRadius: 20,
+        borderRadius: 100,
         alignSelf: 'flex-start',
-        marginBottom: 12,
-    },
-    featuredBadgeText: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 12,
-        color: '#1F2937',
-    },
-    featuredTitle: {
-        fontFamily: 'Poppins_700Bold',
-        fontSize: 22,
-        color: '#FFF',
-    },
-    featuredLocation: {
-        fontFamily: 'Poppins_400Regular',
-        fontSize: 13,
-        color: 'rgba(255,255,255,0.9)',
-        marginLeft: 4,
-    },
-    featuredRating: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 13,
-        color: '#FFF',
-        marginLeft: 4,
-    },
-
-    // Badge
-    badge: {
-        position: 'absolute',
-        top: 12,
-        left: 12,
-        zIndex: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 12,
-        shadowColor: '#000',
+        shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.2,
         shadowRadius: 4,
-        elevation: 3,
     },
-    badgeText: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 11,
+    featuredBadgeText: {
         color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
     },
-
-    // Discovery
-    discoveryCard: {
-        width: 140,
-        height: 180,
-        borderRadius: 16,
-        overflow: 'hidden',
-        marginRight: 12,
-        position: 'relative',
+    featuredTitle: {
+        color: '#FFF',
+        fontFamily: 'Poppins_700Bold',
+        fontSize: moderateScale(26), // Large Typography
+        marginBottom: 4,
+        textShadowColor: 'rgba(0,0,0,0.5)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 8,
     },
-    discoveryImage: {
-        width: '100%',
-        height: '100%',
+    featuredLocation: {
+        color: 'rgba(255,255,255,0.9)',
+        fontFamily: 'Poppins_500Medium',
+        fontSize: moderateScale(14),
     },
-    discoveryOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.2)',
-        justifyContent: 'flex-end',
-        padding: 12,
-    },
-    discoveryTitle: {
+    featuredPrice: {
         color: '#FFF',
         fontFamily: 'Poppins_600SemiBold',
         fontSize: 14,
     },
-    discoveryLoc: {
-        color: 'rgba(255,255,255,0.9)',
+    featuredRating: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 13,
+        marginLeft: 4,
+    },
+    tagBadge: {
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 100,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
+    },
+    tagText: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 10,
+        textTransform: 'uppercase',
+    },
+
+    // Empty states
+    emptyText: {
+        marginTop: 16,
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 16,
+    },
+    emptySubtext: {
+        marginTop: 4,
         fontFamily: 'Poppins_400Regular',
-        fontSize: 11,
-    }
+        fontSize: 14,
+        textAlign: 'center',
+    },
 });

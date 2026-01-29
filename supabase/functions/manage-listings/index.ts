@@ -168,7 +168,8 @@ serve(async (req: Request) => {
                 const { data: operatingHours, error: hoursError } = await supabaseClient
                     .from('studio_operating_hours')
                     .select('*')
-                    .eq('studio_id', id);
+                    .eq('studio_id', id)
+                    .order('slot_order', { ascending: true });
 
                 if (!hoursError && operatingHours) {
                     // Convert operating hours to availability format
@@ -274,11 +275,7 @@ serve(async (req: Request) => {
                     // Map user provided availability
                     // Frontend format: { day: 'Monday', slots: [{start, end}] }
                     // DB format: day_of_week (0-6), open_time, close_time
-                    // We need to map day string to index. Assuming Monday=0 based on frontend array index logic or map correctly.
-                    // Frontend array: ['Monday', 'Tuesday', ... 'Sunday']
-                    // Standard Javascript Day: 0=Sunday, 1=Monday.
-                    // Let's assume standard DB convention: 0=Sunday, 1=Monday... 6=Saturday.
-                    // OR 0=Monday? Let's use a safe map. 
+                    // Support multiple slots per day
 
                     const dayMap: { [key: string]: number } = {
                         'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
@@ -287,25 +284,17 @@ serve(async (req: Request) => {
                     for (const daySchedule of studioAvailability) {
                         const dayIndex = dayMap[daySchedule.day];
                         if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
-                            // Currently DB schema seems to support ONE open/close time per day based on previous default code?
-                            // Previous code: open_time: '09:00', close_time: '22:00'
-                            // If user has multiple slots, we might only be able to store the full range or first slot?
-                            // Let's assume we store the "main" hours which is likely the first slot start to last slot end?
-                            // Or maybe just the first slot for now if table has strict open_time/close_time columns and not an array.
-                            // Given "open_time" and "close_time" naming, it implies a single range.
-
-                            // Let's take the first slot's start and the last slot's end to cover the day.
-                            const slots = daySchedule.slots;
-                            const start = slots[0].start;
-                            const end = slots[slots.length - 1].end;
-
-                            operatingHours.push({
-                                studio_id: studioId,
-                                day_of_week: dayIndex,
-                                is_open: true,
-                                open_time: start,
-                                close_time: end
-                            })
+                            // Insert ALL slots for this day (not just first and last)
+                            daySchedule.slots.forEach((slot: any, slotIndex: number) => {
+                                operatingHours.push({
+                                    studio_id: studioId,
+                                    day_of_week: dayIndex,
+                                    is_open: true,
+                                    open_time: slot.start,
+                                    close_time: slot.end,
+                                    slot_order: slotIndex
+                                });
+                            });
                         }
                     }
                 }
@@ -376,16 +365,16 @@ serve(async (req: Request) => {
                 for (const daySchedule of studioAvailability) {
                     const dayIndex = dayMap[daySchedule.day];
                     if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
-                        const slots = daySchedule.slots;
-                        const start = slots[0].start;
-                        const end = slots[slots.length - 1].end;
-
-                        operatingHours.push({
-                            studio_id: studioId,
-                            day_of_week: dayIndex,
-                            is_open: true,
-                            open_time: start,
-                            close_time: end
+                        // Insert ALL slots for this day (not just first and last)
+                        daySchedule.slots.forEach((slot: any, slotIndex: number) => {
+                            operatingHours.push({
+                                studio_id: studioId,
+                                day_of_week: dayIndex,
+                                is_open: true,
+                                open_time: slot.start,
+                                close_time: slot.end,
+                                slot_order: slotIndex
+                            });
                         });
                     }
                 }
@@ -473,7 +462,7 @@ serve(async (req: Request) => {
 
         // UPDATE BOOKING STATUS (Studio Bookings)
         if (action === 'update_booking_status') {
-            const { bookingId, status } = params;
+            const { bookingId, status, cancellation_reason } = params;
 
             // First get the booking details to send notification
             const { data: bookingDetails, error: bookingError } = await supabaseClient
@@ -488,10 +477,15 @@ serve(async (req: Request) => {
 
             if (bookingError) throw bookingError;
 
-            // Update the booking status
+            // Update the booking status (and cancellation reason if provided)
+            const updateData: any = { status };
+            if (cancellation_reason) {
+                updateData.cancellation_reason = cancellation_reason;
+            }
+            
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
-                .update({ status })
+                .update(updateData)
                 .eq('id', bookingId)
                 .select()
                 .single();
@@ -509,7 +503,7 @@ serve(async (req: Request) => {
             if (status === 'cancelled') {
                 notificationType = 'warning';
                 notificationTitle = 'Booking Declined';
-                notificationMessage = `Your booking request for "${studioName}" on ${bookingDate} has been declined.`;
+                notificationMessage = `Your booking request for "${studioName}" on ${bookingDate} has been declined.${cancellation_reason ? ` Reason: ${cancellation_reason}` : ''}`;
             } else if (status === 'confirmed') {
                 notificationType = 'success';
                 notificationTitle = 'Booking Confirmed! 🎉';
@@ -529,12 +523,150 @@ serve(async (req: Request) => {
                             studio_id: bookingDetails.studio_id,
                             booking_id: bookingId,
                             status: status,
-                            booking_date: bookingDate
+                            booking_date: bookingDate,
+                            cancellation_reason: cancellation_reason || null
                         }
                     });
             }
 
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // PARTIAL SLOT APPROVAL (For multi-slot bookings)
+        if (action === 'partial_slot_approval') {
+            const { bookingId, acceptedSlots, declinedSlots, cancellation_reason } = params;
+
+            // First get the booking details
+            const { data: bookingDetails, error: bookingError } = await supabaseClient
+                .from('studio_bookings')
+                .select(`
+                    *,
+                    studio:studio_id(name, owner_id, hourly_rate),
+                    user:user_id(full_name, email)
+                `)
+                .eq('id', bookingId)
+                .single();
+
+            if (bookingError) throw bookingError;
+
+            const studioName = bookingDetails.studio?.name || 'the studio';
+            const bookingDate = bookingDetails.booking_date;
+            const hourlyRate = bookingDetails.studio?.hourly_rate || 0;
+
+            // If there are accepted slots, update the original booking with only accepted slots
+            if (acceptedSlots && acceptedSlots.length > 0) {
+                // Calculate new pricing for accepted slots
+                let totalHours = 0;
+                for (const slot of acceptedSlots) {
+                    const [startH, startM] = slot.start.split(':').map(Number);
+                    const [endH, endM] = slot.end.split(':').map(Number);
+                    const hours = (endH + endM/60) - (startH + startM/60);
+                    totalHours += hours;
+                }
+                const newPrice = totalHours * hourlyRate;
+
+                // Get overall start and end for backwards compatibility
+                const allStartTimes = acceptedSlots.map((s: any) => s.start).sort();
+                const allEndTimes = acceptedSlots.map((s: any) => s.end).sort();
+                const overallStart = allStartTimes[0];
+                const overallEnd = allEndTimes[allEndTimes.length - 1];
+
+                // Update the booking with only accepted slots
+                const { error: updateError } = await supabaseClient
+                    .from('studio_bookings')
+                    .update({ 
+                        status: 'confirmed',
+                        time_slots: acceptedSlots,
+                        start_time: overallStart,
+                        end_time: overallEnd,
+                        hours: totalHours,
+                        final_price: newPrice,
+                        subtotal: newPrice
+                    })
+                    .eq('id', bookingId);
+
+                if (updateError) throw updateError;
+
+                // Send notification about partial approval
+                const formatSlot = (s: any) => {
+                    const formatTime = (t: string) => {
+                        const [h, m] = t.split(':');
+                        const hr = parseInt(h);
+                        const period = hr >= 12 ? 'PM' : 'AM';
+                        const h12 = hr % 12 || 12;
+                        return `${h12}:${m} ${period}`;
+                    };
+                    return `${formatTime(s.start)} - ${formatTime(s.end)}`;
+                };
+
+                const acceptedSlotsText = acceptedSlots.map(formatSlot).join(', ');
+                const declinedSlotsText = declinedSlots && declinedSlots.length > 0 
+                    ? declinedSlots.map(formatSlot).join(', ') 
+                    : '';
+
+                let notificationMessage = `Your booking for "${studioName}" on ${bookingDate} has been partially approved.\n\n✅ Approved: ${acceptedSlotsText}`;
+                if (declinedSlotsText) {
+                    notificationMessage += `\n❌ Declined: ${declinedSlotsText}`;
+                }
+                if (cancellation_reason) {
+                    notificationMessage += `\n\nNote: ${cancellation_reason}`;
+                }
+
+                await supabaseClient
+                    .from('notifications')
+                    .insert({
+                        user_id: bookingDetails.user_id,
+                        type: 'info',
+                        title: 'Booking Partially Approved',
+                        message: notificationMessage,
+                        meta: {
+                            studio_id: bookingDetails.studio_id,
+                            booking_id: bookingId,
+                            status: 'partial',
+                            booking_date: bookingDate,
+                            accepted_slots: acceptedSlots,
+                            declined_slots: declinedSlots
+                        }
+                    });
+
+                return new Response(JSON.stringify({ 
+                    success: true, 
+                    message: 'Booking partially approved',
+                    acceptedSlots,
+                    declinedSlots
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            } else {
+                // All slots declined - just cancel the booking
+                const { error: updateError } = await supabaseClient
+                    .from('studio_bookings')
+                    .update({ 
+                        status: 'cancelled',
+                        cancellation_reason: cancellation_reason || 'All time slots were declined by the studio owner.'
+                    })
+                    .eq('id', bookingId);
+
+                if (updateError) throw updateError;
+
+                await supabaseClient
+                    .from('notifications')
+                    .insert({
+                        user_id: bookingDetails.user_id,
+                        type: 'warning',
+                        title: 'Booking Declined',
+                        message: `Your booking request for "${studioName}" on ${bookingDate} has been declined. ${cancellation_reason || ''}`,
+                        meta: {
+                            studio_id: bookingDetails.studio_id,
+                            booking_id: bookingId,
+                            status: 'cancelled',
+                            booking_date: bookingDate
+                        }
+                    });
+
+                return new Response(JSON.stringify({ 
+                    success: true, 
+                    message: 'Booking declined'
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            }
         }
 
         // UPDATE APPLICATION STATUS
@@ -577,7 +709,7 @@ serve(async (req: Request) => {
                 notificationType = 'warning';
                 notificationTitle = 'Application Declined';
                 notificationMessage = `Your application for "${gigName}" has been declined.`;
-            } else if (status === 'approved' || status === 'accepted') {
+            } else if (status === 'accepted') {
                 notificationType = 'success';
                 notificationTitle = 'Application Accepted! 🎉';
                 notificationMessage = `Congratulations! Your application for "${gigName}" has been accepted.`;

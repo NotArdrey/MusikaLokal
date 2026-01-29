@@ -551,7 +551,7 @@ export default function AddStudioScreen() {
                             {/* Contract Upload */}
                             <View style={styles.inputContainer}>
                                 <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-                                    Custom Contract (Optional)
+                                    Custom Contract
                                 </Text>
                                 <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
                                     Upload a PDF contract that musicians will see before applying

@@ -113,14 +113,18 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const [selectedDate, setSelectedDate] = useState('');
     const [availableSlots, setAvailableSlots] = useState<string[]>([]);
     const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+    const [validEndTimes, setValidEndTimes] = useState<string[]>([]);
     const [markedDates, setMarkedDates] = useState<any>({});
 
-    // Multiple bookings state with pricing
-    const [bookings, setBookings] = useState<{ date: Date; startTime: Date; endTime: Date; pricing?: any }[]>([]);
+    // Multiple time slots state for multi-slot bookings (same day)
+    const [selectedTimeSlots, setSelectedTimeSlots] = useState<{ start: string; end: string }[]>([]);
+
+    // Multiple bookings state with pricing (different days)
+    const [bookings, setBookings] = useState<{ date: Date; startTime: Date; endTime: Date; timeSlots?: { start: string; end: string }[]; pricing?: any }[]>([]);
     const [showAddBooking, setShowAddBooking] = useState(false);
     const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
 
-    // Auto-calculate duration
+    // Auto-calculate duration (only if validEndTimes is empty to avoid overwrite loop)
     useEffect(() => {
         if (!date || !endTime) {
             setDuration(0);
@@ -129,13 +133,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
         const start = new Date(date).getTime();
         const end = new Date(endTime).getTime();
-        // Handle cross-day or invalid times? For now simple diff
-        // If end is before start, assume next day? Or just show 0.
-        // Let's keep it simple: if end < start, maybe just valid hours.
-        // Actually, let's normalize the dates to be on the same day as 'date' for calculation if only time changed
 
+        // Calculate diff in hours
         let diff = (end - start) / (1000 * 60 * 60);
-        if (diff < 0) diff += 24; // Assume next day if end < start
+
+        // Handle next day wraps if needed, but for now we assume same-day or flexible
+        if (diff < 0) diff += 24;
 
         // Round to 1 decimal
         setDuration(Math.max(1, parseFloat(diff.toFixed(1))));
@@ -163,7 +166,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         if (!userId || !listingId || !group || group.type !== 'Gig') return;
 
         try {
-            // Check for any existing application by this user (either personal or via any group)
+            // Check for any existing application to this specific gig
+            // Once rejected, musician cannot re-apply to the same gig
             const { data, error } = await supabase
                 .from('gig_applications')
                 .select('id, status, group_id')
@@ -494,11 +498,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     const { data: operatingHours, error: hoursError } = await supabase
                         .from('studio_operating_hours')
                         .select('*')
-                        .eq('studio_id', data.id);
+                        .eq('studio_id', data.id)
+                        .order('slot_order', { ascending: true });
 
                     if (!hoursError && operatingHours) {
                         console.log('📅 Operating hours fetched:', operatingHours);
-                        // Convert operating hours to availability format
+                        // Convert operating hours to availability format - now supports multiple slots per day
                         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
                         const availability = dayNames.map((dayName, index) => {
                             const dayHours = operatingHours.filter((h: any) => h.day_of_week === index && h.is_open);
@@ -673,7 +678,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         }
 
         // Generate time slots from the availability
-        const slots: string[] = [];
+        // Use Set to prevent duplicates
+        const slotsSet = new Set<string>();
 
         // Identify blocked times from existing bookings (Confirmed OR Pending)
         const dayBookings = existingBookings.filter((b: any) =>
@@ -703,14 +709,15 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 const timeStr = current.toTimeString().slice(0, 5); // HH:MM
                 // Only add if not blocked
                 if (!blockedTimes.has(timeStr)) {
-                    slots.push(timeStr);
+                    slotsSet.add(timeStr);
                 }
                 current.setHours(current.getHours() + 1); // Assuming 1-hour slots
             }
         });
 
-        console.log('🕐 Generated slots:', slots);
-        setAvailableSlots(slots);
+        const uniqueSlots = Array.from(slotsSet).sort();
+        console.log('🕐 Generated slots:', uniqueSlots);
+        setAvailableSlots(uniqueSlots);
     };
 
     const toggleFavorite = async () => {
@@ -920,6 +927,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 onDayPress={(day) => {
                     setSelectedDate(day.dateString);
                     setSelectedSlot(null);
+                    setValidEndTimes([]);
                     fetchAvailableSlots(day.dateString);
                     // Update date state
                     const selectedDateObj = new Date(day.dateString);
@@ -965,33 +973,73 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                 const isSelected = selectedSlot === slot;
                                 return (
                                     <TouchableOpacity
-                                        key={index}
+                                        key={slot}
                                         style={[
                                             styles.slotButton,
                                             {
                                                 backgroundColor: isSelected ? (isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)') : (isDark ? '#374151' : '#F3F4F6'),
                                                 borderColor: isSelected ? (colors.primary === '#7c3aed' ? '#FFD700' : colors.primary) : 'transparent', // Gold-ish border if primary is purple, or just primary
                                                 borderWidth: isSelected ? 2 : 0,
-                                                shadowColor: isSelected ? (colors.primary === '#7c3aed' ? '#FFD700' : colors.primary) : 'transparent',
-                                                shadowOffset: { width: 0, height: 0 },
-                                                shadowOpacity: isSelected ? 0.5 : 0,
-                                                shadowRadius: 8,
-                                                elevation: isSelected ? 5 : 0
                                             }
                                         ]}
                                         onPress={() => {
                                             setSelectedSlot(slot);
-                                            // Update start time
+
+                                            // 1. Update start date/time
                                             const [hours, minutes] = slot.split(':');
                                             const startDate = new Date(selectedDate);
                                             startDate.setHours(parseInt(hours), parseInt(minutes));
-                                            setDate(startDate); // Update main date state with time
+                                            setDate(startDate);
 
-                                            // Set end time default duration (e.g. 4 hours)
-                                            // Re-calculate end time logic here or rely on prev
-                                            const endDate = new Date(startDate);
-                                            endDate.setHours(startDate.getHours() + duration);
-                                            setEndTime(endDate);
+                                            // 2. Calculate Valid End Times (Contiguous Slots)
+                                            // Logic: Check if next hour exists in availableSlots
+                                            const validEndsSet = new Set<string>();
+
+                                            // Convert all available slots to minutes for easier math
+                                            const slotsInMinutes = new Set(availableSlots.map(s => {
+                                                const [h, m] = s.split(':');
+                                                return parseInt(h) * 60 + parseInt(m);
+                                            }));
+
+                                            const startMinutes = parseInt(hours) * 60 + parseInt(minutes);
+
+                                            // Start checking from next hour
+                                            let currentMinutes = startMinutes + 60; // Min duration 1 hour (60 mins)
+
+                                            // Loop to find max possible duration
+                                            // Max 12 hours or until gap
+                                            for (let i = 0; i < 12; i++) {
+                                                // Handle day wrapping (simple version: limit to 24h)
+                                                if (currentMinutes >= 24 * 60) break;
+
+                                                const h = Math.floor(currentMinutes / 60);
+                                                const m = currentMinutes % 60;
+                                                const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+
+                                                validEndsSet.add(timeStr);
+
+                                                // Check if this time slot (currentMinutes) is available as a START time
+                                                // If it is, we can EXTEND to next hour.
+                                                // If NOT, then this is the last possible end time.
+
+                                                if (!slotsInMinutes.has(currentMinutes)) {
+                                                    break;
+                                                }
+
+                                                currentMinutes += 60;
+                                            }
+
+                                            const validEnds = Array.from(validEndsSet);
+                                            setValidEndTimes(validEnds);
+
+                                            // 3. Set Default End Time (1 hour duration)
+                                            if (validEnds.length > 0) {
+                                                const defaultEnd = validEnds[0];
+                                                const [endH, endM] = defaultEnd.split(':');
+                                                const endDate = new Date(startDate);
+                                                endDate.setHours(parseInt(endH), parseInt(endM));
+                                                setEndTime(endDate);
+                                            }
                                         }}
                                     >
                                         <Text style={{
@@ -1010,6 +1058,47 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 13 }}>
                                 No available slots for this date.
                             </Text>
+                        </View>
+                    )}
+
+                    {/* End Time Selection */}
+                    {selectedSlot && validEndTimes.length > 0 && (
+                        <View style={{ marginTop: 24 }}>
+                            <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
+                                Until
+                            </Text>
+                            <View style={styles.slotGrid}>
+                                {validEndTimes.map((time) => {
+                                    const isSelected = endTime && endTime.toTimeString().slice(0, 5) === time;
+                                    return (
+                                        <TouchableOpacity
+                                            key={time}
+                                            style={[
+                                                styles.slotButton,
+                                                {
+                                                    backgroundColor: isSelected ? (isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)') : (isDark ? '#374151' : '#F3F4F6'),
+                                                    borderColor: isSelected ? colors.primary : 'transparent',
+                                                    borderWidth: isSelected ? 2 : 0,
+                                                }
+                                            ]}
+                                            onPress={() => {
+                                                const [h, m] = time.split(':');
+                                                const newEnd = new Date(date); // Use current date base
+                                                newEnd.setHours(parseInt(h), parseInt(m));
+                                                setEndTime(newEnd);
+                                            }}
+                                        >
+                                            <Text style={{
+                                                color: isSelected ? colors.primary : colors.text,
+                                                fontFamily: isSelected ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
+                                                fontSize: 13
+                                            }}>
+                                                {formatTime12(time)}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
                         </View>
                     )}
                 </View>
@@ -1267,6 +1356,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             // Use calculated pricing or fallback
                             const cost = booking.pricing?.final_price || (parseInt(displayRate.replace(/,/g, '')) * hours);
                             const hasModifiers = booking.pricing?.modifiers && Object.keys(booking.pricing.modifiers).length > 0;
+                            const slots = booking.timeSlots || [{ start: booking.startTime.toTimeString().slice(0, 5), end: booking.endTime.toTimeString().slice(0, 5) }];
+                            const isMultiSlot = slots.length > 1;
 
                             return (
                                 <View key={index} style={[styles.bookingCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 8 }]}>
@@ -1276,15 +1367,24 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                             <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', marginLeft: 6, fontSize: 13 }}>
                                                 {booking.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                                             </Text>
+                                            {isMultiSlot && (
+                                                <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: '#10B98120', borderRadius: 4 }}>
+                                                    <Text style={{ color: '#10B981', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>{slots.length} slots</Text>
+                                                </View>
+                                            )}
                                         </View>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                            <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
-                                            <Text style={{ color: colors.textSecondary, marginLeft: 6, fontSize: 12 }}>
-                                                {booking.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} - {booking.endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} ({booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h)
-                                            </Text>
-                                        </View>
+                                        {/* Show all time slots */}
+                                        {slots.map((slot, slotIndex) => (
+                                            <View key={slotIndex} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: slotIndex < slots.length - 1 ? 2 : 0 }}>
+                                                <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+                                                <Text style={{ color: colors.textSecondary, marginLeft: 6, fontSize: 12 }}>
+                                                    {slot.start} - {slot.end}
+                                                </Text>
+                                            </View>
+                                        ))}
                                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
                                             <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold' }}>₱{cost.toLocaleString()}</Text>
+                                            <Text style={{ color: colors.textSecondary, fontSize: 11, marginLeft: 8 }}>({booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h total)</Text>
                                             {hasModifiers && (
                                                 <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.primary + '20', borderRadius: 4 }}>
                                                     <Text style={{ color: colors.primary, fontSize: 10 }}>Promo Applied</Text>
@@ -1321,7 +1421,16 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         const startTime = date.toTimeString().slice(0, 5);
                                         const endTime2 = endTime.toTimeString().slice(0, 5);
 
-                                        // Check availability
+                                        // Build time slots array - current slot + any previously selected slots for same day
+                                        const currentSlot = { start: startTime, end: endTime2 };
+                                        const allSlots = [...selectedTimeSlots, currentSlot];
+
+                                        // Check if we already have a booking for this date (merge slots)
+                                        const existingBookingIndex = bookings.findIndex(b =>
+                                            b.date.toISOString().split('T')[0] === bookingDate
+                                        );
+
+                                        // Check availability for the new slot
                                         const { data: isAvailable, error: availError } = await supabase.rpc('is_slot_available', {
                                             p_studio_id: group.id,
                                             p_booking_date: bookingDate,
@@ -1343,7 +1452,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                             return;
                                         }
 
-                                        // Calculate accurate pricing
+                                        // Calculate accurate pricing for all slots
                                         const { data: pricing, error: pricingError } = await supabase.rpc('calculate_booking_price', {
                                             p_studio_id: group.id,
                                             p_booking_date: bookingDate,
@@ -1358,17 +1467,51 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                             return;
                                         }
 
-                                        // Add to cart with pricing data
-                                        setBookings([...bookings, {
-                                            date: new Date(date),
-                                            startTime: new Date(date),
-                                            endTime: new Date(endTime),
-                                            pricing: pricing[0]
-                                        }]);
+                                        if (existingBookingIndex >= 0) {
+                                            // Merge with existing booking for this date
+                                            const existingBooking = bookings[existingBookingIndex];
+                                            const mergedSlots = [...(existingBooking.timeSlots || [{
+                                                start: existingBooking.startTime.toTimeString().slice(0, 5),
+                                                end: existingBooking.endTime.toTimeString().slice(0, 5)
+                                            }]), currentSlot];
+
+                                            // Sort slots by start time
+                                            mergedSlots.sort((a, b) => a.start.localeCompare(b.start));
+
+                                            // Calculate total pricing for all merged slots
+                                            const existingPrice = existingBooking.pricing?.final_price || 0;
+                                            const newPrice = pricing[0]?.final_price || 0;
+                                            const totalHours = (existingBooking.pricing?.hours || 0) + (pricing[0]?.hours || 0);
+
+                                            const updatedBookings = [...bookings];
+                                            updatedBookings[existingBookingIndex] = {
+                                                ...existingBooking,
+                                                timeSlots: mergedSlots,
+                                                pricing: {
+                                                    ...pricing[0],
+                                                    final_price: existingPrice + newPrice,
+                                                    hours: totalHours
+                                                }
+                                            };
+                                            setBookings(updatedBookings);
+                                            alert(`Added time slot to your booking for ${new Date(bookingDate).toLocaleDateString()}. You now have ${mergedSlots.length} slot(s) for this day.`);
+                                        } else {
+                                            // Add as new booking with single slot
+                                            setBookings([...bookings, {
+                                                date: new Date(date),
+                                                startTime: new Date(date),
+                                                endTime: new Date(endTime),
+                                                timeSlots: [currentSlot],
+                                                pricing: pricing[0]
+                                            }]);
+                                        }
+
                                         setShowAddBooking(false);
+                                        setSelectedTimeSlots([]);
                                         // Reset form
                                         setDate(null as any);
                                         setEndTime(null as any);
+                                        setSelectedSlot(null);
                                     } catch (e: any) {
                                         console.error('Error adding booking:', e);
                                         alert('An error occurred. Please try again.');
@@ -1454,18 +1597,23 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                     console.log('🛒 Total bookings to create:', bookings.length);
                                     console.log('📋 Bookings array:', bookings);
 
-                                    // Create each booking
+                                    // Create each booking (now supports multi-slot per booking)
                                     for (const booking of bookings) {
                                         const bookingDate = booking.date.toISOString().split('T')[0];
-                                        const startTime = booking.startTime.toTimeString().slice(0, 5);
-                                        const endTime = booking.endTime.toTimeString().slice(0, 5);
 
-                                        console.log('📤 Creating booking:', {
+                                        // Use time_slots if available (multi-slot booking), otherwise fallback to single slot
+                                        const timeSlots = booking.timeSlots && booking.timeSlots.length > 0
+                                            ? booking.timeSlots
+                                            : [{
+                                                start: booking.startTime.toTimeString().slice(0, 5),
+                                                end: booking.endTime.toTimeString().slice(0, 5)
+                                            }];
+
+                                        console.log('📤 Creating multi-slot booking:', {
                                             studio_id: group.id,
                                             user_id: userId,
                                             date: bookingDate,
-                                            start_time: startTime,
-                                            end_time: endTime,
+                                            time_slots: timeSlots,
                                             notes: bookingNotes
                                         });
 
@@ -1475,8 +1623,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                 studio_id: group.id,
                                                 user_id: userId,
                                                 date: bookingDate,
-                                                start_time: startTime,
-                                                end_time: endTime,
+                                                time_slots: timeSlots,  // Send multi-slot array
                                                 notes: bookingNotes
                                             }
                                         });
@@ -1486,6 +1633,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         if (error) {
                                             // Try to extract actual error message
                                             let errorMessage = error.message || 'Unknown error';
+                                            let serverError: any = null;
 
                                             // Check if error has context with response body
                                             if (error.context && typeof error.context === 'object') {
@@ -1493,20 +1641,40 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                     // Try to read response body
                                                     const response = error.context;
                                                     console.log('📥 Error response status:', response.status);
-                                                    console.log('📥 Error response:', response);
+                                                    console.log('📥 Error response (raw):', response);
 
-                                                    // If it's a 400 error, the body might have details
-                                                    if (response.status === 400 && data) {
-                                                        errorMessage = data.error || data.message || errorMessage;
-                                                        console.error('❌ Server error:', data);
+                                                    // If it's a Response object, try to parse body
+                                                    if (response.json && typeof response.json === 'function') {
+                                                        serverError = await response.json();
+                                                        console.log('📥 Parsed server error:', serverError);
+                                                        if (serverError?.error) {
+                                                            errorMessage = serverError.error;
+                                                        }
+                                                        if (serverError?.debug) {
+                                                            console.log('📥 Debug info:', serverError.debug);
+                                                        }
+                                                    } else if (response.text && typeof response.text === 'function') {
+                                                        const textBody = await response.text();
+                                                        console.log('📥 Error body (text):', textBody);
+                                                        try {
+                                                            serverError = JSON.parse(textBody);
+                                                            if (serverError?.error) {
+                                                                errorMessage = serverError.error;
+                                                            }
+                                                        } catch (e) {
+                                                            console.log('📥 Could not parse as JSON');
+                                                        }
                                                     }
                                                 } catch (e) {
-                                                    console.error('Failed to parse error:', e);
+                                                    console.error('Failed to parse error response:', e);
                                                 }
                                             }
 
-                                            errors.push({ booking, error: { message: errorMessage } });
+                                            errors.push({ booking, error: { message: errorMessage, serverError } });
                                             console.error('❌ Booking error:', errorMessage);
+                                            if (serverError) {
+                                                console.error('❌ Full server error:', JSON.stringify(serverError, null, 2));
+                                            }
                                         } else {
                                             results.push(data);
                                             console.log('✅ Booking created successfully');
@@ -1524,6 +1692,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         alert(`${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`);
                                         // Clear form and close
                                         setBookings([]);
+                                        setSelectedTimeSlots([]);
                                         setBookingNotes('');
                                         setModalVisible(false);
                                         (ref as any)?.current?.dismiss();
@@ -1532,6 +1701,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         alert(`Successfully created ${results.length} booking(s)! The studio owner will review your request.`);
                                         // Clear form and close
                                         setBookings([]);
+                                        setSelectedTimeSlots([]);
                                         setBookingNotes('');
                                         setModalVisible(false);
                                         (ref as any)?.current?.dismiss();
@@ -1751,29 +1921,29 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         styles.infoBox,
                         {
                             backgroundColor: existingApplicationStatus === 'rejected' ? '#EF444420' :
-                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B98120' :
+                                existingApplicationStatus === 'accepted' ? '#10B98120' :
                                     colors.primary + '20',
                             borderColor: existingApplicationStatus === 'rejected' ? '#EF4444' :
-                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
+                                existingApplicationStatus === 'accepted' ? '#10B981' :
                                     colors.primary
                         }
                     ]}>
                         <Ionicons
                             name={existingApplicationStatus === 'rejected' ? 'close-circle' :
-                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? 'checkmark-circle' :
+                                existingApplicationStatus === 'accepted' ? 'checkmark-circle' :
                                     'information-circle'}
                             size={20}
                             color={existingApplicationStatus === 'rejected' ? '#EF4444' :
-                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
+                                existingApplicationStatus === 'accepted' ? '#10B981' :
                                     colors.primary}
                         />
                         <Text style={[styles.infoText, { color: colors.text }]}>
                             {existingApplicationStatus === 'rejected'
-                                ? 'Your application has been declined.'
-                                : existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved'
+                                ? 'Your application was declined. You cannot re-apply to this gig.'
+                                : existingApplicationStatus === 'accepted'
                                     ? 'Your application has been accepted! 🎉'
                                     : `You have already applied to this gig. Status: `}
-                            {existingApplicationStatus !== 'rejected' && existingApplicationStatus !== 'accepted' && existingApplicationStatus !== 'approved' && (
+                            {existingApplicationStatus !== 'rejected' && existingApplicationStatus !== 'accepted' && (
                                 <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{existingApplicationStatus}</Text>
                             )}
                         </Text>

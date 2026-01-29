@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
@@ -20,6 +20,28 @@ interface AlertState {
 export default function LoginScreen() {
     const { colors, isDark } = useTheme();
     const { verified } = useLocalSearchParams();
+
+    // Initialize and clear any stale sessions on mount
+    useEffect(() => {
+        const initializeAuth = async () => {
+            try {
+                // Check if there's a valid session
+                const { data: { session }, error } = await supabase.auth.getSession();
+                
+                // If there's an error or no valid session, clear everything
+                if (error || !session) {
+                    console.log('Clearing stale session on login page mount');
+                    await supabase.auth.signOut({ scope: 'local' });
+                }
+            } catch (e) {
+                console.log('Error initializing auth:', e);
+                // Clear on error to ensure clean state
+                await supabase.auth.signOut({ scope: 'local' });
+            }
+        };
+        
+        initializeAuth();
+    }, []);
 
     // Check for verification success from deep link
     useEffect(() => {
@@ -88,8 +110,6 @@ export default function LoginScreen() {
     // Check for verification success from deep link
     useEffect(() => {
         if (verified === 'true') {
-            // Signal global success to prevent conflicting alerts in signup.tsx
-            VerificationStore.setSuccess(true);
             showAlert(
                 'success',
                 'Verification Successful! 🎉',
@@ -120,6 +140,10 @@ export default function LoginScreen() {
 
         setLoading(true);
         try {
+            // Clear any stale session first to prevent refresh token errors
+            console.log('Clearing any existing session...');
+            await supabase.auth.signOut({ scope: 'local' });
+            
             console.log('Attempting login for:', email);
             const { error } = await supabase.auth.signInWithPassword({
                 email,
@@ -135,6 +159,11 @@ export default function LoginScreen() {
                     setLoginMessage({ type: 'error', text: 'Email not confirmed. Check your inbox.' });
                 } else if (error.message.includes('rate') || error.status === 429) {
                     setLoginMessage({ type: 'error', text: 'Too many attempts. Please wait.' });
+                } else if (error.message.includes('refresh') || error.message.includes('token')) {
+                    // Clear storage and retry once
+                    console.log('Token error detected, clearing storage and retrying...');
+                    await supabase.auth.signOut({ scope: 'local' });
+                    setLoginMessage({ type: 'error', text: 'Session expired. Please try again.' });
                 } else {
                     setLoginMessage({ type: 'error', text: error.message });
                 }
@@ -193,7 +222,7 @@ export default function LoginScreen() {
                             console.log('Profile repaired successfully. Re-fetching...');
                             const { data: newProfile } = await supabase
                                 .from('profiles')
-                                .select('is_verified')
+                                .select('is_verified, id_document_expiry')
                                 .eq('id', user.id)
                                 .maybeSingle();
                             profile = newProfile;

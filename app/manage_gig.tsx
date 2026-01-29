@@ -102,9 +102,9 @@ export default function GigDetailsScreen() {
   };
 
   const confirmAction = (applicationId: string, status: string) => {
-    setModalTitle(status === 'approved' ? 'Accept Application' : 'Decline Application');
-    setModalMessage(`Are you sure you want to ${status === 'approved' ? 'accept' : 'decline'} this application?`);
-    setModalButtonText(status === 'approved' ? 'Accept' : 'Decline');
+    setModalTitle(status === 'accepted' ? 'Accept Application' : 'Decline Application');
+    setModalMessage(`Are you sure you want to ${status === 'accepted' ? 'accept' : 'decline'} this application?`);
+    setModalButtonText(status === 'accepted' ? 'Accept' : 'Decline');
     setModalAction(() => async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -264,7 +264,7 @@ export default function GigDetailsScreen() {
                 <View>
                   <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Contract</Text>
                   {gig?.contract_url ? (
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       onPress={async () => {
                         try {
                           const supported = await Linking.canOpenURL(gig.contract_url);
@@ -298,7 +298,7 @@ export default function GigDetailsScreen() {
                     <View style={[styles.noContractCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
                       <Ionicons name="document-text-outline" size={32} color={colors.textSecondary} />
                       <Text style={[styles.noContractText, { color: colors.textSecondary }]}>No contract uploaded</Text>
-                      <TouchableOpacity 
+                      <TouchableOpacity
                         onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig?.id } })}
                         style={{ marginTop: 8 }}
                       >
@@ -331,15 +331,15 @@ export default function GigDetailsScreen() {
                               <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: colors.text }}>
                                 {app.group?.name || app.applicant?.full_name || 'Unknown Applicant'}
                               </Text>
-                              <View style={[styles.statusBadge, { 
-                                backgroundColor: app.status === 'pending' ? colors.primary + '20' : 
-                                                app.status === 'approved' ? '#10B98120' : '#EF444420'
+                              <View style={[styles.statusBadge, {
+                                backgroundColor: app.status === 'pending' ? colors.primary + '20' :
+                                  app.status === 'approved' ? '#10B98120' : '#EF444420'
                               }]}>
-                                <Text style={{ 
-                                  fontFamily: 'Poppins_500Medium', 
-                                  fontSize: 10, 
-                                  color: app.status === 'pending' ? colors.primary : 
-                                         app.status === 'approved' ? '#10B981' : '#EF4444',
+                                <Text style={{
+                                  fontFamily: 'Poppins_500Medium',
+                                  fontSize: 10,
+                                  color: app.status === 'pending' ? colors.primary :
+                                    app.status === 'approved' ? '#10B981' : '#EF4444',
                                   textTransform: 'capitalize'
                                 }}>
                                   {app.status}
@@ -397,7 +397,7 @@ export default function GigDetailsScreen() {
 
                         {/* Demo Video */}
                         {app.video_url && (
-                          <TouchableOpacity 
+                          <TouchableOpacity
                             onPress={async () => {
                               try {
                                 const supported = await Linking.canOpenURL(app.video_url);
@@ -422,7 +422,7 @@ export default function GigDetailsScreen() {
                           <View style={{ marginBottom: 12 }}>
                             <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, color: colors.textSecondary, marginBottom: 8 }}>Music & Portfolio</Text>
                             {app.applicant.portfolio_urls.slice(0, 3).map((url: string, idx: number) => (
-                              <TouchableOpacity 
+                              <TouchableOpacity
                                 key={idx}
                                 onPress={async () => {
                                   try {
@@ -436,12 +436,12 @@ export default function GigDetailsScreen() {
                                 }}
                                 style={[styles.portfolioLink, { backgroundColor: colors.inputBackground }]}
                               >
-                                <Ionicons 
-                                  name={url.includes('spotify') ? 'musical-notes' : 
-                                        url.includes('youtube') ? 'logo-youtube' : 
-                                        url.includes('soundcloud') ? 'cloud' : 'link'} 
-                                  size={16} 
-                                  color={colors.primary} 
+                                <Ionicons
+                                  name={url.includes('spotify') ? 'musical-notes' :
+                                    url.includes('youtube') ? 'logo-youtube' :
+                                      url.includes('soundcloud') ? 'cloud' : 'link'}
+                                  size={16}
+                                  color={colors.primary}
                                 />
                                 <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: colors.primary, flex: 1, marginLeft: 8 }} numberOfLines={1}>
                                   {url.replace(/https?:\/\/(www\.)?/, '')}
@@ -453,13 +453,13 @@ export default function GigDetailsScreen() {
                         )}
 
                         {/* View Full Profile Button */}
-                        <TouchableOpacity 
+                        <TouchableOpacity
                           onPress={() => {
                             console.log('👤 View Profile pressed');
                             console.log('👤 app.group:', app.group);
                             console.log('👤 app.applicant:', app.applicant);
                             console.log('👤 app.applicant_id:', app.applicant_id);
-                            
+
                             if (app.group?.id) {
                               console.log('👤 Navigating to group:', app.group.id);
                               router.push({ pathname: '/group_details', params: { id: app.group.id } });
@@ -492,7 +492,7 @@ export default function GigDetailsScreen() {
                               <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
-                              onPress={() => confirmAction(app.id, 'approved')}
+                              onPress={() => confirmAction(app.id, 'accepted')}
                               style={[styles.acceptButton, { backgroundColor: colors.primary }]}
                             >
                               <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
@@ -572,7 +572,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 150,
   },
   headerContainer: {
     paddingHorizontal: 24,

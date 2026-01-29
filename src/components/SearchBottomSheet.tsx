@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetFlatList, BottomSheetModal } from '@gorhom/bottom-sheet';
-import React, { forwardRef, useCallback, useMemo, useState } from 'react';
-import { Dimensions, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { BottomSheetBackdrop, BottomSheetModal } from '@gorhom/bottom-sheet';
+import React, { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Dimensions, Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ListingCard from './ListingCard';
+import SafeBottomSheetFlatList from './SafeBottomSheetFlatList';
 
 const { width } = Dimensions.get('window');
 
@@ -13,165 +15,48 @@ interface SearchBottomSheetProps {
     onItemPress?: (listingId: string) => void;
 }
 
-import { useAuth } from '../context/AuthContext';
+const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
+    function SearchBottomSheet({ onClose, onItemPress }, ref) {
+        const { colors, isDark } = useTheme();
+        const { userRole } = useAuth();
+        const snapPoints = useMemo(() => ['94%'], []);
 
-// ... imports
+        // Filter Chips - safely handle null userRole
+        const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
+        const FILTERS = isOwner ? ['All', 'Musician'] : ['All', 'Musician', 'Studio', 'Venue'];
 
-const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(({ onClose, onItemPress }, ref) => {
-    const { colors, isDark } = useTheme();
-    const { userRole } = useAuth();
-    const snapPoints = useMemo(() => ['94%'], []);
+        const [activeFilter, setActiveFilter] = useState('All');
+        const [searchQuery, setSearchQuery] = useState('');
+        const [data, setData] = useState<any[]>([]);
+        const [loading, setLoading] = useState(false);
+        const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-    // Filter Chips
-    const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
-    // If owner, only show relevant filters (effectively just Musicians, maybe 'All' is redundant if it's the same, but let's keep it consistent)
-    const FILTERS = isOwner ? ['All', 'Musician'] : ['All', 'Musician', 'Studio', 'Venue'];
+        const renderBackdrop = useCallback(
+            (props: any) => (
+                <BottomSheetBackdrop
+                    {...props}
+                    disappearsOnIndex={-1}
+                    appearsOnIndex={0}
+                    opacity={0.4}
+                />
+            ),
+            []
+        );
 
-    const [activeFilter, setActiveFilter] = useState('All');
-    const [searchQuery, setSearchQuery] = useState('');
+        const handleClose = useCallback(() => {
+            Keyboard.dismiss();
+            onClose?.();
+        }, [onClose]);
 
-    const renderBackdrop = useCallback(
-        (props: any) => (
-            <BottomSheetBackdrop
-                {...props}
-                disappearsOnIndex={-1}
-                appearsOnIndex={0}
-                opacity={0.5}
-            />
-        ),
-        []
-    );
-
-    const handleDismiss = () => {
-        // @ts-ignore
-        ref?.current?.dismiss();
-        if (onClose) onClose();
-    };
-
-    const handleCardPress = (item: any) => {
-        if (onItemPress) {
-            handleDismiss();
-            onItemPress(item.id);
-        }
-    };
-
-    // Data State
-    const [data, setData] = useState<any[]>([]);
-    const [loading, setLoading] = useState(false);
-
-    // ... state ...
-
-    // Filter Logic & Search Effect
-    React.useEffect(() => {
-        const doSearch = async () => {
-            setLoading(true);
-            try {
-                let results: any[] = [];
-                // Use require for AsyncStorage to avoid circular dependency issues if global import fails or isn't present
-                const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-
-                // AI RELEVANCE CHECK
-                // If query is empty, try to fetch based on "Last Viewed" embedding
-                let usedAI = false;
-                if (searchQuery.trim().length === 0) {
-                    try {
-                        let queryVector = null;
-
-                        // 1. Try Long-Term Profile
-                        const { data: { user } } = await supabase.auth.getUser();
-                        if (user) {
-                            const { data: p } = await supabase.from('profiles').select('interest_vector').eq('id', user.id).single();
-                            if (p?.interest_vector) {
-                                queryVector = typeof p.interest_vector === 'string' ? JSON.parse(p.interest_vector) : p.interest_vector;
-                            }
-                        }
-
-                        // 2. Fallback to Short-Term
-                        if (!queryVector) {
-                            const historyJson = await AsyncStorage.getItem('last_viewed_item');
-                            if (historyJson) {
-                                const history = JSON.parse(historyJson);
-                                if (history?.embedding) queryVector = history.embedding;
-                            }
-                        }
-
-                        if (queryVector) {
-                            usedAI = true;
-                            const history = { embedding: queryVector }; // Shim for below logic if needed, or refactor below
-                            // Actually the code below expects `history.embedding`.
-                            // Let's keep `history` var or refactor the block below.
-                            // Refactoring block below to use `queryVector`
-
-                            // Determine type to search
-                            // If filter is 'All', we search all types? match_listings takes one type.
-                            // We might need to run parallel for all types if 'All'
-                            const searchTypes = isOwner
-                                ? ['Group']
-                                : (activeFilter === 'All' ? ['Group', 'Studio', 'Gig'] : [activeFilter]);
-
-                            const promises = searchTypes.map(t =>
-                                supabase.rpc('match_listings', {
-                                    query_embedding: history.embedding,
-                                    match_threshold: 0.3, // Lower threshold for search
-                                    match_count: 5,
-                                    listing_type: t === 'Musician' ? 'Group' : (t === 'Venue' ? 'Gig' : t) // Map filter to type
-                                    // Note: Mapping 'Venue' -> 'Gig' or 'Studio' depends on schema. 
-                                    // Standard: 'Group', 'Studio', 'Gig'
-                                })
-                            );
-
-                            const aiResults = await Promise.all(promises);
-                            const flatIds: any[] = [];
-
-                            // Collect IDs and Types
-                            aiResults.forEach((res, idx) => {
-                                if (res.data) {
-                                    const type = searchTypes[idx];
-                                    res.data.forEach((r: any) => flatIds.push({ id: r.id, type }));
-                                }
-                            });
-
-                            // Fetch full objects
-                            if (flatIds.length > 0) {
-                                // We need to fetch from respective tables again to get full data
-                                // This is a bit heavy, but correct.
-                                // Optimization: Just fetch top 10 total
-
-                                for (const type of ['Group', 'Studio', 'Gig']) {
-                                    const ids = flatIds.filter(x => x.type === type).map(x => x.id);
-                                    if (ids.length > 0) {
-                                        let table = 'groups_with_stats';
-                                        if (type === 'Studio') table = 'studios_with_stats';
-                                        if (type === 'Gig') table = 'gigs_with_stats';
-
-                                        const { data: fullItems } = await supabase.from(table).select('*').in('id', ids);
-                                        if (fullItems) {
-                                            const mapped = fullItems.map((item: any) => ({
-                                                ...item,
-                                                type,
-                                                image: item.images?.[0] || item.image,
-                                                hourly_rate: item.hourly_rate ? item.hourly_rate.toString() : undefined,
-                                                budget: item.budget ? item.budget.toString() : undefined,
-                                                rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
-                                            }));
-                                            results.push(...mapped);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        console.log('AI Search Error:', e);
-                    }
-                }
-
-                if (!usedAI) {
-                    // Fallback to Standard Search
-                    // Determine which tables to query based on filter
+        // Simple search effect
+        useEffect(() => {
+            const doSearch = async () => {
+                setLoading(true);
+                try {
+                    let results: any[] = [];
                     let tables: string[] = [];
 
                     if (isOwner) {
-                        // Owner restricted view: Only Groups
                         tables = ['groups_with_stats'];
                     } else {
                         if (activeFilter === 'All') tables = ['groups_with_stats', 'studios_with_stats', 'gigs_with_stats'];
@@ -182,213 +67,255 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>((
 
                     for (const table of tables) {
                         let query = supabase.from(table).select('*');
-
                         if (searchQuery.trim().length > 0) {
                             query = query.or(`name.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`);
                         }
-
-                        const { data: qData, error } = await query.limit(10);
-
-                        if (error) {
-                            console.log(`Error querying ${table}:`, error);
-                            continue;
+                        // Only show open gigs for musicians/guests
+                        if (table === 'gigs_with_stats') {
+                            query = query.eq('status', 'open');
                         }
-
+                        const { data: qData } = await query.limit(10);
                         if (qData) {
-                            // Normalize
                             const type = table.includes('group') ? 'Group' : (table.includes('studio') ? 'Studio' : 'Gig');
                             const mapped = qData.map((item: any) => ({
                                 ...item,
-                                type: item.type || type, // Use existing or fallback
+                                type: item.type || type,
                                 image: item.images?.[0] || item.image,
-                                // Ensure normalized props for card
-                                // Ensure normalized props for card
-                                // For Studio: prioritize hourly_rate, For Gig: prioritize budget, For Group: rate
-                                hourly_rate: item.hourly_rate ? item.hourly_rate.toString() : undefined,
-                                budget: item.budget ? item.budget.toString() : undefined,
                                 rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
                             }));
                             results.push(...mapped);
                         }
                     }
+                    setData(results);
+                } catch (e) {
+                    console.log('Search error:', e);
+                } finally {
+                    setLoading(false);
                 }
+            };
 
-                // Client-side filtering for edge cases (like Venue vs Studio)
-                const final = results.filter(item => {
-                    if (activeFilter === 'Venue') {
-                        return item.type === 'Venue' || item.type === 'Gig' || (item.type === 'Studio' && item.amenities?.includes('Stage'));
-                    }
-                    return true;
-                });
+            const timeout = setTimeout(doSearch, 300);
+            return () => clearTimeout(timeout);
+        }, [searchQuery, activeFilter, isOwner, refreshTrigger]);
 
-                setData(final);
+        // Realtime Search Updates
+        useEffect(() => {
+            const channel = supabase
+                .channel('public:search_updates')
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'gigs' },
+                    () => setRefreshTrigger(prev => prev + 1)
+                )
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'studios' },
+                    () => setRefreshTrigger(prev => prev + 1)
+                )
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'groups' },
+                    () => setRefreshTrigger(prev => prev + 1)
+                )
+                .subscribe();
 
-            } catch (e) {
-                console.log('Search error:', e);
-            } finally {
-                setLoading(false);
-            }
-        };
+            return () => {
+                supabase.removeChannel(channel);
+            };
+        }, []);
 
-        const timeout = setTimeout(doSearch, 300); // Debounce
-        return () => clearTimeout(timeout);
-    }, [searchQuery, activeFilter]);
+        const handleItemPress = useCallback((item: any) => {
+            onClose?.();
+            onItemPress?.(item.id);
+        }, [onClose, onItemPress]);
 
-    // Handle invite action - opens the details sheet for booking/connecting
-    const handleInvite = (item: any) => {
-        if (onItemPress) {
-            handleDismiss();
-            onItemPress(item.id);
-        }
-    };
+        // Clear search
+        const clearSearch = () => setSearchQuery('');
 
-    const renderItem = ({ item }: { item: any }) => (
-        <ListingCard
-            item={item}
-            onPress={handleCardPress}
-            onInvite={handleInvite}
-            variant="vertical"
-            style={{ width: '100%', marginBottom: 24, marginRight: 0 }}
-        />
-    );
+        const renderItem = useCallback(({ item }: { item: any }) => (
+            <ListingCard
+                item={item}
+                onPress={handleItemPress}
+                variant="vertical"
+                style={{ width: '100%' }}
+            />
+        ), [handleItemPress]);
 
-    return (
-        <BottomSheetModal
-            ref={ref}
-            index={0}
-            snapPoints={snapPoints}
-            backdropComponent={renderBackdrop}
-            backgroundStyle={{ backgroundColor: colors.background }}
-            handleIndicatorStyle={{ backgroundColor: isDark ? '#4B5563' : '#E5E7EB', width: 40 }}
-            keyboardBehavior="interactive"
-            keyboardBlurBehavior="restore"
-            enablePanDownToClose={true}
-        >
-            <View style={{ flex: 1, minHeight: '100%' }}>
-                {/* 1. Modal Header & Controls */}
+        const keyExtractor = useCallback((item: any) => item.id.toString(), []);
+
+        // Extracted Header Component (Sticky)
+        const renderHeader = useMemo(() => (
+            <View style={{ backgroundColor: colors.background }}>
+                {/* Header with improved search bar */}
                 <View style={styles.headerContainer}>
-                    {/* Top Row: Close | Title | Filter Icon */}
-                    <View style={styles.headerTopRow}>
-                        <TouchableOpacity onPress={handleDismiss} style={styles.iconBtn}>
-                            <Ionicons name="close" size={24} color={colors.text} />
-                        </TouchableOpacity>
-                        <Text style={[styles.headerTitle, { color: colors.text }]}>Search</Text>
-                        <View style={{ width: 40 }} />
+                    <Text style={[styles.headerTitle, { color: colors.text }]}>Discover</Text>
+
+                    <View style={{ flexDirection: 'column', gap: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <View style={[styles.searchContainer, {
+                                flex: 1,
+                                backgroundColor: isDark ? '#374151' : '#F3F4F6',
+                                borderColor: 'transparent'
+                            }]}>
+                                <Ionicons name="search" size={20} color={colors.textSecondary} />
+                                <TextInput
+                                    style={[styles.searchInput, { color: colors.text }]}
+                                    placeholder={isOwner ? "Find musicians, bands..." : "Find studios, gigs, venues..."}
+                                    placeholderTextColor={colors.textSecondary}
+                                    value={searchQuery}
+                                    onChangeText={setSearchQuery}
+                                    returnKeyType="search"
+                                    autoCorrect={false}
+                                />
+                                {searchQuery.length > 0 && (
+                                    <TouchableOpacity onPress={clearSearch} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                        <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </View>
+                        <Text style={{
+                            fontSize: 12,
+                            color: colors.textSecondary,
+                            marginLeft: 4,
+                            fontFamily: 'Poppins_400Regular'
+                        }}>
+                            {isOwner ? "Genre • Availability" : "Location • Rate"}
+                        </Text>
                     </View>
 
-                    {/* Search Input */}
-                    <View style={[styles.searchContainer, { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderColor: isDark ? '#4B5563' : 'transparent' }]}>
-                        <Ionicons name="search" size={20} color={colors.textSecondary} />
-                        <TextInput
-                            style={[styles.searchInput, { color: colors.text }]}
-                            placeholder="Where to?"
-                            placeholderTextColor={colors.textSecondary}
-                            value={searchQuery}
-                            onChangeText={setSearchQuery}
-                        />
-                        {searchQuery.length > 0 && (
-                            <TouchableOpacity onPress={() => setSearchQuery('')}>
-                                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
-                            </TouchableOpacity>
-                        )}
-                    </View>
-
-                    {/* 2. Category Filter Chips (Horizontal) - Hidden for owners */}
+                    {/* Filter Chips - Modern Style */}
                     {!isOwner && (
-                        <View style={styles.chipsContainer}>
-                            <BottomSheetFlatList
-                                horizontal
-                                data={FILTERS}
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={{ paddingHorizontal: 24, gap: 10 }}
-                                keyExtractor={(i: string) => i}
-                                renderItem={({ item }: { item: string }) => {
-                                    const isActive = item === activeFilter;
-                                    return (
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.chip,
-                                                isActive ? { backgroundColor: colors.primary, borderColor: colors.primary } : { backgroundColor: 'transparent', borderColor: colors.border },
-                                            ]}
-                                            onPress={() => setActiveFilter(item)}
-                                        >
-                                            <Text style={[
-                                                styles.chipText,
-                                                isActive ? { color: '#FFF' } : { color: colors.textSecondary },
-                                            ]}>{item}</Text>
-                                        </TouchableOpacity>
-                                    );
-                                }}
-                            />
+                        <View style={styles.chipsRow}>
+                            {FILTERS.map((filter) => {
+                                const isActive = filter === activeFilter;
+                                return (
+                                    <TouchableOpacity
+                                        key={filter}
+                                        style={[
+                                            styles.chip,
+                                            isActive
+                                                ? { backgroundColor: colors.primary, borderWidth: 0 }
+                                                : { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderWidth: 0 },
+                                        ]}
+                                        onPress={() => setActiveFilter(filter)}
+                                        activeOpacity={0.8}
+                                    >
+                                        <Text style={[
+                                            styles.chipText,
+                                            isActive ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' },
+                                        ]}>{filter}</Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
                         </View>
                     )}
                 </View>
 
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-                {/* 3. Vertical Results List */}
-                <BottomSheetFlatList
-                    data={data}
-                    keyExtractor={(item: any) => item.id}
-                    renderItem={renderItem}
-                    contentContainerStyle={[styles.listContent, { minHeight: '100%' }]}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                    ListEmptyComponent={
-                        <View style={{ alignItems: 'center', marginTop: 40 }}>
-                            <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No results found</Text>
-                        </View>
-                    }
-                />
+                <Text style={[styles.resultsLabel, { color: colors.textSecondary }]}>
+                    Top Results
+                </Text>
             </View>
-        </BottomSheetModal>
-    );
-});
+        ), [colors, isDark, searchQuery, activeFilter, isOwner, FILTERS]);
+
+        const ListEmptyComponent = useMemo(() => (
+            <View style={styles.emptyContainer}>
+                <View style={[styles.emptyIconContainer, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}>
+                    <Ionicons name="search-outline" size={32} color={colors.textSecondary} />
+                </View>
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>No results found</Text>
+                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                    We couldn't find anything for "{searchQuery}".{"\n"}Try adjusting your search terms.
+                </Text>
+            </View>
+        ), [colors, isDark, searchQuery]);
+
+        return (
+            <BottomSheetModal
+                ref={ref}
+                index={0}
+                snapPoints={snapPoints}
+                backdropComponent={renderBackdrop}
+                onDismiss={handleClose}
+                onChange={(index) => {
+                    if (index === 0) setRefreshTrigger(prev => prev + 1);
+                }}
+                backgroundStyle={{ backgroundColor: colors.background, borderRadius: 32 }}
+                handleIndicatorStyle={{ backgroundColor: isDark ? '#4B5563' : '#E5E7EB', width: 40, marginTop: 10 }}
+                enablePanDownToClose
+                keyboardBehavior="interactive"
+                keyboardBlurBehavior="restore"
+                android_keyboardInputMode="adjustResize"
+            >
+                {renderHeader}
+
+                {loading ? (
+                    <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="large" color={colors.primary} />
+                    </View>
+                ) : (
+                    <SafeBottomSheetFlatList
+                        data={data}
+                        keyExtractor={keyExtractor}
+                        renderItem={renderItem}
+                        // ListHeaderComponent has been removed / extracted to top
+                        ListEmptyComponent={ListEmptyComponent}
+                        ItemSeparatorComponent={() => <View style={{ height: 24 }} />}
+                        contentContainerStyle={[styles.listContent, { paddingHorizontal: 24 }]} // Added padding here instead of on card
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                    />
+                )}
+            </BottomSheetModal>
+        );
+    }
+);
 
 const styles = StyleSheet.create({
     headerContainer: {
-        paddingVertical: 8,
-    },
-    headerTopRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        marginBottom: 16,
+        paddingTop: 8,
+        paddingBottom: 16,
+        paddingHorizontal: 24,
+        gap: 16,
     },
     headerTitle: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 16,
-    },
-    iconBtn: {
-        padding: 8,
-        borderRadius: 20,
+        fontSize: 24,
+        fontFamily: 'Poppins_700Bold',
+        marginBottom: 4,
     },
     searchContainer: {
-        marginHorizontal: 24,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderRadius: 16,
-        borderWidth: 1,
         gap: 10,
-        marginBottom: 16,
     },
     searchInput: {
         flex: 1,
         fontFamily: 'Poppins_500Medium',
-        fontSize: 14,
+        fontSize: 15,
         padding: 0,
     },
-    chipsContainer: {
-        paddingBottom: 8,
+    cancelButton: {
+        paddingVertical: 8,
+        paddingLeft: 4,
+    },
+    cancelText: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 15,
+    },
+    chipsRow: {
+        flexDirection: 'row',
+        gap: 8,
+        paddingTop: 4,
     },
     chip: {
         paddingHorizontal: 16,
         paddingVertical: 8,
-        borderRadius: 24,
-        borderWidth: 1,
+        borderRadius: 100,
     },
     chipText: {
         fontFamily: 'Poppins_500Medium',
@@ -397,12 +324,51 @@ const styles = StyleSheet.create({
     divider: {
         height: 1,
         width: '100%',
-        opacity: 0.5,
+        opacity: 0.1,
     },
     listContent: {
-        paddingHorizontal: 24,
-        paddingTop: 24,
-        paddingBottom: 50,
+        paddingBottom: 100,
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingTop: 50,
+    },
+    emptyContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 60,
+        paddingHorizontal: 32,
+    },
+    emptyIconContainer: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    emptyTitle: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 18,
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    emptySubtitle: {
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 22,
+    },
+    resultsLabel: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+        marginBottom: 16,
+        marginHorizontal: 24,
+        marginTop: 24,
     },
 });
 
