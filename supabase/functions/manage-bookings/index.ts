@@ -64,6 +64,9 @@ serve(async (req: Request) => {
                     const bookingDate = new Date(`${b.booking_date}T${b.start_time}`)
                     const endDate = new Date(`${b.booking_date}T${b.end_time}`)
 
+                    // DEBUG: Log date parsing for first few items
+                    // console.log(`[DEBUG] Booking ${b.id}: Status=${b.status}, End=${endDate.toISOString()}, Now=${now.toISOString()}`)
+
                     const item = {
                         id: b.id,
                         type_id: 'studio_booking',
@@ -77,7 +80,8 @@ serve(async (req: Request) => {
                         image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
                         status: b.status === 'pending' ? 'Waiting for Approval' :
                             b.status === 'confirmed' ? 'Confirmed' :
-                                b.status === 'cancelled' ? 'Declined' : b.status,
+                                b.status === 'checked_in' ? 'In Progress' :
+                                    b.status === 'cancelled' ? 'Declined' : b.status,
                         type: 'Studio Booking',
                         isCancelled: b.status === 'cancelled',
                         action: b.status === 'pending' ? 'View Details' : 'Details',
@@ -93,18 +97,29 @@ serve(async (req: Request) => {
                         // @ts-ignore
                         categorized.Pending.push(item)
                     } else if (b.status === 'confirmed') {
-                        if (now >= bookingDate && now <= endDate) {
+                        if (now > endDate) {
+                            // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
                             // @ts-ignore
-                            categorized.Ongoing.push({ ...item, status: 'In Progress' })
-                        } else if (now > endDate) {
-                            // Only show in Review if not yet reviewed by customer
-                            if (!b.reviewed_by_customer) {
-                                // @ts-ignore
-                                categorized.Review.push({ ...item, status: 'Completed' })
-                            }
+                            categorized.Review.push({ ...item, status: 'Completed' })
                         } else {
                             // @ts-ignore
                             categorized.Upcoming.push(item)
+                        }
+                    } else if (b.status === 'checked_in') {
+                        if (now > endDate) {
+                            // AUTO-COMPLETE: If checked_in and time passed, it's done. Move to Review.
+                            // @ts-ignore
+                            categorized.Review.push({ ...item, status: 'Completed' })
+                        } else {
+                            // STRICT Ongoing Check
+                            // @ts-ignore
+                            categorized.Ongoing.push({ ...item, status: 'In Progress' })
+                        }
+                    } else if (b.status === 'completed') {
+                        // Completed bookings that need review
+                        if (!b.reviewed_by_customer) {
+                            // @ts-ignore
+                            categorized.Review.push({ ...item, status: 'Completed' })
                         }
                     } else if (b.status === 'cancelled') {
                         // @ts-ignore
@@ -154,7 +169,8 @@ serve(async (req: Request) => {
                             image: b.studio?.images?.[0] || 'https://picsum.photos/400/300',
                             status: b.status === 'pending' ? 'User Request' :
                                 b.status === 'confirmed' ? 'Confirmed' :
-                                    b.status === 'cancelled' ? 'Declined' : b.status,
+                                    b.status === 'checked_in' ? 'In Progress' :
+                                        b.status === 'cancelled' ? 'Declined' : b.status,
                             type: 'Studio Booking',
                             isCancelled: b.status === 'cancelled',
                             action: b.status === 'pending' ? 'Confirm Now' : 'Details',
@@ -173,18 +189,28 @@ serve(async (req: Request) => {
                             // @ts-ignore
                             categorized.Pending.push(item)
                         } else if (b.status === 'confirmed') {
-                            if (now >= bookingDate && now <= endDate) {
+                            if (now > endDate) {
+                                // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
                                 // @ts-ignore
-                                categorized.Ongoing.push({ ...item, status: 'In Progress' })
-                            } else if (now > endDate) {
-                                // Only show in Review if not yet reviewed by owner
-                                if (!b.reviewed_by_owner) {
-                                    // @ts-ignore
-                                    categorized.Review.push({ ...item, status: 'Completed' })
-                                }
+                                categorized.Review.push({ ...item, status: 'Completed' })
                             } else {
                                 // @ts-ignore
                                 categorized.Upcoming.push(item)
+                            }
+                        } else if (b.status === 'checked_in') {
+                            if (now > endDate) {
+                                // AUTO-COMPLETE: If checked_in and time passed, it's done. Move to Review.
+                                // @ts-ignore
+                                categorized.Review.push({ ...item, status: 'Completed' })
+                            } else {
+                                // STRICT Ongoing Check
+                                // @ts-ignore
+                                categorized.Ongoing.push({ ...item, status: 'In Progress' })
+                            }
+                        } else if (b.status === 'completed') {
+                            if (!b.reviewed_by_owner) {
+                                // @ts-ignore
+                                categorized.Review.push({ ...item, status: 'Completed' })
                             }
                         } else if (b.status === 'cancelled') {
                             // @ts-ignore
@@ -628,7 +654,7 @@ serve(async (req: Request) => {
                     end_time: overallEnd,
                     time_slots: slots,  // Detailed slots
                     notes: notes || null,
-                    status: 'pending',
+                    status: 'confirmed', // Auto-confirm per user request
                     // Store pricing details - use validated values
                     base_rate: finalBaseRate,
                     hours: finalHours,
@@ -911,6 +937,95 @@ serve(async (req: Request) => {
                     status: 200,
                 })
             }
+        }
+
+        // 7. SCAN QR (Create Check-In)
+        if (action === 'scan_qr') {
+            const { qr_code, scanner_id } = params;
+
+            console.log('📷 Scan QR request:', { qr_code, scanner_id });
+
+            // 1. Verify the booking exists and is confirmed
+            const { data: booking, error: fetchError } = await supabaseClient
+                .from('studio_bookings')
+                .select('*, studio:studios(owner_id)')
+                .eq('id', qr_code)
+                .single();
+
+            console.log('📷 Booking fetch result:', { booking, fetchError });
+
+            if (fetchError) {
+                console.error('📷 Fetch error details:', fetchError);
+                return new Response(JSON.stringify({ error: 'Invalid booking code.', details: fetchError.message }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            if (!booking) {
+                return new Response(JSON.stringify({ error: 'Booking not found.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            // 2. Verify scanner is the studio owner
+            console.log('📷 Verifying owner:', { studio_owner: booking.studio?.owner_id, scanner_id });
+            if (!booking.studio || booking.studio.owner_id !== scanner_id) {
+                return new Response(JSON.stringify({ 
+                    error: 'You are not authorized to scan for this studio.',
+                    debug: { studio_owner: booking.studio?.owner_id, scanner_id }
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            // 3. Verify status
+            console.log('📷 Current booking status:', booking.status);
+            if (booking.status === 'checked_in') {
+                return new Response(JSON.stringify({ message: 'Already checked in!', booking }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (booking.status !== 'confirmed') {
+                return new Response(JSON.stringify({ error: `Cannot check in. Booking status is ${booking.status}.` }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // 4. Update status to checked_in
+            console.log('📷 Attempting to update booking to checked_in...');
+            const { data: updated, error: updateError } = await supabaseClient
+                .from('studio_bookings')
+                .update({
+                    status: 'checked_in',
+                    check_in_time: new Date().toISOString()
+                })
+                .eq('id', booking.id)
+                .select()
+                .single();
+
+            if (updateError) {
+                console.error('📷 Check-in update error:', updateError);
+                return new Response(JSON.stringify({ 
+                    error: 'Failed to update check-in status.', 
+                    details: updateError.message,
+                    code: updateError.code 
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 500,
+                });
+            }
+
+            console.log('📷 Check-in successful:', updated);
+            return new Response(JSON.stringify({ success: true, booking: updated }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
         }
 
         throw new Error('Invalid action')
