@@ -126,6 +126,43 @@ serve(async (req: Request) => {
             })
         }
 
+        // 4. CREATE PROFILE (Bypass RLS for signup)
+        if (action === 'create') {
+            const { userId, email, full_name, role, is_verified, verification_status, didit_session_id } = params
+
+            // Initialize Admin Client to bypass RLS
+            const supabaseAdmin = createClient(
+                // @ts-ignore
+                Deno.env.get('SUPABASE_URL') ?? '',
+                // @ts-ignore
+                Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+            )
+
+            const { data, error } = await supabaseAdmin
+                .from('profiles')
+                .upsert({
+                    id: userId,
+                    email,
+                    full_name,
+                    role,
+                    is_verified,
+                    verification_status,
+                    didit_session_id
+                })
+                .select()
+                .single()
+
+            if (error) {
+                console.error('Profile creation error:', error)
+                throw error
+            }
+
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
         throw new Error('Invalid action')
 
     } catch (error: any) {

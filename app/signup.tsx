@@ -118,7 +118,7 @@ export default function SignupScreen() {
 
     // Role options
     const roleOptions = [
-        { value: 'musician' as const, label: 'Musician', icon: 'musical-notes-outline' as const, description: 'Join bands, find gigs' },
+        { value: 'musician' as const, label: 'Musical Artist', icon: 'musical-notes-outline' as const, description: 'Join bands, find gigs' },
         { value: 'venue-owner' as const, label: 'Venue Owner', icon: 'business-outline' as const, description: 'Host events, hire artists' },
         { value: 'studio-owner' as const, label: 'Studio Owner', icon: 'mic-outline' as const, description: 'Offer recording services' },
     ];
@@ -298,7 +298,6 @@ export default function SignupScreen() {
         }
 
         // 2. Security Check: Validate the verification result on the server
-        // This ensures the user didn't just type ?verified=true in the URL
         const refToLink = sessionId || tempSessionRef || verificationUrl.split('reference=')[1]?.split('&')[0];
         console.log('Finishing Account Creation. Using Session ID:', refToLink);
 
@@ -315,8 +314,6 @@ export default function SignupScreen() {
         let verifiedName = '';
         try {
             console.log('Fetching Didit session for Ref:', refToLink);
-            // We attempt to fetch the session data to store it in metadata
-            // Using our modified 'create-didit-session' which now supports 'get_session'
             const { data: sessionData, error: invokeError } = await supabase.functions.invoke('create-didit-session', {
                 body: { action: 'get_session', session_id: refToLink }
             });
@@ -329,8 +326,6 @@ export default function SignupScreen() {
                 diditData = sessionData;
                 console.log('Didit Data Fetched (Keys):', Object.keys(sessionData));
 
-                // Try to extract name from various possible locations in Didit response v3
-                // Adjusting for common casing issues and nested structures
                 const extracted = diditData?.features?.extracted_data || diditData?.extracted_data || {};
                 const mrz = extracted?.mrz || {};
                 const ocr = extracted?.ocr || {};
@@ -347,20 +342,21 @@ export default function SignupScreen() {
 
                 if (first || last) {
                     verifiedName = [first, last].filter(Boolean).join(' ');
-                } else {
-                    console.warn('Name fields not found in Didit data:', JSON.stringify(extracted));
                 }
             }
         } catch (e) {
             console.log('Could not fetch specific Didit data, proceeding with reference only.', e);
         }
 
+        // Fallback for name if Didit fails
+        if (!verifiedName) {
+            verifiedName = email.split('@')[0] || 'Musician';
+        }
+
         console.log('Proceeding to Supabase SignUp with Name:', verifiedName);
 
         try {
             // 3. Create Account
-            // WORKAROUND: We strictly align metadata with the 'profiles' table columns to prevent Trigger errors.
-            // We also add standard Supabase auth fields 'name' and 'display_name' if they don't break the trigger.
             const { data: authData, error: authError } = await supabase.auth.signUp({
                 email: email.trim(),
                 password: password,
@@ -371,9 +367,9 @@ export default function SignupScreen() {
                         verification_status: 'APPROVED',
                         is_verified: true,
                         didit_session_id: refToLink,
-                        full_name: verifiedName,     // For 'profiles' table
-                        display_name: verifiedName,  // Standard Supabase Auth field
-                        name: verifiedName           // Standard Supabase Auth field
+                        full_name: verifiedName,
+                        display_name: verifiedName,
+                        name: verifiedName
                     }
                 }
             });
@@ -383,20 +379,49 @@ export default function SignupScreen() {
             if (authError) throw authError;
 
             if (authData.user) {
-                console.log('User created. Since database schema is locked, skipping RPC linking.');
+                // FORCE CREATE PROFILE (Via Edge Function to Bypass RLS)
+                try {
+                    const { error: profileError } = await supabase.functions.invoke('manage-profile', {
+                        body: {
+                            action: 'create',
+                            userId: authData.user.id,
+                            email: email.trim(),
+                            full_name: verifiedName,
+                            role: selectedRole,
+                            is_verified: true,
+                            verification_status: 'APPROVED',
+                            didit_session_id: refToLink
+                        }
+                    });
+
+                    if (profileError) {
+                        console.error('Manual Profile Creation Failed:', profileError);
+                    } else {
+                        console.log('Manual Profile Creation Success (Edge Function)');
+                    }
+                } catch (profErr) {
+                    console.error('Profile Invoke Exception:', profErr);
+                }
 
                 // Send Magic Link (matches user's expected "Login" email)
                 try {
                     const { error: magicLinkError } = await supabase.auth.signInWithOtp({
                         email: email.trim(),
                         options: {
-                            emailRedirectTo: Linking.createURL('/'), // Ensures deep link back to app
-                            shouldCreateUser: false // User already created above
+                            emailRedirectTo: Linking.createURL('/'),
+                            shouldCreateUser: false
                         }
                     });
                     if (magicLinkError) console.warn('Magic Link trigger failed:', magicLinkError);
                 } catch (mlErr) {
                     console.warn('Magic Link error:', mlErr);
+                }
+
+                // Clear the temporary signup session
+                try {
+                    await AsyncStorage.removeItem('signup_current_session');
+                } catch (e) {
+                    console.log('Error clearing signup session:', e);
                 }
 
                 // Move to Email Verification Step
@@ -414,13 +439,11 @@ export default function SignupScreen() {
                     options: { emailRedirectTo: Linking.createURL('/') }
                 });
 
-                setLoading(false);
-
                 if (resendError) {
                     Alert.alert('Account Exists', 'This email is already registered. We tried to resend the verification link but failed. Please log in.');
                 } else {
                     Alert.alert('Account Exists', 'This email is already registered. We have sent a new verification link to your inbox.');
-                    setStep('email_verification'); // Optionally move them to the check inbox screen
+                    setStep('email_verification');
                 }
                 return;
             }
