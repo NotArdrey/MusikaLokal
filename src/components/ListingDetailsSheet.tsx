@@ -3,9 +3,11 @@ import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@g
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { forwardRef, useEffect, useMemo, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
+    BackHandler,
     Dimensions,
     Image,
     ScrollView,
@@ -13,13 +15,15 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useProfileCompletion } from '../hooks/useProfileCompletion';
 import CustomAlert from './CustomAlert';
+import DocumentUploader from './DocumentUploader';
 import Modal from './modal';
 import VideoUploader from './VideoUploader';
 
@@ -58,6 +62,7 @@ const formatTime12 = (time24: string) => {
 const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProps>(({ listingId }, ref) => {
     const { colors, isDark } = useTheme();
     const { userId } = useAuth();
+    const { isProfileComplete } = useProfileCompletion();
     const [loading, setLoading] = useState(false);
     const [group, setGroup] = useState<any>(null);
     const [isFavorited, setIsFavorited] = useState(false);
@@ -67,6 +72,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     // Application State (for Gig applications)
     const [pitchMessage, setPitchMessage] = useState('');
     const [videoUrl, setVideoUrl] = useState('');
+    const [cvFile, setCvFile] = useState<any>(null); // File object from picker
+    const [cvUrl, setCvUrl] = useState(''); // Uploaded URL (optional if we just upload on submit)
     const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
     const [hasExistingApplication, setHasExistingApplication] = useState(false);
     const [existingApplicationStatus, setExistingApplicationStatus] = useState<string | null>(null);
@@ -149,8 +156,41 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const [confirmMessage, setConfirmMessage] = useState('');
     const [confirmTitle, setConfirmTitle] = useState('');
 
+    // BackHandler Logic
+    const [sheetIndex, setSheetIndex] = useState(-1);
+
+    const handleSheetChanges = useCallback((index: number) => {
+        setSheetIndex(index);
+    }, []);
+
+    useEffect(() => {
+        const backAction = () => {
+            if (sheetIndex >= 0) {
+                (ref as any)?.current?.dismiss();
+                return true;
+            }
+            return false;
+        };
+        const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+        return () => backHandler.remove();
+    }, [sheetIndex, ref]);
+
     const handleConfirm = (action: () => void, title: string, message: string) => {
         console.log('🔵 handleConfirm called');
+
+        // Profile Check Gate
+        if (!isProfileComplete) {
+            Alert.alert(
+                "Profile Incomplete",
+                "You need to complete your profile details (contact & address) before you can proceed.",
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Complete Now", onPress: () => router.push('/edit_profile') }
+                ]
+            );
+            return;
+        }
+
         console.log('Title:', title);
         console.log('Message:', message);
         console.log('Action function:', action.name || 'anonymous');
@@ -170,7 +210,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             // Once rejected, musician cannot re-apply to the same gig
             const { data, error } = await supabase
                 .from('gig_applications')
-                .select('id, status, group_id')
+                .select('id, status, group_id, cv_url')
                 .eq('applicant_id', userId)
                 .eq('gig_id', listingId)
                 .maybeSingle();
@@ -184,9 +224,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 console.log('📋 User has already applied to this gig:', data);
                 setHasExistingApplication(true);
                 setExistingApplicationStatus(data.status);
+                if (data.cv_url) setCvUrl(data.cv_url);
             } else {
                 setHasExistingApplication(false);
                 setExistingApplicationStatus(null);
+                setCvUrl('');
             }
         } catch (err) {
             console.error('Error checking application:', err);
@@ -252,11 +294,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     };
 
     // Check Eligibility (Spam Block)
-    const checkEligibility = async (organizerId: string) => {
-        if (!userId || !organizerId) return;
+    const checkEligibility = async (targetGigId: string) => {
+        if (!userId || !targetGigId) return;
         try {
             const { data, error } = await supabase.functions.invoke('manage-listings', {
-                body: { action: 'check_eligibility', userId, organizerId }
+                body: { action: 'check_eligibility', userId, gigId: targetGigId }
             });
             if (error) throw error;
 
@@ -269,6 +311,41 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             }
         } catch (err) {
             console.error('Error checking eligibility:', err);
+        }
+    };
+
+    // Helper to upload CV
+    const uploadDocument = async (file: any) => {
+        try {
+            console.log('📤 Uploading CV:', file.name);
+
+            // 1. Read file
+            const response = await fetch(file.uri);
+            const arrayBuffer = await response.arrayBuffer();
+
+            // 2. Prepare path
+            const fileExt = file.name.split('.').pop() || 'pdf';
+            const fileName = `${userId}/cvs/${Date.now()}_cv.${fileExt}`;
+
+            // 3. Upload
+            const { data, error } = await supabase.storage
+                .from('documents') // Ensure this bucket exists or use 'applications'
+                .upload(fileName, arrayBuffer, {
+                    contentType: file.mimeType || 'application/pdf',
+                    upsert: false
+                });
+
+            if (error) throw error;
+
+            // 4. Get Public URL
+            const { data: urlData } = supabase.storage
+                .from('documents')
+                .getPublicUrl(data.path);
+
+            return urlData.publicUrl;
+        } catch (error) {
+            console.error('Error uploading CV:', error);
+            throw error;
         }
     };
 
@@ -297,10 +374,40 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             return;
         }
 
+        // Validate CV
+        if (!cvFile) {
+            setAlertConfig({
+                type: 'error',
+                title: 'CV Required',
+                message: 'Please upload your CV/Resume to apply.'
+            });
+            setAlertVisible(true);
+            return;
+        }
+
         setIsSubmittingApplication(true);
         console.log('Inserting application into database...');
 
         try {
+            // Upload CV first
+            let uploadedCvUrl = null;
+            if (cvFile) {
+                try {
+                    uploadedCvUrl = await uploadDocument(cvFile);
+                    console.log('✅ CV Uploaded:', uploadedCvUrl);
+                } catch (e) {
+                    console.error('Failed to upload CV', e);
+                    setAlertConfig({
+                        type: 'error',
+                        title: 'Upload Failed',
+                        message: 'Failed to upload CV. Please try again.'
+                    });
+                    setAlertVisible(true);
+                    setIsSubmittingApplication(false);
+                    return;
+                }
+            }
+
             const { data, error } = await supabase
                 .from('gig_applications')
                 .insert({
@@ -309,6 +416,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     group_id: selectedGroupId || null,
                     pitch_message: pitchMessage,
                     video_url: videoUrl || null,
+                    cv_url: uploadedCvUrl,
                     status: 'pending'
                 })
                 .select()
@@ -343,6 +451,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             // Clear form
             setPitchMessage('');
             setVideoUrl('');
+            setCvFile(null);
+            setCvUrl('');
 
             // Close the bottom sheet after alert is dismissed
             setTimeout(() => {
@@ -401,9 +511,9 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         if (group && userId && group.type === 'Studio') {
             checkExistingStudioBooking();
         }
-        // Check eligibility if Gig (uses organizer_id)
-        if (group && userId && group.type === 'Gig' && group.organizer_id) {
-            checkEligibility(group.organizer_id);
+        // Check eligibility if Gig (uses gig_id)
+        if (group && userId && group.type === 'Gig') {
+            checkEligibility(group.id);
         }
     }, [group, userId]);
 
@@ -600,9 +710,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 });
 
                 // 2. Check bookings for this day (Confirmed OR Pending should block)
-                const dayBookings = bookings.filter((b: any) =>
-                    b.status !== 'cancelled' && new Date(b.start_time).toISOString().split('T')[0] === dateStr
-                );
+                const dayBookings = bookings.filter((b: any) => {
+                    if (b.status === 'cancelled') return false;
+                    const startDate = new Date(b.start_time);
+                    if (isNaN(startDate.getTime())) return false;
+                    return startDate.toISOString().split('T')[0] === dateStr;
+                });
 
                 // 3. Mark slots as taken
                 // Simple logic: If booking starts at X, that slot is taken.
@@ -682,9 +795,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         const slotsSet = new Set<string>();
 
         // Identify blocked times from existing bookings (Confirmed OR Pending)
-        const dayBookings = existingBookings.filter((b: any) =>
-            b.status !== 'cancelled' && new Date(b.start_time).toISOString().split('T')[0] === dateStr
-        );
+        const dayBookings = existingBookings.filter((b: any) => {
+            if (b.status === 'cancelled') return false;
+            const startDate = new Date(b.start_time);
+            if (isNaN(startDate.getTime())) return false;
+            return startDate.toISOString().split('T')[0] === dateStr;
+        });
         console.log('🕐 Day bookings:', dayBookings.length);
 
         const blockedTimes = new Set<string>();
@@ -963,95 +1079,111 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             {/* 2. The Slot Grid (The Action) - Reveals on Date Selection */}
             {selectedDate && (
                 <View style={[styles.slotGridContainer, { borderTopWidth: 1, borderTopColor: isDark ? '#374151' : '#F3F4F6', paddingTop: 16 }]}>
+
                     <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
                         Available Slots for {new Date(selectedDate).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
                     </Text>
 
                     {availableSlots.length > 0 ? (
-                        <View style={styles.slotGrid}>
-                            {availableSlots.map((slot, index) => {
-                                const isSelected = selectedSlot === slot;
-                                return (
-                                    <TouchableOpacity
-                                        key={slot}
-                                        style={[
-                                            styles.slotButton,
-                                            {
-                                                backgroundColor: isSelected ? (isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)') : (isDark ? '#374151' : '#F3F4F6'),
-                                                borderColor: isSelected ? (colors.primary === '#7c3aed' ? '#FFD700' : colors.primary) : 'transparent', // Gold-ish border if primary is purple, or just primary
-                                                borderWidth: isSelected ? 2 : 0,
-                                            }
-                                        ]}
-                                        onPress={() => {
-                                            setSelectedSlot(slot);
+                        <View>
+                            {/* Helper to group slots */}
+                            {(() => {
+                                const grouped = {
+                                    Morning: [] as string[],
+                                    Afternoon: [] as string[],
+                                    Evening: [] as string[]
+                                };
+                                availableSlots.forEach(slot => {
+                                    const hour = parseInt(slot.split(':')[0]);
+                                    if (hour < 12) grouped.Morning.push(slot);
+                                    else if (hour < 18) grouped.Afternoon.push(slot);
+                                    else grouped.Evening.push(slot);
+                                });
 
-                                            // 1. Update start date/time
-                                            const [hours, minutes] = slot.split(':');
-                                            const startDate = new Date(selectedDate);
-                                            startDate.setHours(parseInt(hours), parseInt(minutes));
-                                            setDate(startDate);
+                                return (Object.keys(grouped) as Array<keyof typeof grouped>).map(period => {
+                                    if (grouped[period].length === 0) return null;
+                                    return (
+                                        <View key={period} style={{ marginBottom: 16 }}>
+                                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary, fontSize: 12, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                                                {period}
+                                            </Text>
+                                            <View style={styles.slotGrid}>
+                                                {grouped[period].map(slot => {
+                                                    const isSelected = selectedSlot === slot;
+                                                    // Check if this slot is part of the selected duration range
+                                                    const slotHour = parseInt(slot.split(':')[0]);
+                                                    const startHour = selectedSlot ? parseInt(selectedSlot.split(':')[0]) : -1;
+                                                    const endHour = endTime ? endTime.getHours() : -1;
+                                                    const isInRange = selectedSlot && endTime && slotHour >= startHour && slotHour < endHour;
 
-                                            // 2. Calculate Valid End Times (Contiguous Slots)
-                                            // Logic: Check if next hour exists in availableSlots
-                                            const validEndsSet = new Set<string>();
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={slot}
+                                                            style={[
+                                                                styles.slotButton,
+                                                                {
+                                                                    backgroundColor: isSelected ? (isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)') :
+                                                                        isInRange ? (isDark ? 'rgba(124, 58, 237, 0.05)' : 'rgba(124, 58, 237, 0.05)') :
+                                                                            (isDark ? '#374151' : '#F3F4F6'),
+                                                                    borderColor: isSelected ? colors.primary : 'transparent',
+                                                                    borderWidth: isSelected ? 2 : 0,
+                                                                }
+                                                            ]}
+                                                            onPress={() => {
+                                                                setSelectedSlot(slot);
 
-                                            // Convert all available slots to minutes for easier math
-                                            const slotsInMinutes = new Set(availableSlots.map(s => {
-                                                const [h, m] = s.split(':');
-                                                return parseInt(h) * 60 + parseInt(m);
-                                            }));
+                                                                // 1. Update start date/time
+                                                                const [hours, minutes] = slot.split(':');
+                                                                const startDate = new Date(selectedDate);
+                                                                startDate.setHours(parseInt(hours), parseInt(minutes));
+                                                                setDate(startDate);
 
-                                            const startMinutes = parseInt(hours) * 60 + parseInt(minutes);
+                                                                // 2. Calculate Valid Max Duration
+                                                                const availableHours = new Set(availableSlots.map(s => parseInt(s.split(':')[0])));
+                                                                let maxDur = 0;
+                                                                let currentH = parseInt(hours);
 
-                                            // Start checking from next hour
-                                            let currentMinutes = startMinutes + 60; // Min duration 1 hour (60 mins)
+                                                                // Check up to 12 hours ahead
+                                                                for (let i = 0; i < 12; i++) {
+                                                                    // Check if the slot *starts* at this hour is available
+                                                                    // (Except the first one, which we know is available since we clicked it)
+                                                                    if (i > 0 && !availableHours.has(currentH)) break;
+                                                                    maxDur++;
+                                                                    currentH++;
+                                                                    if (currentH >= 24) break;
+                                                                }
 
-                                            // Loop to find max possible duration
-                                            // Max 12 hours or until gap
-                                            for (let i = 0; i < 12; i++) {
-                                                // Handle day wrapping (simple version: limit to 24h)
-                                                if (currentMinutes >= 24 * 60) break;
+                                                                // Store max available duration for this start time
+                                                                // We can re-use validEndTimes state to store valid DURATIONS (numbers) as strings if we want, 
+                                                                // or just calculate valid durations on the fly.
+                                                                // Let's store valid duration HOURS in validEndTimes as strings like "1", "2", "3" to reuse state.
+                                                                const validDurs = [];
+                                                                for (let i = 1; i <= maxDur; i++) validDurs.push(i.toString());
+                                                                setValidEndTimes(validDurs);
 
-                                                const h = Math.floor(currentMinutes / 60);
-                                                const m = currentMinutes % 60;
-                                                const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-
-                                                validEndsSet.add(timeStr);
-
-                                                // Check if this time slot (currentMinutes) is available as a START time
-                                                // If it is, we can EXTEND to next hour.
-                                                // If NOT, then this is the last possible end time.
-
-                                                if (!slotsInMinutes.has(currentMinutes)) {
-                                                    break;
-                                                }
-
-                                                currentMinutes += 60;
-                                            }
-
-                                            const validEnds = Array.from(validEndsSet);
-                                            setValidEndTimes(validEnds);
-
-                                            // 3. Set Default End Time (1 hour duration)
-                                            if (validEnds.length > 0) {
-                                                const defaultEnd = validEnds[0];
-                                                const [endH, endM] = defaultEnd.split(':');
-                                                const endDate = new Date(startDate);
-                                                endDate.setHours(parseInt(endH), parseInt(endM));
-                                                setEndTime(endDate);
-                                            }
-                                        }}
-                                    >
-                                        <Text style={{
-                                            color: isSelected ? colors.primary : colors.text,
-                                            fontFamily: isSelected ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
-                                            fontSize: 13
-                                        }}>
-                                            {formatTime12(slot)}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
+                                                                // 3. Auto-select 1 hour if available
+                                                                if (maxDur >= 1) {
+                                                                    const endDate = new Date(startDate);
+                                                                    endDate.setHours(startDate.getHours() + 1);
+                                                                    setEndTime(endDate);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Text style={{
+                                                                color: isSelected ? colors.primary : colors.text,
+                                                                fontFamily: isSelected ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
+                                                                fontSize: 13
+                                                            }}>
+                                                                {formatTime12(slot)}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                        </View>
+                                    );
+                                });
+                            })()}
                         </View>
                     ) : (
                         <View style={{ alignItems: 'center', paddingVertical: 12 }}>
@@ -1061,39 +1193,42 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         </View>
                     )}
 
-                    {/* End Time Selection */}
+                    {/* Duration Selection (Chips) */}
                     {selectedSlot && validEndTimes.length > 0 && (
-                        <View style={{ marginTop: 24 }}>
+                        <View style={{ marginTop: 8 }}>
                             <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
-                                Until
+                                Duration
                             </Text>
-                            <View style={styles.slotGrid}>
-                                {validEndTimes.map((time) => {
-                                    const isSelected = endTime && endTime.toTimeString().slice(0, 5) === time;
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                {validEndTimes.map((durStr) => {
+                                    const dur = parseInt(durStr);
+                                    // Calculate if selected
+                                    const currentDur = (endTime.getTime() - date.getTime()) / (1000 * 60 * 60);
+                                    const isSelected = Math.abs(currentDur - dur) < 0.1;
+
                                     return (
                                         <TouchableOpacity
-                                            key={time}
+                                            key={durStr}
                                             style={[
-                                                styles.slotButton,
                                                 {
-                                                    backgroundColor: isSelected ? (isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)') : (isDark ? '#374151' : '#F3F4F6'),
-                                                    borderColor: isSelected ? colors.primary : 'transparent',
-                                                    borderWidth: isSelected ? 2 : 0,
+                                                    paddingHorizontal: 16,
+                                                    paddingVertical: 8,
+                                                    borderRadius: 100,
+                                                    backgroundColor: isSelected ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
                                                 }
                                             ]}
                                             onPress={() => {
-                                                const [h, m] = time.split(':');
-                                                const newEnd = new Date(date); // Use current date base
-                                                newEnd.setHours(parseInt(h), parseInt(m));
+                                                const newEnd = new Date(date);
+                                                newEnd.setHours(newEnd.getHours() + dur);
                                                 setEndTime(newEnd);
                                             }}
                                         >
                                             <Text style={{
-                                                color: isSelected ? colors.primary : colors.text,
+                                                color: isSelected ? '#FFFFFF' : colors.text,
                                                 fontFamily: isSelected ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
                                                 fontSize: 13
                                             }}>
-                                                {formatTime12(time)}
+                                                {dur} hr{dur > 1 ? 's' : ''}
                                             </Text>
                                         </TouchableOpacity>
                                     );
@@ -1584,6 +1719,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         disabled={bookings.length === 0 || loading}
                         onPress={() => bookings.length > 0 && handleConfirm(
                             async () => {
+                                // Double check profile just in case, though handleConfirm handles it
                                 if (!userId) {
                                     alert('Please sign in to book a studio');
                                     return;
@@ -1826,7 +1962,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             <View style={styles.tabContent}>
                 {/* SPAM BLOCK WARNING */}
                 {isBlocked && (
-                    <View style={[styles.infoBox, { backgroundColor: '#EF444420', borderColor: '#EF4444', marginBottom: 24 }]}>
+                    <View style={[styles.infoBox, { backgroundColor: '#EF444420', borderColor: '#EF4444', marginBottom: 32 }]}>
                         <Ionicons name="alert-circle" size={24} color="#EF4444" />
                         <View style={{ flex: 1 }}>
                             <Text style={[styles.infoText, { color: colors.text, fontFamily: 'Poppins_600SemiBold' }]}>
@@ -1901,6 +2037,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     </View>
                 </View>
 
+                <DocumentUploader
+                    label="Upload CV/Resume"
+                    onFileSelect={(file) => setCvFile(file)}
+                    existingUrl={cvUrl || undefined}
+                />
+
                 <VideoUploader
                     videoUrl={videoUrl}
                     onVideoChange={(url) => setVideoUrl(url || '')}
@@ -1925,7 +2067,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                     colors.primary + '20',
                             borderColor: existingApplicationStatus === 'rejected' ? '#EF4444' :
                                 existingApplicationStatus === 'accepted' ? '#10B981' :
-                                    colors.primary
+                                    colors.primary,
+                            marginBottom: 24
                         }
                     ]}>
                         <Ionicons
@@ -1948,12 +2091,13 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             )}
                         </Text>
                     </View>
-                )}
+                )
+                }
 
                 <TouchableOpacity
                     style={[
                         styles.primaryBtn,
-                        { backgroundColor: colors.primary },
+                        { backgroundColor: colors.primary, marginTop: hasExistingApplication ? 16 : 0 },
                         (isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication) && { opacity: 0.5 }
                     ]}
                     onPress={() => {
@@ -2275,6 +2419,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         </View>
     );
 
+    const scrollRef = useRef<any>(null);
+
     return (
         <>
             <BottomSheetModal
@@ -2285,6 +2431,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 backgroundStyle={{ backgroundColor: colors.background }}
                 handleIndicatorStyle={{ backgroundColor: isDark ? '#4B5563' : '#E5E7EB', width: 40 }}
                 enablePanDownToClose={true}
+                onChange={handleSheetChanges}
             >
                 {loading ? (
                     <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -2292,6 +2439,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     </View>
                 ) : group ? (
                     <BottomSheetScrollView
+                        ref={scrollRef}
                         contentContainerStyle={styles.scrollContent}
                         showsVerticalScrollIndicator={false}
                         showsHorizontalScrollIndicator={false}

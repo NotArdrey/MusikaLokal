@@ -82,6 +82,35 @@ export default function EditStudioScreen() {
     daysOfWeek.map(day => ({ day, slots: [] }))
   );
 
+  // Instruments state
+  const [selectedInstruments, setSelectedInstruments] = useState<{ name: string, image: string }[]>([]);
+
+  // Predefined instruments with images
+  const INSTRUMENT_OPTIONS = [
+    { name: 'Drum Kit', image: 'https://images.unsplash.com/photo-1519892300165-cb5542fb47c7?w=200&h=200&fit=crop' },
+    { name: 'Piano', image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=200&h=200&fit=crop' },
+    { name: 'Guitar Amp', image: 'https://images.unsplash.com/photo-1535587566541-97121a128dc5?w=200&h=200&fit=crop' },
+    { name: 'Bass Amp', image: 'https://images.unsplash.com/photo-1516924962500-2b4b3b99ea02?w=200&h=200&fit=crop' },
+    { name: 'Microphones', image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop' },
+    { name: 'Keyboard', image: 'https://images.unsplash.com/photo-1552422535-c45813c61732?w=200&h=200&fit=crop' },
+    { name: 'Electric Guitar', image: 'https://images.unsplash.com/photo-1550985616-10810253b84d?w=200&h=200&fit=crop' },
+    { name: 'Bass Guitar', image: 'https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=200&h=200&fit=crop' },
+    { name: 'DJ Equipment', image: 'https://images.unsplash.com/photo-1571327073757-71d13c24de30?w=200&h=200&fit=crop' },
+    { name: 'Synthesizer', image: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=200&h=200&fit=crop' },
+    { name: 'PA System', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=200&h=200&fit=crop' },
+    { name: 'Mixing Console', image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop' },
+  ];
+
+  // Toggle instrument selection
+  const toggleInstrument = (instrument: { name: string, image: string }) => {
+    const isSelected = selectedInstruments.some(i => i.name === instrument.name);
+    if (isSelected) {
+      setSelectedInstruments(selectedInstruments.filter(i => i.name !== instrument.name));
+    } else {
+      setSelectedInstruments([...selectedInstruments, instrument]);
+    }
+  };
+
   // Role-based access control
   useEffect(() => {
     checkAuthorization();
@@ -195,6 +224,12 @@ export default function EditStudioScreen() {
         // Initialize with empty schedule if no availability data
         setAvailability(daysOfWeek.map(day => ({ day, slots: [] })));
       }
+
+      // Load instruments
+      if (data.instruments && Array.isArray(data.instruments)) {
+        setSelectedInstruments(data.instruments);
+      }
+
       setSelectedImages(data.images || []);
       if (data.images && data.images.length > 0) {
         setThumbnailIndex(0);
@@ -254,6 +289,7 @@ export default function EditStudioScreen() {
         address,
         hourly_rate: parseFloat(cost) || 0,
         amenities,
+        instruments: selectedInstruments,
         latitude,
         longitude,
         images: selectedImages,
@@ -667,6 +703,48 @@ export default function EditStudioScreen() {
             ))}
           </View>
 
+          {/* Instruments Section */}
+          {renderSectionHeader('Available Instruments', 'musical-notes')}
+          <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 12 }]}>
+            Select the instruments available at your studio
+          </Text>
+          <View style={styles.instrumentsGrid}>
+            {INSTRUMENT_OPTIONS.map((instrument) => {
+              const isSelected = selectedInstruments.some(i => i.name === instrument.name);
+              return (
+                <TouchableOpacity
+                  key={instrument.name}
+                  onPress={() => toggleInstrument(instrument)}
+                  style={[
+                    styles.instrumentCard,
+                    {
+                      backgroundColor: isSelected ? colors.primary + '20' : (isDark ? '#1F2937' : '#F9FAFB'),
+                      borderColor: isSelected ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                    }
+                  ]}
+                >
+                  <Image
+                    source={{ uri: instrument.image }}
+                    style={styles.instrumentImage}
+                  />
+                  <Text style={[styles.instrumentName, { color: colors.text }]} numberOfLines={1}>
+                    {instrument.name}
+                  </Text>
+                  {isSelected && (
+                    <View style={[styles.instrumentCheckmark, { backgroundColor: colors.primary }]}>
+                      <Ionicons name="checkmark" size={12} color="#fff" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {selectedInstruments.length > 0 && (
+            <Text style={[styles.selectedCount, { color: colors.textSecondary }]}>
+              {selectedInstruments.length} instrument{selectedInstruments.length !== 1 ? 's' : ''} selected
+            </Text>
+          )}
+
           {renderSectionHeader('Availability', 'time')}
           <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 16 }]}>
             Set your studio availability for bookings
@@ -1038,6 +1116,49 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 13,
     fontFamily: 'Poppins_400Regular',
+  },
+  // Instruments styles
+  instrumentsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  instrumentCard: {
+    width: '30%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  instrumentImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  instrumentName: {
+    fontSize: 10,
+    fontFamily: 'Poppins_500Medium',
+    textAlign: 'center',
+  },
+  instrumentCheckmark: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedCount: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+    marginTop: 12,
+    textAlign: 'center',
   },
 });
 

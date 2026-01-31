@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
 import { Image, Pressable, Share, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import PagerView from 'react-native-pager-view';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -18,6 +19,7 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
     const { userRole } = useAuth();
     const { width } = useWindowDimensions();
     const [isLiked, setIsLiked] = useState(false);
+    const [pageIndex, setPageIndex] = useState(0);
 
     // Check if current user can invite (venue-owner or studio-owner viewing a musician/Group)
     const canInvite = (userRole === 'venue-owner' || userRole === 'studio-owner') && item.type === 'Group';
@@ -61,24 +63,19 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
     };
 
     // Robust Image Logic
-    const getInitialImage = () => {
-        const uri = item.images?.[0] || item.image;
-        if (uri && typeof uri === 'string' && uri.length > 0) {
-            return { uri };
+    const getImages = () => {
+        if (item.images && Array.isArray(item.images) && item.images.length > 0) {
+            // Filter out empty strings
+            return item.images.filter((img: any) => typeof img === 'string' && img.length > 0);
         }
-        return undefined;
+        if (item.image && typeof item.image === 'string' && item.image.length > 0) {
+            return [item.image];
+        }
+        return [];
     };
 
-    const [imageSource, setImageSource] = useState(getInitialImage());
-
-    // Sync image source when item changes
-    React.useEffect(() => {
-        setImageSource(getInitialImage());
-    }, [item.id, item.images, item.image]);
-
-    const handleImageError = () => {
-        setImageSource(undefined);
-    };
+    const images = getImages();
+    const hasMultipleImages = images.length > 1;
 
     // --- RENDER VARIANTS ---
 
@@ -101,13 +98,30 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                 ]}
             >
                 <View style={[styles.cardContent, { flex: 1, backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                    {/* Full Background Image */}
-                    {imageSource && (
+                    {/* Full Background Image / Slideshow */}
+                    {hasMultipleImages ? (
+                        <View style={StyleSheet.absoluteFillObject}>
+                            <PagerView
+                                style={StyleSheet.absoluteFillObject}
+                                initialPage={0}
+                                onPageSelected={(e) => setPageIndex(e.nativeEvent.position)}
+                            >
+                                {images.map((img: string, index: number) => (
+                                    <View key={index} style={styles.pagerPage}>
+                                        <Image
+                                            source={{ uri: img }}
+                                            style={StyleSheet.absoluteFillObject}
+                                            resizeMode="cover"
+                                        />
+                                    </View>
+                                ))}
+                            </PagerView>
+                        </View>
+                    ) : (
                         <Image
-                            source={imageSource}
+                            source={images.length > 0 ? { uri: images[0] } : undefined}
                             style={StyleSheet.absoluteFillObject}
                             resizeMode="cover"
-                            onError={handleImageError}
                         />
                     )}
 
@@ -117,6 +131,7 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                         style={StyleSheet.absoluteFillObject}
                         start={{ x: 0.5, y: 0.3 }}
                         end={{ x: 0.5, y: 1 }}
+                        pointerEvents="none" // Allow touches to pass through
                     />
 
                     {/* Top Row: Floating Badges */}
@@ -135,6 +150,21 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                         </TouchableOpacity>
                     </View>
 
+                    {/* Pagination Dots */}
+                    {hasMultipleImages && (
+                        <View style={styles.paginationContainer}>
+                            {images.map((_: any, i: number) => (
+                                <View
+                                    key={i}
+                                    style={[
+                                        styles.paginationDot,
+                                        { backgroundColor: i === pageIndex ? '#FFF' : 'rgba(255,255,255,0.5)' }
+                                    ]}
+                                />
+                            ))}
+                        </View>
+                    )}
+
                     {/* Bottom Content Area */}
                     <View style={styles.immersiveBottomContent}>
                         {/* Type Badge */}
@@ -148,6 +178,24 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                             <Ionicons name="location" size={12} color="#FFF" style={{ marginRight: 4 }} />
                             <Text style={styles.immersiveSubtitle} numberOfLines={1}>{subtitle}</Text>
                         </View>
+
+                        {/* Instruments Display for Studios/Venues */}
+                        {item.instruments && Array.isArray(item.instruments) && item.instruments.length > 0 && (
+                            <View style={styles.instrumentsRow}>
+                                {item.instruments.slice(0, 4).map((inst: { name: string, image: string }, idx: number) => (
+                                    <Image
+                                        key={inst.name + idx}
+                                        source={{ uri: inst.image }}
+                                        style={styles.instrumentBadge}
+                                    />
+                                ))}
+                                {item.instruments.length > 4 && (
+                                    <View style={styles.moreInstrumentsBadge}>
+                                        <Text style={styles.moreInstrumentsText}>+{item.instruments.length - 4}</Text>
+                                    </View>
+                                )}
+                            </View>
+                        )}
 
                         <Text style={styles.immersivePrice}>{priceLabel}</Text>
                     </View>
@@ -173,12 +221,43 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
             <View style={[styles.cardContent, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
                 {/* Image Section */}
                 <View style={[styles.imageContainer, { height: imageHeight }]}>
-                    <Image
-                        source={imageSource}
-                        style={styles.image}
-                        resizeMode="cover"
-                        onError={handleImageError}
-                    />
+                    {hasMultipleImages ? (
+                        <View style={{ flex: 1 }}>
+                            <PagerView
+                                style={{ flex: 1 }}
+                                initialPage={0}
+                                onPageSelected={(e) => setPageIndex(e.nativeEvent.position)}
+                            >
+                                {images.map((img: string, index: number) => (
+                                    <View key={index} style={styles.pagerPage}>
+                                        <Image
+                                            source={{ uri: img }}
+                                            style={styles.image}
+                                            resizeMode="cover"
+                                        />
+                                    </View>
+                                ))}
+                            </PagerView>
+                            {/* Pagination Dots for Vertical Card */}
+                            <View style={[styles.paginationContainer, { bottom: 10 }]}>
+                                {images.map((_: any, i: number) => (
+                                    <View
+                                        key={i}
+                                        style={[
+                                            styles.paginationDot,
+                                            { backgroundColor: i === pageIndex ? '#FFF' : 'rgba(255,255,255,0.5)' }
+                                        ]}
+                                    />
+                                ))}
+                            </View>
+                        </View>
+                    ) : (
+                        <Image
+                            source={images.length > 0 ? { uri: images[0] } : undefined}
+                            style={styles.image}
+                            resizeMode="cover"
+                        />
+                    )}
 
                     {/* Modern Overlay Badge */}
                     <View style={styles.typeOverlayBadge}>
@@ -226,6 +305,24 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                             <Text style={styles.reviewCount}>({item.review_count} reviews)</Text>
                         )}
                     </View>
+
+                    {/* Instruments Display for Studios/Venues */}
+                    {item.instruments && Array.isArray(item.instruments) && item.instruments.length > 0 && (
+                        <View style={[styles.instrumentsRowVertical, { borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                            {item.instruments.slice(0, 4).map((inst: { name: string, image: string }, idx: number) => (
+                                <Image
+                                    key={inst.name + idx}
+                                    source={{ uri: inst.image }}
+                                    style={styles.instrumentBadgeSmall}
+                                />
+                            ))}
+                            {item.instruments.length > 4 && (
+                                <View style={styles.moreInstrumentsBadgeSmall}>
+                                    <Text style={styles.moreInstrumentsTextSmall}>+{item.instruments.length - 4}</Text>
+                                </View>
+                            )}
+                        </View>
+                    )}
                 </View>
             </View>
         </Pressable>
@@ -342,6 +439,26 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
     },
+    pagerPage: {
+        width: '100%',
+        height: '100%',
+    },
+    paginationContainer: {
+        position: 'absolute',
+        bottom: 80, // Above content
+        left: 0,
+        right: 0,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 6,
+        zIndex: 20,
+    },
+    paginationDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: 'rgba(255,255,255,0.5)',
+    },
     topActions: {
         position: 'absolute',
         top: 12,
@@ -445,7 +562,63 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_600SemiBold',
         textTransform: 'uppercase',
         letterSpacing: 0.5,
-    }
+    },
+    // Instruments styles for horizontal (immersive) cards
+    instrumentsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 8,
+        gap: 4,
+    },
+    instrumentBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        borderWidth: 2,
+        borderColor: 'rgba(255,255,255,0.8)',
+    },
+    moreInstrumentsBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    moreInstrumentsText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    // Instruments styles for vertical cards
+    instrumentsRowVertical: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingTop: 10,
+        marginTop: 10,
+        borderTopWidth: 1,
+        gap: 6,
+    },
+    instrumentBadgeSmall: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        borderWidth: 1.5,
+        borderColor: 'rgba(0,0,0,0.1)',
+    },
+    moreInstrumentsBadgeSmall: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#E5E7EB',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    moreInstrumentsTextSmall: {
+        color: '#6B7280',
+        fontSize: 9,
+        fontFamily: 'Poppins_600SemiBold',
+    },
 });
 
 export default ListingCard;

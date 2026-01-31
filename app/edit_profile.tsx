@@ -16,6 +16,8 @@ export default function EditProfileScreen() {
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [genres, setGenres] = useState('');
   const [bio, setBio] = useState('');
+  const [contactNumber, setContactNumber] = useState('');
+  const [address, setAddress] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -124,6 +126,8 @@ export default function EditProfileScreen() {
       setSelectedRoles(data?.skills || []);
       setGenres(data?.genres?.join(', ') || '');
       setBio(data?.bio || '');
+      setContactNumber(data?.contact_number || '');
+      setAddress(data?.address || '');
       setAvatarUrl(data?.avatar_url || '');
     } catch (e) {
       console.log('Error fetching profile:', e);
@@ -151,6 +155,14 @@ export default function EditProfileScreen() {
       Alert.alert('Required Field', 'Please enter a bio');
       return false;
     }
+    if (!contactNumber.trim()) {
+      Alert.alert('Required Field', 'Contact number is required');
+      return false;
+    }
+    if (!address.trim()) {
+      Alert.alert('Required Field', 'Address is required');
+      return false;
+    }
     if (!avatarUrl) {
       Alert.alert('Required Field', 'Please upload a profile picture');
       return false;
@@ -162,7 +174,7 @@ export default function EditProfileScreen() {
     if (!validateForm()) {
       return;
     }
-    
+
     if (!userId) return;
     setSaving(true);
     try {
@@ -173,7 +185,9 @@ export default function EditProfileScreen() {
           userId,
           skills: selectedRoles,
           genres: genreArray,
-          bio
+          bio,
+          contact_number: contactNumber,
+          address
         }
       });
       if (error) throw error;
@@ -256,6 +270,33 @@ export default function EditProfileScreen() {
                   <Text style={[styles.inputValue, { color: colors.muted }]}>{name}</Text>
                 </View>
                 <Text style={[styles.inputHelper, { color: colors.textSecondary }]}>Display Name cannot be changed.</Text>
+              </View>
+
+              <View>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Contact Number</Text>
+                <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
+                  <TextInput
+                    value={contactNumber}
+                    onChangeText={setContactNumber}
+                    placeholder="+1 234 567 890"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="phone-pad"
+                    style={[styles.textInput, { color: colors.text }]}
+                  />
+                </View>
+              </View>
+
+              <View>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Address / Location</Text>
+                <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
+                  <TextInput
+                    value={address}
+                    onChangeText={setAddress}
+                    placeholder="City, Country"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[styles.textInput, { color: colors.text }]}
+                  />
+                </View>
               </View>
 
               <View>

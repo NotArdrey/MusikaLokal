@@ -6,6 +6,7 @@ import {
     ActivityIndicator,
     Dimensions,
     Image,
+    Linking,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -238,9 +239,22 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                         {booking.video_url && (
                                             <View style={[styles.detailItem, { marginTop: moderateScale(12) }]}>
                                                 <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Video / Demo</Text>
-                                                <Text style={[styles.detailValue, { color: colors.primary, textDecorationLine: 'underline' }]} onPress={() => { /* Handle link open */ }}>
-                                                    {booking.video_url}
-                                                </Text>
+                                                <TouchableOpacity onPress={() => Linking.openURL(booking.video_url)}>
+                                                    <Text style={[styles.detailValue, { color: colors.primary, textDecorationLine: 'underline' }]}>
+                                                        View Video
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
+
+                                        {booking.cv_url && (
+                                            <View style={[styles.detailItem, { marginTop: moderateScale(12) }]}>
+                                                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>CV / Resume</Text>
+                                                <TouchableOpacity onPress={() => Linking.openURL(booking.cv_url)}>
+                                                    <Text style={[styles.detailValue, { color: colors.primary, textDecorationLine: 'underline' }]}>
+                                                        View Document
+                                                    </Text>
+                                                </TouchableOpacity>
                                             </View>
                                         )}
                                     </View>

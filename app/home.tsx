@@ -20,6 +20,7 @@ import Header from '../src/components/header';
 import ListingCard from '../src/components/ListingCard';
 import ListingDetailsSheet from '../src/components/ListingDetailsSheet';
 import Navbar from '../src/components/navbar';
+import { ProfileCompletionBanner } from '../src/components/ProfileCompletionBanner';
 import RecentlyViewedSheet from '../src/components/RecentlyViewedSheet';
 import SearchBottomSheet from '../src/components/SearchBottomSheet';
 import { useTheme } from '../src/context/ThemeContext';
@@ -694,6 +695,10 @@ export default function HomeScreen() {
                 }
             >
                 {renderHero()}
+
+                <View style={{ paddingHorizontal: 24, marginTop: 16 }}>
+                    <ProfileCompletionBanner />
+                </View>
 
                 {renderHighlightsSection()}
 

@@ -3,7 +3,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, Dimensions, Image, Modal as RNModal, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, Dimensions, Image, Linking, Modal as RNModal, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { supabase } from '../lib/supabase';
 import BookingDetailsSheet from '../src/components/BookingDetailsSheet';
@@ -285,7 +285,7 @@ export default function BookingsScreen() {
     try {
       setLoading(true);
       console.log('📷 Scanning QR code:', { qr_code: data, scanner_id: userId });
-      
+
       const { data: response, error } = await supabase.functions.invoke('manage-bookings', {
         body: {
           action: 'scan_qr',
@@ -295,14 +295,14 @@ export default function BookingsScreen() {
       });
 
       setLoading(false);
-      
+
       console.log('📷 Check-in response:', response);
       console.log('📷 Check-in error:', error);
 
       // When there's a FunctionsHttpError (non-2xx status), the error body is in the response data
       if (error) {
         console.error('Check-in error:', error);
-        
+
         // The response data contains the error details even when error is set
         if (response?.error) {
           const errorMessage = response.error;
@@ -443,6 +443,50 @@ export default function BookingsScreen() {
                           </Text>
                           <Ionicons name="chevron-forward" size={12} color={colors.textSecondary} />
                         </TouchableOpacity>
+                      )}
+
+                      {/* Contact Info (Studio Owners) */}
+                      {userRole === 'studio-owner' && item.type_id === 'studio_booking' && (
+                        <View style={{ marginTop: 4, gap: 4 }}>
+                          {item.customer_contact && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="call-outline" size={12} color={colors.primary} />
+                              <Text style={{ fontSize: 12, fontFamily: 'Poppins_400Regular', color: colors.text }}>
+                                {item.customer_contact}
+                              </Text>
+                            </View>
+                          )}
+                          {item.customer_address && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="location-outline" size={12} color={colors.primary} />
+                              <Text style={{ fontSize: 12, fontFamily: 'Poppins_400Regular', color: colors.text }} numberOfLines={1}>
+                                {item.customer_address}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
+
+                      {/* Video & Note (Venue Owners / Gig Applications) */}
+                      {userRole === 'venue-owner' && item.type_id === 'gig_application' && (
+                        <View style={{ marginTop: 8, gap: 8 }}>
+                          {item.video_url && (
+                            <TouchableOpacity
+                              onPress={() => Linking.openURL(item.video_url)}
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF', padding: 8, borderRadius: 8 }}
+                            >
+                              <Ionicons name="play-circle" size={20} color="#3B82F6" />
+                              <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#3B82F6' }}>Watch Audition Video</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {item.note && (
+                            <View style={{ backgroundColor: isDark ? '#374151' : '#F9FAFB', padding: 8, borderRadius: 8 }}>
+                              <Text style={{ fontSize: 11, fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary, marginBottom: 2 }}>Note:</Text>
+                              <Text style={{ fontSize: 12, fontFamily: 'Poppins_400Regular', color: colors.text }}>"{item.note}"</Text>
+                            </View>
+                          )}
+                        </View>
                       )}
 
 

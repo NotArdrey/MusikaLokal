@@ -212,32 +212,28 @@ serve(async (req: Request) => {
             if (type === 'gig_application') {
                 const { gig_id } = insertPayload;
 
-                // 1. Get the organizer_id of the gig
-                const { data: gigData, error: gigError } = await supabaseClient
-                    .from('gigs')
-                    .select('organizer_id')
-                    .eq('id', gig_id)
-                    .single();
-
-                if (gigError || !gigData) throw new Error('Gig not found');
-                const organizerId = gigData.organizer_id;
-
-                // 2. Count cancellations for this user against this organizer in last 30 days
+                // Limit tries for THIS specific gig
                 const thirtyDaysAgo = new Date();
                 thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
                 const { count, error: countError } = await supabaseClient
                     .from('gig_applications')
-                    .select('id, gig:gigs!inner(organizer_id)', { count: 'exact', head: true })
-                    .eq('status', 'cancelled')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('status', 'cancelled') // canceled or rejected? User said "limited tries", usually means re-applying after rejection/cancel.
+                    // But if restricted to "cancelled", it means user canceled. If 'rejected', maybe they can't apply again anyway?
+                    // Original code checked 'cancelled'. Let's stick to that but scope to gig_id.
+                    // Actually, if I was rejected, I probably shouldn't be able to apply again immediately? 
+                    // But user specifically said "limited tries".
+                    // Let's count both cancelled and rejected to be safe? Or just stick to current logic but scoped to gig.
+                    // Current logic: status = 'cancelled'.
                     .eq('applicant_id', userId)
-                    .eq('gig.organizer_id', organizerId)
+                    .eq('gig_id', gig_id) // Changed from organizer_id to gig_id
                     .gte('updated_at', thirtyDaysAgo.toISOString());
 
                 if (countError) throw countError;
 
-                if (count !== null && count >= 3) { // Threshold: 3 cancellations
-                    throw new Error('You are temporarily blocked from applying to this organizer due to frequent cancellations.');
+                if (count !== null && count >= 3) { // Threshold: 3 tries per gig
+                    throw new Error('You have reached the maximum number of attempts for this gig.');
                 }
             }
 
@@ -361,7 +357,7 @@ serve(async (req: Request) => {
                     'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
                 };
 
-                let operatingHours = [];
+                let operatingHours: any[] = [];
                 for (const daySchedule of studioAvailability) {
                     const dayIndex = dayMap[daySchedule.day];
                     if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
@@ -482,7 +478,7 @@ serve(async (req: Request) => {
             if (cancellation_reason) {
                 updateData.cancellation_reason = cancellation_reason;
             }
-            
+
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
                 .update(updateData)
@@ -560,7 +556,7 @@ serve(async (req: Request) => {
                 for (const slot of acceptedSlots) {
                     const [startH, startM] = slot.start.split(':').map(Number);
                     const [endH, endM] = slot.end.split(':').map(Number);
-                    const hours = (endH + endM/60) - (startH + startM/60);
+                    const hours = (endH + endM / 60) - (startH + startM / 60);
                     totalHours += hours;
                 }
                 const newPrice = totalHours * hourlyRate;
@@ -574,7 +570,7 @@ serve(async (req: Request) => {
                 // Update the booking with only accepted slots
                 const { error: updateError } = await supabaseClient
                     .from('studio_bookings')
-                    .update({ 
+                    .update({
                         status: 'confirmed',
                         time_slots: acceptedSlots,
                         start_time: overallStart,
@@ -600,8 +596,8 @@ serve(async (req: Request) => {
                 };
 
                 const acceptedSlotsText = acceptedSlots.map(formatSlot).join(', ');
-                const declinedSlotsText = declinedSlots && declinedSlots.length > 0 
-                    ? declinedSlots.map(formatSlot).join(', ') 
+                const declinedSlotsText = declinedSlots && declinedSlots.length > 0
+                    ? declinedSlots.map(formatSlot).join(', ')
                     : '';
 
                 let notificationMessage = `Your booking for "${studioName}" on ${bookingDate} has been partially approved.\n\n✅ Approved: ${acceptedSlotsText}`;
@@ -629,8 +625,8 @@ serve(async (req: Request) => {
                         }
                     });
 
-                return new Response(JSON.stringify({ 
-                    success: true, 
+                return new Response(JSON.stringify({
+                    success: true,
                     message: 'Booking partially approved',
                     acceptedSlots,
                     declinedSlots
@@ -639,7 +635,7 @@ serve(async (req: Request) => {
                 // All slots declined - just cancel the booking
                 const { error: updateError } = await supabaseClient
                     .from('studio_bookings')
-                    .update({ 
+                    .update({
                         status: 'cancelled',
                         cancellation_reason: cancellation_reason || 'All time slots were declined by the studio owner.'
                     })
@@ -662,8 +658,8 @@ serve(async (req: Request) => {
                         }
                     });
 
-                return new Response(JSON.stringify({ 
-                    success: true, 
+                return new Response(JSON.stringify({
+                    success: true,
                     message: 'Booking declined'
                 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
             }
@@ -771,18 +767,22 @@ serve(async (req: Request) => {
 
         // CHECK ELIGIBILITY (Spam Block Check)
         if (action === 'check_eligibility') {
-            const { organizerId } = params;
+            const { gigId } = params; // Changed from organizerId to gigId
 
-            // Count cancellations in last 30 days
+            if (!gigId) {
+                return new Response(JSON.stringify({ blocked: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            }
+
+            // Count cancellations for THIS gig in last 30 days
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
             const { count, error: countError } = await supabaseClient
                 .from('gig_applications')
-                .select('id, gig:gigs!inner(organizer_id)', { count: 'exact', head: true })
+                .select('id', { count: 'exact', head: true })
                 .eq('status', 'cancelled')
                 .eq('applicant_id', userId)
-                .eq('gig.organizer_id', organizerId)
+                .eq('gig_id', gigId) // Scoped to gig
                 .gte('updated_at', thirtyDaysAgo.toISOString());
 
             if (countError) throw countError;
@@ -790,7 +790,7 @@ serve(async (req: Request) => {
             const blocked = (count || 0) >= 3;
             return new Response(JSON.stringify({
                 blocked,
-                reason: blocked ? 'Temporarily blocked due to excessive cancellations.' : null
+                reason: blocked ? 'Maximum attempts reached for this gig.' : null
             }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
         }
 

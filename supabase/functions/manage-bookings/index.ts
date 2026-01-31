@@ -141,7 +141,7 @@ serve(async (req: Request) => {
                 if (studioIds.length > 0) {
                     const { data: bookings, error: bookingError } = await supabaseClient
                         .from('studio_bookings')
-                        .select('*, studio:studios(name, images), profile:user_id(full_name, avatar_url, email)')
+                        .select('*, studio:studios(name, images), profile:user_id(full_name, avatar_url, email, contact_number, address)')
                         .in('studio_id', studioIds)
                         .order('booking_date', { ascending: false })
 
@@ -180,6 +180,8 @@ serve(async (req: Request) => {
                             notes: b.notes,
                             customer_name: customerName,
                             customer_avatar: customerAvatar,
+                            customer_contact: b.profile?.contact_number,
+                            customer_address: b.profile?.address,
                             reviewed_by_customer: b.reviewed_by_customer || false,
                             reviewed_by_owner: b.reviewed_by_owner || false,
                             proof_url: b.proof_url
@@ -350,7 +352,10 @@ serve(async (req: Request) => {
                             location: gig?.location,
                             performer: performerName,
                             customer_name: performerName,
-                            customer_avatar: app.group?.images?.[0] || app.applicant?.avatar_url
+                            customer_avatar: app.group?.images?.[0] || app.applicant?.avatar_url,
+                            video_url: app.video_url,
+                            cv_url: app.cv_url, // Added CV URL
+                            note: app.note
                         }
 
                         if (app.status === 'pending') {
@@ -972,7 +977,7 @@ serve(async (req: Request) => {
             // 2. Verify scanner is the studio owner
             console.log('📷 Verifying owner:', { studio_owner: booking.studio?.owner_id, scanner_id });
             if (!booking.studio || booking.studio.owner_id !== scanner_id) {
-                return new Response(JSON.stringify({ 
+                return new Response(JSON.stringify({
                     error: 'You are not authorized to scan for this studio.',
                     debug: { studio_owner: booking.studio?.owner_id, scanner_id }
                 }), {
@@ -1011,10 +1016,10 @@ serve(async (req: Request) => {
 
             if (updateError) {
                 console.error('📷 Check-in update error:', updateError);
-                return new Response(JSON.stringify({ 
-                    error: 'Failed to update check-in status.', 
+                return new Response(JSON.stringify({
+                    error: 'Failed to update check-in status.',
                     details: updateError.message,
-                    code: updateError.code 
+                    code: updateError.code
                 }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 500,
