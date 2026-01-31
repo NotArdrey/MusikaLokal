@@ -3,11 +3,13 @@ import { BlurView } from 'expo-blur';
 import { router, useFocusEffect, usePathname } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 
 export default function Navbar() {
     const { colors, isDark } = useTheme();
+    const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
     const [role, setRole] = useState('');
@@ -84,7 +86,7 @@ export default function Navbar() {
     ];
 
     return (
-        <View style={styles.navbarWrapper}>
+        <View style={[styles.navbarWrapper, { bottom: 24 + insets.bottom }]}>
             <BlurView
                 intensity={Platform.OS === 'ios' ? 80 : 100}
                 tint={isDark ? "systemMaterialDark" : "systemMaterialLight"}

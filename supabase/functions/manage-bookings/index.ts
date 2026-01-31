@@ -64,6 +64,9 @@ serve(async (req: Request) => {
                     const bookingDate = new Date(`${b.booking_date}T${b.start_time}`)
                     const endDate = new Date(`${b.booking_date}T${b.end_time}`)
 
+                    // DEBUG: Log date parsing for first few items
+                    // console.log(`[DEBUG] Booking ${b.id}: Status=${b.status}, End=${endDate.toISOString()}, Now=${now.toISOString()}`)
+
                     const item = {
                         id: b.id,
                         type_id: 'studio_booking',
@@ -77,7 +80,8 @@ serve(async (req: Request) => {
                         image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
                         status: b.status === 'pending' ? 'Waiting for Approval' :
                             b.status === 'confirmed' ? 'Confirmed' :
-                                b.status === 'cancelled' ? 'Declined' : b.status,
+                                b.status === 'checked_in' ? 'In Progress' :
+                                    b.status === 'cancelled' ? 'Declined' : b.status,
                         type: 'Studio Booking',
                         isCancelled: b.status === 'cancelled',
                         action: b.status === 'pending' ? 'View Details' : 'Details',
@@ -93,18 +97,29 @@ serve(async (req: Request) => {
                         // @ts-ignore
                         categorized.Pending.push(item)
                     } else if (b.status === 'confirmed') {
-                        if (now >= bookingDate && now <= endDate) {
+                        if (now > endDate) {
+                            // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
                             // @ts-ignore
-                            categorized.Ongoing.push({ ...item, status: 'In Progress' })
-                        } else if (now > endDate) {
-                            // Only show in Review if not yet reviewed by customer
-                            if (!b.reviewed_by_customer) {
-                                // @ts-ignore
-                                categorized.Review.push({ ...item, status: 'Completed' })
-                            }
+                            categorized.Review.push({ ...item, status: 'Completed' })
                         } else {
                             // @ts-ignore
                             categorized.Upcoming.push(item)
+                        }
+                    } else if (b.status === 'checked_in') {
+                        if (now > endDate) {
+                            // AUTO-COMPLETE: If checked_in and time passed, it's done. Move to Review.
+                            // @ts-ignore
+                            categorized.Review.push({ ...item, status: 'Completed' })
+                        } else {
+                            // STRICT Ongoing Check
+                            // @ts-ignore
+                            categorized.Ongoing.push({ ...item, status: 'In Progress' })
+                        }
+                    } else if (b.status === 'completed') {
+                        // Completed bookings that need review
+                        if (!b.reviewed_by_customer) {
+                            // @ts-ignore
+                            categorized.Review.push({ ...item, status: 'Completed' })
                         }
                     } else if (b.status === 'cancelled') {
                         // @ts-ignore
@@ -125,8 +140,8 @@ serve(async (req: Request) => {
 
                 if (studioIds.length > 0) {
                     const { data: bookings, error: bookingError } = await supabaseClient
-                        .from('studio_bookings_with_cost')
-                        .select('*')
+                        .from('studio_bookings')
+                        .select('*, studio:studios(name, images), profile:user_id(full_name, avatar_url, email, contact_number, address)')
                         .in('studio_id', studioIds)
                         .order('booking_date', { ascending: false })
 
@@ -138,6 +153,9 @@ serve(async (req: Request) => {
                         const bookingDate = new Date(`${b.booking_date}T${b.start_time}`)
                         const endDate = new Date(`${b.booking_date}T${b.end_time}`)
 
+                        const customerName = b.profile?.full_name || b.profile?.email || 'Guest'
+                        const customerAvatar = b.profile?.avatar_url || 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop'
+
                         const item = {
                             id: b.id,
                             type_id: 'studio_booking',
@@ -146,20 +164,24 @@ serve(async (req: Request) => {
                             raw_date: b.booking_date,
                             start_time: b.start_time,
                             end_time: b.end_time,
-                            name: `${b.studio_name} - ${b.user_full_name || b.user_email || 'Guest'}`,
+                            name: `${b.studio?.name} - ${customerName}`,
                             date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
-                            image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
-                            status: b.status === 'pending' ? 'Awaiting Your Approval' :
+                            image: b.studio?.images?.[0] || 'https://picsum.photos/400/300',
+                            status: b.status === 'pending' ? 'User Request' :
                                 b.status === 'confirmed' ? 'Confirmed' :
-                                    b.status === 'cancelled' ? 'Declined' : b.status,
+                                    b.status === 'checked_in' ? 'In Progress' :
+                                        b.status === 'cancelled' ? 'Declined' : b.status,
                             type: 'Studio Booking',
                             isCancelled: b.status === 'cancelled',
                             action: b.status === 'pending' ? 'Confirm Now' : 'Details',
-                            duration_hours: b.duration_hours,
-                            total_cost: b.total_cost,
-                            studio_name: b.studio_name,
+                            duration_hours: b.hours, // Use stored column
+                            total_cost: b.final_price, // Use stored column
+                            studio_name: b.studio?.name,
                             notes: b.notes,
-                            customer_name: b.user_full_name || b.user_email || 'Guest',
+                            customer_name: customerName,
+                            customer_avatar: customerAvatar,
+                            customer_contact: b.profile?.contact_number,
+                            customer_address: b.profile?.address,
                             reviewed_by_customer: b.reviewed_by_customer || false,
                             reviewed_by_owner: b.reviewed_by_owner || false,
                             proof_url: b.proof_url
@@ -169,18 +191,28 @@ serve(async (req: Request) => {
                             // @ts-ignore
                             categorized.Pending.push(item)
                         } else if (b.status === 'confirmed') {
-                            if (now >= bookingDate && now <= endDate) {
+                            if (now > endDate) {
+                                // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
                                 // @ts-ignore
-                                categorized.Ongoing.push({ ...item, status: 'In Progress' })
-                            } else if (now > endDate) {
-                                // Only show in Review if not yet reviewed by owner
-                                if (!b.reviewed_by_owner) {
-                                    // @ts-ignore
-                                    categorized.Review.push({ ...item, status: 'Completed' })
-                                }
+                                categorized.Review.push({ ...item, status: 'Completed' })
                             } else {
                                 // @ts-ignore
                                 categorized.Upcoming.push(item)
+                            }
+                        } else if (b.status === 'checked_in') {
+                            if (now > endDate) {
+                                // AUTO-COMPLETE: If checked_in and time passed, it's done. Move to Review.
+                                // @ts-ignore
+                                categorized.Review.push({ ...item, status: 'Completed' })
+                            } else {
+                                // STRICT Ongoing Check
+                                // @ts-ignore
+                                categorized.Ongoing.push({ ...item, status: 'In Progress' })
+                            }
+                        } else if (b.status === 'completed') {
+                            if (!b.reviewed_by_owner) {
+                                // @ts-ignore
+                                categorized.Review.push({ ...item, status: 'Completed' })
                             }
                         } else if (b.status === 'cancelled') {
                             // @ts-ignore
@@ -226,11 +258,11 @@ serve(async (req: Request) => {
                         date: dateStr,
                         image: gig?.images?.[0] || 'https://picsum.photos/400/300',
                         status: g.status === 'pending' ? 'Applied' :
-                            g.status === 'accepted' || g.status === 'approved' ? 'Accepted' :
+                            g.status === 'accepted' ? 'Accepted' :
                                 g.status === 'rejected' ? 'Declined' : g.status,
                         type: 'Gig Application',
                         isCancelled: g.status === 'cancelled' || g.status === 'rejected',
-                        action: g.status === 'accepted' || g.status === 'approved' ? 'View Details' : 'Details',
+                        action: g.status === 'accepted' ? 'View Details' : 'Details',
                         location: gig?.location,
                         reviewed_by_applicant: g.reviewed_by_applicant || false
                     }
@@ -238,7 +270,7 @@ serve(async (req: Request) => {
                     if (g.status === 'pending') {
                         // @ts-ignore
                         categorized.Pending.push(item)
-                    } else if (g.status === 'accepted' || g.status === 'approved') {
+                    } else if (g.status === 'accepted') {
                         // Time-based categorization for accepted gigs
                         if (eventDate) {
                             const eventStart = new Date(gig.event_date)
@@ -289,7 +321,9 @@ serve(async (req: Request) => {
                             group:group_id(name, images)
                         `)
                         .in('gig_id', gigIds)
-                        .in('status', ['accepted', 'approved'])
+                        .in('gig_id', gigIds)
+                        .in('status', ['accepted', 'pending'])
+                        .order('created_at', { ascending: false })
                         .order('created_at', { ascending: false })
 
                     if (appError) {
@@ -304,22 +338,33 @@ serve(async (req: Request) => {
 
                         const item = {
                             id: app.id,
-                            type_id: 'gig_booking',
+                            type_id: 'gig_application',
                             gig_id: app.gig_id,
+                            user_id: app.applicant_id, // For profile link
                             raw_date: dateStr,
                             name: `${gig?.name || 'Gig'} - ${performerName}`,
                             date: dateStr,
                             image: app.group?.images?.[0] || app.applicant?.avatar_url || gig?.images?.[0] || 'https://picsum.photos/400/300',
-                            status: 'Confirmed',
-                            type: 'Gig Booking',
+                            status: app.status === 'pending' ? 'Action Required' : 'Confirmed',
+                            type: 'Gig Application',
                             isCancelled: false,
-                            action: 'View Details',
+                            action: app.status === 'pending' ? 'Confirm Now' : 'View Details',
                             location: gig?.location,
-                            performer: performerName
+                            performer: performerName,
+                            customer_name: performerName,
+                            customer_avatar: app.group?.images?.[0] || app.applicant?.avatar_url,
+                            video_url: app.video_url,
+                            cv_url: app.cv_url, // Added CV URL
+                            note: app.note
                         }
 
-                        // @ts-ignore
-                        categorized.Upcoming.push(item)
+                        if (app.status === 'pending') {
+                            // @ts-ignore
+                            categorized.Pending.push(item)
+                        } else {
+                            // @ts-ignore
+                            categorized.Upcoming.push(item)
+                        }
                     })
                 }
             }
@@ -330,18 +375,47 @@ serve(async (req: Request) => {
             })
         }
 
-        // 2. CREATE BOOKING (Studio)
+        // 2. CREATE BOOKING (Studio) - Supports multiple time slots
         if (action === 'create') {
-            const { studio_id, user_id, date, start_time, end_time, notes } = params
+            const { studio_id, user_id, date, start_time, end_time, time_slots, notes } = params
 
-            console.log('📥 Creating booking:', { studio_id, user_id, date, start_time, end_time });
+            // Support both old single-slot format and new multi-slot format
+            let slots: Array<{ start: string, end: string }> = [];
 
-            // Check if user already has a pending booking for this studio (prevent spam)
+            if (time_slots && Array.isArray(time_slots) && time_slots.length > 0) {
+                // New multi-slot format
+                slots = time_slots;
+                console.log('📥 Creating multi-slot booking:', { studio_id, user_id, date, time_slots });
+            } else if (start_time && end_time) {
+                // Backwards compatibility: single slot format
+                slots = [{ start: start_time, end: end_time }];
+                console.log('📥 Creating single-slot booking:', { studio_id, user_id, date, start_time, end_time });
+            } else {
+                return new Response(JSON.stringify({
+                    error: 'Invalid booking request. Provide either time_slots array or start_time/end_time.'
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // Validate slots are not empty
+            if (slots.length === 0) {
+                return new Response(JSON.stringify({
+                    error: 'At least one time slot is required.'
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // Check if user already has a pending booking for this studio ON THIS DATE (prevent spam)
             const { data: existingPendingBooking, error: existingError } = await supabaseClient
                 .from('studio_bookings')
-                .select('id, status')
+                .select('id, status, booking_date')
                 .eq('studio_id', studio_id)
                 .eq('user_id', user_id)
+                .eq('booking_date', date)
                 .eq('status', 'pending')
                 .maybeSingle()
 
@@ -351,7 +425,7 @@ serve(async (req: Request) => {
 
             if (existingPendingBooking) {
                 return new Response(JSON.stringify({
-                    error: 'You already have a pending booking for this studio. Please wait for the studio owner to respond before creating another booking.',
+                    error: 'You already have a pending booking for this studio on this date. Please wait for the studio owner to respond, or cancel your existing booking to create a new one.',
                     existing_booking_id: existingPendingBooking.id
                 }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -359,100 +433,247 @@ serve(async (req: Request) => {
                 })
             }
 
-            // Use the comprehensive is_slot_available function
-            console.log('🔍 Checking slot availability...');
+            // Convert slots to JSONB format for database function
+            const slotsJsonb = JSON.stringify(slots);
+
+            // Use multi-slot availability check
+            console.log('🔍 Checking multi-slot availability...');
             const { data: isAvailable, error: availError } = await supabaseClient
-                .rpc('is_slot_available', {
+                .rpc('are_slots_available', {
                     p_studio_id: studio_id,
                     p_booking_date: date,
-                    p_start_time: start_time,
-                    p_end_time: end_time,
+                    p_time_slots: slots,
                     p_user_id: user_id
                 })
 
             if (availError) {
                 console.error('❌ Availability check error:', availError);
-                return new Response(JSON.stringify({
-                    error: 'Availability check failed: ' + availError.message,
-                    details: availError.toString(),
-                    hint: 'The is_slot_available function may not exist or has an error',
-                    code: availError.code
-                }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 400,
-                })
-            }
+                // Fallback to single-slot check if new function doesn't exist
+                if (availError.message?.includes('function') || availError.code === '42883') {
+                    console.log('⚠️ Falling back to single-slot availability check...');
+                    // Check each slot individually using old function
+                    for (const slot of slots) {
+                        const { data: slotAvailable, error: slotError } = await supabaseClient
+                            .rpc('is_slot_available', {
+                                p_studio_id: studio_id,
+                                p_booking_date: date,
+                                p_start_time: slot.start,
+                                p_end_time: slot.end,
+                                p_user_id: user_id
+                            });
 
-            console.log('✅ Slot availability:', isAvailable);
+                        if (slotError) {
+                            return new Response(JSON.stringify({
+                                error: 'Availability check failed: ' + slotError.message,
+                            }), {
+                                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                                status: 400,
+                            });
+                        }
 
-            if (!isAvailable) {
+                        if (!slotAvailable) {
+                            return new Response(JSON.stringify({
+                                error: `Time slot ${slot.start} - ${slot.end} is not available.`
+                            }), {
+                                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                                status: 409,
+                            });
+                        }
+                    }
+                } else {
+                    return new Response(JSON.stringify({
+                        error: 'Availability check failed: ' + availError.message,
+                    }), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 400,
+                    });
+                }
+            } else if (!isAvailable) {
                 return new Response(JSON.stringify({
-                    error: 'This time slot is not available. It may be outside operating hours, overlap with another booking, or the studio may be closed on this date.'
+                    error: 'One or more time slots are not available. They may be outside operating hours, overlap with another booking, or the studio may be closed on this date.'
                 }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 409, // Conflict
                 })
             }
 
-            // Calculate proper pricing with modifiers (REQUIRED)
-            console.log('💰 Calculating booking price...');
-            const { data: pricing, error: pricingError } = await supabaseClient
-                .rpc('calculate_booking_price', {
-                    p_studio_id: studio_id,
-                    p_booking_date: date,
-                    p_start_time: start_time,
-                    p_end_time: end_time
-                })
+            console.log('✅ All slots available');
 
-            if (pricingError) {
-                console.error('❌ Pricing calculation error:', pricingError);
+            // First, verify studio has a valid hourly rate
+            const { data: studioData, error: studioError } = await supabaseClient
+                .from('studios')
+                .select('id, name, hourly_rate')
+                .eq('id', studio_id)
+                .single();
+
+            if (studioError || !studioData) {
+                console.error('❌ Studio not found:', studioError);
                 return new Response(JSON.stringify({
-                    error: 'Pricing calculation failed: ' + pricingError.message,
-                    details: pricingError.toString(),
-                    hint: 'The calculate_booking_price function may not exist or has an error',
-                    code: pricingError.code
+                    error: 'Studio not found.',
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            console.log('📊 Studio data:', studioData);
+
+            if (!studioData.hourly_rate || studioData.hourly_rate <= 0) {
+                console.error('❌ Studio has no valid hourly rate:', studioData.hourly_rate);
+                return new Response(JSON.stringify({
+                    error: 'This studio does not have a valid hourly rate configured. Please contact the studio owner.',
+                    debug: { studio_id, hourly_rate: studioData.hourly_rate }
                 }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
-                })
+                });
             }
 
-            if (!pricing || pricing.length === 0) {
-                console.error('❌ No pricing data returned');
+            // Calculate pricing for all slots combined
+            console.log('💰 Calculating multi-slot booking price...');
+            let pricingData: any = null;
+
+            const { data: pricing, error: pricingError } = await supabaseClient
+                .rpc('calculate_multi_slot_price', {
+                    p_studio_id: studio_id,
+                    p_booking_date: date,
+                    p_time_slots: slots
+                })
+
+            if (pricingError) {
+                console.error('❌ Multi-slot pricing error:', pricingError);
+                // Fallback to calculating each slot and summing
+                if (pricingError.message?.includes('function') || pricingError.code === '42883') {
+                    console.log('⚠️ Falling back to individual slot pricing...');
+                    let totalHours = 0;
+                    let totalPrice = 0;
+                    let baseRate = 0;
+
+                    for (const slot of slots) {
+                        const { data: slotPricing } = await supabaseClient
+                            .rpc('calculate_booking_price', {
+                                p_studio_id: studio_id,
+                                p_booking_date: date,
+                                p_start_time: slot.start,
+                                p_end_time: slot.end
+                            });
+
+                        if (slotPricing && slotPricing[0]) {
+                            totalHours += slotPricing[0].hours || 0;
+                            totalPrice += slotPricing[0].final_price || 0;
+                            baseRate = slotPricing[0].base_rate || baseRate;
+                        }
+                    }
+
+                    pricingData = {
+                        base_rate: baseRate,
+                        hours: totalHours,
+                        subtotal: baseRate * totalHours,
+                        modifiers: {},
+                        final_price: totalPrice
+                    };
+                } else {
+                    return new Response(JSON.stringify({
+                        error: 'Pricing calculation failed: ' + pricingError.message,
+                    }), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 400,
+                    });
+                }
+            } else if (pricing && pricing.length > 0) {
+                pricingData = pricing[0];
+            }
+
+            if (!pricingData) {
+                console.error('❌ No pricing data returned, falling back to manual calculation');
+                // Fallback: Calculate manually using studio's hourly rate
+                let totalHours = 0;
+                for (const slot of slots) {
+                    const startParts = slot.start.split(':').map(Number);
+                    const endParts = slot.end.split(':').map(Number);
+                    const startMinutes = startParts[0] * 60 + startParts[1];
+                    const endMinutes = endParts[0] * 60 + endParts[1];
+                    totalHours += (endMinutes - startMinutes) / 60;
+                }
+
+                pricingData = {
+                    base_rate: studioData.hourly_rate,
+                    hours: totalHours,
+                    total_hours: totalHours,
+                    subtotal: studioData.hourly_rate * totalHours,
+                    modifiers: {},
+                    final_price: studioData.hourly_rate * totalHours
+                };
+                console.log('📊 Manual pricing fallback:', pricingData);
+            }
+
+            console.log('✅ Pricing calculated:', pricingData);
+
+            // Get overall start and end times (for backwards compatibility)
+            const allStartTimes = slots.map(s => s.start).sort();
+            const allEndTimes = slots.map(s => s.end).sort();
+            const overallStart = allStartTimes[0];
+            const overallEnd = allEndTimes[allEndTimes.length - 1];
+
+            // Validate pricing data before insert - use studio rate as fallback
+            const finalBaseRate = pricingData.base_rate || studioData.hourly_rate;
+            const finalHours = pricingData.total_hours || pricingData.hours;
+
+            if (!finalBaseRate || finalBaseRate <= 0) {
+                console.error('❌ Invalid base rate:', { pricingData, studioData });
                 return new Response(JSON.stringify({
-                    error: 'Unable to calculate booking price. Please try again or contact support.'
+                    error: 'Unable to calculate booking price. Studio may not have a valid hourly rate configured.',
+                    debug: { pricingData, studio_id, studio_hourly_rate: studioData.hourly_rate }
                 }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                    status: 500,
-                })
+                    status: 400,
+                });
             }
 
-            console.log('✅ Pricing calculated:', pricing);
+            if (!finalHours || finalHours <= 0) {
+                console.error('❌ Invalid hours calculated:', { pricingData, slots });
+                return new Response(JSON.stringify({
+                    error: 'Invalid booking duration. Please select valid time slots.',
+                    debug: { pricingData, slots }
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
 
-            const pricingData = pricing[0]
+            console.log('📤 Inserting multi-slot booking...', {
+                studio_id, user_id, date, overallStart, overallEnd, slots,
+                base_rate: finalBaseRate,
+                hours: finalHours,
+                subtotal: pricingData.subtotal || (finalBaseRate * finalHours),
+                final_price: pricingData.final_price || (finalBaseRate * finalHours)
+            });
 
-            console.log('📤 Inserting booking...');
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
                 .insert({
                     studio_id,
                     user_id,
                     booking_date: date,
-                    start_time,
-                    end_time,
+                    start_time: overallStart,  // Overall range for backwards compatibility
+                    end_time: overallEnd,
+                    time_slots: slots,  // Detailed slots
                     notes: notes || null,
-                    status: 'pending',
-                    // Store pricing details (REQUIRED fields)
-                    base_rate: pricingData.base_rate,
-                    hours: pricingData.hours,
-                    subtotal: pricingData.subtotal,
+                    status: 'confirmed', // Auto-confirm per user request
+                    // Store pricing details - use validated values
+                    base_rate: finalBaseRate,
+                    hours: finalHours,
+                    subtotal: pricingData.subtotal || (finalBaseRate * finalHours),
                     modifiers_applied: pricingData.modifiers || {},
-                    final_price: pricingData.final_price
+                    final_price: pricingData.final_price || (finalBaseRate * finalHours)
                 })
                 .select()
                 .single()
 
-            if (error) throw error
+            if (error) {
+                console.error('❌ Insert error:', error);
+                throw error;
+            }
 
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -464,15 +685,21 @@ serve(async (req: Request) => {
         if (action === 'update_status') {
             const { booking_id, new_status, type_id, cancellation_reason } = params // type_id: 'studio_booking' or 'gig_application'
 
+            console.log('📝 update_status called with:', { booking_id, new_status, type_id, cancellation_reason })
+
             let table = 'studio_bookings'
             if (type_id === 'gig_application') table = 'gig_applications'
 
+            console.log('📝 Updating table:', table)
+
             const updateData: any = { status: new_status }
 
-            // Only add cancellation_reason if status is cancelled and reason is provided
-            if (new_status === 'cancelled' && cancellation_reason) {
+            // Add cancellation_reason if status is cancelled/rejected and reason is provided
+            if ((new_status === 'cancelled' || new_status === 'rejected') && cancellation_reason) {
                 updateData.cancellation_reason = cancellation_reason
             }
+
+            console.log('📝 Update data:', updateData)
 
             const { data, error } = await supabaseClient
                 .from(table)
@@ -480,7 +707,79 @@ serve(async (req: Request) => {
                 .eq('id', booking_id)
                 .select()
 
+            console.log('📝 Update result:', { data, error })
+
             if (error) throw error
+
+            // NOTIFICATION LOGIC
+            if (['cancelled', 'rejected', 'confirmed', 'accepted'].includes(new_status)) {
+                try {
+                    // Determine who to notify
+                    let targetUserId = null;
+                    let notificationTitle = '';
+                    let notificationMessage = '';
+                    let notificationType = 'info';
+
+                    if (table === 'studio_bookings') {
+                        // For Studio Bookings
+                        const { data: bookingInfo } = await supabaseClient
+                            .from('studio_bookings')
+                            .select('user_id, studio:studios(name)')
+                            .eq('id', booking_id)
+                            .single();
+
+                        if (bookingInfo) {
+                            if (new_status === 'cancelled' && cancellation_reason) {
+                                targetUserId = bookingInfo.user_id;
+                                notificationTitle = 'Booking Declined';
+                                notificationMessage = `Your booking at ${bookingInfo.studio.name} has been declined/cancelled. Reason: ${cancellation_reason}`;
+                                notificationType = 'error';
+                            } else if (new_status === 'confirmed') {
+                                targetUserId = bookingInfo.user_id;
+                                notificationTitle = 'Booking Confirmed!';
+                                notificationMessage = `Your booking at ${bookingInfo.studio.name} has been confirmed.`;
+                                notificationType = 'success';
+                            }
+                        }
+                    } else if (table === 'gig_applications') {
+                        // For Gig Applications
+                        const { data: gigInfo } = await supabaseClient
+                            .from('gig_applications')
+                            .select('applicant_id, gig:gigs(name)')
+                            .eq('id', booking_id)
+                            .single();
+
+                        if (gigInfo) {
+                            if (new_status === 'rejected') {
+                                targetUserId = gigInfo.applicant_id;
+                                notificationTitle = 'Application Declined';
+                                notificationMessage = `Your application for ${gigInfo.gig.name} has been declined.`;
+                                notificationType = 'error';
+                            } else if (new_status === 'accepted') {
+                                targetUserId = gigInfo.applicant_id;
+                                notificationTitle = 'Application Accepted!';
+                                notificationMessage = `Your application for ${gigInfo.gig.name} has been accepted!`;
+                                notificationType = 'success';
+                            }
+                        }
+                    }
+
+                    if (targetUserId) {
+                        await supabaseClient
+                            .from('notifications')
+                            .insert({
+                                user_id: targetUserId,
+                                type: notificationType,
+                                title: notificationTitle,
+                                message: notificationMessage,
+                                read: false
+                            });
+                        console.log(`🔔 Notification sent to ${targetUserId}: ${notificationTitle}`);
+                    }
+                } catch (notifyError) {
+                    console.error('Error sending notification:', notifyError);
+                }
+            }
 
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -643,6 +942,95 @@ serve(async (req: Request) => {
                     status: 200,
                 })
             }
+        }
+
+        // 7. SCAN QR (Create Check-In)
+        if (action === 'scan_qr') {
+            const { qr_code, scanner_id } = params;
+
+            console.log('📷 Scan QR request:', { qr_code, scanner_id });
+
+            // 1. Verify the booking exists and is confirmed
+            const { data: booking, error: fetchError } = await supabaseClient
+                .from('studio_bookings')
+                .select('*, studio:studios(owner_id)')
+                .eq('id', qr_code)
+                .single();
+
+            console.log('📷 Booking fetch result:', { booking, fetchError });
+
+            if (fetchError) {
+                console.error('📷 Fetch error details:', fetchError);
+                return new Response(JSON.stringify({ error: 'Invalid booking code.', details: fetchError.message }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            if (!booking) {
+                return new Response(JSON.stringify({ error: 'Booking not found.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            // 2. Verify scanner is the studio owner
+            console.log('📷 Verifying owner:', { studio_owner: booking.studio?.owner_id, scanner_id });
+            if (!booking.studio || booking.studio.owner_id !== scanner_id) {
+                return new Response(JSON.stringify({
+                    error: 'You are not authorized to scan for this studio.',
+                    debug: { studio_owner: booking.studio?.owner_id, scanner_id }
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            // 3. Verify status
+            console.log('📷 Current booking status:', booking.status);
+            if (booking.status === 'checked_in') {
+                return new Response(JSON.stringify({ message: 'Already checked in!', booking }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
+            if (booking.status !== 'confirmed') {
+                return new Response(JSON.stringify({ error: `Cannot check in. Booking status is ${booking.status}.` }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // 4. Update status to checked_in
+            console.log('📷 Attempting to update booking to checked_in...');
+            const { data: updated, error: updateError } = await supabaseClient
+                .from('studio_bookings')
+                .update({
+                    status: 'checked_in',
+                    check_in_time: new Date().toISOString()
+                })
+                .eq('id', booking.id)
+                .select()
+                .single();
+
+            if (updateError) {
+                console.error('📷 Check-in update error:', updateError);
+                return new Response(JSON.stringify({
+                    error: 'Failed to update check-in status.',
+                    details: updateError.message,
+                    code: updateError.code
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 500,
+                });
+            }
+
+            console.log('📷 Check-in successful:', updated);
+            return new Response(JSON.stringify({ success: true, booking: updated }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
         }
 
         throw new Error('Invalid action')

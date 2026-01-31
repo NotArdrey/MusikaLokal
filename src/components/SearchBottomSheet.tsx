@@ -1,394 +1,665 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetFlatList, BottomSheetModal } from '@gorhom/bottom-sheet';
-import React, { forwardRef, useCallback, useMemo, useState } from 'react';
-import { Dimensions, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import React, { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Dimensions, Keyboard, LayoutAnimation, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ListingCard from './ListingCard';
 
 const { width } = Dimensions.get('window');
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// Filter Constants
+const GENRE_OPTIONS = ['All', 'Rock', 'Jazz', 'Indie Pop', 'Acoustic', 'Electronic', 'OPM', 'Classical', 'R&B', 'Hip Hop'];
+const RATING_OPTIONS = [
+    { label: 'All', value: 0 },
+    { label: '3+', value: 3 },
+    { label: '4+', value: 4 },
+    { label: '4.5+', value: 4.5 },
+];
+const PRICE_OPTIONS = [
+    { label: 'All', value: 'all' },
+    { label: '₱0-5K', value: 'low' },
+    { label: '₱5K-15K', value: 'mid' },
+    { label: '₱15K+', value: 'high' },
+];
+const SORT_OPTIONS = [
+    { label: 'Newest', value: 'newest', icon: 'time-outline' },
+    { label: 'Top Rated', value: 'rating', icon: 'star-outline' },
+    { label: 'Price ↑', value: 'price_low', icon: 'arrow-up-outline' },
+    { label: 'Price ↓', value: 'price_high', icon: 'arrow-down-outline' },
+];
 
 interface SearchBottomSheetProps {
     onClose?: () => void;
     onItemPress?: (listingId: string) => void;
 }
 
-import { useAuth } from '../context/AuthContext';
+const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
+    function SearchBottomSheet({ onClose, onItemPress }, ref) {
+        const { colors, isDark } = useTheme();
+        const { userRole } = useAuth();
+        const snapPoints = useMemo(() => ['94%'], []);
 
-// ... imports
+        // Filter Chips - safely handle null userRole
+        const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
+        const TYPE_FILTERS = isOwner ? ['All', 'Musician'] : ['All', 'Musician', 'Studio', 'Gig'];
 
-const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(({ onClose, onItemPress }, ref) => {
-    const { colors, isDark } = useTheme();
-    const { userRole } = useAuth();
-    const snapPoints = useMemo(() => ['94%'], []);
+        // Basic State
+        const [activeFilter, setActiveFilter] = useState('All');
+        const [searchQuery, setSearchQuery] = useState('');
+        const [data, setData] = useState<any[]>([]);
+        const [loading, setLoading] = useState(true);
+        const [initialLoad, setInitialLoad] = useState(true);
+        const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-    // Filter Chips
-    const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
-    // If owner, only show relevant filters (effectively just Musicians, maybe 'All' is redundant if it's the same, but let's keep it consistent)
-    const FILTERS = isOwner ? ['All', 'Musician'] : ['All', 'Musician', 'Studio', 'Venue'];
+        // Advanced Filter State
+        const [showFilters, setShowFilters] = useState(false);
+        const [selectedGenre, setSelectedGenre] = useState('All');
+        const [minRating, setMinRating] = useState(0);
+        const [priceRange, setPriceRange] = useState<'all' | 'low' | 'mid' | 'high'>('all');
+        const [sortBy, setSortBy] = useState<'newest' | 'rating' | 'price_low' | 'price_high'>('newest');
 
-    const [activeFilter, setActiveFilter] = useState('All');
-    const [searchQuery, setSearchQuery] = useState('');
+        // Count active filters (excluding defaults)
+        const activeFilterCount = useMemo(() => {
+            let count = 0;
+            if (selectedGenre !== 'All') count++;
+            if (minRating > 0) count++;
+            if (priceRange !== 'all') count++;
+            if (sortBy !== 'newest') count++;
+            return count;
+        }, [selectedGenre, minRating, priceRange, sortBy]);
 
-    const renderBackdrop = useCallback(
-        (props: any) => (
-            <BottomSheetBackdrop
-                {...props}
-                disappearsOnIndex={-1}
-                appearsOnIndex={0}
-                opacity={0.5}
-            />
-        ),
-        []
-    );
+        const renderBackdrop = useCallback(
+            (props: any) => (
+                <BottomSheetBackdrop
+                    {...props}
+                    disappearsOnIndex={-1}
+                    appearsOnIndex={0}
+                    opacity={0.4}
+                />
+            ),
+            []
+        );
 
-    const handleDismiss = () => {
-        // @ts-ignore
-        ref?.current?.dismiss();
-        if (onClose) onClose();
-    };
+        const handleClose = useCallback(() => {
+            Keyboard.dismiss();
+            onClose?.();
+        }, [onClose]);
 
-    const handleCardPress = (item: any) => {
-        if (onItemPress) {
-            handleDismiss();
-            onItemPress(item.id);
-        }
-    };
+        // Toggle filter panel with animation
+        const toggleFilters = useCallback(() => {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setShowFilters(prev => !prev);
+        }, []);
 
-    // Data State
-    const [data, setData] = useState<any[]>([]);
-    const [loading, setLoading] = useState(false);
+        // Reset all filters
+        const resetFilters = useCallback(() => {
+            setSelectedGenre('All');
+            setMinRating(0);
+            setPriceRange('all');
+            setSortBy('newest');
+        }, []);
 
-    // ... state ...
-
-    // Filter Logic & Search Effect
-    React.useEffect(() => {
-        const doSearch = async () => {
-            setLoading(true);
-            try {
-                let results: any[] = [];
-                // Use require for AsyncStorage to avoid circular dependency issues if global import fails or isn't present
-                const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-
-                // AI RELEVANCE CHECK
-                // If query is empty, try to fetch based on "Last Viewed" embedding
-                let usedAI = false;
-                if (searchQuery.trim().length === 0) {
-                    try {
-                        let queryVector = null;
-
-                        // 1. Try Long-Term Profile
-                        const { data: { user } } = await supabase.auth.getUser();
-                        if (user) {
-                            const { data: p } = await supabase.from('profiles').select('interest_vector').eq('id', user.id).single();
-                            if (p?.interest_vector) {
-                                queryVector = typeof p.interest_vector === 'string' ? JSON.parse(p.interest_vector) : p.interest_vector;
-                            }
-                        }
-
-                        // 2. Fallback to Short-Term
-                        if (!queryVector) {
-                            const historyJson = await AsyncStorage.getItem('last_viewed_item');
-                            if (historyJson) {
-                                const history = JSON.parse(historyJson);
-                                if (history?.embedding) queryVector = history.embedding;
-                            }
-                        }
-
-                        if (queryVector) {
-                            usedAI = true;
-                            const history = { embedding: queryVector }; // Shim for below logic if needed, or refactor below
-                            // Actually the code below expects `history.embedding`.
-                            // Let's keep `history` var or refactor the block below.
-                            // Refactoring block below to use `queryVector`
-
-                            // Determine type to search
-                            // If filter is 'All', we search all types? match_listings takes one type.
-                            // We might need to run parallel for all types if 'All'
-                            const searchTypes = isOwner
-                                ? ['Group']
-                                : (activeFilter === 'All' ? ['Group', 'Studio', 'Gig'] : [activeFilter]);
-
-                            const promises = searchTypes.map(t =>
-                                supabase.rpc('match_listings', {
-                                    query_embedding: history.embedding,
-                                    match_threshold: 0.3, // Lower threshold for search
-                                    match_count: 5,
-                                    listing_type: t === 'Musician' ? 'Group' : (t === 'Venue' ? 'Gig' : t) // Map filter to type
-                                    // Note: Mapping 'Venue' -> 'Gig' or 'Studio' depends on schema. 
-                                    // Standard: 'Group', 'Studio', 'Gig'
-                                })
-                            );
-
-                            const aiResults = await Promise.all(promises);
-                            const flatIds: any[] = [];
-
-                            // Collect IDs and Types
-                            aiResults.forEach((res, idx) => {
-                                if (res.data) {
-                                    const type = searchTypes[idx];
-                                    res.data.forEach((r: any) => flatIds.push({ id: r.id, type }));
-                                }
-                            });
-
-                            // Fetch full objects
-                            if (flatIds.length > 0) {
-                                // We need to fetch from respective tables again to get full data
-                                // This is a bit heavy, but correct.
-                                // Optimization: Just fetch top 10 total
-
-                                for (const type of ['Group', 'Studio', 'Gig']) {
-                                    const ids = flatIds.filter(x => x.type === type).map(x => x.id);
-                                    if (ids.length > 0) {
-                                        let table = 'groups_with_stats';
-                                        if (type === 'Studio') table = 'studios_with_stats';
-                                        if (type === 'Gig') table = 'gigs_with_stats';
-
-                                        const { data: fullItems } = await supabase.from(table).select('*').in('id', ids);
-                                        if (fullItems) {
-                                            const mapped = fullItems.map((item: any) => ({
-                                                ...item,
-                                                type,
-                                                image: item.images?.[0] || item.image,
-                                                hourly_rate: item.hourly_rate ? item.hourly_rate.toString() : undefined,
-                                                budget: item.budget ? item.budget.toString() : undefined,
-                                                rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
-                                            }));
-                                            results.push(...mapped);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        console.log('AI Search Error:', e);
-                    }
-                }
-
-                if (!usedAI) {
-                    // Fallback to Standard Search
-                    // Determine which tables to query based on filter
+        // Search effect with filters
+        useEffect(() => {
+            const doSearch = async () => {
+                if (initialLoad) setLoading(true);
+                try {
+                    let results: any[] = [];
                     let tables: string[] = [];
 
                     if (isOwner) {
-                        // Owner restricted view: Only Groups
                         tables = ['groups_with_stats'];
                     } else {
                         if (activeFilter === 'All') tables = ['groups_with_stats', 'studios_with_stats', 'gigs_with_stats'];
                         else if (activeFilter === 'Musician') tables = ['groups_with_stats'];
                         else if (activeFilter === 'Studio') tables = ['studios_with_stats'];
-                        else if (activeFilter === 'Venue') tables = ['studios_with_stats', 'gigs_with_stats'];
+                        else if (activeFilter === 'Gig') tables = ['gigs_with_stats'];
                     }
 
                     for (const table of tables) {
                         let query = supabase.from(table).select('*');
 
+                        // Text search
                         if (searchQuery.trim().length > 0) {
                             query = query.or(`name.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`);
                         }
 
-                        const { data: qData, error } = await query.limit(10);
-
-                        if (error) {
-                            console.log(`Error querying ${table}:`, error);
-                            continue;
+                        // Only show open gigs
+                        if (table === 'gigs_with_stats') {
+                            query = query.eq('status', 'open');
                         }
 
+                        // Genre filter (Groups and Gigs)
+                        if (selectedGenre !== 'All' && (table === 'groups_with_stats' || table === 'gigs_with_stats')) {
+                            query = query.ilike('genre', `%${selectedGenre}%`);
+                        }
+
+                        // Rating filter
+                        if (minRating > 0) {
+                            query = query.gte('rating', minRating);
+                        }
+
+                        // Price range filter
+                        if (priceRange !== 'all') {
+                            const priceField = table.includes('studio') ? 'hourly_rate' :
+                                table.includes('gig') ? 'budget' : 'rate';
+
+                            if (priceRange === 'low') {
+                                query = query.lte(priceField, 5000);
+                            } else if (priceRange === 'mid') {
+                                query = query.gte(priceField, 5000).lte(priceField, 15000);
+                            } else if (priceRange === 'high') {
+                                query = query.gte(priceField, 15000);
+                            }
+                        }
+
+                        // Sort order
+                        if (sortBy === 'rating') {
+                            query = query.order('rating', { ascending: false });
+                        } else if (sortBy === 'price_low') {
+                            const priceField = table.includes('studio') ? 'hourly_rate' :
+                                table.includes('gig') ? 'budget' : 'rate';
+                            query = query.order(priceField, { ascending: true, nullsFirst: false });
+                        } else if (sortBy === 'price_high') {
+                            const priceField = table.includes('studio') ? 'hourly_rate' :
+                                table.includes('gig') ? 'budget' : 'rate';
+                            query = query.order(priceField, { ascending: false, nullsFirst: false });
+                        } else {
+                            query = query.order('created_at', { ascending: false });
+                        }
+
+                        const { data: qData } = await query.limit(15);
                         if (qData) {
-                            // Normalize
                             const type = table.includes('group') ? 'Group' : (table.includes('studio') ? 'Studio' : 'Gig');
                             const mapped = qData.map((item: any) => ({
                                 ...item,
-                                type: item.type || type, // Use existing or fallback
+                                type: item.type || type,
                                 image: item.images?.[0] || item.image,
-                                // Ensure normalized props for card
-                                // Ensure normalized props for card
-                                // For Studio: prioritize hourly_rate, For Gig: prioritize budget, For Group: rate
-                                hourly_rate: item.hourly_rate ? item.hourly_rate.toString() : undefined,
-                                budget: item.budget ? item.budget.toString() : undefined,
                                 rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
                             }));
                             results.push(...mapped);
                         }
                     }
-                }
 
-                // Client-side filtering for edge cases (like Venue vs Studio)
-                const final = results.filter(item => {
-                    if (activeFilter === 'Venue') {
-                        return item.type === 'Venue' || item.type === 'Gig' || (item.type === 'Studio' && item.amenities?.includes('Stage'));
+                    // Client-side sort for combined results
+                    if (sortBy === 'rating') {
+                        results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+                    } else if (sortBy === 'price_low') {
+                        results.sort((a, b) => {
+                            const aPrice = parseFloat(a.rate?.replace(/,/g, '') || '0');
+                            const bPrice = parseFloat(b.rate?.replace(/,/g, '') || '0');
+                            return aPrice - bPrice;
+                        });
+                    } else if (sortBy === 'price_high') {
+                        results.sort((a, b) => {
+                            const aPrice = parseFloat(a.rate?.replace(/,/g, '') || '0');
+                            const bPrice = parseFloat(b.rate?.replace(/,/g, '') || '0');
+                            return bPrice - aPrice;
+                        });
                     }
-                    return true;
-                });
 
-                setData(final);
+                    setData(results);
+                } catch (e) {
+                    console.log('Search error:', e);
+                } finally {
+                    setLoading(false);
+                    setInitialLoad(false);
+                }
+            };
 
-            } catch (e) {
-                console.log('Search error:', e);
-            } finally {
-                setLoading(false);
-            }
-        };
+            const timeout = setTimeout(doSearch, 300);
+            return () => clearTimeout(timeout);
+        }, [searchQuery, activeFilter, isOwner, refreshTrigger, selectedGenre, minRating, priceRange, sortBy]);
 
-        const timeout = setTimeout(doSearch, 300); // Debounce
-        return () => clearTimeout(timeout);
-    }, [searchQuery, activeFilter]);
+        // Realtime Search Updates
+        useEffect(() => {
+            const channel = supabase
+                .channel('public:search_updates')
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'gigs' },
+                    () => setRefreshTrigger(prev => prev + 1)
+                )
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'studios' },
+                    () => setRefreshTrigger(prev => prev + 1)
+                )
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'groups' },
+                    () => setRefreshTrigger(prev => prev + 1)
+                )
+                .subscribe();
 
-    // Handle invite action - opens the details sheet for booking/connecting
-    const handleInvite = (item: any) => {
-        if (onItemPress) {
-            handleDismiss();
-            onItemPress(item.id);
-        }
-    };
+            return () => {
+                supabase.removeChannel(channel);
+            };
+        }, []);
 
-    const renderItem = ({ item }: { item: any }) => (
-        <ListingCard
-            item={item}
-            onPress={handleCardPress}
-            onInvite={handleInvite}
-            variant="vertical"
-            style={{ width: '100%', marginBottom: 24, marginRight: 0 }}
-        />
-    );
+        const handleItemPress = useCallback((item: any) => {
+            onClose?.();
+            onItemPress?.(item.id);
+        }, [onClose, onItemPress]);
 
-    return (
-        <BottomSheetModal
-            ref={ref}
-            index={0}
-            snapPoints={snapPoints}
-            backdropComponent={renderBackdrop}
-            backgroundStyle={{ backgroundColor: colors.background }}
-            handleIndicatorStyle={{ backgroundColor: isDark ? '#4B5563' : '#E5E7EB', width: 40 }}
-            keyboardBehavior="interactive"
-            keyboardBlurBehavior="restore"
-            enablePanDownToClose={true}
-        >
-            <View style={{ flex: 1, minHeight: '100%' }}>
-                {/* 1. Modal Header & Controls */}
-                <View style={styles.headerContainer}>
-                    {/* Top Row: Close | Title | Filter Icon */}
-                    <View style={styles.headerTopRow}>
-                        <TouchableOpacity onPress={handleDismiss} style={styles.iconBtn}>
-                            <Ionicons name="close" size={24} color={colors.text} />
+        const clearSearch = () => setSearchQuery('');
+
+        const renderItem = useCallback(({ item }: { item: any }) => (
+            <ListingCard
+                item={item}
+                onPress={handleItemPress}
+                variant="vertical"
+                style={{ width: '100%' }}
+            />
+        ), [handleItemPress]);
+
+        const keyExtractor = useCallback((item: any) => item.id.toString(), []);
+
+        // Filter Section Component
+        const renderFilterSection = useMemo(() => {
+            if (!showFilters) return null;
+
+            return (
+                <View style={[styles.filterPanel, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                    {/* Genre Filter */}
+                    <View style={styles.filterSection}>
+                        <Text style={[styles.filterLabel, { color: colors.text }]}>Genre</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsScroll}>
+                            {GENRE_OPTIONS.map((genre) => (
+                                <TouchableOpacity
+                                    key={genre}
+                                    style={[
+                                        styles.filterChip,
+                                        selectedGenre === genre
+                                            ? { backgroundColor: colors.primary }
+                                            : { backgroundColor: isDark ? '#374151' : '#F3F4F6' }
+                                    ]}
+                                    onPress={() => setSelectedGenre(genre)}
+                                >
+                                    <Text style={[
+                                        styles.filterChipText,
+                                        selectedGenre === genre ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' }
+                                    ]}>{genre}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+
+                    {/* Rating Filter */}
+                    <View style={styles.filterSection}>
+                        <Text style={[styles.filterLabel, { color: colors.text }]}>Min Rating</Text>
+                        <View style={styles.filterRow}>
+                            {RATING_OPTIONS.map((option) => (
+                                <TouchableOpacity
+                                    key={option.value}
+                                    style={[
+                                        styles.filterChip,
+                                        minRating === option.value
+                                            ? { backgroundColor: colors.primary }
+                                            : { backgroundColor: isDark ? '#374151' : '#F3F4F6' }
+                                    ]}
+                                    onPress={() => setMinRating(option.value)}
+                                >
+                                    {option.value > 0 && <Ionicons name="star" size={12} color={minRating === option.value ? '#FFF' : '#FBBF24'} style={{ marginRight: 4 }} />}
+                                    <Text style={[
+                                        styles.filterChipText,
+                                        minRating === option.value ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' }
+                                    ]}>{option.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+
+                    {/* Price Range Filter */}
+                    <View style={styles.filterSection}>
+                        <Text style={[styles.filterLabel, { color: colors.text }]}>Price Range</Text>
+                        <View style={styles.filterRow}>
+                            {PRICE_OPTIONS.map((option) => (
+                                <TouchableOpacity
+                                    key={option.value}
+                                    style={[
+                                        styles.filterChip,
+                                        priceRange === option.value
+                                            ? { backgroundColor: colors.primary }
+                                            : { backgroundColor: isDark ? '#374151' : '#F3F4F6' }
+                                    ]}
+                                    onPress={() => setPriceRange(option.value as any)}
+                                >
+                                    <Text style={[
+                                        styles.filterChipText,
+                                        priceRange === option.value ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' }
+                                    ]}>{option.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+
+                    {/* Sort By */}
+                    <View style={styles.filterSection}>
+                        <Text style={[styles.filterLabel, { color: colors.text }]}>Sort By</Text>
+                        <View style={styles.filterRow}>
+                            {SORT_OPTIONS.map((option) => (
+                                <TouchableOpacity
+                                    key={option.value}
+                                    style={[
+                                        styles.filterChip,
+                                        sortBy === option.value
+                                            ? { backgroundColor: colors.primary }
+                                            : { backgroundColor: isDark ? '#374151' : '#F3F4F6' }
+                                    ]}
+                                    onPress={() => setSortBy(option.value as any)}
+                                >
+                                    <Ionicons
+                                        name={option.icon as any}
+                                        size={14}
+                                        color={sortBy === option.value ? '#FFF' : (isDark ? '#D1D5DB' : '#4B5563')}
+                                        style={{ marginRight: 4 }}
+                                    />
+                                    <Text style={[
+                                        styles.filterChipText,
+                                        sortBy === option.value ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' }
+                                    ]}>{option.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+
+                    {/* Reset Button */}
+                    {activeFilterCount > 0 && (
+                        <TouchableOpacity style={[styles.resetButton, { borderColor: colors.primary }]} onPress={resetFilters}>
+                            <Ionicons name="refresh-outline" size={16} color={colors.primary} />
+                            <Text style={[styles.resetButtonText, { color: colors.primary }]}>Reset Filters</Text>
                         </TouchableOpacity>
-                        <Text style={[styles.headerTitle, { color: colors.text }]}>Search</Text>
-                        <View style={{ width: 40 }} />
-                    </View>
+                    )}
+                </View>
+            );
+        }, [showFilters, colors, isDark, selectedGenre, minRating, priceRange, sortBy, activeFilterCount, resetFilters]);
 
-                    {/* Search Input */}
-                    <View style={[styles.searchContainer, { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderColor: isDark ? '#4B5563' : 'transparent' }]}>
-                        <Ionicons name="search" size={20} color={colors.textSecondary} />
-                        <TextInput
-                            style={[styles.searchInput, { color: colors.text }]}
-                            placeholder="Where to?"
-                            placeholderTextColor={colors.textSecondary}
-                            value={searchQuery}
-                            onChangeText={setSearchQuery}
-                        />
-                        {searchQuery.length > 0 && (
-                            <TouchableOpacity onPress={() => setSearchQuery('')}>
-                                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+        // Header Component
+        const renderHeader = useMemo(() => (
+            <View style={{ backgroundColor: colors.background }}>
+                <View style={styles.headerContainer}>
+                    <Text style={[styles.headerTitle, { color: colors.text }]}>Discover</Text>
+
+                    <View style={{ flexDirection: 'column', gap: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <View style={[styles.searchContainer, {
+                                flex: 1,
+                                backgroundColor: isDark ? '#374151' : '#F3F4F6',
+                                borderColor: 'transparent'
+                            }]}>
+                                <Ionicons name="search" size={20} color={colors.textSecondary} />
+                                <TextInput
+                                    style={[styles.searchInput, { color: colors.text }]}
+                                    placeholder={isOwner ? "Find musicians, bands..." : "Find studios, gigs, venues..."}
+                                    placeholderTextColor={colors.textSecondary}
+                                    value={searchQuery}
+                                    onChangeText={setSearchQuery}
+                                    returnKeyType="search"
+                                    autoCorrect={false}
+                                />
+                                {searchQuery.length > 0 && (
+                                    <TouchableOpacity onPress={clearSearch} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                        <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+
+                            {/* Filter Button */}
+                            <TouchableOpacity
+                                style={[
+                                    styles.filterButton,
+                                    {
+                                        backgroundColor: showFilters || activeFilterCount > 0 ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                    }
+                                ]}
+                                onPress={toggleFilters}
+                            >
+                                <Ionicons
+                                    name="options-outline"
+                                    size={20}
+                                    color={showFilters || activeFilterCount > 0 ? '#FFF' : colors.textSecondary}
+                                />
+                                {activeFilterCount > 0 && (
+                                    <View style={styles.filterBadge}>
+                                        <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                                    </View>
+                                )}
                             </TouchableOpacity>
-                        )}
+                        </View>
+
+                        <Text style={{
+                            fontSize: 12,
+                            color: colors.textSecondary,
+                            marginLeft: 4,
+                            fontFamily: 'Poppins_400Regular'
+                        }}>
+                            {activeFilterCount > 0
+                                ? `${activeFilterCount} filter${activeFilterCount > 1 ? 's' : ''} applied`
+                                : (isOwner ? "Genre • Availability" : "Location • Rate")}
+                        </Text>
                     </View>
 
-                    {/* 2. Category Filter Chips (Horizontal) - Hidden for owners */}
+                    {/* Type Filter Chips */}
                     {!isOwner && (
-                        <View style={styles.chipsContainer}>
-                            <BottomSheetFlatList
-                                horizontal
-                                data={FILTERS}
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={{ paddingHorizontal: 24, gap: 10 }}
-                                keyExtractor={(i: string) => i}
-                                renderItem={({ item }: { item: string }) => {
-                                    const isActive = item === activeFilter;
-                                    return (
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.chip,
-                                                isActive ? { backgroundColor: colors.primary, borderColor: colors.primary } : { backgroundColor: 'transparent', borderColor: colors.border },
-                                            ]}
-                                            onPress={() => setActiveFilter(item)}
-                                        >
-                                            <Text style={[
-                                                styles.chipText,
-                                                isActive ? { color: '#FFF' } : { color: colors.textSecondary },
-                                            ]}>{item}</Text>
-                                        </TouchableOpacity>
-                                    );
-                                }}
-                            />
+                        <View style={styles.chipsRow}>
+                            {TYPE_FILTERS.map((filter) => {
+                                const isActive = filter === activeFilter;
+                                return (
+                                    <TouchableOpacity
+                                        key={filter}
+                                        style={[
+                                            styles.chip,
+                                            isActive
+                                                ? { backgroundColor: colors.primary, borderWidth: 0 }
+                                                : { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderWidth: 0 },
+                                        ]}
+                                        onPress={() => setActiveFilter(filter)}
+                                        activeOpacity={0.8}
+                                    >
+                                        <Text style={[
+                                            styles.chipText,
+                                            isActive ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' },
+                                        ]}>{filter}</Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
                         </View>
                     )}
                 </View>
 
+                {/* Filter Panel */}
+                {renderFilterSection}
+
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-                {/* 3. Vertical Results List */}
-                <BottomSheetFlatList
-                    data={data}
-                    keyExtractor={(item: any) => item.id}
-                    renderItem={renderItem}
-                    contentContainerStyle={[styles.listContent, { minHeight: '100%' }]}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                    ListEmptyComponent={
-                        <View style={{ alignItems: 'center', marginTop: 40 }}>
-                            <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No results found</Text>
-                        </View>
-                    }
-                />
+                <Text style={[styles.resultsLabel, { color: colors.textSecondary }]}>
+                    {data.length > 0 ? `${data.length} Result${data.length !== 1 ? 's' : ''}` : 'Top Results'}
+                </Text>
             </View>
-        </BottomSheetModal>
-    );
-});
+        ), [colors, isDark, searchQuery, activeFilter, isOwner, TYPE_FILTERS, showFilters, activeFilterCount, toggleFilters, renderFilterSection, data.length]);
+
+        const ListEmptyComponent = useMemo(() => (
+            <View style={styles.emptyContainer}>
+                <View style={[styles.emptyIconContainer, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}>
+                    <Ionicons name="search-outline" size={32} color={colors.textSecondary} />
+                </View>
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>No results found</Text>
+                <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+                    {activeFilterCount > 0
+                        ? "Try adjusting your filters or search terms."
+                        : `We couldn't find anything for "${searchQuery}".\nTry adjusting your search terms.`}
+                </Text>
+                {activeFilterCount > 0 && (
+                    <TouchableOpacity style={[styles.clearFiltersBtn, { backgroundColor: colors.primary }]} onPress={resetFilters}>
+                        <Text style={styles.clearFiltersBtnText}>Clear Filters</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+        ), [colors, isDark, searchQuery, activeFilterCount, resetFilters]);
+
+        return (
+            <BottomSheetModal
+                ref={ref}
+                index={0}
+                snapPoints={snapPoints}
+                backdropComponent={renderBackdrop}
+                onDismiss={handleClose}
+
+                backgroundStyle={{ backgroundColor: colors.background, borderRadius: 32 }}
+                handleIndicatorStyle={{ backgroundColor: isDark ? '#4B5563' : '#E5E7EB', width: 40, marginTop: 10 }}
+                enablePanDownToClose
+                keyboardBehavior="interactive"
+                keyboardBlurBehavior="restore"
+                android_keyboardInputMode="adjustResize"
+            >
+                {renderHeader}
+
+                {loading ? (
+                    <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="large" color={colors.primary} />
+                    </View>
+                ) : (
+                    <BottomSheetScrollView
+                        contentContainerStyle={[styles.listContent, { paddingHorizontal: 24 }]}
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                    >
+                        {data.length === 0 ? (
+                            ListEmptyComponent
+                        ) : (
+                            data.map((item, index) => (
+                                <View key={item.id?.toString() || index.toString()}>
+                                    <ListingCard
+                                        item={item}
+                                        onPress={handleItemPress}
+                                        variant="vertical"
+                                        style={{ width: '100%' }}
+                                    />
+                                    {index < data.length - 1 && <View style={{ height: 24 }} />}
+                                </View>
+                            ))
+                        )}
+                    </BottomSheetScrollView>
+                )}
+            </BottomSheetModal>
+        );
+    }
+);
 
 const styles = StyleSheet.create({
     headerContainer: {
-        paddingVertical: 8,
-    },
-    headerTopRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        marginBottom: 16,
+        paddingTop: 8,
+        paddingBottom: 16,
+        paddingHorizontal: 24,
+        gap: 16,
     },
     headerTitle: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 16,
-    },
-    iconBtn: {
-        padding: 8,
-        borderRadius: 20,
+        fontSize: 24,
+        fontFamily: 'Poppins_700Bold',
+        marginBottom: 4,
     },
     searchContainer: {
-        marginHorizontal: 24,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderRadius: 16,
-        borderWidth: 1,
         gap: 10,
-        marginBottom: 16,
     },
     searchInput: {
         flex: 1,
         fontFamily: 'Poppins_500Medium',
-        fontSize: 14,
+        fontSize: 15,
         padding: 0,
     },
-    chipsContainer: {
-        paddingBottom: 8,
+    filterButton: {
+        width: 48,
+        height: 48,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    filterBadge: {
+        position: 'absolute',
+        top: 6,
+        right: 6,
+        backgroundColor: '#EF4444',
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    filterBadgeText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    filterPanel: {
+        marginHorizontal: 24,
+        marginBottom: 16,
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+    },
+    filterSection: {
+        marginBottom: 16,
+    },
+    filterLabel: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 13,
+        marginBottom: 10,
+    },
+    filterRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    filterChipsScroll: {
+        gap: 8,
+    },
+    filterChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 100,
+    },
+    filterChipText: {
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 13,
+    },
+    resetButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        gap: 6,
+        marginTop: 4,
+    },
+    resetButtonText: {
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 13,
+    },
+    chipsRow: {
+        flexDirection: 'row',
+        gap: 8,
+        paddingTop: 4,
     },
     chip: {
         paddingHorizontal: 16,
         paddingVertical: 8,
-        borderRadius: 24,
-        borderWidth: 1,
+        borderRadius: 100,
     },
     chipText: {
         fontFamily: 'Poppins_500Medium',
@@ -397,12 +668,62 @@ const styles = StyleSheet.create({
     divider: {
         height: 1,
         width: '100%',
-        opacity: 0.5,
+        opacity: 0.1,
     },
     listContent: {
+        paddingBottom: 100,
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingTop: 50,
+    },
+    emptyContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 60,
+        paddingHorizontal: 32,
+    },
+    emptyIconContainer: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    emptyTitle: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 18,
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    emptySubtitle: {
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 22,
+    },
+    clearFiltersBtn: {
+        marginTop: 20,
         paddingHorizontal: 24,
-        paddingTop: 24,
-        paddingBottom: 50,
+        paddingVertical: 12,
+        borderRadius: 12,
+    },
+    clearFiltersBtnText: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 14,
+    },
+    resultsLabel: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 1,
+        marginBottom: 16,
+        marginHorizontal: 24,
+        marginTop: 24,
     },
 });
 

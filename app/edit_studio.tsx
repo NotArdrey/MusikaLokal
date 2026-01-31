@@ -14,40 +14,40 @@ import { supabase } from '../lib/supabase';
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
-    // Remove all non-digit characters except colon
-    let cleaned = text.replace(/[^0-9:]/g, '');
-    
-    // Limit to 5 characters (HH:MM)
-    if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
-    
-    // Auto-add colon after 2 digits
-    if (cleaned.length === 2 && !cleaned.includes(':')) {
-        cleaned = cleaned + ':';
+  // Remove all non-digit characters except colon
+  let cleaned = text.replace(/[^0-9:]/g, '');
+
+  // Limit to 5 characters (HH:MM)
+  if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
+
+  // Auto-add colon after 2 digits
+  if (cleaned.length === 2 && !cleaned.includes(':')) {
+    cleaned = cleaned + ':';
+  }
+
+  // If user types more than 2 digits before colon, insert colon
+  if (cleaned.length > 2 && !cleaned.includes(':')) {
+    cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
+  }
+
+  // Validate hour (01-12)
+  const parts = cleaned.split(':');
+  if (parts[0] && parts[0].length === 2) {
+    const hour = parseInt(parts[0]);
+    if (hour < 1 || hour > 12) {
+      return cleaned.substring(0, 1);
     }
-    
-    // If user types more than 2 digits before colon, insert colon
-    if (cleaned.length > 2 && !cleaned.includes(':')) {
-        cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
+  }
+
+  // Validate minute (00-59)
+  if (parts[1] && parts[1].length === 2) {
+    const minute = parseInt(parts[1]);
+    if (minute > 59) {
+      return parts[0] + ':' + parts[1].substring(0, 1);
     }
-    
-    // Validate hour (01-12)
-    const parts = cleaned.split(':');
-    if (parts[0] && parts[0].length === 2) {
-        const hour = parseInt(parts[0]);
-        if (hour < 1 || hour > 12) {
-            return cleaned.substring(0, 1);
-        }
-    }
-    
-    // Validate minute (00-59)
-    if (parts[1] && parts[1].length === 2) {
-        const minute = parseInt(parts[1]);
-        if (minute > 59) {
-            return parts[0] + ':' + parts[1].substring(0, 1);
-        }
-    }
-    
-    return cleaned;
+  }
+
+  return cleaned;
 };
 
 export default function EditStudioScreen() {
@@ -81,6 +81,35 @@ export default function EditStudioScreen() {
   const [availability, setAvailability] = useState<{ day: string; slots: { start: string; end: string }[] }[]>(
     daysOfWeek.map(day => ({ day, slots: [] }))
   );
+
+  // Instruments state
+  const [selectedInstruments, setSelectedInstruments] = useState<{ name: string, image: string }[]>([]);
+
+  // Predefined instruments with images
+  const INSTRUMENT_OPTIONS = [
+    { name: 'Drum Kit', image: 'https://images.unsplash.com/photo-1519892300165-cb5542fb47c7?w=200&h=200&fit=crop' },
+    { name: 'Piano', image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=200&h=200&fit=crop' },
+    { name: 'Guitar Amp', image: 'https://images.unsplash.com/photo-1535587566541-97121a128dc5?w=200&h=200&fit=crop' },
+    { name: 'Bass Amp', image: 'https://images.unsplash.com/photo-1516924962500-2b4b3b99ea02?w=200&h=200&fit=crop' },
+    { name: 'Microphones', image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop' },
+    { name: 'Keyboard', image: 'https://images.unsplash.com/photo-1552422535-c45813c61732?w=200&h=200&fit=crop' },
+    { name: 'Electric Guitar', image: 'https://images.unsplash.com/photo-1550985616-10810253b84d?w=200&h=200&fit=crop' },
+    { name: 'Bass Guitar', image: 'https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=200&h=200&fit=crop' },
+    { name: 'DJ Equipment', image: 'https://images.unsplash.com/photo-1571327073757-71d13c24de30?w=200&h=200&fit=crop' },
+    { name: 'Synthesizer', image: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=200&h=200&fit=crop' },
+    { name: 'PA System', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=200&h=200&fit=crop' },
+    { name: 'Mixing Console', image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop' },
+  ];
+
+  // Toggle instrument selection
+  const toggleInstrument = (instrument: { name: string, image: string }) => {
+    const isSelected = selectedInstruments.some(i => i.name === instrument.name);
+    if (isSelected) {
+      setSelectedInstruments(selectedInstruments.filter(i => i.name !== instrument.name));
+    } else {
+      setSelectedInstruments([...selectedInstruments, instrument]);
+    }
+  };
 
   // Role-based access control
   useEffect(() => {
@@ -164,7 +193,7 @@ export default function EditStudioScreen() {
         const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
         setContractFileName(decodeURIComponent(fileName));
       }
-      
+
       // Load availability
       console.log('📅 Loading availability from data:', data.availability);
       if (data.availability && Array.isArray(data.availability)) {
@@ -195,6 +224,12 @@ export default function EditStudioScreen() {
         // Initialize with empty schedule if no availability data
         setAvailability(daysOfWeek.map(day => ({ day, slots: [] })));
       }
+
+      // Load instruments
+      if (data.instruments && Array.isArray(data.instruments)) {
+        setSelectedInstruments(data.instruments);
+      }
+
       setSelectedImages(data.images || []);
       if (data.images && data.images.length > 0) {
         setThumbnailIndex(0);
@@ -236,7 +271,7 @@ export default function EditStudioScreen() {
     if (!validateForm()) {
       return;
     }
-    
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -254,6 +289,7 @@ export default function EditStudioScreen() {
         address,
         hourly_rate: parseFloat(cost) || 0,
         amenities,
+        instruments: selectedInstruments,
         latitude,
         longitude,
         images: selectedImages,
@@ -299,11 +335,11 @@ export default function EditStudioScreen() {
 
       if (response.error) {
         console.error('❌ Error details:', JSON.stringify(response.error, null, 2));
-        
+
         // Try to read the actual error message from the response body
         let errorMessage = 'Unknown error occurred';
         let errorDetails = null;
-        
+
         try {
           // Check if there's a response context with body
           if (response.error.context && response.error.context._bodyBlob) {
@@ -317,10 +353,10 @@ export default function EditStudioScreen() {
               },
               body: JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload })
             });
-            
+
             const errorBody = await errorResponse.text();
             console.log('🔍 Raw error response:', errorBody);
-            
+
             try {
               errorDetails = JSON.parse(errorBody);
               errorMessage = errorDetails.error || errorDetails.message || errorMessage;
@@ -341,7 +377,7 @@ export default function EditStudioScreen() {
         } catch (readError) {
           console.error('❌ Failed to read error body:', readError);
         }
-        
+
         console.error('❌ Final error message:', errorMessage);
         throw new Error(errorMessage);
       }
@@ -381,7 +417,7 @@ export default function EditStudioScreen() {
   const handleContractUpload = async () => {
     try {
       setUploadingContract(true);
-      
+
       if (Platform.OS === 'web') {
         if (fileInputRef.current) {
           fileInputRef.current.click();
@@ -389,7 +425,7 @@ export default function EditStudioScreen() {
         setUploadingContract(false);
         return;
       }
-      
+
       // Dynamic import for native platforms only
       const DocumentPicker = await import('expo-document-picker');
       const result = await DocumentPicker.getDocumentAsync({
@@ -667,6 +703,48 @@ export default function EditStudioScreen() {
             ))}
           </View>
 
+          {/* Instruments Section */}
+          {renderSectionHeader('Available Instruments', 'musical-notes')}
+          <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 12 }]}>
+            Select the instruments available at your studio
+          </Text>
+          <View style={styles.instrumentsGrid}>
+            {INSTRUMENT_OPTIONS.map((instrument) => {
+              const isSelected = selectedInstruments.some(i => i.name === instrument.name);
+              return (
+                <TouchableOpacity
+                  key={instrument.name}
+                  onPress={() => toggleInstrument(instrument)}
+                  style={[
+                    styles.instrumentCard,
+                    {
+                      backgroundColor: isSelected ? colors.primary + '20' : (isDark ? '#1F2937' : '#F9FAFB'),
+                      borderColor: isSelected ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                    }
+                  ]}
+                >
+                  <Image
+                    source={{ uri: instrument.image }}
+                    style={styles.instrumentImage}
+                  />
+                  <Text style={[styles.instrumentName, { color: colors.text }]} numberOfLines={1}>
+                    {instrument.name}
+                  </Text>
+                  {isSelected && (
+                    <View style={[styles.instrumentCheckmark, { backgroundColor: colors.primary }]}>
+                      <Ionicons name="checkmark" size={12} color="#fff" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {selectedInstruments.length > 0 && (
+            <Text style={[styles.selectedCount, { color: colors.textSecondary }]}>
+              {selectedInstruments.length} instrument{selectedInstruments.length !== 1 ? 's' : ''} selected
+            </Text>
+          )}
+
           {renderSectionHeader('Availability', 'time')}
           <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 16 }]}>
             Set your studio availability for bookings
@@ -863,7 +941,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 160,
     paddingHorizontal: 24,
   },
   sectionHeader: {
@@ -871,7 +949,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 16,
-    marginTop: 24,
   },
   sectionTitle: {
     fontFamily: 'Poppins_600SemiBold',
@@ -1039,6 +1116,49 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 13,
     fontFamily: 'Poppins_400Regular',
+  },
+  // Instruments styles
+  instrumentsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  instrumentCard: {
+    width: '30%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  instrumentImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  instrumentName: {
+    fontSize: 10,
+    fontFamily: 'Poppins_500Medium',
+    textAlign: 'center',
+  },
+  instrumentCheckmark: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectedCount: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+    marginTop: 12,
+    textAlign: 'center',
   },
 });
 

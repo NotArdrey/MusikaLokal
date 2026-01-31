@@ -78,7 +78,10 @@ serve(async (req: Request) => {
             if (genres !== undefined) updateData.genres = genres
             if (avatar_url !== undefined) updateData.avatar_url = avatar_url
             if (location !== undefined) updateData.location = location
+            if (location !== undefined) updateData.location = location
             if (portfolio_urls !== undefined) updateData.portfolio_urls = portfolio_urls
+            if (params.contact_number !== undefined) updateData.contact_number = params.contact_number
+            if (params.address !== undefined) updateData.address = params.address
 
             const { data, error } = await supabaseClient
                 .from('profiles')

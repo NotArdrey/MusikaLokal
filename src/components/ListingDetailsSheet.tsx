@@ -3,9 +3,11 @@ import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@g
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import React, { forwardRef, useEffect, useMemo, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
+    BackHandler,
     Dimensions,
     Image,
     ScrollView,
@@ -13,13 +15,15 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useProfileCompletion } from '../hooks/useProfileCompletion';
 import CustomAlert from './CustomAlert';
+import DocumentUploader from './DocumentUploader';
 import Modal from './modal';
 import VideoUploader from './VideoUploader';
 
@@ -58,6 +62,7 @@ const formatTime12 = (time24: string) => {
 const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProps>(({ listingId }, ref) => {
     const { colors, isDark } = useTheme();
     const { userId } = useAuth();
+    const { isProfileComplete } = useProfileCompletion();
     const [loading, setLoading] = useState(false);
     const [group, setGroup] = useState<any>(null);
     const [isFavorited, setIsFavorited] = useState(false);
@@ -67,6 +72,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     // Application State (for Gig applications)
     const [pitchMessage, setPitchMessage] = useState('');
     const [videoUrl, setVideoUrl] = useState('');
+    const [cvFile, setCvFile] = useState<any>(null); // File object from picker
+    const [cvUrl, setCvUrl] = useState(''); // Uploaded URL (optional if we just upload on submit)
     const [isSubmittingApplication, setIsSubmittingApplication] = useState(false);
     const [hasExistingApplication, setHasExistingApplication] = useState(false);
     const [existingApplicationStatus, setExistingApplicationStatus] = useState<string | null>(null);
@@ -113,14 +120,18 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const [selectedDate, setSelectedDate] = useState('');
     const [availableSlots, setAvailableSlots] = useState<string[]>([]);
     const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+    const [validEndTimes, setValidEndTimes] = useState<string[]>([]);
     const [markedDates, setMarkedDates] = useState<any>({});
 
-    // Multiple bookings state with pricing
-    const [bookings, setBookings] = useState<{ date: Date; startTime: Date; endTime: Date; pricing?: any }[]>([]);
+    // Multiple time slots state for multi-slot bookings (same day)
+    const [selectedTimeSlots, setSelectedTimeSlots] = useState<{ start: string; end: string }[]>([]);
+
+    // Multiple bookings state with pricing (different days)
+    const [bookings, setBookings] = useState<{ date: Date; startTime: Date; endTime: Date; timeSlots?: { start: string; end: string }[]; pricing?: any }[]>([]);
     const [showAddBooking, setShowAddBooking] = useState(false);
     const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
 
-    // Auto-calculate duration
+    // Auto-calculate duration (only if validEndTimes is empty to avoid overwrite loop)
     useEffect(() => {
         if (!date || !endTime) {
             setDuration(0);
@@ -129,13 +140,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
         const start = new Date(date).getTime();
         const end = new Date(endTime).getTime();
-        // Handle cross-day or invalid times? For now simple diff
-        // If end is before start, assume next day? Or just show 0.
-        // Let's keep it simple: if end < start, maybe just valid hours.
-        // Actually, let's normalize the dates to be on the same day as 'date' for calculation if only time changed
 
+        // Calculate diff in hours
         let diff = (end - start) / (1000 * 60 * 60);
-        if (diff < 0) diff += 24; // Assume next day if end < start
+
+        // Handle next day wraps if needed, but for now we assume same-day or flexible
+        if (diff < 0) diff += 24;
 
         // Round to 1 decimal
         setDuration(Math.max(1, parseFloat(diff.toFixed(1))));
@@ -146,8 +156,41 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const [confirmMessage, setConfirmMessage] = useState('');
     const [confirmTitle, setConfirmTitle] = useState('');
 
+    // BackHandler Logic
+    const [sheetIndex, setSheetIndex] = useState(-1);
+
+    const handleSheetChanges = useCallback((index: number) => {
+        setSheetIndex(index);
+    }, []);
+
+    useEffect(() => {
+        const backAction = () => {
+            if (sheetIndex >= 0) {
+                (ref as any)?.current?.dismiss();
+                return true;
+            }
+            return false;
+        };
+        const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+        return () => backHandler.remove();
+    }, [sheetIndex, ref]);
+
     const handleConfirm = (action: () => void, title: string, message: string) => {
         console.log('🔵 handleConfirm called');
+
+        // Profile Check Gate
+        if (!isProfileComplete) {
+            Alert.alert(
+                "Profile Incomplete",
+                "You need to complete your profile details (contact & address) before you can proceed.",
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Complete Now", onPress: () => router.push('/edit_profile') }
+                ]
+            );
+            return;
+        }
+
         console.log('Title:', title);
         console.log('Message:', message);
         console.log('Action function:', action.name || 'anonymous');
@@ -163,10 +206,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         if (!userId || !listingId || !group || group.type !== 'Gig') return;
 
         try {
-            // Check for any existing application by this user (either personal or via any group)
+            // Check for any existing application to this specific gig
+            // Once rejected, musician cannot re-apply to the same gig
             const { data, error } = await supabase
                 .from('gig_applications')
-                .select('id, status, group_id')
+                .select('id, status, group_id, cv_url')
                 .eq('applicant_id', userId)
                 .eq('gig_id', listingId)
                 .maybeSingle();
@@ -180,9 +224,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 console.log('📋 User has already applied to this gig:', data);
                 setHasExistingApplication(true);
                 setExistingApplicationStatus(data.status);
+                if (data.cv_url) setCvUrl(data.cv_url);
             } else {
                 setHasExistingApplication(false);
                 setExistingApplicationStatus(null);
+                setCvUrl('');
             }
         } catch (err) {
             console.error('Error checking application:', err);
@@ -248,11 +294,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     };
 
     // Check Eligibility (Spam Block)
-    const checkEligibility = async (organizerId: string) => {
-        if (!userId || !organizerId) return;
+    const checkEligibility = async (targetGigId: string) => {
+        if (!userId || !targetGigId) return;
         try {
             const { data, error } = await supabase.functions.invoke('manage-listings', {
-                body: { action: 'check_eligibility', userId, organizerId }
+                body: { action: 'check_eligibility', userId, gigId: targetGigId }
             });
             if (error) throw error;
 
@@ -265,6 +311,41 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             }
         } catch (err) {
             console.error('Error checking eligibility:', err);
+        }
+    };
+
+    // Helper to upload CV
+    const uploadDocument = async (file: any) => {
+        try {
+            console.log('📤 Uploading CV:', file.name);
+
+            // 1. Read file
+            const response = await fetch(file.uri);
+            const arrayBuffer = await response.arrayBuffer();
+
+            // 2. Prepare path
+            const fileExt = file.name.split('.').pop() || 'pdf';
+            const fileName = `${userId}/cvs/${Date.now()}_cv.${fileExt}`;
+
+            // 3. Upload
+            const { data, error } = await supabase.storage
+                .from('documents') // Ensure this bucket exists or use 'applications'
+                .upload(fileName, arrayBuffer, {
+                    contentType: file.mimeType || 'application/pdf',
+                    upsert: false
+                });
+
+            if (error) throw error;
+
+            // 4. Get Public URL
+            const { data: urlData } = supabase.storage
+                .from('documents')
+                .getPublicUrl(data.path);
+
+            return urlData.publicUrl;
+        } catch (error) {
+            console.error('Error uploading CV:', error);
+            throw error;
         }
     };
 
@@ -293,10 +374,40 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             return;
         }
 
+        // Validate CV
+        if (!cvFile) {
+            setAlertConfig({
+                type: 'error',
+                title: 'CV Required',
+                message: 'Please upload your CV/Resume to apply.'
+            });
+            setAlertVisible(true);
+            return;
+        }
+
         setIsSubmittingApplication(true);
         console.log('Inserting application into database...');
 
         try {
+            // Upload CV first
+            let uploadedCvUrl = null;
+            if (cvFile) {
+                try {
+                    uploadedCvUrl = await uploadDocument(cvFile);
+                    console.log('✅ CV Uploaded:', uploadedCvUrl);
+                } catch (e) {
+                    console.error('Failed to upload CV', e);
+                    setAlertConfig({
+                        type: 'error',
+                        title: 'Upload Failed',
+                        message: 'Failed to upload CV. Please try again.'
+                    });
+                    setAlertVisible(true);
+                    setIsSubmittingApplication(false);
+                    return;
+                }
+            }
+
             const { data, error } = await supabase
                 .from('gig_applications')
                 .insert({
@@ -305,6 +416,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     group_id: selectedGroupId || null,
                     pitch_message: pitchMessage,
                     video_url: videoUrl || null,
+                    cv_url: uploadedCvUrl,
                     status: 'pending'
                 })
                 .select()
@@ -339,6 +451,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             // Clear form
             setPitchMessage('');
             setVideoUrl('');
+            setCvFile(null);
+            setCvUrl('');
 
             // Close the bottom sheet after alert is dismissed
             setTimeout(() => {
@@ -397,9 +511,9 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         if (group && userId && group.type === 'Studio') {
             checkExistingStudioBooking();
         }
-        // Check eligibility if Gig (uses organizer_id)
-        if (group && userId && group.type === 'Gig' && group.organizer_id) {
-            checkEligibility(group.organizer_id);
+        // Check eligibility if Gig (uses gig_id)
+        if (group && userId && group.type === 'Gig') {
+            checkEligibility(group.id);
         }
     }, [group, userId]);
 
@@ -494,11 +608,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     const { data: operatingHours, error: hoursError } = await supabase
                         .from('studio_operating_hours')
                         .select('*')
-                        .eq('studio_id', data.id);
+                        .eq('studio_id', data.id)
+                        .order('slot_order', { ascending: true });
 
                     if (!hoursError && operatingHours) {
                         console.log('📅 Operating hours fetched:', operatingHours);
-                        // Convert operating hours to availability format
+                        // Convert operating hours to availability format - now supports multiple slots per day
                         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
                         const availability = dayNames.map((dayName, index) => {
                             const dayHours = operatingHours.filter((h: any) => h.day_of_week === index && h.is_open);
@@ -595,9 +710,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 });
 
                 // 2. Check bookings for this day (Confirmed OR Pending should block)
-                const dayBookings = bookings.filter((b: any) =>
-                    b.status !== 'cancelled' && new Date(b.start_time).toISOString().split('T')[0] === dateStr
-                );
+                const dayBookings = bookings.filter((b: any) => {
+                    if (b.status === 'cancelled') return false;
+                    const startDate = new Date(b.start_time);
+                    if (isNaN(startDate.getTime())) return false;
+                    return startDate.toISOString().split('T')[0] === dateStr;
+                });
 
                 // 3. Mark slots as taken
                 // Simple logic: If booking starts at X, that slot is taken.
@@ -673,12 +791,16 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         }
 
         // Generate time slots from the availability
-        const slots: string[] = [];
+        // Use Set to prevent duplicates
+        const slotsSet = new Set<string>();
 
         // Identify blocked times from existing bookings (Confirmed OR Pending)
-        const dayBookings = existingBookings.filter((b: any) =>
-            b.status !== 'cancelled' && new Date(b.start_time).toISOString().split('T')[0] === dateStr
-        );
+        const dayBookings = existingBookings.filter((b: any) => {
+            if (b.status === 'cancelled') return false;
+            const startDate = new Date(b.start_time);
+            if (isNaN(startDate.getTime())) return false;
+            return startDate.toISOString().split('T')[0] === dateStr;
+        });
         console.log('🕐 Day bookings:', dayBookings.length);
 
         const blockedTimes = new Set<string>();
@@ -703,14 +825,15 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 const timeStr = current.toTimeString().slice(0, 5); // HH:MM
                 // Only add if not blocked
                 if (!blockedTimes.has(timeStr)) {
-                    slots.push(timeStr);
+                    slotsSet.add(timeStr);
                 }
                 current.setHours(current.getHours() + 1); // Assuming 1-hour slots
             }
         });
 
-        console.log('🕐 Generated slots:', slots);
-        setAvailableSlots(slots);
+        const uniqueSlots = Array.from(slotsSet).sort();
+        console.log('🕐 Generated slots:', uniqueSlots);
+        setAvailableSlots(uniqueSlots);
     };
 
     const toggleFavorite = async () => {
@@ -920,6 +1043,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 onDayPress={(day) => {
                     setSelectedDate(day.dateString);
                     setSelectedSlot(null);
+                    setValidEndTimes([]);
                     fetchAvailableSlots(day.dateString);
                     // Update date state
                     const selectedDateObj = new Date(day.dateString);
@@ -955,61 +1079,161 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             {/* 2. The Slot Grid (The Action) - Reveals on Date Selection */}
             {selectedDate && (
                 <View style={[styles.slotGridContainer, { borderTopWidth: 1, borderTopColor: isDark ? '#374151' : '#F3F4F6', paddingTop: 16 }]}>
+
                     <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
                         Available Slots for {new Date(selectedDate).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
                     </Text>
 
                     {availableSlots.length > 0 ? (
-                        <View style={styles.slotGrid}>
-                            {availableSlots.map((slot, index) => {
-                                const isSelected = selectedSlot === slot;
-                                return (
-                                    <TouchableOpacity
-                                        key={index}
-                                        style={[
-                                            styles.slotButton,
-                                            {
-                                                backgroundColor: isSelected ? (isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)') : (isDark ? '#374151' : '#F3F4F6'),
-                                                borderColor: isSelected ? (colors.primary === '#7c3aed' ? '#FFD700' : colors.primary) : 'transparent', // Gold-ish border if primary is purple, or just primary
-                                                borderWidth: isSelected ? 2 : 0,
-                                                shadowColor: isSelected ? (colors.primary === '#7c3aed' ? '#FFD700' : colors.primary) : 'transparent',
-                                                shadowOffset: { width: 0, height: 0 },
-                                                shadowOpacity: isSelected ? 0.5 : 0,
-                                                shadowRadius: 8,
-                                                elevation: isSelected ? 5 : 0
-                                            }
-                                        ]}
-                                        onPress={() => {
-                                            setSelectedSlot(slot);
-                                            // Update start time
-                                            const [hours, minutes] = slot.split(':');
-                                            const startDate = new Date(selectedDate);
-                                            startDate.setHours(parseInt(hours), parseInt(minutes));
-                                            setDate(startDate); // Update main date state with time
+                        <View>
+                            {/* Helper to group slots */}
+                            {(() => {
+                                const grouped = {
+                                    Morning: [] as string[],
+                                    Afternoon: [] as string[],
+                                    Evening: [] as string[]
+                                };
+                                availableSlots.forEach(slot => {
+                                    const hour = parseInt(slot.split(':')[0]);
+                                    if (hour < 12) grouped.Morning.push(slot);
+                                    else if (hour < 18) grouped.Afternoon.push(slot);
+                                    else grouped.Evening.push(slot);
+                                });
 
-                                            // Set end time default duration (e.g. 4 hours)
-                                            // Re-calculate end time logic here or rely on prev
-                                            const endDate = new Date(startDate);
-                                            endDate.setHours(startDate.getHours() + duration);
-                                            setEndTime(endDate);
-                                        }}
-                                    >
-                                        <Text style={{
-                                            color: isSelected ? colors.primary : colors.text,
-                                            fontFamily: isSelected ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
-                                            fontSize: 13
-                                        }}>
-                                            {formatTime12(slot)}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
+                                return (Object.keys(grouped) as Array<keyof typeof grouped>).map(period => {
+                                    if (grouped[period].length === 0) return null;
+                                    return (
+                                        <View key={period} style={{ marginBottom: 16 }}>
+                                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary, fontSize: 12, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                                                {period}
+                                            </Text>
+                                            <View style={styles.slotGrid}>
+                                                {grouped[period].map(slot => {
+                                                    const isSelected = selectedSlot === slot;
+                                                    // Check if this slot is part of the selected duration range
+                                                    const slotHour = parseInt(slot.split(':')[0]);
+                                                    const startHour = selectedSlot ? parseInt(selectedSlot.split(':')[0]) : -1;
+                                                    const endHour = endTime ? endTime.getHours() : -1;
+                                                    const isInRange = selectedSlot && endTime && slotHour >= startHour && slotHour < endHour;
+
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={slot}
+                                                            style={[
+                                                                styles.slotButton,
+                                                                {
+                                                                    backgroundColor: isSelected ? (isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)') :
+                                                                        isInRange ? (isDark ? 'rgba(124, 58, 237, 0.05)' : 'rgba(124, 58, 237, 0.05)') :
+                                                                            (isDark ? '#374151' : '#F3F4F6'),
+                                                                    borderColor: isSelected ? colors.primary : 'transparent',
+                                                                    borderWidth: isSelected ? 2 : 0,
+                                                                }
+                                                            ]}
+                                                            onPress={() => {
+                                                                setSelectedSlot(slot);
+
+                                                                // 1. Update start date/time
+                                                                const [hours, minutes] = slot.split(':');
+                                                                const startDate = new Date(selectedDate);
+                                                                startDate.setHours(parseInt(hours), parseInt(minutes));
+                                                                setDate(startDate);
+
+                                                                // 2. Calculate Valid Max Duration
+                                                                const availableHours = new Set(availableSlots.map(s => parseInt(s.split(':')[0])));
+                                                                let maxDur = 0;
+                                                                let currentH = parseInt(hours);
+
+                                                                // Check up to 12 hours ahead
+                                                                for (let i = 0; i < 12; i++) {
+                                                                    // Check if the slot *starts* at this hour is available
+                                                                    // (Except the first one, which we know is available since we clicked it)
+                                                                    if (i > 0 && !availableHours.has(currentH)) break;
+                                                                    maxDur++;
+                                                                    currentH++;
+                                                                    if (currentH >= 24) break;
+                                                                }
+
+                                                                // Store max available duration for this start time
+                                                                // We can re-use validEndTimes state to store valid DURATIONS (numbers) as strings if we want, 
+                                                                // or just calculate valid durations on the fly.
+                                                                // Let's store valid duration HOURS in validEndTimes as strings like "1", "2", "3" to reuse state.
+                                                                const validDurs = [];
+                                                                for (let i = 1; i <= maxDur; i++) validDurs.push(i.toString());
+                                                                setValidEndTimes(validDurs);
+
+                                                                // 3. Auto-select 1 hour if available
+                                                                if (maxDur >= 1) {
+                                                                    const endDate = new Date(startDate);
+                                                                    endDate.setHours(startDate.getHours() + 1);
+                                                                    setEndTime(endDate);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <Text style={{
+                                                                color: isSelected ? colors.primary : colors.text,
+                                                                fontFamily: isSelected ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
+                                                                fontSize: 13
+                                                            }}>
+                                                                {formatTime12(slot)}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                        </View>
+                                    );
+                                });
+                            })()}
                         </View>
                     ) : (
                         <View style={{ alignItems: 'center', paddingVertical: 12 }}>
                             <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 13 }}>
                                 No available slots for this date.
                             </Text>
+                        </View>
+                    )}
+
+                    {/* Duration Selection (Chips) */}
+                    {selectedSlot && validEndTimes.length > 0 && (
+                        <View style={{ marginTop: 8 }}>
+                            <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, fontSize: 13, marginBottom: 12 }}>
+                                Duration
+                            </Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                {validEndTimes.map((durStr) => {
+                                    const dur = parseInt(durStr);
+                                    // Calculate if selected
+                                    const currentDur = (endTime.getTime() - date.getTime()) / (1000 * 60 * 60);
+                                    const isSelected = Math.abs(currentDur - dur) < 0.1;
+
+                                    return (
+                                        <TouchableOpacity
+                                            key={durStr}
+                                            style={[
+                                                {
+                                                    paddingHorizontal: 16,
+                                                    paddingVertical: 8,
+                                                    borderRadius: 100,
+                                                    backgroundColor: isSelected ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                                }
+                                            ]}
+                                            onPress={() => {
+                                                const newEnd = new Date(date);
+                                                newEnd.setHours(newEnd.getHours() + dur);
+                                                setEndTime(newEnd);
+                                            }}
+                                        >
+                                            <Text style={{
+                                                color: isSelected ? '#FFFFFF' : colors.text,
+                                                fontFamily: isSelected ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
+                                                fontSize: 13
+                                            }}>
+                                                {dur} hr{dur > 1 ? 's' : ''}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
                         </View>
                     )}
                 </View>
@@ -1267,6 +1491,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             // Use calculated pricing or fallback
                             const cost = booking.pricing?.final_price || (parseInt(displayRate.replace(/,/g, '')) * hours);
                             const hasModifiers = booking.pricing?.modifiers && Object.keys(booking.pricing.modifiers).length > 0;
+                            const slots = booking.timeSlots || [{ start: booking.startTime.toTimeString().slice(0, 5), end: booking.endTime.toTimeString().slice(0, 5) }];
+                            const isMultiSlot = slots.length > 1;
 
                             return (
                                 <View key={index} style={[styles.bookingCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 8 }]}>
@@ -1276,15 +1502,24 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                             <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', marginLeft: 6, fontSize: 13 }}>
                                                 {booking.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                                             </Text>
+                                            {isMultiSlot && (
+                                                <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: '#10B98120', borderRadius: 4 }}>
+                                                    <Text style={{ color: '#10B981', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>{slots.length} slots</Text>
+                                                </View>
+                                            )}
                                         </View>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                            <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
-                                            <Text style={{ color: colors.textSecondary, marginLeft: 6, fontSize: 12 }}>
-                                                {booking.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} - {booking.endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} ({booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h)
-                                            </Text>
-                                        </View>
+                                        {/* Show all time slots */}
+                                        {slots.map((slot, slotIndex) => (
+                                            <View key={slotIndex} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: slotIndex < slots.length - 1 ? 2 : 0 }}>
+                                                <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+                                                <Text style={{ color: colors.textSecondary, marginLeft: 6, fontSize: 12 }}>
+                                                    {slot.start} - {slot.end}
+                                                </Text>
+                                            </View>
+                                        ))}
                                         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
                                             <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold' }}>₱{cost.toLocaleString()}</Text>
+                                            <Text style={{ color: colors.textSecondary, fontSize: 11, marginLeft: 8 }}>({booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h total)</Text>
                                             {hasModifiers && (
                                                 <View style={{ marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.primary + '20', borderRadius: 4 }}>
                                                     <Text style={{ color: colors.primary, fontSize: 10 }}>Promo Applied</Text>
@@ -1321,7 +1556,16 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         const startTime = date.toTimeString().slice(0, 5);
                                         const endTime2 = endTime.toTimeString().slice(0, 5);
 
-                                        // Check availability
+                                        // Build time slots array - current slot + any previously selected slots for same day
+                                        const currentSlot = { start: startTime, end: endTime2 };
+                                        const allSlots = [...selectedTimeSlots, currentSlot];
+
+                                        // Check if we already have a booking for this date (merge slots)
+                                        const existingBookingIndex = bookings.findIndex(b =>
+                                            b.date.toISOString().split('T')[0] === bookingDate
+                                        );
+
+                                        // Check availability for the new slot
                                         const { data: isAvailable, error: availError } = await supabase.rpc('is_slot_available', {
                                             p_studio_id: group.id,
                                             p_booking_date: bookingDate,
@@ -1343,7 +1587,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                             return;
                                         }
 
-                                        // Calculate accurate pricing
+                                        // Calculate accurate pricing for all slots
                                         const { data: pricing, error: pricingError } = await supabase.rpc('calculate_booking_price', {
                                             p_studio_id: group.id,
                                             p_booking_date: bookingDate,
@@ -1358,17 +1602,51 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                             return;
                                         }
 
-                                        // Add to cart with pricing data
-                                        setBookings([...bookings, {
-                                            date: new Date(date),
-                                            startTime: new Date(date),
-                                            endTime: new Date(endTime),
-                                            pricing: pricing[0]
-                                        }]);
+                                        if (existingBookingIndex >= 0) {
+                                            // Merge with existing booking for this date
+                                            const existingBooking = bookings[existingBookingIndex];
+                                            const mergedSlots = [...(existingBooking.timeSlots || [{
+                                                start: existingBooking.startTime.toTimeString().slice(0, 5),
+                                                end: existingBooking.endTime.toTimeString().slice(0, 5)
+                                            }]), currentSlot];
+
+                                            // Sort slots by start time
+                                            mergedSlots.sort((a, b) => a.start.localeCompare(b.start));
+
+                                            // Calculate total pricing for all merged slots
+                                            const existingPrice = existingBooking.pricing?.final_price || 0;
+                                            const newPrice = pricing[0]?.final_price || 0;
+                                            const totalHours = (existingBooking.pricing?.hours || 0) + (pricing[0]?.hours || 0);
+
+                                            const updatedBookings = [...bookings];
+                                            updatedBookings[existingBookingIndex] = {
+                                                ...existingBooking,
+                                                timeSlots: mergedSlots,
+                                                pricing: {
+                                                    ...pricing[0],
+                                                    final_price: existingPrice + newPrice,
+                                                    hours: totalHours
+                                                }
+                                            };
+                                            setBookings(updatedBookings);
+                                            alert(`Added time slot to your booking for ${new Date(bookingDate).toLocaleDateString()}. You now have ${mergedSlots.length} slot(s) for this day.`);
+                                        } else {
+                                            // Add as new booking with single slot
+                                            setBookings([...bookings, {
+                                                date: new Date(date),
+                                                startTime: new Date(date),
+                                                endTime: new Date(endTime),
+                                                timeSlots: [currentSlot],
+                                                pricing: pricing[0]
+                                            }]);
+                                        }
+
                                         setShowAddBooking(false);
+                                        setSelectedTimeSlots([]);
                                         // Reset form
                                         setDate(null as any);
                                         setEndTime(null as any);
+                                        setSelectedSlot(null);
                                     } catch (e: any) {
                                         console.error('Error adding booking:', e);
                                         alert('An error occurred. Please try again.');
@@ -1441,6 +1719,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         disabled={bookings.length === 0 || loading}
                         onPress={() => bookings.length > 0 && handleConfirm(
                             async () => {
+                                // Double check profile just in case, though handleConfirm handles it
                                 if (!userId) {
                                     alert('Please sign in to book a studio');
                                     return;
@@ -1454,18 +1733,23 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                     console.log('🛒 Total bookings to create:', bookings.length);
                                     console.log('📋 Bookings array:', bookings);
 
-                                    // Create each booking
+                                    // Create each booking (now supports multi-slot per booking)
                                     for (const booking of bookings) {
                                         const bookingDate = booking.date.toISOString().split('T')[0];
-                                        const startTime = booking.startTime.toTimeString().slice(0, 5);
-                                        const endTime = booking.endTime.toTimeString().slice(0, 5);
 
-                                        console.log('📤 Creating booking:', {
+                                        // Use time_slots if available (multi-slot booking), otherwise fallback to single slot
+                                        const timeSlots = booking.timeSlots && booking.timeSlots.length > 0
+                                            ? booking.timeSlots
+                                            : [{
+                                                start: booking.startTime.toTimeString().slice(0, 5),
+                                                end: booking.endTime.toTimeString().slice(0, 5)
+                                            }];
+
+                                        console.log('📤 Creating multi-slot booking:', {
                                             studio_id: group.id,
                                             user_id: userId,
                                             date: bookingDate,
-                                            start_time: startTime,
-                                            end_time: endTime,
+                                            time_slots: timeSlots,
                                             notes: bookingNotes
                                         });
 
@@ -1475,8 +1759,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                 studio_id: group.id,
                                                 user_id: userId,
                                                 date: bookingDate,
-                                                start_time: startTime,
-                                                end_time: endTime,
+                                                time_slots: timeSlots,  // Send multi-slot array
                                                 notes: bookingNotes
                                             }
                                         });
@@ -1486,6 +1769,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         if (error) {
                                             // Try to extract actual error message
                                             let errorMessage = error.message || 'Unknown error';
+                                            let serverError: any = null;
 
                                             // Check if error has context with response body
                                             if (error.context && typeof error.context === 'object') {
@@ -1493,20 +1777,40 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                     // Try to read response body
                                                     const response = error.context;
                                                     console.log('📥 Error response status:', response.status);
-                                                    console.log('📥 Error response:', response);
+                                                    console.log('📥 Error response (raw):', response);
 
-                                                    // If it's a 400 error, the body might have details
-                                                    if (response.status === 400 && data) {
-                                                        errorMessage = data.error || data.message || errorMessage;
-                                                        console.error('❌ Server error:', data);
+                                                    // If it's a Response object, try to parse body
+                                                    if (response.json && typeof response.json === 'function') {
+                                                        serverError = await response.json();
+                                                        console.log('📥 Parsed server error:', serverError);
+                                                        if (serverError?.error) {
+                                                            errorMessage = serverError.error;
+                                                        }
+                                                        if (serverError?.debug) {
+                                                            console.log('📥 Debug info:', serverError.debug);
+                                                        }
+                                                    } else if (response.text && typeof response.text === 'function') {
+                                                        const textBody = await response.text();
+                                                        console.log('📥 Error body (text):', textBody);
+                                                        try {
+                                                            serverError = JSON.parse(textBody);
+                                                            if (serverError?.error) {
+                                                                errorMessage = serverError.error;
+                                                            }
+                                                        } catch (e) {
+                                                            console.log('📥 Could not parse as JSON');
+                                                        }
                                                     }
                                                 } catch (e) {
-                                                    console.error('Failed to parse error:', e);
+                                                    console.error('Failed to parse error response:', e);
                                                 }
                                             }
 
-                                            errors.push({ booking, error: { message: errorMessage } });
+                                            errors.push({ booking, error: { message: errorMessage, serverError } });
                                             console.error('❌ Booking error:', errorMessage);
+                                            if (serverError) {
+                                                console.error('❌ Full server error:', JSON.stringify(serverError, null, 2));
+                                            }
                                         } else {
                                             results.push(data);
                                             console.log('✅ Booking created successfully');
@@ -1524,6 +1828,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         alert(`${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`);
                                         // Clear form and close
                                         setBookings([]);
+                                        setSelectedTimeSlots([]);
                                         setBookingNotes('');
                                         setModalVisible(false);
                                         (ref as any)?.current?.dismiss();
@@ -1532,6 +1837,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         alert(`Successfully created ${results.length} booking(s)! The studio owner will review your request.`);
                                         // Clear form and close
                                         setBookings([]);
+                                        setSelectedTimeSlots([]);
                                         setBookingNotes('');
                                         setModalVisible(false);
                                         (ref as any)?.current?.dismiss();
@@ -1656,7 +1962,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             <View style={styles.tabContent}>
                 {/* SPAM BLOCK WARNING */}
                 {isBlocked && (
-                    <View style={[styles.infoBox, { backgroundColor: '#EF444420', borderColor: '#EF4444', marginBottom: 24 }]}>
+                    <View style={[styles.infoBox, { backgroundColor: '#EF444420', borderColor: '#EF4444', marginBottom: 32 }]}>
                         <Ionicons name="alert-circle" size={24} color="#EF4444" />
                         <View style={{ flex: 1 }}>
                             <Text style={[styles.infoText, { color: colors.text, fontFamily: 'Poppins_600SemiBold' }]}>
@@ -1731,6 +2037,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     </View>
                 </View>
 
+                <DocumentUploader
+                    label="Upload CV/Resume"
+                    onFileSelect={(file) => setCvFile(file)}
+                    existingUrl={cvUrl || undefined}
+                />
+
                 <VideoUploader
                     videoUrl={videoUrl}
                     onVideoChange={(url) => setVideoUrl(url || '')}
@@ -1751,39 +2063,41 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         styles.infoBox,
                         {
                             backgroundColor: existingApplicationStatus === 'rejected' ? '#EF444420' :
-                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B98120' :
+                                existingApplicationStatus === 'accepted' ? '#10B98120' :
                                     colors.primary + '20',
                             borderColor: existingApplicationStatus === 'rejected' ? '#EF4444' :
-                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
-                                    colors.primary
+                                existingApplicationStatus === 'accepted' ? '#10B981' :
+                                    colors.primary,
+                            marginBottom: 24
                         }
                     ]}>
                         <Ionicons
                             name={existingApplicationStatus === 'rejected' ? 'close-circle' :
-                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? 'checkmark-circle' :
+                                existingApplicationStatus === 'accepted' ? 'checkmark-circle' :
                                     'information-circle'}
                             size={20}
                             color={existingApplicationStatus === 'rejected' ? '#EF4444' :
-                                existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved' ? '#10B981' :
+                                existingApplicationStatus === 'accepted' ? '#10B981' :
                                     colors.primary}
                         />
                         <Text style={[styles.infoText, { color: colors.text }]}>
                             {existingApplicationStatus === 'rejected'
-                                ? 'Your application has been declined.'
-                                : existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved'
+                                ? 'Your application was declined. You cannot re-apply to this gig.'
+                                : existingApplicationStatus === 'accepted'
                                     ? 'Your application has been accepted! 🎉'
                                     : `You have already applied to this gig. Status: `}
-                            {existingApplicationStatus !== 'rejected' && existingApplicationStatus !== 'accepted' && existingApplicationStatus !== 'approved' && (
+                            {existingApplicationStatus !== 'rejected' && existingApplicationStatus !== 'accepted' && (
                                 <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{existingApplicationStatus}</Text>
                             )}
                         </Text>
                     </View>
-                )}
+                )
+                }
 
                 <TouchableOpacity
                     style={[
                         styles.primaryBtn,
-                        { backgroundColor: colors.primary },
+                        { backgroundColor: colors.primary, marginTop: hasExistingApplication ? 16 : 0 },
                         (isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication) && { opacity: 0.5 }
                     ]}
                     onPress={() => {
@@ -2105,6 +2419,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         </View>
     );
 
+    const scrollRef = useRef<any>(null);
+
     return (
         <>
             <BottomSheetModal
@@ -2115,6 +2431,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 backgroundStyle={{ backgroundColor: colors.background }}
                 handleIndicatorStyle={{ backgroundColor: isDark ? '#4B5563' : '#E5E7EB', width: 40 }}
                 enablePanDownToClose={true}
+                onChange={handleSheetChanges}
             >
                 {loading ? (
                     <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -2122,6 +2439,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     </View>
                 ) : group ? (
                     <BottomSheetScrollView
+                        ref={scrollRef}
                         contentContainerStyle={styles.scrollContent}
                         showsVerticalScrollIndicator={false}
                         showsHorizontalScrollIndicator={false}

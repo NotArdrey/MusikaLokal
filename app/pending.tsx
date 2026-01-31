@@ -46,13 +46,13 @@ export default function PendingScreen() {
       // For "Pending" tab specifically, we usually want 'pending' or 'approved' (if payment needed).
       // Let's include 'pending' and 'approved' for now.
 
-      const normalizedGigApps = (gigApps || []).filter((a: any) => a.status === 'pending' || a.status === 'approved').map((a: any) => ({
+      const normalizedGigApps = (gigApps || []).filter((a: any) => a.status === 'pending' || a.status === 'accepted').map((a: any) => ({
         id: a.id,
         originalId: a.id,
         name: a.gig?.name || 'Unknown Gig',
         date: a.gig?.event_date ? new Date(a.gig.event_date).toLocaleDateString() : 'Date TBA',
         image: a.gig?.images?.[0] || null,
-        status: a.status === 'approved' ? 'Action Required' : 'Waiting for Approval', // Approved = user might need to sign contract
+        status: a.status === 'accepted' ? 'Action Required' : 'Waiting for Approval', // Accepted = user might need to sign contract
         type: 'Gig Application',
         rawStatus: a.status,
         isGig: true

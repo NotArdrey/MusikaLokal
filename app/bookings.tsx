@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { Alert, Dimensions, Image, Linking, Modal as RNModal, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import { supabase } from '../lib/supabase';
 import BookingDetailsSheet from '../src/components/BookingDetailsSheet';
 import Header from '../src/components/header';
@@ -40,6 +42,14 @@ export default function BookingsScreen() {
   const [cancellationReason, setCancellationReason] = useState('');
   const bookingDetailsRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
   const { width } = useWindowDimensions();
+  const [modalMode, setModalMode] = useState<'confirm' | 'cancel' | 'decline'>('confirm');
+
+  // QR Check-in State
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [qrValue, setQrValue] = useState<string>('');
+  const [permission, requestPermission] = useCameraPermissions();
+  const [scanned, setScanned] = useState(false);
 
   // State for fetched data
   const [data, setData] = useState({
@@ -87,7 +97,14 @@ export default function BookingsScreen() {
 
   async function handleStatusUpdate(bookingId: string, newStatus: string, typeId: string = 'studio_booking', reason?: string) {
     try {
-      const { error } = await supabase.functions.invoke('manage-bookings', {
+      console.log('📤 handleStatusUpdate called with:', {
+        bookingId,
+        newStatus,
+        typeId,
+        reason
+      });
+
+      const { data, error } = await supabase.functions.invoke('manage-bookings', {
         body: {
           action: 'update_status',
           booking_id: bookingId,
@@ -96,6 +113,9 @@ export default function BookingsScreen() {
           cancellation_reason: reason
         }
       });
+
+      console.log('📥 handleStatusUpdate response:', { data, error });
+
       if (error) throw error;
 
       // Refresh list
@@ -113,11 +133,21 @@ export default function BookingsScreen() {
   };
 
   const handleConfirmBooking = async (bookingId: string) => {
-    await handleStatusUpdate(bookingId, 'confirmed', selectedItem?.type_id || 'studio_booking');
+    // Use 'accepted' for gig applications, 'confirmed' for studio bookings
+    const status = selectedItem?.type_id === 'gig_application' ? 'accepted' : 'confirmed';
+    await handleStatusUpdate(bookingId, status, selectedItem?.type_id || 'studio_booking');
   };
 
   const handleCancelBooking = async (bookingId: string) => {
     setCancellationReason('');
+    setModalMode('cancel');
+    setModalVisible(true);
+  };
+
+  const handleDeclineBooking = (item: any) => {
+    setSelectedItem(item);
+    setCancellationReason('');
+    setModalMode('decline');
     setModalVisible(true);
   };
 
@@ -225,6 +255,88 @@ export default function BookingsScreen() {
     } as any);
   };
 
+  // QR Code Logic
+  const handleShowPass = (item: any) => {
+    setQrValue(item.id);
+    setShowQRModal(true);
+  };
+
+  const handleScanOpen = async () => {
+    if (!permission) {
+      // Permission status not yet loaded
+      return;
+    }
+    if (!permission.granted) {
+      const { granted } = await requestPermission();
+      if (!granted) {
+        Alert.alert('Permission Required', 'Camera access is required to scan entry passes.');
+        return;
+      }
+    }
+    setScanned(false);
+    setShowScanModal(true);
+  };
+
+  const handleBarCodeScanned = async ({ type, data }: { type: string, data: string }) => {
+    setScanned(true);
+    setShowScanModal(false);
+
+    // Call backend to verify check-in
+    try {
+      setLoading(true);
+      console.log('📷 Scanning QR code:', { qr_code: data, scanner_id: userId });
+
+      const { data: response, error } = await supabase.functions.invoke('manage-bookings', {
+        body: {
+          action: 'scan_qr',
+          qr_code: data,
+          scanner_id: userId
+        }
+      });
+
+      setLoading(false);
+
+      console.log('📷 Check-in response:', response);
+      console.log('📷 Check-in error:', error);
+
+      // When there's a FunctionsHttpError (non-2xx status), the error body is in the response data
+      if (error) {
+        console.error('Check-in error:', error);
+
+        // The response data contains the error details even when error is set
+        if (response?.error) {
+          const errorMessage = response.error;
+          const details = response.details ? `\n\n${response.details}` : '';
+          Alert.alert('Check-In Failed', errorMessage + details);
+        } else if (response?.message) {
+          // Some responses might have a message field instead
+          Alert.alert('Info', response.message);
+        } else {
+          Alert.alert('Check-In Failed', 'Could not verify booking. Please try again.');
+        }
+        return;
+      }
+
+      // Success responses
+      if (response?.message) {
+        Alert.alert('Info', response.message);
+        // Refresh bookings even for "already checked in" message
+        if (userId) fetchBookings(userId);
+      } else if (response?.success) {
+        Alert.alert('Success', 'Check-in confirmed! Booking is now LIVE.');
+        if (userId) fetchBookings(userId);
+      } else {
+        Alert.alert('Success', 'Check-in processed.');
+        if (userId) fetchBookings(userId);
+      }
+
+    } catch (e: any) {
+      setLoading(false);
+      console.error('Scan error:', e);
+      Alert.alert('Error', e?.message || 'An error occurred during check-in.');
+    }
+  };
+
   const currentItems = data[activeTab] || [];
 
   const renderTab = (tab: Tab) => (
@@ -314,22 +426,110 @@ export default function BookingsScreen() {
                   <View style={styles.cardHeader}>
                     <View style={styles.cardTitleContainer}>
                       <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
+
+                      {/* Booker Info for Studio/Venue Owners */}
+                      {(userRole === 'studio-owner' || userRole === 'venue-owner') && item.customer_name && (
+                        <TouchableOpacity
+                          style={styles.customerInfoContainer}
+                          onPress={() => router.push({ pathname: '/profile', params: { userId: item.user_id } })}
+                        >
+                          <Image
+                            source={{ uri: item.customer_avatar || 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=100&h=100&fit=crop' }}
+                            style={styles.customerAvatar}
+                          />
+                          <Text style={[styles.customerName, { color: colors.textSecondary }]}>
+                            {item.type_id === 'gig_application' ? 'Applied by ' : 'Booked by '}
+                            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>{item.customer_name}</Text>
+                          </Text>
+                          <Ionicons name="chevron-forward" size={12} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Contact Info (Studio Owners) */}
+                      {userRole === 'studio-owner' && item.type_id === 'studio_booking' && (
+                        <View style={{ marginTop: 4, gap: 4 }}>
+                          {item.customer_contact && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="call-outline" size={12} color={colors.primary} />
+                              <Text style={{ fontSize: 12, fontFamily: 'Poppins_400Regular', color: colors.text }}>
+                                {item.customer_contact}
+                              </Text>
+                            </View>
+                          )}
+                          {item.customer_address && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="location-outline" size={12} color={colors.primary} />
+                              <Text style={{ fontSize: 12, fontFamily: 'Poppins_400Regular', color: colors.text }} numberOfLines={1}>
+                                {item.customer_address}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
+
+                      {/* Video & Note (Venue Owners / Gig Applications) */}
+                      {userRole === 'venue-owner' && item.type_id === 'gig_application' && (
+                        <View style={{ marginTop: 8, gap: 8 }}>
+                          {item.video_url && (
+                            <TouchableOpacity
+                              onPress={() => Linking.openURL(item.video_url)}
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF', padding: 8, borderRadius: 8 }}
+                            >
+                              <Ionicons name="play-circle" size={20} color="#3B82F6" />
+                              <Text style={{ fontSize: 12, fontFamily: 'Poppins_500Medium', color: '#3B82F6' }}>Watch Audition Video</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {item.note && (
+                            <View style={{ backgroundColor: isDark ? '#374151' : '#F9FAFB', padding: 8, borderRadius: 8 }}>
+                              <Text style={{ fontSize: 11, fontFamily: 'Poppins_600SemiBold', color: colors.textSecondary, marginBottom: 2 }}>Note:</Text>
+                              <Text style={{ fontSize: 12, fontFamily: 'Poppins_400Regular', color: colors.text }}>"{item.note}"</Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
+
+
+
+
                       <Text style={[styles.cardDate, { color: colors.textSecondary }]}>
-                        {item.raw_date ? new Date(item.raw_date).toLocaleDateString() : new Date(item.start_time).toLocaleDateString()} • {item.start_time && item.start_time.includes(':') ? (() => {
-                          const [hours, minutes] = item.start_time.split(':');
-                          const h = parseInt(hours);
-                          const period = h >= 12 ? 'PM' : 'AM';
-                          const h12 = h % 12 || 12;
-                          return `${h12}:${minutes} ${period}`;
-                        })() : new Date(item.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        {(() => {
+                          const dateStr = item.raw_date
+                            ? new Date(item.raw_date).toLocaleDateString()
+                            : new Date(item.start_time).toLocaleDateString();
+
+                          let timeStr = '';
+                          if (item.start_time) {
+                            if (item.start_time.includes('T')) {
+                              // Handle ISO timestamp
+                              timeStr = new Date(item.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+                            } else if (item.start_time.includes(':')) {
+                              // Handle HH:MM format
+                              const [hours, minutes] = item.start_time.split(':');
+                              const h = parseInt(hours);
+                              if (!isNaN(h)) {
+                                const period = h >= 12 ? 'PM' : 'AM';
+                                const h12 = h % 12 || 12;
+                                timeStr = `${h12}:${minutes} ${period}`;
+                              }
+                            }
+                          }
+
+                          return `${dateStr}${timeStr ? ` • ${timeStr}` : ''}`;
+                        })()}
                       </Text>
                     </View>
                   </View>
 
-                  <View style={[styles.cardFooter, { borderColor: isDark ? colors.border : '#F3F4F6' }]}>
+                  <View style={[
+                    styles.cardFooter,
+                    { borderColor: isDark ? colors.border : '#F3F4F6' },
+                    // FORCE COLUMN LAYOUT for proper vertical stacking
+                    { flexDirection: 'column', alignItems: 'flex-start', gap: moderateScale(12) }
+                  ]}>
 
-                    {/* Status Text with Icon */}
-                    <View style={styles.statusContainer}>
+                    {/* Status Text with Icon - Now at the Top */}
+                    <View style={[styles.statusContainer, { marginBottom: 0 }]}>
                       {item.isCancelled ? (
                         <Ionicons name="close-circle" size={16} color="#EF4444" />
                       ) : activeTab === 'Ongoing' ? (
@@ -355,12 +555,34 @@ export default function BookingsScreen() {
                     </View>
 
 
-                    {/* Action Buttons */}
-                    <View style={styles.actionButtonsContainer}>
+                    <View style={[
+                      styles.actionButtonsContainer,
+                      { marginTop: 0, width: '100%' }
+                    ]}>
                       {activeTab === 'Pending' && item.action === 'Confirm Now' ? (
-                        <TouchableOpacity onPress={() => { setSelectedItem(item); setModalVisible(true); }} style={[styles.actionButton, { backgroundColor: '#16A34A' }]}>
-                          <Text style={[styles.actionButtonText, { color: 'white' }]}>Confirm Now</Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', gap: scale(8), flex: 1 }}>
+                          {/* Details Button */}
+                          <TouchableOpacity
+                            onPress={() => handleDetailsPress(item)}
+                            style={[styles.outlineButton, { borderColor: colors.border, flex: 1, justifyContent: 'center', alignItems: 'center' }]}
+                          >
+                            <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>Details</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={() => handleDeclineBooking(item)}
+                            style={[styles.actionButton, { backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEF2F2', flex: 1, justifyContent: 'center', alignItems: 'center' }]}
+                          >
+                            <Text style={[styles.actionButtonText, { color: '#EF4444' }]}>Decline</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={() => { setSelectedItem(item); setModalMode('confirm'); setModalVisible(true); }}
+                            style={[styles.actionButton, { backgroundColor: '#16A34A', flex: 1, justifyContent: 'center', alignItems: 'center' }]}
+                          >
+                            <Text style={[styles.actionButtonText, { color: 'white' }]}>Confirm</Text>
+                          </TouchableOpacity>
+                        </View>
                       ) : activeTab === 'Ongoing' ? (
                         <TouchableOpacity
                           onPress={() => handleUploadProof(item)}
@@ -377,18 +599,49 @@ export default function BookingsScreen() {
                         </TouchableOpacity>
                       ) : (
                         // Default / Upcoming Buttons
-                        <View style={styles.defaultButtons}>
-                          <TouchableOpacity
-                            onPress={() => handleDetailsPress(item)}
-                            style={[styles.outlineButton, { borderColor: colors.border }]}>
-                            <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>Details</Text>
-                          </TouchableOpacity>
+                        <View style={{ width: '100%', gap: moderateScale(8) }}>
 
-                          {activeTab === 'Upcoming' && !item.isCancelled && (
-                            <TouchableOpacity onPress={() => { setSelectedItem(item); setModalVisible(true); }} style={[styles.cancelButton, { backgroundColor: isDark ? 'rgba(127, 29, 29, 0.2)' : '#FEF2F2' }]}>
-                              <Text style={[styles.cancelButtonText, isDark ? { color: '#F87171' } : { color: '#DC2626' }]}>Cancel</Text>
-                            </TouchableOpacity>
+                          {/* 1. Primary Action: QR Check-in (Full Width) */}
+                          {activeTab === 'Upcoming' && item.type_id === 'studio_booking' && item.status === 'Confirmed' && (
+                            userRole === 'studio-owner' ? (
+                              <TouchableOpacity
+                                onPress={handleScanOpen}
+                                style={[styles.actionButton, { backgroundColor: '#7C3AED', width: '100%', alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }]}
+                              >
+                                <Ionicons name="scan-outline" size={18} color="white" style={{ marginRight: 8 }} />
+                                <Text style={[styles.actionButtonText, { color: 'white', fontSize: moderateScale(14) }]}>Scan Entry</Text>
+                              </TouchableOpacity>
+                            ) : (
+                              <TouchableOpacity
+                                onPress={() => handleShowPass(item)}
+                                style={[styles.actionButton, { backgroundColor: colors.primary, width: '100%', alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }]}
+                              >
+                                <Ionicons name="qr-code-outline" size={18} color="white" style={{ marginRight: 8 }} />
+                                <Text style={[styles.actionButtonText, { color: 'white', fontSize: moderateScale(14) }]}>Show Entry Pass</Text>
+                              </TouchableOpacity>
+                            )
                           )}
+
+                          {/* 2. Secondary Actions: Details & Cancel (Row) */}
+                          <View style={{ flexDirection: 'row', gap: scale(8) }}>
+                            <TouchableOpacity
+                              onPress={() => handleDetailsPress(item)}
+                              style={[styles.outlineButton, { borderColor: colors.border, flex: 1, alignItems: 'center' }]}>
+                              <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>Details</Text>
+                            </TouchableOpacity>
+
+                            {activeTab === 'Upcoming' && !item.isCancelled && (
+                              <TouchableOpacity onPress={() => {
+                                setSelectedItem(item);
+                                setModalMode('cancel');
+                                setCancellationReason('');
+                                setModalVisible(true);
+                              }} style={[styles.cancelButton, { backgroundColor: isDark ? 'rgba(127, 29, 29, 0.2)' : '#FEF2F2', flex: 1, alignItems: 'center' }]}>
+                                <Text style={[styles.cancelButtonText, isDark ? { color: '#F87171' } : { color: '#DC2626' }]}>Cancel</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+
                         </View>
                       )}
                     </View>
@@ -409,31 +662,95 @@ export default function BookingsScreen() {
       <Modal
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        title={activeTab === 'Pending' ? "Confirm Booking" : "Cancel Booking"}
-        message={
-          activeTab === 'Pending'
-            ? "Are you sure you want to confirm this booking?"
-            : (() => {
-              if (selectedItem?.raw_date) {
-                const eventDate = new Date(selectedItem.raw_date);
-                const now = new Date();
-                const diffTime = eventDate.getTime() - now.getTime();
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-                if (diffDays > 7) return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
-                if (diffDays >= 3) return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
-                return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
-              }
-              return "Are you sure you want to cancel this booking? This action cannot be undone.";
-            })()
+        title={
+          modalMode === 'confirm'
+            ? (selectedItem?.type_id === 'gig_application' ? "Accept Application" : "Confirm Booking")
+            : modalMode === 'decline'
+              ? (selectedItem?.type_id === 'gig_application' ? "Decline Application" : "Decline Booking")
+              : (selectedItem?.type_id === 'gig_application' ? "Withdraw from Gig" : "Cancel Booking")
         }
-        buttonText={activeTab === 'Pending' ? "Confirm" : "Yes, Cancel Booking"}
-        showInput={activeTab !== 'Pending'} // Show input only for cancellation
+        message={
+          modalMode === 'confirm'
+            ? (selectedItem?.type_id === 'gig_application'
+              ? "Are you sure you want to accept this application? The musician will be notified."
+              : "Are you sure you want to confirm this booking?")
+            : modalMode === 'decline'
+              ? (selectedItem?.type_id === 'gig_application'
+                ? "Are you sure you want to decline this application? The musician will be notified and cannot re-apply to this gig."
+                : "Are you sure you want to decline this booking? The user will be notified.")
+              : (() => {
+                // Cancel mode
+                if (selectedItem?.type_id === 'gig_application') {
+                  // For gig applications
+                  if (userRole === 'venue-owner') {
+                    return "Are you sure you want to revoke this accepted application? The musician will be notified.";
+                  } else {
+                    // Musician withdrawing
+                    if (selectedItem?.raw_date) {
+                      const eventDate = new Date(selectedItem.raw_date);
+                      const now = new Date();
+                      const diffTime = eventDate.getTime() - now.getTime();
+                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                      if (diffDays > 7) {
+                        return "Warning: You are withdrawing from an accepted gig with more than 7 days notice. This may affect your reputation with this venue.";
+                      } else if (diffDays >= 3) {
+                        return "Warning: You are withdrawing within 3-7 days. This may significantly affect your reputation with this venue.";
+                      }
+                      return "You are withdrawing with less than 3 days notice. This may severely damage your reputation with this venue.";
+                    }
+                    return "Are you sure you want to withdraw from this gig? The venue owner will be notified.";
+                  }
+                } else {
+                  // For studio bookings - show refund policy
+                  if (selectedItem?.raw_date) {
+                    const eventDate = new Date(selectedItem.raw_date);
+                    const now = new Date();
+                    const diffTime = eventDate.getTime() - now.getTime();
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                    if (diffDays > 7) return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
+                    if (diffDays >= 3) return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
+                    return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
+                  }
+                  return "Are you sure you want to cancel this booking? This action cannot be undone.";
+                }
+              })()
+        }
+        buttonText={
+          modalMode === 'confirm'
+            ? (selectedItem?.type_id === 'gig_application' ? "Accept" : "Confirm")
+            : modalMode === 'decline'
+              ? (selectedItem?.type_id === 'gig_application' ? "Decline Application" : "Decline Booking")
+              : "Yes, Cancel Booking"
+        }
+        showInput={modalMode !== 'confirm'} // Show input for cancel AND decline
         onInputChange={setCancellationReason}
         onConfirm={() => {
           if (selectedItem) {
-            // If Pending, confirm. If Upcoming/other, cancel.
-            const status = activeTab === 'Pending' ? 'confirmed' : 'cancelled';
+            console.log('🔍 Modal onConfirm - selectedItem:', selectedItem);
+            console.log('🔍 Modal onConfirm - modalMode:', modalMode);
+            console.log('🔍 Modal onConfirm - selectedItem.type_id:', selectedItem.type_id);
+
+            let status = 'cancelled'; // Default for studio bookings
+            if (modalMode === 'confirm') {
+              status = selectedItem.type_id === 'gig_application' ? 'accepted' : 'confirmed';
+            } else if (modalMode === 'decline') {
+              status = selectedItem.type_id === 'gig_application' ? 'rejected' : 'cancelled';
+            } else if (modalMode === 'cancel') {
+              // Cancel mode (from Upcoming tab)
+              status = selectedItem.type_id === 'gig_application' ? 'rejected' : 'cancelled';
+            }
+
+            console.log('🔍 Modal onConfirm - Final status:', status);
+            console.log('🔍 Modal onConfirm - Calling handleStatusUpdate with:', {
+              id: selectedItem.id,
+              status,
+              type_id: selectedItem?.type_id,
+              reason: cancellationReason
+            });
+
+            // For decline/cancel, we send cancellationReason
             handleStatusUpdate(selectedItem.id, status, selectedItem?.type_id, cancellationReason);
           }
         }}
@@ -445,6 +762,41 @@ export default function BookingsScreen() {
         onConfirm={handleConfirmBooking}
         onCancel={handleCancelBooking}
       />
+
+      {/* QR Code Modal (Musician) */}
+      <RNModal visible={showQRModal} transparent animationType="slide" onRequestClose={() => setShowQRModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.qrContainer, { backgroundColor: 'white' }]}>
+            <Text style={styles.qrTitle}>Entry Pass</Text>
+            <Text style={styles.qrSubtitle}>Show this to the studio owner</Text>
+            <View style={styles.qrWrapper}>
+              <QRCode value={qrValue} size={200} />
+            </View>
+            <TouchableOpacity onPress={() => setShowQRModal(false)} style={styles.closeButton}>
+              <Text style={styles.closeButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </RNModal>
+
+      {/* Scanner Modal (Studio Owner) */}
+      <RNModal visible={showScanModal} animationType="slide" onRequestClose={() => setShowScanModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'black' }}>
+          <CameraView
+            style={StyleSheet.absoluteFillObject}
+            facing="back"
+            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+          />
+          <View style={styles.scannerOverlay}>
+            <View style={styles.scanBox} />
+            <Text style={styles.scanText}>Scan Musician's Entry Pass</Text>
+            <TouchableOpacity onPress={() => setShowScanModal(false)} style={styles.closeScannerButton}>
+              <Ionicons name="close-circle" size={48} color="white" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </RNModal>
+
     </>
   );
 }
@@ -472,7 +824,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
   },
   scrollContent: {
-    paddingBottom: SCREEN_HEIGHT < 700 ? verticalScale(120) : verticalScale(150),
+    paddingBottom: SCREEN_HEIGHT < 700 ? verticalScale(150) : verticalScale(180),
     paddingHorizontal: scale(24),
     paddingTop: moderateScale(16),
   },
@@ -605,10 +957,108 @@ const styles = StyleSheet.create({
     marginLeft: scale(6),
     fontFamily: 'Poppins_500Medium',
   },
+  customerInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: moderateScale(4),
+    marginBottom: moderateScale(2),
+  },
+  customerAvatar: {
+    width: moderateScale(20),
+    height: moderateScale(20),
+    borderRadius: moderateScale(10),
+    marginRight: scale(6),
+  },
+  customerName: {
+    fontSize: moderateScale(12),
+    fontFamily: 'Poppins_400Regular',
+    marginRight: scale(4),
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: moderateScale(4),
+    gap: scale(4),
+  },
+  locationText: {
+    fontSize: moderateScale(12),
+    fontFamily: 'Poppins_400Regular',
+    flex: 1,
+  },
   actionButtonsContainer: {
     flexDirection: 'row',
-    gap: scale(8),
+    marginTop: moderateScale(12),
+    width: '100%',
+    justifyContent: 'flex-end',
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20
+  },
+  qrContainer: {
+    width: '100%',
+    padding: 30,
+    borderRadius: 20,
+    alignItems: 'center',
+  },
+  qrTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    color: 'black'
+  },
+  qrSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 20
+  },
+  qrWrapper: {
+    padding: 20,
+    backgroundColor: 'white',
+    borderRadius: 10,
+    overflow: 'hidden'
+  },
+  closeButton: {
+    marginTop: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    backgroundColor: 'black',
+    borderRadius: 10
+  },
+  closeButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16
+  },
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  scanBox: {
+    width: 250,
+    height: 250,
+    borderWidth: 2,
+    borderColor: 'white',
+    borderRadius: 20,
+    backgroundColor: 'transparent'
+  },
+  scanText: {
+    color: 'white',
+    fontSize: 16,
+    marginTop: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 10,
+    borderRadius: 5
+  },
+  closeScannerButton: {
+    position: 'absolute',
+    bottom: 50
+  },
+
   actionButton: {
     paddingHorizontal: scale(16),
     paddingVertical: moderateScale(8),

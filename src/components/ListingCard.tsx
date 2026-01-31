@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
 import { Image, Pressable, Share, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import PagerView from 'react-native-pager-view';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -17,6 +19,7 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
     const { userRole } = useAuth();
     const { width } = useWindowDimensions();
     const [isLiked, setIsLiked] = useState(false);
+    const [pageIndex, setPageIndex] = useState(0);
 
     // Check if current user can invite (venue-owner or studio-owner viewing a musician/Group)
     const canInvite = (userRole === 'venue-owner' || userRole === 'studio-owner') && item.type === 'Group';
@@ -44,9 +47,7 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
         priceLabel = 'Inquire for rates'; // Fallback
     }
 
-    const cardWidth = variant === 'horizontal' ? Math.min(width * 0.8, 300) : '100%'; // Increased from 0.7/280 to 0.8/300
-    const imageHeight = variant === 'horizontal' ? 180 : 240;
-
+    // Shared actions
     const handleShare = async () => {
         try {
             await Share.share({
@@ -62,148 +63,265 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
     };
 
     // Robust Image Logic
-    const getInitialImage = () => {
-        const uri = item.images?.[0] || item.image;
-        if (uri && typeof uri === 'string' && uri.length > 0) {
-            return { uri };
+    const getImages = () => {
+        if (item.images && Array.isArray(item.images) && item.images.length > 0) {
+            // Filter out empty strings
+            return item.images.filter((img: any) => typeof img === 'string' && img.length > 0);
         }
-        return undefined;
+        if (item.image && typeof item.image === 'string' && item.image.length > 0) {
+            return [item.image];
+        }
+        return [];
     };
 
-    const [imageSource, setImageSource] = useState(getInitialImage());
+    const images = getImages();
+    const hasMultipleImages = images.length > 1;
 
-    const handleImageError = () => {
-        // Fallback to a reliable placeholder or local asset if available
-        setImageSource(undefined);
-    };
+    // --- RENDER VARIANTS ---
+
+    // 1. IMMERSIVE HORIZONTAL CARD (For Home Screen)
+    if (variant === 'horizontal') {
+        const cardWidth = Math.min(width * 0.8, 300);
+        const cardHeight = 320; // Taller for immersive feel
+
+        return (
+            <Pressable
+                onPress={() => onPress(item)}
+                style={({ pressed }) => [
+                    styles.card,
+                    {
+                        width: cardWidth,
+                        height: cardHeight,
+                        transform: [{ scale: pressed ? 0.98 : 1 }]
+                    },
+                    style,
+                ]}
+            >
+                <View style={[styles.cardContent, { flex: 1, backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                    {/* Full Background Image / Slideshow */}
+                    {hasMultipleImages ? (
+                        <View style={StyleSheet.absoluteFillObject}>
+                            <PagerView
+                                style={StyleSheet.absoluteFillObject}
+                                initialPage={0}
+                                onPageSelected={(e) => setPageIndex(e.nativeEvent.position)}
+                            >
+                                {images.map((img: string, index: number) => (
+                                    <View key={index} style={styles.pagerPage}>
+                                        <Image
+                                            source={{ uri: img }}
+                                            style={StyleSheet.absoluteFillObject}
+                                            resizeMode="cover"
+                                        />
+                                    </View>
+                                ))}
+                            </PagerView>
+                        </View>
+                    ) : (
+                        <Image
+                            source={images.length > 0 ? { uri: images[0] } : undefined}
+                            style={StyleSheet.absoluteFillObject}
+                            resizeMode="cover"
+                        />
+                    )}
+
+                    {/* Gradient Overlay */}
+                    <LinearGradient
+                        colors={['transparent', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.85)']}
+                        style={StyleSheet.absoluteFillObject}
+                        start={{ x: 0.5, y: 0.3 }}
+                        end={{ x: 0.5, y: 1 }}
+                        pointerEvents="none" // Allow touches to pass through
+                    />
+
+                    {/* Top Row: Floating Badges */}
+                    <View style={styles.immersiveTopRow}>
+                        {/* Rating Glass Badge */}
+                        <View style={styles.glassBadge}>
+                            <Ionicons name="star" size={12} color="#FCD34D" />
+                            <Text style={styles.glassBadgeText}>
+                                {item.rating > 0 ? item.rating.toFixed(1) : 'New'}
+                            </Text>
+                        </View>
+
+                        {/* Like Button Glass */}
+                        <TouchableOpacity style={styles.glassIconBtn} onPress={toggleLike}>
+                            <Ionicons name={isLiked ? "heart" : "heart-outline"} size={20} color={isLiked ? "#EF4444" : "#FFF"} />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Pagination Dots */}
+                    {hasMultipleImages && (
+                        <View style={styles.paginationContainer}>
+                            {images.map((_: any, i: number) => (
+                                <View
+                                    key={i}
+                                    style={[
+                                        styles.paginationDot,
+                                        { backgroundColor: i === pageIndex ? '#FFF' : 'rgba(255,255,255,0.5)' }
+                                    ]}
+                                />
+                            ))}
+                        </View>
+                    )}
+
+                    {/* Bottom Content Area */}
+                    <View style={styles.immersiveBottomContent}>
+                        {/* Type Badge */}
+                        <View style={styles.tagBadge}>
+                            <Text style={styles.tagText}>{item.type || 'Artist'}</Text>
+                        </View>
+
+                        <Text style={styles.immersiveTitle} numberOfLines={2}>{item.name}</Text>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, opacity: 0.9 }}>
+                            <Ionicons name="location" size={12} color="#FFF" style={{ marginRight: 4 }} />
+                            <Text style={styles.immersiveSubtitle} numberOfLines={1}>{subtitle}</Text>
+                        </View>
+
+                        {/* Instruments Display for Studios/Venues */}
+                        {item.instruments && Array.isArray(item.instruments) && item.instruments.length > 0 && (
+                            <View style={styles.instrumentsRow}>
+                                {item.instruments.slice(0, 4).map((inst: { name: string, image: string }, idx: number) => (
+                                    <Image
+                                        key={inst.name + idx}
+                                        source={{ uri: inst.image }}
+                                        style={styles.instrumentBadge}
+                                    />
+                                ))}
+                                {item.instruments.length > 4 && (
+                                    <View style={styles.moreInstrumentsBadge}>
+                                        <Text style={styles.moreInstrumentsText}>+{item.instruments.length - 4}</Text>
+                                    </View>
+                                )}
+                            </View>
+                        )}
+
+                        <Text style={styles.immersivePrice}>{priceLabel}</Text>
+                    </View>
+                </View>
+            </Pressable>
+        );
+    }
+
+    // 2. STANDARD VERTICAL CARD (For Search / Lists)
+    // Legacy Layout: Image Top, White Info Box Bottom
+    const imageHeight = 180;
 
     return (
         <Pressable
             onPress={() => onPress(item)}
             style={({ pressed }) => [
                 styles.card,
-                { width: cardWidth, backgroundColor: isDark ? '#1F2937' : '#FFFFFF' },
+                { width: '100%', backgroundColor: isDark ? '#1F2937' : '#FFFFFF' },
                 style,
                 { transform: [{ scale: pressed ? 0.99 : 1 }] }
             ]}
         >
-            {/* Image Section */}
-            <View style={[styles.imageContainer, { height: imageHeight }]}>
-                <Image
-                    source={imageSource}
-                    style={styles.image}
-                    resizeMode="cover"
-                    onError={handleImageError}
-                />
-
-                {/* Top Actions: Rating & Share/Heart */}
-                <View style={[styles.topActions]}>
-                    {item.rating > 0 && (item.review_count || 0) > 0 ? (
-                        <View style={styles.ratingBadge}>
-                            <Ionicons name="star" size={12} color="#FBBF24" />
-                            <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
+            <View style={[styles.cardContent, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
+                {/* Image Section */}
+                <View style={[styles.imageContainer, { height: imageHeight }]}>
+                    {hasMultipleImages ? (
+                        <View style={{ flex: 1 }}>
+                            <PagerView
+                                style={{ flex: 1 }}
+                                initialPage={0}
+                                onPageSelected={(e) => setPageIndex(e.nativeEvent.position)}
+                            >
+                                {images.map((img: string, index: number) => (
+                                    <View key={index} style={styles.pagerPage}>
+                                        <Image
+                                            source={{ uri: img }}
+                                            style={styles.image}
+                                            resizeMode="cover"
+                                        />
+                                    </View>
+                                ))}
+                            </PagerView>
+                            {/* Pagination Dots for Vertical Card */}
+                            <View style={[styles.paginationContainer, { bottom: 10 }]}>
+                                {images.map((_: any, i: number) => (
+                                    <View
+                                        key={i}
+                                        style={[
+                                            styles.paginationDot,
+                                            { backgroundColor: i === pageIndex ? '#FFF' : 'rgba(255,255,255,0.5)' }
+                                        ]}
+                                    />
+                                ))}
+                            </View>
                         </View>
                     ) : (
-                        <View style={[styles.ratingBadge, { backgroundColor: 'rgba(148, 163, 184, 0.9)' }]}>
-                            <Text style={styles.ratingText}>No ratings yet</Text>
-                        </View>
+                        <Image
+                            source={images.length > 0 ? { uri: images[0] } : undefined}
+                            style={styles.image}
+                            resizeMode="cover"
+                        />
                     )}
 
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                        {canInvite && onInvite && (
-                            <TouchableOpacity
-                                style={[styles.iconBtn, styles.inviteBtn]}
-                                onPress={() => onInvite(item)}
-                            >
-                                <Ionicons name="mail-outline" size={18} color="#FFF" />
-                            </TouchableOpacity>
+                    {/* Modern Overlay Badge */}
+                    <View style={styles.typeOverlayBadge}>
+                        <Text style={styles.typeOverlayText}>{item.type || 'Artist'}</Text>
+                    </View>
+
+                    {/* Top Actions for Standard Card */}
+                    <View style={[styles.topActions]}>
+                        <View style={{ flex: 1 }} />
+
+                        {/* Rating moved to right or kept at top? Keeping original rating badge logic but ensuring zIndex */}
+                        {item.rating > 0 && (item.review_count || 0) > 0 ? (
+                            <View style={[styles.ratingBadge, { marginRight: 'auto' }]}>
+                                <Ionicons name="star" size={12} color="#FBBF24" />
+                                <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
+                            </View>
+                        ) : (
+                            <View style={[styles.ratingBadge, { backgroundColor: 'rgba(148, 163, 184, 0.9)', marginRight: 'auto' }]}>
+                                <Text style={styles.ratingText}>No ratings yet</Text>
+                            </View>
                         )}
-                        <TouchableOpacity style={styles.iconBtn} onPress={handleShare}>
-                            <Ionicons name="share-outline" size={20} color="#000" />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.iconBtn} onPress={toggleLike}>
-                            <Ionicons name={isLiked ? "heart" : "heart-outline"} size={20} color={isLiked ? "#EF4444" : "#000"} />
-                        </TouchableOpacity>
+
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TouchableOpacity style={styles.iconBtn} onPress={toggleLike}>
+                                <Ionicons name={isLiked ? "heart" : "heart-outline"} size={20} color={isLiked ? "#EF4444" : "#000"} />
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
-            </View>
 
-            {/* Info Section (Below Image) */}
-            <View style={styles.info}>
-                <View style={{ marginBottom: 4 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                {/* Info Section */}
+                <View style={styles.info}>
+                    <View>
                         <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
-                        {/* Type Badge (Mini) */}
-                        <Text style={[styles.typeMini, { color: colors.primary }]}>{item.type || 'Artist'}</Text>
-                    </View>
-
-                    <Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {item.type === 'Gig' && item.event_date 
-                            ? `${new Date(item.event_date).toLocaleDateString()} • ${subtitle}` 
-                            : subtitle}
-                    </Text>
-                </View>
-
-                {item.experience_level && (
-                    <View style={{ flexDirection: 'row', marginBottom: 6 }}>
-                        <View style={{
-                            backgroundColor: isDark ? 'rgba(59, 130, 246, 0.2)' : '#EFF6FF',
-                            paddingHorizontal: 8,
-                            paddingVertical: 2,
-                            borderRadius: 4,
-                            borderWidth: 1,
-                            borderColor: isDark ? 'rgba(59, 130, 246, 0.4)' : '#DBEAFE'
-                        }}>
-                            <Text style={{
-                                fontSize: 10,
-                                color: isDark ? '#60A5FA' : '#2563EB',
-                                fontFamily: 'Poppins_500Medium'
-                            }}>
-                                {item.experience_level}
-                            </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="location-outline" size={12} color={colors.textSecondary} />
+                            <Text style={[styles.subtitle, { color: colors.textSecondary, flex: 1 }]} numberOfLines={1}>{subtitle}</Text>
                         </View>
                     </View>
-                )}
 
-                {/* Contract Badge for Studios and Gigs */}
-                {item.contract_url && (item.type === 'Studio' || item.type === 'Gig') && (
-                    <View style={{ flexDirection: 'row', marginBottom: 6 }}>
-                        <View style={{
-                            backgroundColor: isDark ? 'rgba(139, 92, 246, 0.2)' : '#F5F3FF',
-                            paddingHorizontal: 8,
-                            paddingVertical: 2,
-                            borderRadius: 4,
-                            borderWidth: 1,
-                            borderColor: isDark ? 'rgba(139, 92, 246, 0.4)' : '#DDD6FE',
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 4,
-                        }}>
-                            <Ionicons name="document-text" size={10} color={isDark ? '#A78BFA' : '#7C3AED'} />
-                            <Text style={{
-                                fontSize: 10,
-                                color: isDark ? '#A78BFA' : '#7C3AED',
-                                fontFamily: 'Poppins_500Medium'
-                            }}>
-                                Contract Available
-                            </Text>
-                        </View>
+                    <View style={[styles.priceRow, { borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                        <Text style={[styles.price, { color: colors.primary }]}>{priceLabel}</Text>
+                        <View style={{ flex: 1 }} />
+                        {item.review_count > 0 && (
+                            <Text style={styles.reviewCount}>({item.review_count} reviews)</Text>
+                        )}
                     </View>
-                )}
 
-                <View style={styles.priceRow}>
-                    <Text style={[styles.price, { color: colors.text }]}>{priceLabel}</Text>
-
-                    {/* Completion Rate Badge */}
-                    {(item.type === 'Studio' && item.completion_rate !== undefined) && (
-                        <View style={styles.completionBadge}>
-                            <Ionicons name="checkmark-circle" size={12} color="#10B981" />
-                            <Text style={styles.completionText}>{item.completion_rate}% Completion</Text>
+                    {/* Instruments Display for Studios/Venues */}
+                    {item.instruments && Array.isArray(item.instruments) && item.instruments.length > 0 && (
+                        <View style={[styles.instrumentsRowVertical, { borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                            {item.instruments.slice(0, 4).map((inst: { name: string, image: string }, idx: number) => (
+                                <Image
+                                    key={inst.name + idx}
+                                    source={{ uri: inst.image }}
+                                    style={styles.instrumentBadgeSmall}
+                                />
+                            ))}
+                            {item.instruments.length > 4 && (
+                                <View style={styles.moreInstrumentsBadgeSmall}>
+                                    <Text style={styles.moreInstrumentsTextSmall}>+{item.instruments.length - 4}</Text>
+                                </View>
+                            )}
                         </View>
-                    )}
-
-                    {item.review_count > 0 && (
-                        <Text style={styles.reviewCount}>({item.review_count} reviews)</Text>
                     )}
                 </View>
             </View>
@@ -214,26 +332,132 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
 const styles = StyleSheet.create({
     card: {
         marginBottom: 20,
-        marginRight: 16,
-        borderRadius: 20,
+        marginRight: 0,
+        borderRadius: 24,
         overflow: 'hidden',
-        // Subtle shadow directly on card container now
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 3,
         borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.05)'
+        borderColor: 'rgba(0,0,0,0.05)',
+        // Modern Shadow
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 }, // Slightly softer
+        shadowOpacity: 0.1, // Reduced opacity
+        shadowRadius: 10,
+        elevation: 4, // Reduced elevation for Android
     },
+    cardContent: {
+        // flex: 1 removed to allow auto-height for vertical cards
+        borderRadius: 24, // Matches card
+        overflow: 'hidden', // Clips content
+        position: 'relative',
+    },
+    // --- Immersive Styles ---
+    immersiveTopRow: {
+        position: 'absolute',
+        top: 16,
+        left: 16,
+        right: 16,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        zIndex: 10,
+        alignItems: 'center', // Fix vertical alignment
+    },
+    immersiveBottomContent: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        padding: 20,
+        justifyContent: 'flex-end',
+    },
+    immersiveTitle: {
+        fontFamily: 'Poppins_700Bold',
+        fontSize: 20,
+        color: '#FFF',
+        textShadowColor: 'rgba(0,0,0,0.5)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 6,
+        marginBottom: 4,
+    },
+    immersiveSubtitle: {
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 13,
+        color: 'rgba(255,255,255,0.95)',
+    },
+    immersivePrice: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 16,
+        color: '#FFF',
+        marginTop: 4,
+    },
+    glassBadge: {
+        backgroundColor: '#111827', // Solid heavy dark
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        // No border
+        // No opacity
+    },
+    glassBadgeText: {
+        color: '#FFF',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 11,
+    },
+    glassIconBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#111827', // Solid heavy dark for button too
+        alignItems: 'center',
+        justifyContent: 'center',
+        // Removed border
+    },
+    tagBadge: {
+        alignSelf: 'flex-start',
+        backgroundColor: '#7C3AED', // Solid Purple
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 6,
+        marginBottom: 8,
+    },
+    tagText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontFamily: 'Poppins_600SemiBold',
+        textTransform: 'uppercase',
+    },
+
+    // --- Standard Styles ---
     imageContainer: {
         width: '100%',
-        backgroundColor: '#f0f0f0',
+        backgroundColor: '#f3f4f6',
         position: 'relative',
     },
     image: {
         width: '100%',
         height: '100%',
+    },
+    pagerPage: {
+        width: '100%',
+        height: '100%',
+    },
+    paginationContainer: {
+        position: 'absolute',
+        bottom: 80, // Above content
+        left: 0,
+        right: 0,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 6,
+        zIndex: 20,
+    },
+    paginationDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: 'rgba(255,255,255,0.5)',
     },
     topActions: {
         position: 'absolute',
@@ -243,19 +467,22 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
+        zIndex: 10,
+        gap: 12, // Added gap to separate rating and heart
     },
     ratingBadge: {
         backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        paddingHorizontal: 8,
-        paddingVertical: 5,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
         borderRadius: 20,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.15,
         shadowRadius: 4,
+        elevation: 2,
     },
     ratingText: {
         fontFamily: 'Poppins_600SemiBold',
@@ -273,15 +500,15 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
+        elevation: 2,
     },
     info: {
-        padding: 12,
-        gap: 8,
+        padding: 16, // Increased padding
+        gap: 4, // Tighter gap
     },
     title: {
         fontFamily: 'Poppins_600SemiBold',
         fontSize: 16,
-        flex: 1,
         marginRight: 8,
     },
     typeMini: {
@@ -289,15 +516,22 @@ const styles = StyleSheet.create({
         fontSize: 10,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
+        textAlign: 'right',
+        opacity: 0.7,
     },
     subtitle: {
         fontFamily: 'Poppins_400Regular',
         fontSize: 13,
+        marginTop: 2,
     },
     priceRow: {
         flexDirection: 'row',
-        alignItems: 'baseline',
-        gap: 6
+        alignItems: 'center',
+        gap: 6,
+        marginTop: 10, // More separation for price
+        paddingTop: 10,
+        borderTopWidth: 1,
+        borderColor: 'rgba(0,0,0,0.05)', // Subtle separator
     },
     price: {
         fontFamily: 'Poppins_600SemiBold',
@@ -308,23 +542,83 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#9CA3AF',
     },
-    completionBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
-    },
-    completionText: {
-        fontSize: 10,
-        fontFamily: 'Poppins_600SemiBold',
-        color: '#10B981',
-    },
     inviteBtn: {
         backgroundColor: '#7C3AED',
-    }
+    },
+    // Modern Type Badge (Overlay)
+    typeOverlayBadge: {
+        position: 'absolute',
+        top: 12,
+        left: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
+        backgroundColor: 'rgba(0,0,0,0.6)', // Dark translucent
+        zIndex: 11,
+    },
+    typeOverlayText: {
+        color: 'white',
+        fontSize: 10,
+        fontFamily: 'Poppins_600SemiBold',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    // Instruments styles for horizontal (immersive) cards
+    instrumentsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 8,
+        gap: 4,
+    },
+    instrumentBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        borderWidth: 2,
+        borderColor: 'rgba(255,255,255,0.8)',
+    },
+    moreInstrumentsBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    moreInstrumentsText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    // Instruments styles for vertical cards
+    instrumentsRowVertical: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingTop: 10,
+        marginTop: 10,
+        borderTopWidth: 1,
+        gap: 6,
+    },
+    instrumentBadgeSmall: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        borderWidth: 1.5,
+        borderColor: 'rgba(0,0,0,0.1)',
+    },
+    moreInstrumentsBadgeSmall: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#E5E7EB',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    moreInstrumentsTextSmall: {
+        color: '#6B7280',
+        fontSize: 9,
+        fontFamily: 'Poppins_600SemiBold',
+    },
 });
 
 export default ListingCard;

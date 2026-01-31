@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
@@ -14,20 +14,20 @@ import { useTheme } from '../src/context/ThemeContext';
 const formatTimeInput = (text: string): string => {
     // Remove all non-digit characters except colon
     let cleaned = text.replace(/[^0-9:]/g, '');
-    
+
     // Limit to 5 characters (HH:MM)
     if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
-    
+
     // Auto-add colon after 2 digits
     if (cleaned.length === 2 && !cleaned.includes(':')) {
         cleaned = cleaned + ':';
     }
-    
+
     // If user types more than 2 digits before colon, insert colon
     if (cleaned.length > 2 && !cleaned.includes(':')) {
         cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
     }
-    
+
     // Validate hour (01-12)
     const parts = cleaned.split(':');
     if (parts[0] && parts[0].length === 2) {
@@ -36,7 +36,7 @@ const formatTimeInput = (text: string): string => {
             return cleaned.substring(0, 1);
         }
     }
-    
+
     // Validate minute (00-59)
     if (parts[1] && parts[1].length === 2) {
         const minute = parseInt(parts[1]);
@@ -44,7 +44,7 @@ const formatTimeInput = (text: string): string => {
             return parts[0] + ':' + parts[1].substring(0, 1);
         }
     }
-    
+
     return cleaned;
 };
 
@@ -67,6 +67,35 @@ export default function AddStudioScreen() {
     // Arrays
     const [amenities, setAmenities] = useState<string[]>([]);
     const [newAmenity, setNewAmenity] = useState('');
+
+    // Instruments state
+    const [selectedInstruments, setSelectedInstruments] = useState<{ name: string, image: string }[]>([]);
+
+    // Predefined instruments with images (using Unsplash for demo, replace with your own CDN)
+    const INSTRUMENT_OPTIONS = [
+        { name: 'Drum Kit', image: 'https://images.unsplash.com/photo-1519892300165-cb5542fb47c7?w=200&h=200&fit=crop' },
+        { name: 'Piano', image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=200&h=200&fit=crop' },
+        { name: 'Guitar Amp', image: 'https://images.unsplash.com/photo-1535587566541-97121a128dc5?w=200&h=200&fit=crop' },
+        { name: 'Bass Amp', image: 'https://images.unsplash.com/photo-1516924962500-2b4b3b99ea02?w=200&h=200&fit=crop' },
+        { name: 'Microphones', image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop' },
+        { name: 'Keyboard', image: 'https://images.unsplash.com/photo-1552422535-c45813c61732?w=200&h=200&fit=crop' },
+        { name: 'Electric Guitar', image: 'https://images.unsplash.com/photo-1550985616-10810253b84d?w=200&h=200&fit=crop' },
+        { name: 'Bass Guitar', image: 'https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=200&h=200&fit=crop' },
+        { name: 'DJ Equipment', image: 'https://images.unsplash.com/photo-1571327073757-71d13c24de30?w=200&h=200&fit=crop' },
+        { name: 'Synthesizer', image: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=200&h=200&fit=crop' },
+        { name: 'PA System', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=200&h=200&fit=crop' },
+        { name: 'Mixing Console', image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop' },
+    ];
+
+    // Toggle instrument selection
+    const toggleInstrument = (instrument: { name: string, image: string }) => {
+        const isSelected = selectedInstruments.some(i => i.name === instrument.name);
+        if (isSelected) {
+            setSelectedInstruments(selectedInstruments.filter(i => i.name !== instrument.name));
+        } else {
+            setSelectedInstruments([...selectedInstruments, instrument]);
+        }
+    };
 
     // Images state
     const [images, setImages] = useState<string[]>([]);
@@ -153,7 +182,7 @@ export default function AddStudioScreen() {
         if (!validateStep(step)) {
             return;
         }
-        
+
         if (step < 4) {
             setStep(step + 1);
         } else {
@@ -205,6 +234,7 @@ export default function AddStudioScreen() {
                 address,
                 hourly_rate: parseFloat(cost) || 0,
                 amenities,
+                instruments: selectedInstruments,
                 images: images,
                 contract_url: contractUrl || null,
                 availability: availability
@@ -224,7 +254,7 @@ export default function AddStudioScreen() {
             console.log('📅 FILTERED availability (days with slots):', payload.availability);
             console.log('📅 Number of days with availability:', payload.availability.length);
             console.log('�🔵 Creating studio with payload:', JSON.stringify({ action: 'create', type: 'studio', userId: session.user.id, payload }, null, 2));
-            
+
             const { data, error } = await supabase.functions.invoke('manage-listings', {
                 body: { action: 'create', type: 'studio', userId: session.user.id, payload }
             });
@@ -291,7 +321,7 @@ export default function AddStudioScreen() {
     const handleContractUpload = async () => {
         try {
             setUploadingContract(true);
-            
+
             if (Platform.OS === 'web') {
                 // Web: Use HTML input element
                 if (fileInputRef.current) {
@@ -300,7 +330,7 @@ export default function AddStudioScreen() {
                 setUploadingContract(false);
                 return;
             }
-            
+
             // Dynamic import for native platforms only
             const DocumentPicker = await import('expo-document-picker');
             const result = await DocumentPicker.getDocumentAsync({
@@ -551,7 +581,7 @@ export default function AddStudioScreen() {
                             {/* Contract Upload */}
                             <View style={styles.inputContainer}>
                                 <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-                                    Custom Contract (Optional)
+                                    Custom Contract
                                 </Text>
                                 <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
                                     Upload a PDF contract that musicians will see before applying
@@ -644,6 +674,54 @@ export default function AddStudioScreen() {
                                     ))}
                                 </View>
                             )}
+
+                            {/* Instruments Section */}
+                            <View style={{ marginTop: 24 }}>
+                                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                                    Available Instruments
+                                </Text>
+                                <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 12 }]}>
+                                    Select the instruments available at your studio
+                                </Text>
+
+                                <View style={styles.instrumentsGrid}>
+                                    {INSTRUMENT_OPTIONS.map((instrument) => {
+                                        const isSelected = selectedInstruments.some(i => i.name === instrument.name);
+                                        return (
+                                            <TouchableOpacity
+                                                key={instrument.name}
+                                                onPress={() => toggleInstrument(instrument)}
+                                                style={[
+                                                    styles.instrumentCard,
+                                                    {
+                                                        backgroundColor: isSelected ? colors.primary + '20' : (isDark ? '#1F2937' : '#F9FAFB'),
+                                                        borderColor: isSelected ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                                                    }
+                                                ]}
+                                            >
+                                                <Image
+                                                    source={{ uri: instrument.image }}
+                                                    style={styles.instrumentImage}
+                                                />
+                                                <Text style={[styles.instrumentName, { color: colors.text }]} numberOfLines={1}>
+                                                    {instrument.name}
+                                                </Text>
+                                                {isSelected && (
+                                                    <View style={[styles.instrumentCheckmark, { backgroundColor: colors.primary }]}>
+                                                        <Ionicons name="checkmark" size={12} color="#fff" />
+                                                    </View>
+                                                )}
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+
+                                {selectedInstruments.length > 0 && (
+                                    <Text style={[styles.selectedCount, { color: colors.textSecondary }]}>
+                                        {selectedInstruments.length} instrument{selectedInstruments.length !== 1 ? 's' : ''} selected
+                                    </Text>
+                                )}
+                            </View>
                         </View>
                     )}
 
@@ -825,6 +903,24 @@ export default function AddStudioScreen() {
                                             </View>
                                         ))}
                                     </View>
+                                </View>
+
+                                <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
+
+                                <View>
+                                    <Text style={styles.reviewLabel}>Instruments ({selectedInstruments.length})</Text>
+                                    {selectedInstruments.length > 0 ? (
+                                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                            {selectedInstruments.map((inst, i) => (
+                                                <View key={i} style={{ alignItems: 'center', width: 60 }}>
+                                                    <Image source={{ uri: inst.image }} style={{ width: 40, height: 40, borderRadius: 8 }} />
+                                                    <Text style={{ fontSize: 10, color: colors.textSecondary, textAlign: 'center' }} numberOfLines={1}>{inst.name}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    ) : (
+                                        <Text style={{ color: colors.textSecondary, fontSize: 12 }}>No instruments selected</Text>
+                                    )}
                                 </View>
 
                                 <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
@@ -1205,5 +1301,48 @@ const styles = StyleSheet.create({
     },
     removeContractBtn: {
         padding: 8,
+    },
+    // Instruments styles
+    instrumentsGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+    },
+    instrumentCard: {
+        width: '30%',
+        aspectRatio: 1,
+        borderRadius: 12,
+        borderWidth: 1.5,
+        padding: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+    },
+    instrumentImage: {
+        width: 48,
+        height: 48,
+        borderRadius: 8,
+        marginBottom: 6,
+    },
+    instrumentName: {
+        fontSize: 10,
+        fontFamily: 'Poppins_500Medium',
+        textAlign: 'center',
+    },
+    instrumentCheckmark: {
+        position: 'absolute',
+        top: 6,
+        right: 6,
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    selectedCount: {
+        fontSize: 12,
+        fontFamily: 'Poppins_400Regular',
+        marginTop: 12,
+        textAlign: 'center',
     },
 });

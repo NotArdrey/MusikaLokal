@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, Modal as RNModal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
@@ -20,6 +20,8 @@ export default function StudioDetailsScreen() {
   const [modalMessage, setModalMessage] = useState('');
   const [modalButtonText, setModalButtonText] = useState('');
   const [modalAction, setModalAction] = useState<() => Promise<void> | void>(() => { });
+  const [showReasonInput, setShowReasonInput] = useState(false);
+  const [cancellationReason, setCancellationReason] = useState('');
 
   // Calendar View State
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
@@ -32,6 +34,11 @@ export default function StudioDetailsScreen() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // State for partial slot approval
+  const [selectedBookingForPartial, setSelectedBookingForPartial] = useState<any>(null);
+  const [selectedSlots, setSelectedSlots] = useState<{ [key: number]: 'accept' | 'decline' | null }>({});
+  const [partialModalVisible, setPartialModalVisible] = useState(false);
 
   // Role-based access control
   useEffect(() => {
@@ -107,28 +114,152 @@ export default function StudioDetailsScreen() {
   };
 
   const confirmAction = (bookingId: string, status: string) => {
+    const isDecline = status === 'cancelled';
     setModalTitle(status === 'confirmed' ? 'Accept Booking' : 'Decline Booking');
-    setModalMessage(`Are you sure you want to ${status === 'confirmed' ? 'accept' : 'decline'} this booking request?`);
+    setModalMessage(
+      status === 'confirmed'
+        ? 'Are you sure you want to accept this booking request?'
+        : 'Are you sure you want to decline this booking request? Please provide a reason.'
+    );
     setModalButtonText(status === 'confirmed' ? 'Accept' : 'Decline');
+    setShowReasonInput(isDecline);
+    setCancellationReason('');
     setModalAction(() => async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
         const { error } = await supabase.functions.invoke('manage-listings', {
-          body: { action: 'update_booking_status', bookingId, status, userId: user.id }
+          body: {
+            action: 'update_booking_status',
+            bookingId,
+            status,
+            userId: user.id,
+            cancellation_reason: isDecline ? cancellationReason : undefined
+          }
         });
         if (error) throw error;
 
         // Update local state
         setBookings(bookings.map(b => b.id === bookingId ? { ...b, status } : b));
         setModalVisible(false);
+        setShowReasonInput(false);
+        setCancellationReason('');
       } catch (e) {
         console.log('Error updating booking:', e);
         Alert.alert('Error', 'Failed to update booking status');
       }
     });
     setModalVisible(true);
+  };
+
+  // Helper to format time for display
+  const formatTime = (time: string) => {
+    if (!time || !time.includes(':')) return time;
+    const [hours, minutes] = time.split(':');
+    const h = parseInt(hours);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${minutes} ${period}`;
+  };
+
+  // Open partial approval modal for multi-slot booking
+  const openPartialApproval = (booking: any) => {
+    setSelectedBookingForPartial(booking);
+    // Initialize all slots as null (not yet decided)
+    const initialSlots: { [key: number]: 'accept' | 'decline' | null } = {};
+    if (booking.time_slots && Array.isArray(booking.time_slots)) {
+      booking.time_slots.forEach((_: any, index: number) => {
+        initialSlots[index] = null;
+      });
+    }
+    setSelectedSlots(initialSlots);
+    setPartialModalVisible(true);
+  };
+
+  // Toggle slot selection
+  const toggleSlotSelection = (index: number, action: 'accept' | 'decline') => {
+    setSelectedSlots(prev => ({
+      ...prev,
+      [index]: prev[index] === action ? null : action
+    }));
+  };
+
+  // Handle partial slot approval submission
+  const handlePartialApproval = async () => {
+    if (!selectedBookingForPartial) return;
+
+    const booking = selectedBookingForPartial;
+    const slots = booking.time_slots || [];
+
+    // Separate accepted and declined slots
+    const acceptedSlots = slots.filter((_: any, i: number) => selectedSlots[i] === 'accept');
+    const declinedSlots = slots.filter((_: any, i: number) => selectedSlots[i] === 'decline');
+
+    // Check if all slots have a decision
+    const undecidedCount = slots.filter((_: any, i: number) => selectedSlots[i] === null).length;
+    if (undecidedCount > 0) {
+      Alert.alert('Incomplete', 'Please decide on all time slots before submitting.');
+      return;
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // If all slots are accepted, just confirm the booking
+      if (acceptedSlots.length === slots.length) {
+        const { error } = await supabase.functions.invoke('manage-listings', {
+          body: {
+            action: 'update_booking_status',
+            bookingId: booking.id,
+            status: 'confirmed',
+            userId: user.id
+          }
+        });
+        if (error) throw error;
+        setBookings(bookings.map(b => b.id === booking.id ? { ...b, status: 'confirmed' } : b));
+      }
+      // If all slots are declined, just cancel the booking
+      else if (declinedSlots.length === slots.length) {
+        const { error } = await supabase.functions.invoke('manage-listings', {
+          body: {
+            action: 'update_booking_status',
+            bookingId: booking.id,
+            status: 'cancelled',
+            userId: user.id,
+            cancellation_reason: 'All requested time slots were declined by the studio owner.'
+          }
+        });
+        if (error) throw error;
+        setBookings(bookings.map(b => b.id === booking.id ? { ...b, status: 'cancelled' } : b));
+      }
+      // Partial approval - need to handle specially
+      else {
+        const { error } = await supabase.functions.invoke('manage-listings', {
+          body: {
+            action: 'partial_slot_approval',
+            bookingId: booking.id,
+            userId: user.id,
+            acceptedSlots: acceptedSlots,
+            declinedSlots: declinedSlots,
+            cancellation_reason: declinedSlots.length > 0 ? 'Some time slots were declined by the studio owner.' : undefined
+          }
+        });
+        if (error) throw error;
+
+        // Refresh the bookings list
+        if (user.id) fetchData(user.id);
+      }
+
+      setPartialModalVisible(false);
+      setSelectedBookingForPartial(null);
+      setSelectedSlots({});
+      Alert.alert('Success', 'Booking updated successfully!');
+    } catch (e) {
+      console.log('Error with partial approval:', e);
+      Alert.alert('Error', 'Failed to update booking status');
+    }
   };
 
   const tabs = ['About', 'Setup', 'Bookings', 'Review'];
@@ -255,7 +386,7 @@ export default function StudioDetailsScreen() {
                 <View>
                   <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Contract</Text>
                   {studio?.contract_url ? (
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       onPress={async () => {
                         try {
                           const supported = await Linking.canOpenURL(studio.contract_url);
@@ -289,7 +420,7 @@ export default function StudioDetailsScreen() {
                     <View style={[styles.noContractCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
                       <Ionicons name="document-text-outline" size={32} color={colors.textSecondary} />
                       <Text style={[styles.noContractText, { color: colors.textSecondary }]}>No contract uploaded</Text>
-                      <TouchableOpacity 
+                      <TouchableOpacity
                         onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio?.id } })}
                         style={{ marginTop: 8 }}
                       >
@@ -479,7 +610,7 @@ export default function StudioDetailsScreen() {
                             <Text style={[styles.bookingSubtitle, { color: colors.textSecondary }]}>{booking.user?.email}</Text>
                           </View>
                           <View style={styles.bookingPriceContainer}>
-                            <Text style={[styles.bookingPrice, { color: colors.primary }]}>₱{(booking.total_price || 0).toLocaleString()}</Text>
+                            <Text style={[styles.bookingPrice, { color: colors.primary }]}>₱{(booking.total_price || booking.final_price || 0).toLocaleString()}</Text>
                             <Text style={[styles.bookingDuration, { color: colors.textSecondary }]}>{booking.status}</Text>
                           </View>
                         </View>
@@ -487,37 +618,76 @@ export default function StudioDetailsScreen() {
                         <View style={[styles.bookingDateContainer, { backgroundColor: isDark ? 'rgba(30, 41, 59, 0.5)' : '#F9FAFB' }]}>
                           <Ionicons name="calendar-outline" size={16} color={colors.primary} />
                           <Text style={[styles.bookingDate, { color: colors.text }]}>
-                            {booking.raw_date ? new Date(booking.raw_date).toLocaleDateString() : booking.booking_date ? new Date(booking.booking_date).toLocaleDateString() : new Date(booking.start_time).toLocaleDateString()} • {booking.start_time && booking.start_time.includes(':') ? (() => {
-                              const [hours, minutes] = booking.start_time.split(':');
-                              const h = parseInt(hours);
-                              const period = h >= 12 ? 'PM' : 'AM';
-                              const h12 = h % 12 || 12;
-                              return `${h12}:${minutes} ${period}`;
-                            })() : new Date(booking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })} - {booking.end_time && booking.end_time.includes(':') ? (() => {
-                              const [hours, minutes] = booking.end_time.split(':');
-                              const h = parseInt(hours);
-                              const period = h >= 12 ? 'PM' : 'AM';
-                              const h12 = h % 12 || 12;
-                              return `${h12}:${minutes} ${period}`;
-                            })() : new Date(booking.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
+                            {booking.raw_date ? new Date(booking.raw_date).toLocaleDateString() : booking.booking_date ? new Date(booking.booking_date).toLocaleDateString() : new Date(booking.start_time).toLocaleDateString()}
                           </Text>
                         </View>
 
-                        {/* Only show buttons if pending */}
+                        {/* Display time slots */}
+                        {booking.time_slots && Array.isArray(booking.time_slots) && booking.time_slots.length > 1 ? (
+                          // Multi-slot booking - show all slots
+                          <View style={{ marginTop: 12, gap: 8 }}>
+                            <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, color: colors.textSecondary, marginBottom: 4 }}>
+                              {booking.time_slots.length} TIME SLOTS REQUESTED
+                            </Text>
+                            {booking.time_slots.map((slot: any, index: number) => (
+                              <View
+                                key={index}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  backgroundColor: isDark ? '#374151' : '#F3F4F6',
+                                  padding: 10,
+                                  borderRadius: 8,
+                                  gap: 8
+                                }}
+                              >
+                                <Ionicons name="time-outline" size={16} color={colors.primary} />
+                                <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text, flex: 1 }}>
+                                  {formatTime(slot.start)} - {formatTime(slot.end)}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        ) : (
+                          // Single slot - show regular time display
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 8 }}>
+                            <Ionicons name="time-outline" size={16} color={colors.primary} />
+                            <Text style={[styles.bookingDate, { color: colors.text }]}>
+                              {formatTime(booking.start_time)} - {formatTime(booking.end_time)}
+                            </Text>
+                          </View>
+                        )}
+
+                        {/* Action buttons if pending */}
                         {booking.status === 'pending' && (
-                          <View style={styles.actionButtons}>
-                            <TouchableOpacity
-                              onPress={() => confirmAction(booking.id, 'cancelled')}
-                              style={[styles.declineButton, { borderColor: colors.border }]}
-                            >
-                              <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              onPress={() => confirmAction(booking.id, 'confirmed')}
-                              style={[styles.acceptButton, { backgroundColor: colors.primary }]}
-                            >
-                              <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept</Text>
-                            </TouchableOpacity>
+                          <View style={{ marginTop: 16 }}>
+                            {/* If multi-slot, show partial approval option */}
+                            {booking.time_slots && Array.isArray(booking.time_slots) && booking.time_slots.length > 1 && (
+                              <TouchableOpacity
+                                onPress={() => openPartialApproval(booking)}
+                                style={[styles.partialApprovalButton, { borderColor: colors.primary, marginBottom: 12 }]}
+                              >
+                                <Ionicons name="options-outline" size={16} color={colors.primary} />
+                                <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary, marginLeft: 8 }}>
+                                  Approve/Decline Individual Slots
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+
+                            <View style={styles.actionButtons}>
+                              <TouchableOpacity
+                                onPress={() => confirmAction(booking.id, 'cancelled')}
+                                style={[styles.declineButton, { borderColor: colors.border }]}
+                              >
+                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Decline All</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => confirmAction(booking.id, 'confirmed')}
+                                style={[styles.acceptButton, { backgroundColor: colors.primary }]}
+                              >
+                                <Text style={{ fontFamily: 'Poppins_600SemiBold', color: '#FFF' }}>Accept All</Text>
+                              </TouchableOpacity>
+                            </View>
                           </View>
                         )}
                       </View>
@@ -568,12 +738,123 @@ export default function StudioDetailsScreen() {
       </View>
       <Modal
         visible={modalVisible}
-        onClose={() => setModalVisible(false)}
+        onClose={() => {
+          setModalVisible(false);
+          setShowReasonInput(false);
+          setCancellationReason('');
+        }}
         onConfirm={modalAction}
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        showInput={showReasonInput}
+        onInputChange={setCancellationReason}
       />
+
+      {/* Partial Approval Modal for Multi-Slot Bookings */}
+      <RNModal
+        visible={partialModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => {
+          setPartialModalVisible(false);
+          setSelectedBookingForPartial(null);
+          setSelectedSlots({});
+        }}
+      >
+        <View style={styles.partialModalOverlay}>
+          <View style={[styles.partialModalContainer, { backgroundColor: colors.card }]}>
+            <View style={styles.partialModalHeader}>
+              <Text style={[styles.partialModalTitle, { color: colors.text }]}>Review Time Slots</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setPartialModalVisible(false);
+                  setSelectedBookingForPartial(null);
+                  setSelectedSlots({});
+                }}
+              >
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[styles.partialModalSubtitle, { color: colors.textSecondary }]}>
+              Decide on each time slot individually. You can accept some and decline others.
+            </Text>
+
+            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+              {selectedBookingForPartial?.time_slots?.map((slot: any, index: number) => (
+                <View key={index} style={[styles.slotDecisionCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
+                  <View style={styles.slotTimeInfo}>
+                    <Ionicons name="time-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.slotTimeText, { color: colors.text }]}>
+                      {formatTime(slot.start)} - {formatTime(slot.end)}
+                    </Text>
+                  </View>
+                  <View style={styles.slotDecisionButtons}>
+                    <TouchableOpacity
+                      onPress={() => toggleSlotSelection(index, 'decline')}
+                      style={[
+                        styles.slotDecisionBtn,
+                        {
+                          backgroundColor: selectedSlots[index] === 'decline' ? '#EF4444' : 'transparent',
+                          borderColor: selectedSlots[index] === 'decline' ? '#EF4444' : colors.border,
+                        }
+                      ]}
+                    >
+                      <Ionicons
+                        name="close"
+                        size={16}
+                        color={selectedSlots[index] === 'decline' ? '#FFF' : colors.textSecondary}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => toggleSlotSelection(index, 'accept')}
+                      style={[
+                        styles.slotDecisionBtn,
+                        {
+                          backgroundColor: selectedSlots[index] === 'accept' ? '#10B981' : 'transparent',
+                          borderColor: selectedSlots[index] === 'accept' ? '#10B981' : colors.border,
+                        }
+                      ]}
+                    >
+                      <Ionicons
+                        name="checkmark"
+                        size={16}
+                        color={selectedSlots[index] === 'accept' ? '#FFF' : colors.textSecondary}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            {/* Summary */}
+            <View style={[styles.slotSummary, { borderColor: colors.border }]}>
+              <View style={styles.summaryRow}>
+                <View style={[styles.summaryDot, { backgroundColor: '#10B981' }]} />
+                <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>
+                  Accepting: {Object.values(selectedSlots).filter(v => v === 'accept').length} slots
+                </Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <View style={[styles.summaryDot, { backgroundColor: '#EF4444' }]} />
+                <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>
+                  Declining: {Object.values(selectedSlots).filter(v => v === 'decline').length} slots
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={handlePartialApproval}
+              style={[styles.submitPartialBtn, { backgroundColor: colors.primary }]}
+            >
+              <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold', fontSize: 16 }}>
+                Submit Decisions
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </RNModal>
     </>
   );
 }
@@ -587,7 +868,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 150,
   },
   headerContainer: {
     paddingHorizontal: 24,
@@ -930,6 +1211,94 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Poppins_500Medium',
     marginTop: 8,
+  },
+  // Partial Approval Styles
+  partialApprovalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  partialModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  partialModalContainer: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  partialModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  partialModalTitle: {
+    fontSize: 20,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  partialModalSubtitle: {
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+    marginBottom: 20,
+  },
+  slotDecisionCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+  },
+  slotTimeInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  slotTimeText: {
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  slotDecisionButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  slotDecisionBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotSummary: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    gap: 8,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  summaryDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  submitPartialBtn: {
+    marginTop: 20,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
   },
 });
 

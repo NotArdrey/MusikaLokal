@@ -15,20 +15,20 @@ import { useTheme } from '../src/context/ThemeContext';
 const formatTimeInput = (text: string): string => {
     // Remove all non-digit characters except colon
     let cleaned = text.replace(/[^0-9:]/g, '');
-    
+
     // Limit to 5 characters (HH:MM)
     if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
-    
+
     // Auto-add colon after 2 digits
     if (cleaned.length === 2 && !cleaned.includes(':')) {
         cleaned = cleaned + ':';
     }
-    
+
     // If user types more than 2 digits before colon, insert colon
     if (cleaned.length > 2 && !cleaned.includes(':')) {
         cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
     }
-    
+
     // Validate hour (01-12)
     const parts = cleaned.split(':');
     if (parts[0] && parts[0].length === 2) {
@@ -37,7 +37,7 @@ const formatTimeInput = (text: string): string => {
             return cleaned.substring(0, 1);
         }
     }
-    
+
     // Validate minute (00-59)
     if (parts[1] && parts[1].length === 2) {
         const minute = parseInt(parts[1]);
@@ -45,7 +45,7 @@ const formatTimeInput = (text: string): string => {
             return parts[0] + ':' + parts[1].substring(0, 1);
         }
     }
-    
+
     return cleaned;
 };
 
@@ -86,7 +86,7 @@ export default function AddGigScreen() {
     // Form Steps Configuration
     const steps = [
         { id: 1, title: 'Gig Details', icon: 'information-circle' },
-        { id: 2, title: 'Requirements', icon: 'list' },
+        { id: 2, title: 'Needs', icon: 'list' },
         { id: 3, title: 'Review', icon: 'checkmark-circle' },
     ];
 
@@ -163,7 +163,7 @@ export default function AddGigScreen() {
         if (!validateStep(step)) {
             return;
         }
-        
+
         if (step < 3) {
             setStep(step + 1);
         } else {
@@ -196,7 +196,7 @@ export default function AddGigScreen() {
                 budget: parseFloat(cost) || 0,
                 status: 'open',
                 images: images,
-                documents: contractUrl ? [contractUrl] : [],
+                contract_url: contractUrl || null,
                 latitude,
                 longitude,
                 event_date: eventDate,
@@ -222,7 +222,7 @@ export default function AddGigScreen() {
             if (error) {
                 console.error('❌ Error details:', JSON.stringify(error, null, 2));
                 console.error('❌ Function response data:', JSON.stringify(data, null, 2));
-                
+
                 // The actual error message from the Edge Function is in data
                 if (data && typeof data === 'object') {
                     const errorMsg = (data as any).error || (data as any).message || 'Unknown function error';
@@ -305,7 +305,7 @@ export default function AddGigScreen() {
     const handleContractUpload = async () => {
         try {
             setUploadingContract(true);
-            
+
             if (Platform.OS === 'web') {
                 if (fileInputRef.current) {
                     fileInputRef.current.click();
@@ -313,7 +313,7 @@ export default function AddGigScreen() {
                 setUploadingContract(false);
                 return;
             }
-            
+
             // Dynamic import for native platforms only
             const DocumentPicker = await import('expo-document-picker');
             const result = await DocumentPicker.getDocumentAsync({
@@ -702,12 +702,12 @@ export default function AddGigScreen() {
                     {step === 2 && (
                         <View>
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                                Requirements
+                                Needs
                             </Text>
 
                             {/* Genre Requirements */}
                             <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Required Genres</Text>
+                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genres</Text>
                                 <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
                                     <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
                                         <TextInput
@@ -752,7 +752,7 @@ export default function AddGigScreen() {
 
                             {/* Instrument Requirements */}
                             <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Required Instruments</Text>
+                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Instruments</Text>
                                 <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
                                     <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
                                         <TextInput
@@ -849,7 +849,7 @@ export default function AddGigScreen() {
                                     <>
                                         <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
                                         <View>
-                                            <Text style={styles.reviewLabel}>Requirements</Text>
+                                            <Text style={styles.reviewLabel}>Needs</Text>
                                             {requiredGenres.length > 0 && (
                                                 <View style={{ marginBottom: 8 }}>
                                                     <Text style={[styles.requirementSubLabel, { color: colors.textSecondary }]}>Genres:</Text>

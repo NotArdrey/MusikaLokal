@@ -6,6 +6,7 @@ import {
     ActivityIndicator,
     Dimensions,
     Image,
+    Linking,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -60,7 +61,7 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
 
         const fetchStudioDetails = async () => {
             if (!booking?.studio_id) return;
-            
+
             try {
                 setLoading(true);
                 const { data, error } = await supabase
@@ -81,8 +82,10 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
         const getStatusColor = (status: string) => {
             switch (status?.toLowerCase()) {
                 case 'confirmed': return '#10B981';
+                case 'accepted': return '#10B981';  // Gig application accepted
                 case 'pending': return '#F59E0B';
                 case 'cancelled': return '#EF4444';
+                case 'rejected': return '#EF4444';  // Gig application rejected
                 case 'completed': return '#6366F1';
                 default: return colors.textSecondary;
             }
@@ -91,8 +94,10 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
         const getStatusIcon = (status: string) => {
             switch (status?.toLowerCase()) {
                 case 'confirmed': return 'checkmark-circle';
+                case 'accepted': return 'checkmark-circle';  // Gig application accepted
                 case 'pending': return 'time-outline';
                 case 'cancelled': return 'close-circle';
+                case 'rejected': return 'close-circle';  // Gig application rejected
                 case 'completed': return 'checkmark-done-circle';
                 default: return 'information-circle';
             }
@@ -101,13 +106,18 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
         const formatTime = (time?: string) => {
             if (!time) return '';
             try {
+                // Handle ISO string
+                if (time.includes('T')) {
+                    return new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+                }
+
                 // Handle both "HH:MM:SS" and "HH:MM" formats
                 const timeParts = time.split(':');
                 const hours = parseInt(timeParts[0]);
                 const minutes = parseInt(timeParts[1] || '0');
-                
+
                 if (isNaN(hours) || isNaN(minutes)) return time;
-                
+
                 const period = hours >= 12 ? 'PM' : 'AM';
                 const displayHours = hours % 12 || 12;
                 return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
@@ -118,6 +128,9 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
         };
 
         if (!booking) return null;
+
+        const isStudio = booking.type_id === 'studio_booking' || !!booking.studio_id;
+        const isGig = booking.type_id === 'gig_application' || !!booking.gig_id;
 
         return (
             <BottomSheetModal
@@ -132,7 +145,9 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                         {/* Header */}
                         <View style={styles.header}>
                             <View style={styles.headerTop}>
-                                <Text style={[styles.title, { color: colors.text }]}>Booking Details</Text>
+                                <Text style={[styles.title, { color: colors.text }]}>
+                                    {isGig ? 'Application Details' : 'Booking Details'}
+                                </Text>
                                 <TouchableOpacity
                                     onPress={() => (ref as any)?.current?.dismiss()}
                                     style={[styles.closeBtn, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}
@@ -156,33 +171,92 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                             </View>
                         ) : (
                             <>
-                                {/* Studio Info Card */}
-                                {studioDetails && (
+                                {/* Info Card (Studio or Gig) */}
+                                {(studioDetails || isGig) && (
                                     <View style={[styles.card, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
                                         <Image
-                                            source={{ uri: studioDetails.images?.[0] || booking.image || 'https://via.placeholder.com/400x200' }}
+                                            source={{ uri: studioDetails?.images?.[0] || booking.image || 'https://via.placeholder.com/400x200' }}
                                             style={styles.studioImage}
                                         />
                                         <View style={styles.studioInfo}>
                                             <Text style={[styles.studioName, { color: colors.text }]}>
-                                                {studioDetails.name || booking.name}
+                                                {studioDetails?.name || booking.name}
                                             </Text>
-                                            <View style={styles.ownerRow}>
-                                                <Image
-                                                    source={{ uri: studioDetails.owner?.avatar_url || 'https://via.placeholder.com/40' }}
-                                                    style={styles.ownerAvatar}
-                                                />
-                                                <Text style={[styles.ownerName, { color: colors.textSecondary }]}>
-                                                    {studioDetails.owner?.full_name || 'Studio Owner'}
-                                                </Text>
-                                            </View>
-                                            <View style={styles.locationRow}>
-                                                <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
-                                                <Text style={[styles.locationText, { color: colors.textSecondary }]}>
-                                                    {studioDetails.address || 'Location not specified'}
-                                                </Text>
-                                            </View>
+
+                                            {/* Studio Owner Info - Only for Studio */}
+                                            {isStudio && studioDetails?.owner && (
+                                                <View style={styles.ownerRow}>
+                                                    <Image
+                                                        source={{ uri: studioDetails.owner?.avatar_url || 'https://via.placeholder.com/40' }}
+                                                        style={styles.ownerAvatar}
+                                                    />
+                                                    <Text style={[styles.ownerName, { color: colors.textSecondary }]}>
+                                                        {studioDetails.owner?.full_name || 'Studio Owner'}
+                                                    </Text>
+                                                </View>
+                                            )}
+
+                                            {/* Applicant Info - Only for Gig Application */}
+                                            {isGig && booking.customer_name && (
+                                                <View style={styles.ownerRow}>
+                                                    <Image
+                                                        source={{ uri: booking.customer_avatar || 'https://via.placeholder.com/40' }}
+                                                        style={styles.ownerAvatar}
+                                                    />
+                                                    <Text style={[styles.ownerName, { color: colors.textSecondary }]}>
+                                                        Applied by <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>{booking.customer_name}</Text>
+                                                    </Text>
+                                                </View>
+                                            )}
+
+                                            {/* Location - Show for Studio (fetched) or Gig (passed) */}
+                                            {(studioDetails?.address || booking.location) && (
+                                                <View style={styles.locationRow}>
+                                                    <Ionicons name="location-outline" size={16} color={colors.textSecondary} />
+                                                    <Text style={[styles.locationText, { color: colors.textSecondary }]}>
+                                                        {studioDetails?.address || booking.location}
+                                                    </Text>
+                                                </View>
+                                            )}
                                         </View>
+                                    </View>
+                                )}
+
+                                {isGig && (booking.pitch_message || booking.video_url) && (
+                                    <View style={[styles.card, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
+                                        <View style={styles.cardHeader}>
+                                            <Ionicons name="document-text-outline" size={24} color={colors.primary} />
+                                            <Text style={[styles.cardTitle, { color: colors.text }]}>Application</Text>
+                                        </View>
+
+                                        {booking.pitch_message && (
+                                            <View style={styles.detailItem}>
+                                                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Pitch / Message</Text>
+                                                <Text style={[styles.notesText, { color: colors.text }]}>{booking.pitch_message}</Text>
+                                            </View>
+                                        )}
+
+                                        {booking.video_url && (
+                                            <View style={[styles.detailItem, { marginTop: moderateScale(12) }]}>
+                                                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Video / Demo</Text>
+                                                <TouchableOpacity onPress={() => Linking.openURL(booking.video_url)}>
+                                                    <Text style={[styles.detailValue, { color: colors.primary, textDecorationLine: 'underline' }]}>
+                                                        View Video
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
+
+                                        {booking.cv_url && (
+                                            <View style={[styles.detailItem, { marginTop: moderateScale(12) }]}>
+                                                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>CV / Resume</Text>
+                                                <TouchableOpacity onPress={() => Linking.openURL(booking.cv_url)}>
+                                                    <Text style={[styles.detailValue, { color: colors.primary, textDecorationLine: 'underline' }]}>
+                                                        View Document
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
                                     </View>
                                 )}
 
@@ -190,23 +264,26 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                 <View style={[styles.card, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
                                     <View style={styles.cardHeader}>
                                         <Ionicons name="calendar-outline" size={24} color={colors.primary} />
-                                        <Text style={[styles.cardTitle, { color: colors.text }]}>Session Details</Text>
+                                        <Text style={[styles.cardTitle, { color: colors.text }]}>
+                                            {isGig ? 'Event Details' : 'Session Details'}
+                                        </Text>
                                     </View>
 
                                     <View style={styles.detailsGrid}>
                                         <View style={styles.detailItem}>
                                             <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Date</Text>
                                             <Text style={[styles.detailValue, { color: colors.text }]}>
-                                                {booking.raw_date ? new Date(booking.raw_date).toLocaleDateString('en-US', { 
-                                                    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' 
-                                                }) : booking.date?.split('•')[0]}
+                                                {booking.raw_date && (booking.raw_date.includes('T') || !isNaN(Date.parse(booking.raw_date))) ? new Date(booking.raw_date).toLocaleDateString('en-US', {
+                                                    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+                                                }) : booking.date?.includes('•') ? booking.date.split('•')[0] : booking.date}
                                             </Text>
                                         </View>
 
                                         <View style={styles.detailItem}>
                                             <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Time</Text>
                                             <Text style={[styles.detailValue, { color: colors.text }]}>
-                                                {formatTime(booking.start_time || booking.date?.split('•')[1]?.trim())} - {formatTime(booking.end_time)}
+                                                {formatTime(booking.start_time || (booking.date?.includes('•') ? booking.date.split('•')[1]?.trim() : ''))}
+                                                {booking.end_time ? ` - ${formatTime(booking.end_time)}` : ''}
                                             </Text>
                                         </View>
 
@@ -267,7 +344,9 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                             }}
                                         >
                                             <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-                                            <Text style={styles.actionBtnText}>Confirm Booking</Text>
+                                            <Text style={styles.actionBtnText}>
+                                                {isGig ? 'Accept Application' : 'Confirm Booking'}
+                                            </Text>
                                         </TouchableOpacity>
                                     )}
 
@@ -284,7 +363,7 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                         </TouchableOpacity>
                                     )}
 
-                                    {(booking.status === 'confirmed' || booking.status === 'pending') && onCancel && (
+                                    {(booking.status === 'confirmed' || booking.status === 'pending' || booking.status === 'accepted') && onCancel && (
                                         <TouchableOpacity
                                             style={[styles.actionBtn, styles.cancelBtn, { borderColor: colors.border }]}
                                             onPress={() => {
@@ -293,7 +372,9 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                             }}
                                         >
                                             <Ionicons name="close-circle-outline" size={20} color="#EF4444" />
-                                            <Text style={[styles.cancelBtnText]}>Cancel Booking</Text>
+                                            <Text style={[styles.cancelBtnText]}>
+                                                {isGig ? 'Decline Application' : 'Cancel Booking'}
+                                            </Text>
                                         </TouchableOpacity>
                                     )}
                                 </View>

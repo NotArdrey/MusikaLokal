@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetFlatList, BottomSheetModal } from '@gorhom/bottom-sheet';
+import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -205,14 +205,20 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                         </Text>
                     </View>
                 ) : (
-                    <BottomSheetFlatList
-                        data={data}
-                        renderItem={renderItem}
-                        keyExtractor={(item: any) => item.id}
+                    <BottomSheetScrollView
                         contentContainerStyle={{ paddingTop: moderateScale(16), paddingBottom: moderateScale(100) }}
-                        ListEmptyComponent={renderEmpty}
                         showsVerticalScrollIndicator={false}
-                    />
+                    >
+                        {data.length === 0 ? (
+                            renderEmpty()
+                        ) : (
+                            data.map((item: any) => (
+                                <View key={item.id} style={{ paddingHorizontal: scale(24), marginBottom: moderateScale(16) }}>
+                                    <ListingCard item={item} onPress={() => handleCardPress(item)} />
+                                </View>
+                            ))
+                        )}
+                    </BottomSheetScrollView>
                 )}
             </BottomSheetModal>
         </>
