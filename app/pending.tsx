@@ -41,10 +41,46 @@ export default function PendingScreen() {
       });
       if (studioError) throw studioError;
 
+      // 3. Fetch Pending Leadership Transfers (Incoming)
+      const { data: transfers, error: transferError } = await supabase
+        .from('leadership_transfer_requests')
+        .select(`
+          id,
+          created_at,
+          status,
+          message,
+          group:group_id (
+            id,
+            name,
+            images
+          ),
+          from_user:from_user_id (
+            full_name
+          )
+        `)
+        .eq('to_user_id', user.id)
+        .eq('status', 'pending');
+
+      if (transferError) throw transferError;
+
       // Combine and Normalize Data
       // Filter for status: 'pending', 'approved' (action required?), 'rejected' (history?)
       // For "Pending" tab specifically, we usually want 'pending' or 'approved' (if payment needed).
       // Let's include 'pending' and 'approved' for now.
+
+      const normalizedTransfers = (transfers || []).map((t: any) => ({
+        id: t.id,
+        originalId: t.id,
+        name: `Leadership: ${t.group?.name || 'Unknown Group'}`,
+        date: new Date(t.created_at).toLocaleDateString(),
+        image: t.group?.images?.[0] || null,
+        status: 'Action Required',
+        type: 'Leadership Transfer',
+        rawStatus: t.status,
+        isGig: false,
+        isTransfer: true,
+        meta: t // Store full object for actions
+      }));
 
       const normalizedGigApps = (gigApps || []).filter((a: any) => a.status === 'pending' || a.status === 'accepted').map((a: any) => ({
         id: a.id,
@@ -70,7 +106,7 @@ export default function PendingScreen() {
         isGig: false
       }));
 
-      const allItems = [...normalizedGigApps, ...normalizedStudioBookings].sort((a, b) => b.id - a.id); // primitive sort, maybe created_at better
+      const allItems = [...normalizedTransfers, ...normalizedGigApps, ...normalizedStudioBookings].sort((a, b) => b.id - a.id); // primitive sort, maybe created_at better
       setPendingItems(allItems);
 
     } catch (e) {
@@ -89,6 +125,64 @@ export default function PendingScreen() {
   const handleCancelPress = (item: any) => {
     setItemToCancel(item);
     setModalVisible(true);
+  };
+
+  // Leadership Transfer Actions
+  const handleAcceptTransfer = async (item: any) => {
+    Alert.alert(
+      'Accept Leadership',
+      `Are you sure you want to become the leader of "${item.meta?.group?.name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Accept',
+          onPress: async () => {
+            setLoading(true);
+            try {
+              const { error } = await supabase.rpc('accept_leadership_transfer', {
+                request_id: item.originalId
+              });
+              if (error) throw error;
+
+              Alert.alert('Success', 'You are now the group leader!');
+              fetchData();
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Failed to accept transfer');
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleDeclineTransfer = async (item: any) => {
+    Alert.alert(
+      'Decline Leadership',
+      'Are you sure you want to decline this leadership transfer?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Decline',
+          style: 'destructive',
+          onPress: async () => {
+            setLoading(true);
+            try {
+              const { error } = await supabase.rpc('decline_leadership_transfer', {
+                request_id: item.originalId
+              });
+              if (error) throw error;
+
+              Alert.alert('Declined', 'Leadership transfer request has been declined.');
+              fetchData();
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Failed to decline transfer');
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const confirmCancel = async () => {
@@ -117,17 +211,7 @@ export default function PendingScreen() {
           Alert.alert('Success', 'Application cancelled successfully.');
         }
       } else {
-        // Cancel Studio Booking (Not yet implemented deeply in plan, but let's assume update_booking_status to 'cancelled')
-        // OR better: we might need a distinct 'cancel_booking' action if we want to delete it.
-        // For now, let's just alert if it's a studio booking as "Contact Studio" or similar if we didn't implement cancel booking fully.
-        // Wait, the plan only mentioned cancelling applications. The user request was "in pending tab make sure the musician have the ability to cancel".
-        // I'll stick to Gig Applications for now as per plan focus.
-        // But if I put studio bookings here I should handle them.
-        // Actually, update_booking_status is for owners. Users might need a 'cancel_my_booking'.
-        // I'll implement 'cancel_application' for gigs. For studios, I'll restrict or use 'update_booking_status' if allowed.
-        // Let's assume for now we only strictly support cancelling Gig Applications as confirmed in plan.
-
-        // If I try to cancel studio booking:
+        // Cancel Studio Booking logic...
         Alert.alert('Notice', 'To cancel a studio booking, please contact the studio directly or simple wait for it to expire if not paid.');
         setLoading(false);
         return;
@@ -206,7 +290,22 @@ export default function PendingScreen() {
                           </TouchableOpacity>
                         )}
 
-                        {item.status === 'Action Required' ? (
+                        {item.isTransfer ? (
+                          <>
+                            <TouchableOpacity
+                              onPress={() => handleDeclineTransfer(item)}
+                              style={[styles.outlineBtn, { borderColor: colors.border }]}
+                            >
+                              <Text style={[styles.outlineBtnText, { color: colors.text }]}>Decline</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => handleAcceptTransfer(item)}
+                              style={[styles.actionBtn, { backgroundColor: '#10B981' }]}
+                            >
+                              <Text style={[styles.actionBtnText, { color: 'white' }]}>Accept</Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : item.status === 'Action Required' ? (
                           <TouchableOpacity
                             onPress={() => {
                               // Navigate to gig details or contract signing
@@ -221,12 +320,6 @@ export default function PendingScreen() {
                             style={[styles.outlineBtn, { borderColor: colors.border }]}
                             onPress={() => {
                               // Navigate to details
-                              // Since manage_gig is for owners, we probably need a 'gig_details' or 'view_gig' for public/applicant.
-                              // But keeping it simple, maybe just alert or navigate to home for now if no dedicated view.
-                              // Actually, we can assume 'manage_gig' might redirect if not owner, or use 'gig_details' if exists.
-                              // Let's try pushing to a generic 'gig_details' page if it exists, or just log for now.
-                              // Checking file list: group_details exists. manage_gig exists.
-                              // I'll assume 'manage_gig' is incorrect for applicant. Maybe just nothing for now.
                             }}
                           >
                             <Text style={[styles.outlineBtnText, { color: colors.textSecondary }]}>Details</Text>

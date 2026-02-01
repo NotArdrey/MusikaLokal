@@ -73,6 +73,7 @@ export default function EditGigScreen() {
   const [documents, setDocuments] = useState(['Contract.pdf', 'Rider_v2.pdf']);
   const [images, setImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
+  const [musicianType, setMusicianType] = useState<'solo' | 'group' | 'both'>('both');
 
   // Contract state
   const [contractUrl, setContractUrl] = useState<string>('');
@@ -157,6 +158,7 @@ export default function EditGigScreen() {
       // Read event times from requirements JSONB field
       setEventStartTime(data.requirements?.event_start_time || '06:00 PM');
       setEventEndTime(data.requirements?.event_end_time || '11:00 PM');
+      setMusicianType(data.requirements?.musician_type || 'both');
       setContractUrl(data.contract_url || '');
       if (data.contract_url) {
         const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
@@ -236,6 +238,7 @@ export default function EditGigScreen() {
         requirements: {
           event_start_time: eventStartTime,
           event_end_time: eventEndTime,
+          musician_type: musicianType,
         },
       };
 
@@ -450,6 +453,7 @@ export default function EditGigScreen() {
     );
   }
 
+
   // Don't render if not authorized
   if (!authorized) {
     return null;
@@ -618,6 +622,48 @@ export default function EditGigScreen() {
                   </View>
                 </View>
               </View>
+            </View>
+          </View>
+
+          {renderSectionHeader('Looking For', 'people')}
+          <View style={styles.inputContainer}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {[
+                { value: 'solo', label: 'Solo Artists', icon: 'person' },
+                { value: 'group', label: 'Bands/Groups', icon: 'people' },
+                { value: 'both', label: 'Both', icon: 'people-circle' },
+              ].map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  onPress={() => setMusicianType(option.value as 'solo' | 'group' | 'both')}
+                  style={[
+                    {
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingHorizontal: 16,
+                      paddingVertical: 12,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      gap: 8,
+                      backgroundColor: musicianType === option.value ? colors.primary : (isDark ? '#1F2937' : '#F9FAFB'),
+                      borderColor: musicianType === option.value ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                    }
+                  ]}
+                >
+                  <Ionicons
+                    name={option.icon as any}
+                    size={18}
+                    color={musicianType === option.value ? '#fff' : colors.text}
+                  />
+                  <Text style={{
+                    fontFamily: 'Poppins_500Medium',
+                    fontSize: 14,
+                    color: musicianType === option.value ? '#fff' : colors.text
+                  }}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 

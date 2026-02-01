@@ -58,6 +58,7 @@ export default function AddStudioScreen() {
     const [longitude, setLongitude] = useState<number | null>(null);
     const [locationPickerVisible, setLocationPickerVisible] = useState(false);
     const [cost, setCost] = useState('');
+    const [studioType, setStudioType] = useState<'Rehearsal' | 'Recording'>('Rehearsal');
     const [modalVisible, setModalVisible] = useState(false);
     const [authorized, setAuthorized] = useState(false);
     const [checkingAuth, setCheckingAuth] = useState(true);
@@ -230,6 +231,7 @@ export default function AddStudioScreen() {
 
             const payload = {
                 name: studioName,
+                type: studioType,
                 description,
                 address,
                 hourly_rate: parseFloat(cost) || 0,
@@ -540,6 +542,38 @@ export default function AddStudioScreen() {
                                 Studio Details
                             </Text>
                             {renderInput('Studio Name', studioName, setStudioName, 'e.g. SoundWave Studios')}
+
+                            {/* Studio Type Selection */}
+                            <View style={styles.inputContainer}>
+                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Studio Type</Text>
+                                <View style={{ flexDirection: 'row', gap: 12 }}>
+                                    {(['Rehearsal', 'Recording'] as const).map((type) => (
+                                        <TouchableOpacity
+                                            key={type}
+                                            onPress={() => setStudioType(type)}
+                                            style={{
+                                                flex: 1,
+                                                paddingVertical: 12,
+                                                borderRadius: 12,
+                                                backgroundColor: studioType === type ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                borderWidth: 1,
+                                                borderColor: studioType === type ? colors.primary : 'transparent'
+                                            }}
+                                        >
+                                            <Text style={{
+                                                color: studioType === type ? '#FFF' : colors.textSecondary,
+                                                fontFamily: 'Poppins_600SemiBold',
+                                                fontSize: 14
+                                            }}>
+                                                {type} Studio
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </View>
+
                             {renderInput('Description', description, setDescription, 'Brief description of your studio', true)}
 
                             {/* Image Upload */}

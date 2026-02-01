@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
@@ -60,6 +60,7 @@ export default function EditStudioScreen() {
   const [longitude, setLongitude] = useState<number | null>(null);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [cost, setCost] = useState('');
+  const [studioType, setStudioType] = useState<'Rehearsal' | 'Recording'>('Rehearsal');
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
@@ -187,6 +188,7 @@ export default function EditStudioScreen() {
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
       setCost(data.hourly_rate?.toString() || '');
+      setStudioType(data.type || 'Rehearsal');
       setAmenities(data.amenities || []);
       setContractUrl(data.contract_url || '');
       if (data.contract_url) {
@@ -285,6 +287,7 @@ export default function EditStudioScreen() {
 
       const payload = {
         name: studioName,
+        type: studioType,
         description,
         address,
         hourly_rate: parseFloat(cost) || 0,
@@ -603,6 +606,38 @@ export default function EditStudioScreen() {
 
           {renderSectionHeader('Studio Details', 'business')}
           {renderInput('Studio Name', studioName, setStudioName)}
+
+          {/* Studio Type Selection */}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Studio Type</Text>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              {(['Rehearsal', 'Recording'] as const).map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  onPress={() => setStudioType(type)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    backgroundColor: studioType === type ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderWidth: 1,
+                    borderColor: studioType === type ? colors.primary : 'transparent'
+                  }}
+                >
+                  <Text style={{
+                    color: studioType === type ? '#FFF' : colors.textSecondary,
+                    fontFamily: 'Poppins_600SemiBold',
+                    fontSize: 14
+                  }}>
+                    {type} Studio
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
           {renderInput('Description', description, setDescription, true)}
 
           <View style={styles.inputContainer}>

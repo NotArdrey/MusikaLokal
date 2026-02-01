@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
@@ -73,6 +73,154 @@ export default function NotificationsScreen() {
         } catch (e) {
             console.log('Error marking all as read:', e);
         }
+    };
+
+    // Leadership Transfer Handlers
+    const [processingTransferId, setProcessingTransferId] = useState<string | null>(null);
+
+    const handleAcceptTransfer = async (notification: any) => {
+        const requestId = notification.meta?.request_id;
+        if (!requestId) {
+            Alert.alert('Error', 'Invalid transfer request');
+            return;
+        }
+
+        Alert.alert(
+            'Accept Leadership',
+            `Are you sure you want to become the leader of "${notification.meta?.group_name || 'this group'}"?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Accept',
+                    onPress: async () => {
+                        setProcessingTransferId(requestId);
+                        try {
+                            const { error } = await supabase.rpc('accept_leadership_transfer', {
+                                request_id: requestId
+                            });
+
+                            if (error) throw error;
+
+                            // Send notifications
+                            const { data: request } = await supabase
+                                .from('leadership_transfer_requests')
+                                .select('from_user_id, group_id, groups:group_id(name)')
+                                .eq('id', requestId)
+                                .single();
+
+                            if (request) {
+                                // Notify old leader
+                                await supabase.from('notifications').insert({
+                                    user_id: request.from_user_id,
+                                    type: 'success',
+                                    title: 'Leadership Transfer Accepted',
+                                    message: `Your leadership transfer request for "${(request.groups as any)?.name}" was accepted.`,
+                                    meta: { type: 'leadership_transfer_accepted', group_id: request.group_id }
+                                });
+
+                                // Notify group members
+                                const { data: members } = await supabase
+                                    .from('group_members')
+                                    .select('user_id')
+                                    .eq('group_id', request.group_id)
+                                    .neq('user_id', request.from_user_id);
+
+                                const { data: { user } } = await supabase.auth.getUser();
+                                if (members && members.length > 0 && user) {
+                                    const memberNotifications = members
+                                        .filter(m => m.user_id !== user.id)
+                                        .map(m => ({
+                                            user_id: m.user_id,
+                                            type: 'info',
+                                            title: 'Group Leadership Changed',
+                                            message: `"${(request.groups as any)?.name}" has a new leader.`,
+                                            meta: { type: 'leadership_changed', group_id: request.group_id }
+                                        }));
+
+                                    if (memberNotifications.length > 0) {
+                                        await supabase.from('notifications').insert(memberNotifications);
+                                    }
+                                }
+                            }
+
+                            Alert.alert('Success', 'You are now the group leader!');
+
+                            // Mark notification as processed/read
+                            markAsRead(notification.id, false);
+                            fetchNotifications();
+
+                        } catch (e: any) {
+                            console.error('Error accepting transfer:', e);
+                            Alert.alert('Error', e.message || 'Failed to accept transfer');
+                        } finally {
+                            setProcessingTransferId(null);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const handleDeclineTransfer = async (notification: any) => {
+        const requestId = notification.meta?.request_id;
+        if (!requestId) {
+            Alert.alert('Error', 'Invalid transfer request');
+            return;
+        }
+
+        Alert.alert(
+            'Decline Leadership',
+            'Are you sure you want to decline this leadership transfer?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Decline',
+                    style: 'destructive',
+                    onPress: async () => {
+                        setProcessingTransferId(requestId);
+                        try {
+                            const { error } = await supabase.rpc('decline_leadership_transfer', {
+                                request_id: requestId
+                            });
+
+                            if (error) throw error;
+
+                            // Notify old leader
+                            const { data: request } = await supabase
+                                .from('leadership_transfer_requests')
+                                .select('from_user_id, groups:group_id(name)')
+                                .eq('id', requestId)
+                                .single();
+
+                            if (request) {
+                                await supabase.from('notifications').insert({
+                                    user_id: request.from_user_id,
+                                    type: 'warning',
+                                    title: 'Leadership Transfer Declined',
+                                    message: `Your leadership transfer request for "${(request.groups as any)?.name}" was declined.`,
+                                    meta: { type: 'leadership_transfer_declined' }
+                                });
+                            }
+
+                            Alert.alert('Declined', 'Leadership transfer request has been declined.');
+                            markAsRead(notification.id, false);
+                            fetchNotifications();
+
+                        } catch (e: any) {
+                            console.error('Error declining transfer:', e);
+                            Alert.alert('Error', e.message || 'Failed to decline transfer');
+                        } finally {
+                            setProcessingTransferId(null);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    // Check if notification is a pending leadership transfer
+    const isLeadershipTransfer = (notification: any) => {
+        return notification.meta?.type === 'leadership_transfer';
     };
 
     const unreadCount = notifications.filter(n => !n.read).length;
@@ -151,44 +299,72 @@ export default function NotificationsScreen() {
                                             {
                                                 backgroundColor: notification.read ? 'transparent' : (isDark ? 'rgba(30, 41, 59, 0.5)' : '#F5F7FF'),
                                                 borderColor: notification.read ? 'transparent' : (isDark ? colors.border : '#E0E7FF')
-                                            }
+                                            },
+                                            isLeadershipTransfer(notification) && { flexDirection: 'column', alignItems: 'stretch' }
                                         ]}
-                                        onPress={() => markAsRead(notification.id, notification.read)}
+                                        onPress={() => !isLeadershipTransfer(notification) && markAsRead(notification.id, notification.read)}
+                                        activeOpacity={isLeadershipTransfer(notification) ? 1 : 0.7}
                                     >
-                                        <View style={styles.avatarWrapper}>
-                                            <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
-                                                <Image
-                                                    source={{ uri: notification.image || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop' }}
-                                                    style={styles.avatarImage}
-                                                    resizeMode="cover"
-                                                />
+                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                            <View style={styles.avatarWrapper}>
+                                                <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
+                                                    <Image
+                                                        source={{ uri: notification.image || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop' }}
+                                                        style={styles.avatarImage}
+                                                        resizeMode="cover"
+                                                    />
+                                                </View>
+                                                {/* Status indicator badge based on type */}
+                                                <View style={[styles.statusBadge, { backgroundColor: colors.card, borderColor: colors.card }]}>
+                                                    {notification.type === 'success' && <Ionicons name="checkmark-circle" size={14} color="#10B981" />}
+                                                    {notification.type === 'warning' && <Ionicons name="alert-circle" size={14} color="#F59E0B" />}
+                                                    {notification.type === 'info' && <Ionicons name="information-circle" size={14} color="#3B82F6" />}
+                                                    {(!notification.type || notification.type === 'error') && <Ionicons name="information-circle" size={14} color="#EF4444" />}
+                                                </View>
                                             </View>
-                                            {/* Status indicator badge based on type */}
-                                            <View style={[styles.statusBadge, { backgroundColor: colors.card, borderColor: colors.card }]}>
-                                                {notification.type === 'success' && <Ionicons name="checkmark-circle" size={14} color="#10B981" />}
-                                                {notification.type === 'warning' && <Ionicons name="alert-circle" size={14} color="#F59E0B" />}
-                                                {notification.type === 'info' && <Ionicons name="information-circle" size={14} color="#3B82F6" />}
-                                                {(!notification.type || notification.type === 'error') && <Ionicons name="information-circle" size={14} color="#EF4444" />}
+
+                                            <View style={styles.textContainer}>
+                                                <View style={styles.headerRow}>
+                                                    <Text style={[styles.titleText, { color: colors.text }]} numberOfLines={1}>
+                                                        {notification.title}
+                                                    </Text>
+                                                    <Text style={[styles.timeText, { color: colors.textSecondary }]}>
+                                                        {formatTime(notification.created_at)}
+                                                    </Text>
+                                                </View>
+
+                                                <Text style={[styles.messageText, { color: notification.read ? colors.textSecondary : colors.text }]} numberOfLines={2}>
+                                                    {notification.message}
+                                                </Text>
                                             </View>
+
+                                            {!notification.read && !isLeadershipTransfer(notification) && (
+                                                <View style={styles.unreadDot} />
+                                            )}
                                         </View>
 
-                                        <View style={styles.textContainer}>
-                                            <View style={styles.headerRow}>
-                                                <Text style={[styles.titleText, { color: colors.text }]} numberOfLines={1}>
-                                                    {notification.title}
-                                                </Text>
-                                                <Text style={[styles.timeText, { color: colors.textSecondary }]}>
-                                                    {formatTime(notification.created_at)}
-                                                </Text>
+                                        {/* Leadership Transfer Actions */}
+                                        {isLeadershipTransfer(notification) && !notification.read && (
+                                            <View style={styles.transferActions}>
+                                                {processingTransferId === notification.meta?.request_id ? (
+                                                    <ActivityIndicator size="small" color={colors.primary} />
+                                                ) : (
+                                                    <>
+                                                        <TouchableOpacity
+                                                            style={[styles.declineBtn, { borderColor: colors.border }]}
+                                                            onPress={() => handleDeclineTransfer(notification)}
+                                                        >
+                                                            <Text style={[styles.declineBtnText, { color: colors.text }]}>Decline</Text>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity
+                                                            style={[styles.acceptBtn, { backgroundColor: '#10B981' }]}
+                                                            onPress={() => handleAcceptTransfer(notification)}
+                                                        >
+                                                            <Text style={styles.acceptBtnText}>Accept</Text>
+                                                        </TouchableOpacity>
+                                                    </>
+                                                )}
                                             </View>
-
-                                            <Text style={[styles.messageText, { color: notification.read ? colors.textSecondary : colors.text }]} numberOfLines={2}>
-                                                {notification.message}
-                                            </Text>
-                                        </View>
-
-                                        {!notification.read && (
-                                            <View style={styles.unreadDot} />
                                         )}
                                     </TouchableOpacity>
                                 ))}
@@ -328,5 +504,34 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
+    },
+    // Leadership Transfer Styles
+    transferActions: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 12,
+        marginLeft: 64,
+    },
+    declineBtn: {
+        flex: 1,
+        paddingVertical: 10,
+        borderRadius: 8,
+        borderWidth: 1,
+        alignItems: 'center',
+    },
+    declineBtnText: {
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 13,
+    },
+    acceptBtn: {
+        flex: 1,
+        paddingVertical: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    acceptBtnText: {
+        color: 'white',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 13,
     },
 });

@@ -51,8 +51,8 @@ serve(async (req: Request) => {
             // A. For Musicians: Fetch their Studio Bookings as customers
             if (userRole === 'musician') {
                 const { data: bookings, error: bookingError } = await supabaseClient
-                    .from('studio_bookings_with_cost')
-                    .select('*')
+                    .from('studio_bookings')
+                    .select('*, studio:studios(name, images, amenities)')
                     .eq('user_id', userId)
                     .order('booking_date', { ascending: false })
 
@@ -63,6 +63,7 @@ serve(async (req: Request) => {
                 bookings?.forEach((b: any) => {
                     const bookingDate = new Date(`${b.booking_date}T${b.start_time}`)
                     const endDate = new Date(`${b.booking_date}T${b.end_time}`)
+                    const isVenue = b.studio?.amenities?.includes('Stage') ?? false
 
                     // DEBUG: Log date parsing for first few items
                     // console.log(`[DEBUG] Booking ${b.id}: Status=${b.status}, End=${endDate.toISOString()}, Now=${now.toISOString()}`)
@@ -75,18 +76,18 @@ serve(async (req: Request) => {
                         raw_date: b.booking_date,
                         start_time: b.start_time,
                         end_time: b.end_time,
-                        name: b.studio_name || 'Unknown Studio',
+                        name: b.studio?.name || 'Unknown Studio',
                         date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
-                        image: b.studio_images?.[0] || 'https://picsum.photos/400/300',
+                        image: b.studio?.images?.[0] || 'https://picsum.photos/400/300',
                         status: b.status === 'pending' ? 'Waiting for Approval' :
                             b.status === 'confirmed' ? 'Confirmed' :
                                 b.status === 'checked_in' ? 'In Progress' :
                                     b.status === 'cancelled' ? 'Declined' : b.status,
-                        type: 'Studio Booking',
+                        type: isVenue ? 'Venue Booking' : 'Studio Booking',
                         isCancelled: b.status === 'cancelled',
                         action: b.status === 'pending' ? 'View Details' : 'Details',
-                        duration_hours: b.duration_hours,
-                        total_cost: b.total_cost,
+                        duration_hours: b.hours,
+                        total_cost: b.final_price,
                         notes: b.notes,
                         reviewed_by_customer: b.reviewed_by_customer || false,
                         reviewed_by_owner: b.reviewed_by_owner || false,
@@ -141,7 +142,7 @@ serve(async (req: Request) => {
                 if (studioIds.length > 0) {
                     const { data: bookings, error: bookingError } = await supabaseClient
                         .from('studio_bookings')
-                        .select('*, studio:studios(name, images), profile:user_id(full_name, avatar_url, email, contact_number, address)')
+                        .select('*, studio:studios(name, images, amenities), profile:user_id(full_name, avatar_url, email, contact_number, address)')
                         .in('studio_id', studioIds)
                         .order('booking_date', { ascending: false })
 
@@ -155,6 +156,8 @@ serve(async (req: Request) => {
 
                         const customerName = b.profile?.full_name || b.profile?.email || 'Guest'
                         const customerAvatar = b.profile?.avatar_url || 'https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop'
+
+                        const isVenue = b.studio?.amenities?.includes('Stage') ?? false
 
                         const item = {
                             id: b.id,
@@ -171,7 +174,7 @@ serve(async (req: Request) => {
                                 b.status === 'confirmed' ? 'Confirmed' :
                                     b.status === 'checked_in' ? 'In Progress' :
                                         b.status === 'cancelled' ? 'Declined' : b.status,
-                            type: 'Studio Booking',
+                            type: isVenue ? 'Venue Booking' : 'Studio Booking',
                             isCancelled: b.status === 'cancelled',
                             action: b.status === 'pending' ? 'Confirm Now' : 'Details',
                             duration_hours: b.hours, // Use stored column
@@ -321,9 +324,7 @@ serve(async (req: Request) => {
                             group:group_id(name, images)
                         `)
                         .in('gig_id', gigIds)
-                        .in('gig_id', gigIds)
                         .in('status', ['accepted', 'pending'])
-                        .order('created_at', { ascending: false })
                         .order('created_at', { ascending: false })
 
                     if (appError) {
@@ -659,7 +660,7 @@ serve(async (req: Request) => {
                     end_time: overallEnd,
                     time_slots: slots,  // Detailed slots
                     notes: notes || null,
-                    status: 'confirmed', // Auto-confirm per user request
+                    status: 'pending', // Await owner approval
                     // Store pricing details - use validated values
                     base_rate: finalBaseRate,
                     hours: finalHours,

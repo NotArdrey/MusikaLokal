@@ -87,6 +87,10 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
     const [loadingGroups, setLoadingGroups] = useState(false);
 
+    // Group Deduplication State (prevent same group applying twice)
+    const [groupAlreadyApplied, setGroupAlreadyApplied] = useState(false);
+    const [groupApplicationBy, setGroupApplicationBy] = useState<string | null>(null);
+
     // Spam Block State
     const [isBlocked, setIsBlocked] = useState(false);
     const [blockReason, setBlockReason] = useState<string | null>(null);
@@ -98,6 +102,14 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         title: string;
         message: string;
     }>({ type: 'info', title: '', message: '' });
+
+    // Booking Request State (Invites)
+    const [requestMessage, setRequestMessage] = useState('');
+    const [isSendingRequest, setIsSendingRequest] = useState(false);
+
+    // Venue Selection State (for venue owners sending invites)
+    const [userVenues, setUserVenues] = useState<any[]>([]);
+    const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
 
     // Review State
     const [reviews, setReviews] = useState<any[]>([]);
@@ -235,23 +247,45 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         }
     };
 
-    // Fetch user's groups for gig application
+    // Fetch user's groups for gig application (owned OR member of)
     const fetchUserGroups = async () => {
         if (!userId || !group || group.type !== 'Gig') return;
 
         setLoadingGroups(true);
         try {
-            const { data, error } = await supabase
+            // Fetch groups where user is owner
+            const { data: ownedGroups, error: ownedError } = await supabase
                 .from('groups')
                 .select('id, name, images, genre')
                 .eq('owner_id', userId);
 
-            if (error) {
-                console.error('Error fetching user groups:', error);
-                return;
+            // Fetch groups where user is a member (from group_members table)
+            const { data: memberGroups, error: memberError } = await supabase
+                .from('group_members')
+                .select('group_id, groups:group_id(id, name, images, genre)')
+                .eq('user_id', userId);
+
+            if (ownedError) {
+                console.error('Error fetching owned groups:', ownedError);
+            }
+            if (memberError) {
+                console.error('Error fetching member groups:', memberError);
+                // If group_members table doesn't exist yet, just use owned groups
             }
 
-            setUserGroups(data || []);
+            // Combine and deduplicate
+            const allGroups = [
+                ...(ownedGroups || []),
+                ...(memberGroups || []).map((m: any) => m.groups).filter(Boolean)
+            ];
+
+            // Remove duplicates by id
+            const uniqueGroups = allGroups.filter((g, idx, arr) =>
+                arr.findIndex(x => x.id === g.id) === idx
+            );
+
+            console.log('📋 Fetched groups (owned + member):', uniqueGroups.length);
+            setUserGroups(uniqueGroups);
         } catch (err) {
             console.error('Error fetching groups:', err);
         } finally {
@@ -259,9 +293,44 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         }
     };
 
+    // Check if selected group has already applied to this gig
+    const checkGroupApplication = async (groupId: string) => {
+        if (!groupId || !listingId) {
+            setGroupAlreadyApplied(false);
+            setGroupApplicationBy(null);
+            return;
+        }
+
+        try {
+            const { data, error } = await supabase
+                .from('gig_applications')
+                .select('id, applicant_id, status, profiles:applicant_id(full_name)')
+                .eq('gig_id', listingId)
+                .eq('group_id', groupId)
+                .neq('status', 'rejected')
+                .maybeSingle();
+
+            if (error) {
+                console.error('Error checking group application:', error);
+                return;
+            }
+
+            if (data && data.applicant_id !== userId) {
+                console.log('⚠️ Group already applied by another member:', data);
+                setGroupAlreadyApplied(true);
+                setGroupApplicationBy((data.profiles as any)?.full_name || 'Another member');
+            } else {
+                setGroupAlreadyApplied(false);
+                setGroupApplicationBy(null);
+            }
+        } catch (err) {
+            console.error('Error checking group application:', err);
+        }
+    };
+
     // Check if user has an existing booking for this studio
     const checkExistingStudioBooking = async () => {
-        if (!userId || !listingId || !group || group.type !== 'Studio') return;
+        if (!userId || !listingId || !group || (group.type !== 'Studio' && group.type !== 'Venue')) return;
 
         try {
             // Check for any recent booking (pending, confirmed, or cancelled)
@@ -357,6 +426,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         console.log('group:', group);
         console.log('pitchMessage:', pitchMessage);
         console.log('videoUrl:', videoUrl);
+        console.log('selectedGroupId:', selectedGroupId);
 
         if (!userId || !listingId || !group) {
             console.error('Missing required data for application:', { userId, listingId, group });
@@ -369,6 +439,29 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 type: 'warning',
                 title: 'Already Applied',
                 message: `You have already submitted an application for this gig. Status: ${existingApplicationStatus || 'pending'}.`
+            });
+            setAlertVisible(true);
+            return;
+        }
+
+        // Check if group already applied (by another member)
+        if (groupAlreadyApplied) {
+            setAlertConfig({
+                type: 'warning',
+                title: 'Group Already Applied',
+                message: `This group has already applied via ${groupApplicationBy}. Only one application per group is allowed.`
+            });
+            setAlertVisible(true);
+            return;
+        }
+
+        // Validate group selection for group-only gigs
+        const musicianTypeRequired = group.requirements?.musician_type || 'both';
+        if (musicianTypeRequired === 'group' && !selectedGroupId) {
+            setAlertConfig({
+                type: 'error',
+                title: 'Group Required',
+                message: 'This gig requires applications from groups. Please select a group to apply.'
             });
             setAlertVisible(true);
             return;
@@ -414,6 +507,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     applicant_id: userId,
                     gig_id: listingId,
                     group_id: selectedGroupId || null,
+                    is_solo_application: !selectedGroupId, // Flag to distinguish solo vs group
                     pitch_message: pitchMessage,
                     video_url: videoUrl || null,
                     cv_url: uploadedCvUrl,
@@ -425,16 +519,58 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             if (error) {
                 console.error('Error submitting application:', error);
                 console.error('Error details:', JSON.stringify(error, null, 2));
-                setAlertConfig({
-                    type: 'error',
-                    title: 'Submission Failed',
-                    message: error.message || 'Failed to submit application. Please try again.'
-                });
+
+                // Check for unique constraint violation (group already applied)
+                if (error.code === '23505') {
+                    setAlertConfig({
+                        type: 'error',
+                        title: 'Duplicate Application',
+                        message: 'This group has already applied to this gig.'
+                    });
+                } else {
+                    setAlertConfig({
+                        type: 'error',
+                        title: 'Submission Failed',
+                        message: error.message || 'Failed to submit application. Please try again.'
+                    });
+                }
                 setAlertVisible(true);
                 return;
             }
 
             console.log('✅ Application submitted successfully!', data);
+
+            // Notify group members if this is a group application
+            if (selectedGroupId && data) {
+                try {
+                    // Fetch group members (excluding the applicant)
+                    const { data: members } = await supabase
+                        .from('group_members')
+                        .select('user_id')
+                        .eq('group_id', selectedGroupId)
+                        .neq('user_id', userId);
+
+                    if (members && members.length > 0) {
+                        // Get group name for notification
+                        const selectedGroup = userGroups.find(g => g.id === selectedGroupId);
+
+                        // Create notifications for all members
+                        const notifications = members.map(m => ({
+                            user_id: m.user_id,
+                            type: 'info',
+                            title: 'Group Gig Application',
+                            message: `${selectedGroup?.name || 'Your group'} has applied for "${group.name}". Check the gig details for more info.`,
+                            meta: { gig_id: listingId, application_id: data.id }
+                        }));
+
+                        await supabase.from('notifications').insert(notifications);
+                        console.log('📬 Notified group members:', members.length);
+                    }
+                } catch (notifyErr) {
+                    console.error('Failed to notify group members:', notifyErr);
+                    // Don't block the success flow for notification failures
+                }
+            }
 
             // Update application status
             setHasExistingApplication(true);
@@ -444,7 +580,9 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             setAlertConfig({
                 type: 'success',
                 title: 'Application Submitted!',
-                message: 'Your application has been submitted successfully. The venue owner will review it and get back to you soon.'
+                message: selectedGroupId
+                    ? 'Your group application has been submitted successfully. Group members have been notified. The venue owner will review it and get back to you soon.'
+                    : 'Your application has been submitted successfully. The venue owner will review it and get back to you soon.'
             });
             setAlertVisible(true);
 
@@ -493,6 +631,10 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             // Reset group selection state
             setSelectedGroupId(null);
             setUserGroups([]);
+            // Reset venue selection state
+            setSelectedVenueId(null);
+            setUserVenues([]);
+
             console.log('Application form reset');
             setShowAddBooking(false);
         }
@@ -508,7 +650,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
     // Check for existing studio booking when group data is loaded
     useEffect(() => {
-        if (group && userId && group.type === 'Studio') {
+        if (group && userId && (group.type === 'Studio' || group.type === 'Venue')) {
             checkExistingStudioBooking();
         }
         // Check eligibility if Gig (uses gig_id)
@@ -516,6 +658,16 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             checkEligibility(group.id);
         }
     }, [group, userId]);
+
+    // Check if selected group has already applied (group-level deduplication)
+    useEffect(() => {
+        if (selectedGroupId) {
+            checkGroupApplication(selectedGroupId);
+        } else {
+            setGroupAlreadyApplied(false);
+            setGroupApplicationBy(null);
+        }
+    }, [selectedGroupId, listingId]);
 
     // Debug effect to monitor application state changes
     useEffect(() => {
@@ -577,12 +729,25 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         data = gigData;
                         type = 'Gig';
                         ownerId = gigData.organizer_id;
+                    } else {
+                        // Try Profile (Solo Artist)
+                        const { data: profileData } = await supabase
+                            .from('profiles')
+                            .select('*')
+                            .eq('id', listingId)
+                            .single();
+
+                        if (profileData && profileData.role === 'musician') {
+                            data = profileData;
+                            type = 'Artist';
+                            ownerId = profileData.id; // Self-managed
+                        }
                     }
                 }
             }
 
             if (data && ownerId) {
-                console.log('Found data:', { type, id: data.id, name: data.name });
+                console.log('Found data:', { type, id: data.id, name: data.name || data.full_name });
                 // Fetch owner profile separately
                 const { data: ownerProfile } = await supabase
                     .from('profiles')
@@ -594,16 +759,22 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 const normalizedData = {
                     ...data,
                     type,
-                    owner_name: ownerProfile?.full_name || 'Unknown',
-                    owner_avatar: ownerProfile?.avatar_url,
-                    role: ownerProfile?.role,
+                    name: data.name || data.full_name, // Handle profile name
+                    description: data.description || data.bio, // Handle profile bio
+                    image: data.image || data.avatar_url, // Handle profile avatar
+                    images: data.images || (data.avatar_url ? [data.avatar_url] : []),
+                    location: data.location || data.address, // Handle profile address
+                    genre: data.genre || (data.genres ? data.genres.join(', ') : ''),
+                    owner_name: ownerProfile?.full_name || data.name || data.full_name || 'Unknown', // Use data.full_name if ownerProfile fails (self-managed)
+                    owner_avatar: ownerProfile?.avatar_url || data.avatar_url,
+                    role: ownerProfile?.role || data.role,
                     rate: data.hourly_rate?.toString() || data.budget?.toString() || data.rate || '0',
                     review_count: data.review_count || 0,
                     rating: data.rating || 0
                 };
 
-                // If studio, fetch availability from operating hours
-                if (type === 'Studio') {
+                // If studio or venue, fetch availability from operating hours
+                if (type === 'Studio' || type === 'Venue') {
                     console.log('📅 Fetching studio operating hours...');
                     const { data: operatingHours, error: hoursError } = await supabase
                         .from('studio_operating_hours')
@@ -891,7 +1062,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 if (!group) return;
 
                 let col = 'group_id';
-                if (group.type === 'Studio') col = 'studio_id';
+                if (group.type === 'Studio' || group.type === 'Venue') col = 'studio_id';
                 if (group.type === 'Gig') col = 'gig_id';
 
                 const { data: rData } = await supabase
@@ -923,7 +1094,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         if (relatedIds.length > 0) {
                             // Fetch full details for these IDs from the respective view
                             let viewName = 'groups_with_stats';
-                            if (group.type === 'Studio') viewName = 'studios_with_stats';
+                            if (group.type === 'Studio' || group.type === 'Venue') viewName = 'studios_with_stats';
                             if (group.type === 'Gig') viewName = 'gigs_with_stats';
 
                             const { data: fullRelated } = await supabase
@@ -969,13 +1140,19 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 return {
                     aboutTitle: 'About this venue',
                     tabs: ['About', 'Specs', 'Book', 'Review'],
-                    unit: 'event'
+                    unit: 'hour'
                 };
             case 'Gig':
                 return {
                     aboutTitle: 'About this gig',
                     tabs: ['About', 'Info', 'Apply', 'Review'],
                     unit: 'project'
+                };
+            case 'Artist':
+                return {
+                    aboutTitle: 'About this artist',
+                    tabs: ['About', 'Connect', 'Review'],
+                    unit: 'event'
                 };
             default: // Group
                 return {
@@ -998,7 +1175,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     style={[styles.tab, activeTab === tab && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
                     onPress={() => setActiveTab(tab)}
                 >
-                    <Text style={[styles.tabText, { color: activeTab === tab ? colors.primary : colors.textSecondary }]}>{tab}</Text>
+                    <Text style={[
+                        styles.tabText,
+                        activeTab === tab ? { color: colors.primary, fontFamily: 'Poppins_600SemiBold' } : { color: colors.textSecondary }
+                    ]}>
+                        {tab}
+                    </Text>
                 </TouchableOpacity>
             ))}
         </View>
@@ -1364,7 +1546,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         </View>
     );
 
-    // Studio: Setup Tab
+    // Studio: Setup Tab (also used for Venue Specs)
     const renderStudioSetup = () => {
         const amenities = group.amenities || [];
         const equipment: string[] = [];
@@ -1381,10 +1563,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             });
         }
 
+        const title = group.type === 'Venue' ? 'Venue Specs' : 'Studio Amenities';
+
         return (
             <View style={styles.tabContent}>
                 <View style={styles.section}>
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Studio Amenities</Text>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
                     <View style={styles.tagsContainer}>
                         {amenities.length > 0 ? amenities.map((tag: string, index: number) => (
                             <View key={`${tag}-${index}`} style={[styles.tag, {
@@ -1395,7 +1579,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                 <Text style={{ color: colors.text, fontSize: 13, fontFamily: 'Poppins_500Medium' }}>{tag}</Text>
                             </View>
                         )) : (
-                            <Text style={{ color: colors.textSecondary, fontStyle: 'italic' }}>No amenities listed for this studio.</Text>
+                            <Text style={{ color: colors.textSecondary, fontStyle: 'italic' }}>No specs listed for this {group.type === 'Venue' ? 'venue' : 'studio'}.</Text>
                         )}
                     </View>
                 </View>
@@ -1976,48 +2160,118 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 )}
 
 
-                {/* Group Selection (if user has groups) */}
-                {userGroups.length > 0 && !hasExistingApplication && (
-                    <View style={styles.inputContainer}>
-                        <Text style={[styles.label, { color: colors.textSecondary }]}>Apply as</Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-                            <TouchableOpacity
-                                style={[
-                                    styles.groupSelectChip,
-                                    {
-                                        backgroundColor: selectedGroupId === null ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
-                                        borderColor: selectedGroupId === null ? colors.primary : colors.border,
-                                    }
-                                ]}
-                                onPress={() => setSelectedGroupId(null)}
-                            >
-                                <Ionicons name="person" size={16} color={selectedGroupId === null ? '#FFF' : colors.text} />
-                                <Text style={{ color: selectedGroupId === null ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
-                                    Individual
+                {/* Group Selection (if user has groups) - Conditional based on musician_type */}
+                {(() => {
+                    const musicianTypeRequired = group.requirements?.musician_type || 'both';
+                    const canApplyAsSolo = musicianTypeRequired === 'solo' || musicianTypeRequired === 'both';
+                    const canApplyAsGroup = musicianTypeRequired === 'group' || musicianTypeRequired === 'both';
+                    const hasGroups = userGroups.length > 0;
+
+                    // Show restriction message if user can't apply
+                    if (!canApplyAsSolo && !hasGroups) {
+                        return (
+                            <View style={[styles.infoBox, { backgroundColor: '#F59E0B20', borderColor: '#F59E0B', marginBottom: 16 }]}>
+                                <Ionicons name="information-circle" size={20} color="#F59E0B" />
+                                <Text style={[styles.infoText, { color: colors.text }]}>
+                                    This gig is looking for <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>bands/groups only</Text>.
+                                    Create a group first to apply.
                                 </Text>
-                            </TouchableOpacity>
-                            {userGroups.map((g) => (
-                                <TouchableOpacity
-                                    key={g.id}
-                                    style={[
-                                        styles.groupSelectChip,
-                                        {
-                                            backgroundColor: selectedGroupId === g.id ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
-                                            borderColor: selectedGroupId === g.id ? colors.primary : colors.border,
-                                            marginLeft: 8,
-                                        }
-                                    ]}
-                                    onPress={() => setSelectedGroupId(g.id)}
-                                >
-                                    <Ionicons name="people" size={16} color={selectedGroupId === g.id ? '#FFF' : colors.text} />
-                                    <Text style={{ color: selectedGroupId === g.id ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
-                                        {g.name}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    </View>
-                )}
+                            </View>
+                        );
+                    }
+
+                    // Don't show selection if only one valid option and no groups
+                    if (canApplyAsSolo && !canApplyAsGroup && !hasGroups) {
+                        return null; // Will apply as individual by default
+                    }
+
+                    // Show type indicator if restricted
+                    if (musicianTypeRequired !== 'both' && !hasExistingApplication) {
+                        return (
+                            <View style={styles.inputContainer}>
+                                <Text style={[styles.label, { color: colors.textSecondary }]}>Apply as</Text>
+                                {musicianTypeRequired === 'solo' && (
+                                    <View style={[styles.infoBox, { backgroundColor: colors.primary + '20', borderColor: colors.primary, marginBottom: 8 }]}>
+                                        <Ionicons name="person" size={16} color={colors.primary} />
+                                        <Text style={[styles.infoText, { color: colors.text }]}>
+                                            This gig is for <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>solo artists only</Text>
+                                        </Text>
+                                    </View>
+                                )}
+                                {musicianTypeRequired === 'group' && hasGroups && (
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                                        {userGroups.map((g) => (
+                                            <TouchableOpacity
+                                                key={g.id}
+                                                style={[
+                                                    styles.groupSelectChip,
+                                                    {
+                                                        backgroundColor: selectedGroupId === g.id ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                                        borderColor: selectedGroupId === g.id ? colors.primary : colors.border,
+                                                        marginRight: 8,
+                                                    }
+                                                ]}
+                                                onPress={() => setSelectedGroupId(g.id)}
+                                            >
+                                                <Ionicons name="people" size={16} color={selectedGroupId === g.id ? '#FFF' : colors.text} />
+                                                <Text style={{ color: selectedGroupId === g.id ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
+                                                    {g.name}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
+                                )}
+                            </View>
+                        );
+                    }
+
+                    // Show full selection (both options available)
+                    if (hasGroups && !hasExistingApplication) {
+                        return (
+                            <View style={styles.inputContainer}>
+                                <Text style={[styles.label, { color: colors.textSecondary }]}>Apply as</Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.groupSelectChip,
+                                            {
+                                                backgroundColor: selectedGroupId === null ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                                borderColor: selectedGroupId === null ? colors.primary : colors.border,
+                                            }
+                                        ]}
+                                        onPress={() => setSelectedGroupId(null)}
+                                    >
+                                        <Ionicons name="person" size={16} color={selectedGroupId === null ? '#FFF' : colors.text} />
+                                        <Text style={{ color: selectedGroupId === null ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
+                                            Individual
+                                        </Text>
+                                    </TouchableOpacity>
+                                    {userGroups.map((g) => (
+                                        <TouchableOpacity
+                                            key={g.id}
+                                            style={[
+                                                styles.groupSelectChip,
+                                                {
+                                                    backgroundColor: selectedGroupId === g.id ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                                    borderColor: selectedGroupId === g.id ? colors.primary : colors.border,
+                                                    marginLeft: 8,
+                                                }
+                                            ]}
+                                            onPress={() => setSelectedGroupId(g.id)}
+                                        >
+                                            <Ionicons name="people" size={16} color={selectedGroupId === g.id ? '#FFF' : colors.text} />
+                                            <Text style={{ color: selectedGroupId === g.id ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
+                                                {g.name}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </View>
+                        );
+                    }
+
+                    return null;
+                })()}
 
                 <View style={styles.inputContainer}>
                     <Text style={[styles.label, { color: colors.textSecondary }]}>Pitch Message</Text>
@@ -2094,11 +2348,22 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 )
                 }
 
+                {/* Warning: Group Already Applied by Another Member */}
+                {groupAlreadyApplied && selectedGroupId && (
+                    <View style={[styles.infoBox, { backgroundColor: '#F59E0B20', borderColor: '#F59E0B', marginBottom: 16 }]}>
+                        <Ionicons name="warning" size={20} color="#F59E0B" />
+                        <Text style={[styles.infoText, { color: colors.text }]}>
+                            This group has already applied via <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{groupApplicationBy}</Text>.
+                            Only one application per group is allowed.
+                        </Text>
+                    </View>
+                )}
+
                 <TouchableOpacity
                     style={[
                         styles.primaryBtn,
                         { backgroundColor: colors.primary, marginTop: hasExistingApplication ? 16 : 0 },
-                        (isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication) && { opacity: 0.5 }
+                        (isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication || groupAlreadyApplied || (group.requirements?.musician_type === 'group' && !selectedGroupId)) && { opacity: 0.5 }
                     ]}
                     onPress={() => {
                         console.log('🟡 SUBMIT APPLICATION BUTTON PRESSED');
@@ -2106,6 +2371,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         console.log('pitchMessage.trim():', pitchMessage.trim());
                         console.log('isSubmittingApplication:', isSubmittingApplication);
                         console.log('hasExistingApplication:', hasExistingApplication);
+                        console.log('groupAlreadyApplied:', groupAlreadyApplied);
+                        console.log('selectedGroupId:', selectedGroupId);
                         console.log('userId:', userId);
                         console.log('listingId:', listingId);
 
@@ -2114,6 +2381,16 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                 type: 'warning',
                                 title: 'Already Applied',
                                 message: `You have already submitted an application for this gig. Status: ${existingApplicationStatus || 'pending'}.`
+                            });
+                            setAlertVisible(true);
+                            return;
+                        }
+
+                        if (groupAlreadyApplied) {
+                            setAlertConfig({
+                                type: 'warning',
+                                title: 'Group Already Applied',
+                                message: `This group has already applied via ${groupApplicationBy}. Only one application per group is allowed.`
                             });
                             setAlertVisible(true);
                             return;
@@ -2141,7 +2418,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             'Are you sure you want to submit this application?'
                         );
                     }}
-                    disabled={isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication || isBlocked}
+                    disabled={isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication || isBlocked || groupAlreadyApplied || (group.requirements?.musician_type === 'group' && !selectedGroupId)}
                 >
                     {isSubmittingApplication ? (
                         <ActivityIndicator color="#fff" />
@@ -2153,7 +2430,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                     : existingApplicationStatus === 'accepted' || existingApplicationStatus === 'approved'
                                         ? 'Application Accepted'
                                         : 'Already Applied'
-                                : 'Submit Application'}
+                                : groupAlreadyApplied
+                                    ? 'Group Already Applied'
+                                    : (group.requirements?.musician_type === 'group' && !selectedGroupId)
+                                        ? 'Select a Group to Apply'
+                                        : 'Submit Application'}
                         </Text>
                     )}
                 </TouchableOpacity>
@@ -2331,12 +2612,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     // Handler for Send Request button with venue check
     const handleSendBookingRequest = () => {
         // Check if venue-owner has a venue uploaded
-        if (currentUserRole === 'venue-owner' && !hasExistingVenue) {
+        if (currentUserRole === 'venue-owner' && userVenues.length === 0) {
             handleConfirm(
                 () => {
                     // Navigate to add gig/venue page
                     const router = require('expo-router').router;
-                    router.push('/add_gig');
+                    router.push('/add_studio'); // Assuming add_studio handles venues
                 },
                 'No Venue Found',
                 'You need to create a venue first before sending booking requests. Would you like to create one now?'
@@ -2344,11 +2625,77 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             return;
         }
 
+        if (currentUserRole === 'venue-owner' && !selectedVenueId) {
+            setAlertConfig({
+                type: 'error',
+                title: 'Select Venue',
+                message: 'Please select which venue you are inviting the artist to.'
+            });
+            setAlertVisible(true);
+            return;
+        }
+
+        if (!requestMessage.trim()) {
+            setAlertConfig({
+                type: 'error',
+                title: 'Message Required',
+                message: 'Please describe your event or offer.'
+            });
+            setAlertVisible(true);
+            return;
+        }
+
         // Proceed with normal booking request
         handleConfirm(
-            () => console.log('Sent Request'),
+            async () => {
+                setIsSendingRequest(true);
+                try {
+                    const receiverId = group.type === 'Artist' ? group.id : group.owner_id;
+                    const groupId = group.type === 'Group' ? group.id : null;
+
+                    const { error } = await supabase
+                        .from('booking_requests')
+                        .insert({
+                            sender_id: currentUserId,
+                            receiver_id: receiverId,
+                            group_id: groupId,
+                            studio_id: selectedVenueId, // Include selected venue
+                            message: requestMessage,
+                            status: 'pending',
+                            event_details: {} // Can be expanded later
+                        });
+
+                    if (error) throw error;
+
+                    setAlertConfig({
+                        type: 'success',
+                        title: 'Request Sent',
+                        message: 'Your booking request has been sent successfully!'
+                    });
+                    setAlertVisible(true);
+                    setRequestMessage('');
+
+                    // Close sheet after delay
+                    setTimeout(() => {
+                        if (ref && 'current' in ref && ref.current) {
+                            (ref as any).current.dismiss();
+                        }
+                    }, 2000);
+
+                } catch (e) {
+                    console.error('Error sending request:', e);
+                    setAlertConfig({
+                        type: 'error',
+                        title: 'Error',
+                        message: 'Failed to send request. Please try again.'
+                    });
+                    setAlertVisible(true);
+                } finally {
+                    setIsSendingRequest(false);
+                }
+            },
             'Send Booking Request',
-            'Are you sure you want to send this booking request to the artist?'
+            'Are you sure you want to send this booking request?'
         );
     };
 
@@ -2356,10 +2703,46 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const renderGroupConnect = () => (
         <View style={styles.tabContent}>
             {/* Show Booking Request for Venues/Organizers OR if role is unknown/not logged in (fallback) */}
-            {(!currentUserRole || currentUserRole === 'venue-owner' || currentUserRole === 'studio-owner') && (
+            {(!currentUserRole || currentUserRole === 'venue-owner') && (
                 <View style={styles.section}>
                     <View style={{ marginTop: 0 }}>
                         {renderBookingControls()}
+
+                        {/* Venue Selection for Owners with Multiple Venues */}
+                        {currentUserRole === 'venue-owner' && userVenues.length > 0 && (
+                            <View style={{ marginBottom: 16 }}>
+                                <Text style={[styles.label, { color: colors.textSecondary }]}>Select Venue</Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                    {userVenues.map((v) => (
+                                        <TouchableOpacity
+                                            key={v.id}
+                                            style={[
+                                                styles.groupSelectChip,
+                                                {
+                                                    backgroundColor: selectedVenueId === v.id ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
+                                                    borderColor: selectedVenueId === v.id ? colors.primary : colors.border,
+                                                    marginRight: 8,
+                                                }
+                                            ]}
+                                            onPress={() => setSelectedVenueId(v.id)}
+                                        >
+                                            <Ionicons name="business" size={16} color={selectedVenueId === v.id ? '#FFF' : colors.text} />
+                                            <Text style={{ color: selectedVenueId === v.id ? '#FFF' : colors.text, marginLeft: 8, fontFamily: 'Poppins_500Medium' }}>
+                                                {v.name}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+                            </View>
+                        )}
+
+                        {(currentUserRole === 'venue-owner' && userVenues.length === 0 && !checkingVenue) && (
+                            <View style={[styles.infoBox, { backgroundColor: '#FEE2E2', borderColor: '#EF4444', marginBottom: 16 }]}>
+                                <Text style={[styles.infoText, { color: '#B91C1C' }]}>
+                                    You don't have any venues listed. Please create a venue to send invites.
+                                </Text>
+                            </View>
+                        )}
 
                         <Text style={[styles.label, { color: colors.text }]}>Send Booking Request</Text>
                         <View style={[styles.inputWrapper, { backgroundColor: isDark ? '#374151' : '#F9FAFB', height: 100, marginBottom: 16 }]}>
@@ -2369,6 +2752,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                 placeholderTextColor={colors.textSecondary}
                                 multiline
                                 textAlignVertical="top"
+                                value={requestMessage}
+                                onChangeText={setRequestMessage}
                             />
                         </View>
 
@@ -2380,11 +2765,15 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         <TouchableOpacity
                             style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
                             onPress={handleSendBookingRequest}
-                            disabled={checkingVenue}
+                            disabled={checkingVenue || isSendingRequest}
                         >
-                            <Text style={styles.primaryBtnText}>
-                                {checkingVenue ? 'Checking...' : 'Send Request'}
-                            </Text>
+                            {isSendingRequest ? (
+                                <ActivityIndicator color="#FFF" />
+                            ) : (
+                                <Text style={styles.primaryBtnText}>
+                                    {checkingVenue ? 'Checking...' : 'Send Request'}
+                                </Text>
+                            )}
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -2501,8 +2890,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
                             {/* GENERAL RENDERLOGIC */}
 
-                            {/* Group Specific Tabs */}
-                            {(group.type === 'Group' || !group.type) && (
+                            {/* Group/Artist Specific Tabs */}
+                            {(group.type === 'Group' || group.type === 'Artist' || !group.type) && (
                                 <>
                                     {(activeTab === 'About' || !showTabs) && renderGroupAbout()}
                                     {activeTab === 'Setup' && renderGroupSetup()}
@@ -2512,7 +2901,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             )}
 
                             {/* Existing Tabs for Studio/Gig */}
-                            {group.type !== 'Group' && group.type && (
+                            {(group.type === 'Studio' || group.type === 'Gig' || group.type === 'Venue') && (
                                 <>
                                     {activeTab === 'About' && (
                                         <View style={styles.tabContent}>
@@ -2534,8 +2923,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                 </View>
                                             )}
 
-                                            {/* Stats Row (Studio) */}
-                                            {(group.type === 'Studio') && (
+                                            {/* Stats Row (Studio/Venue) */}
+                                            {(group.type === 'Studio' || group.type === 'Venue') && (
                                                 <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
                                                     <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                                                         <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Hourly Rate</Text>
@@ -2618,6 +3007,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         </View>
                                     )}
                                     {activeTab === 'Setup' && renderStudioSetup()}
+                                    {activeTab === 'Specs' && renderStudioSetup()}
                                     {activeTab === 'Book' && renderStudioBook()}
                                     {activeTab === 'Info' && renderGigInfo()}
                                     {activeTab === 'Apply' && renderGigApply()}

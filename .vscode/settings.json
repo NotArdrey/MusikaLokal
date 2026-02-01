@@ -3,5 +3,48 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
+  },
+  "mcp.servers": {
+    "supabase": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase"
+      ],
+      "env": {
+        "SUPABASE_URL": "https://aefldxegsvzecshlayza.supabase.co",
+        "SUPABASE_SERVICE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFlZmxkeGVnc3Z6ZWNzaGxheXphIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2ODY1ODI5NSwiZXhwIjoyMDg0MjM0Mjk1fQ.ZS98ixQ1mRA2JsWE0FGHQx6mcEaZDzrLKlWKnuwGVIo",
+        "SUPABASE_ACCESS_TOKEN": "sbp_329b45d4f523b89b05bc579dbf5a7383ac4f5238"
+      }
+    }
+  },
+  "chat.mcp.serverSampling": {
+    "MusikaLokal/.vscode/mcp.json: com.supabase/mcp": {
+      "allowedModels": [
+        "copilot/claude-sonnet-4.5",
+        "copilot/auto",
+        "copilot/claude-haiku-4.5",
+        "copilot/claude-opus-41",
+        "copilot/claude-opus-4.5",
+        "copilot/claude-sonnet-4",
+        "copilot/gemini-2.5-pro",
+        "copilot/gemini-3-flash-preview",
+        "copilot/gemini-3-pro-preview",
+        "copilot/gpt-4.1",
+        "copilot/gpt-4o",
+        "copilot/gpt-5",
+        "copilot/gpt-5-mini",
+        "copilot/gpt-5-codex",
+        "copilot/gpt-5.1",
+        "copilot/gpt-5.1-codex",
+        "copilot/gpt-5.1-codex-max",
+        "copilot/gpt-5.1-codex-mini",
+        "copilot/gpt-5.2",
+        "copilot/gpt-5.2-codex",
+        "copilot/grok-code-fast-1",
+        "copilot/oswe-vscode-prime"
+      ]
+    }
   }
 }

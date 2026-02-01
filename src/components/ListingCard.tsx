@@ -12,21 +12,28 @@ interface ListingCardProps {
     onInvite?: (item: any) => void;
     variant?: 'horizontal' | 'vertical';
     style?: any;
+    hasGroups?: boolean;
 }
 
-const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, variant = 'horizontal', style }) => {
+const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, variant = 'horizontal', style, hasGroups }) => {
     const { colors, isDark } = useTheme();
-    const { userRole } = useAuth();
+    const { userRole } = useAuth(); // To avoid showing warning to owners
     const { width } = useWindowDimensions();
     const [isLiked, setIsLiked] = useState(false);
     const [pageIndex, setPageIndex] = useState(0);
 
-    // Check if current user can invite (venue-owner or studio-owner viewing a musician/Group)
-    const canInvite = (userRole === 'venue-owner' || userRole === 'studio-owner') && item.type === 'Group';
+    // Check if current user can invite (ONLY venue-owner viewing a musician/Group)
+    const canInvite = userRole === 'venue-owner' && (item.type === 'Group' || item.type === 'Artist');
+
+    // Group Warning Logic
+    const showGroupWarning = item.type === 'Gig' &&
+        item.requirements?.musician_type === 'group' &&
+        hasGroups === false &&
+        userRole === 'musician';
 
     // Determine "Subtitle" (Location or Genre)
     let subtitle = item.location || item.address;
-    if (item.type === 'Group' && item.genre) {
+    if ((item.type === 'Group' || item.type === 'Artist') && item.genre) {
         subtitle = item.genre;
     }
 
@@ -60,6 +67,11 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
 
     const toggleLike = () => {
         setIsLiked(!isLiked);
+    };
+
+    const handleInviteAction = (e: any) => {
+        e.stopPropagation();
+        onInvite?.(item);
     };
 
     // Robust Image Logic
@@ -144,6 +156,23 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                             </Text>
                         </View>
 
+                        {/* Group Required Warning Badge (Horizontal) */}
+                        {showGroupWarning && (
+                            <View style={[styles.glassBadge, { backgroundColor: '#EF4444', marginLeft: 8 }]}>
+                                <Ionicons name="people" size={12} color="#FFF" />
+                                <Text style={styles.glassBadgeText}>Group Req.</Text>
+                            </View>
+                        )}
+
+                        <View style={{ flex: 1 }} />
+
+                        {/* Invite Button Glass */}
+                        {canInvite && (
+                            <TouchableOpacity style={[styles.glassIconBtn, { marginRight: 8, backgroundColor: colors.primary }]} onPress={handleInviteAction}>
+                                <Ionicons name="mail" size={18} color="#FFF" />
+                            </TouchableOpacity>
+                        )}
+
                         {/* Like Button Glass */}
                         <TouchableOpacity style={styles.glassIconBtn} onPress={toggleLike}>
                             <Ionicons name={isLiked ? "heart" : "heart-outline"} size={20} color={isLiked ? "#EF4444" : "#FFF"} />
@@ -169,7 +198,7 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                     <View style={styles.immersiveBottomContent}>
                         {/* Type Badge */}
                         <View style={styles.tagBadge}>
-                            <Text style={styles.tagText}>{item.type || 'Artist'}</Text>
+                            <Text style={styles.tagText}>{item.type || (item.hourly_rate ? 'Studio' : 'Artist')}</Text>
                         </View>
 
                         <Text style={styles.immersiveTitle} numberOfLines={2}>{item.name}</Text>
@@ -261,14 +290,21 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
 
                     {/* Modern Overlay Badge */}
                     <View style={styles.typeOverlayBadge}>
-                        <Text style={styles.typeOverlayText}>{item.type || 'Artist'}</Text>
+                        <Text style={styles.typeOverlayText}>{item.type || (item.hourly_rate ? 'Studio' : 'Artist')}</Text>
                     </View>
+
+                    {/* Group Required Warning Badge (Vertical) */}
+                    {showGroupWarning && (
+                        <View style={[styles.typeOverlayBadge, { top: 40, backgroundColor: '#EF4444' }]}>
+                            <Text style={styles.typeOverlayText}>Group Required</Text>
+                        </View>
+                    )}
 
                     {/* Top Actions for Standard Card */}
                     <View style={[styles.topActions]}>
                         <View style={{ flex: 1 }} />
 
-                        {/* Rating moved to right or kept at top? Keeping original rating badge logic but ensuring zIndex */}
+                        {/* Rating moved to right or kept at top? Keeping original rating logic but ensuring zIndex */}
                         {item.rating > 0 && (item.review_count || 0) > 0 ? (
                             <View style={[styles.ratingBadge, { marginRight: 'auto' }]}>
                                 <Ionicons name="star" size={12} color="#FBBF24" />
@@ -281,6 +317,12 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                         )}
 
                         <View style={{ flexDirection: 'row', gap: 8 }}>
+                            {/* Invite Button Vertical */}
+                            {canInvite && (
+                                <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.primary }]} onPress={handleInviteAction}>
+                                    <Ionicons name="mail" size={20} color="#FFF" />
+                                </TouchableOpacity>
+                            )}
                             <TouchableOpacity style={styles.iconBtn} onPress={toggleLike}>
                                 <Ionicons name={isLiked ? "heart" : "heart-outline"} size={20} color={isLiked ? "#EF4444" : "#000"} />
                             </TouchableOpacity>

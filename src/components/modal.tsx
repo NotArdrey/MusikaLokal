@@ -10,6 +10,7 @@ type CustomModalProps = {
   message?: string;
   buttonText?: string;
   showInput?: boolean;
+  danger?: boolean; // New prop for destructive actions
   onInputChange?: (text: string) => void;
 };
 
@@ -21,6 +22,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
   message = '',
   buttonText = 'Close',
   showInput = false,
+  danger = false,
   onInputChange
 }) => {
   const { colors } = useTheme();
@@ -70,7 +72,10 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
           <View style={styles.buttonContainer}>
             <TouchableOpacity
-              style={[styles.confirmButton, { backgroundColor: colors.primary }]}
+              style={[
+                styles.confirmButton,
+                { backgroundColor: danger ? '#EF4444' : colors.primary }
+              ]}
               onPress={onConfirm || onClose}
             >
               <Text style={styles.confirmButtonText}>{buttonText}</Text>

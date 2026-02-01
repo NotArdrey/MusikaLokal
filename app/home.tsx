@@ -159,6 +159,8 @@ export default function HomeScreen() {
 
 
 
+    const [hasGroups, setHasGroups] = useState(false);
+
     const fetchUserProfile = async () => {
         try {
             let user;
@@ -173,6 +175,7 @@ export default function HomeScreen() {
 
             if (!user) return;
 
+            // Fetch Profile Name
             const { data } = await supabase
                 .from('profiles')
                 .select('full_name')
@@ -182,6 +185,14 @@ export default function HomeScreen() {
             if (data?.full_name) {
                 setUserName(data.full_name.split(' ')[0]);
             }
+
+            // Fetch Group Status (for UI warnings)
+            const { count } = await supabase
+                .from('groups')
+                .select('id', { count: 'exact', head: true })
+                .eq('owner_id', user.id);
+            setHasGroups(count ? count > 0 : false);
+
         } catch (e) {
             console.log('Error fetching user profile:', e);
         }
@@ -195,6 +206,7 @@ export default function HomeScreen() {
             let groups: any[] = [];
             let studios: any[] = [];
             let gigs: any[] = [];
+            let soloArtists: any[] = [];
 
             const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
 
@@ -205,6 +217,18 @@ export default function HomeScreen() {
                 .order('created_at', { ascending: false })
                 .limit(20);
             groups = gData || [];
+
+            // Fetch Solo Artists (Musicians who haven't created a group, or just all musicians)
+            // We assume 'musician' role in profiles
+            const { data: pData } = await supabase
+                .from('profiles')
+                .select('id, full_name, avatar_url, address, created_at, role, skills, genres')
+                .eq('role', 'musician')
+                .limit(20);
+
+            // Filter out profiles that might be owners of the groups already fetched? 
+            // For now, just show them as Solo Artists.
+            soloArtists = pData || [];
 
             // Musicians and Guests can see studios and gigs, but owners cannot
             if (!isOwner) {
@@ -232,10 +256,10 @@ export default function HomeScreen() {
             const normalize = (items: any[], type: string) => items.map(item => ({
                 id: item.id,
                 type,
-                name: item.name,
-                image: item.images?.[0] || null,
-                images: item.images || [],
-                rating: item.rating || 0,
+                name: item.name || item.full_name, // Handle profile name
+                image: item.images?.[0] || item.avatar_url || null, // Handle profile avatar
+                images: item.images || (item.avatar_url ? [item.avatar_url] : []),
+                rating: item.rating || 0, // Solo artists might not have ratings yet
                 review_count: item.review_count || 0,
                 // Explicitly pass rate fields
                 hourly_rate: item.hourly_rate?.toString(),
@@ -244,16 +268,18 @@ export default function HomeScreen() {
                 location: item.location || item.address || '',
                 amenities: item.amenities || [],
                 experience_level: item.requirements?.experience_level || null,
-                embedding: item.embedding,
-                created_at: item.created_at // Added for New Arrivals
+                embedding: item.embedding, // Profiles might have interest_vector but listing card uses embedding
+                created_at: item.created_at, // Added for New Arrivals
+                genre: item.genres?.join(', ') || item.genre || '', // For solo artists
             }));
 
             const allGroups = normalize(groups, 'Group');
             const allStudios = normalize(studios, 'Studio');
             const allGigs = normalize(gigs, 'Gig');
+            const allSoloArtists = normalize(soloArtists, 'Artist'); // Use 'Artist' for solo
 
-            const allItemsList = [...allGroups, ...allStudios, ...allGigs];
-            console.log(`📊 Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`);
+            const allItemsList = [...allGroups, ...allSoloArtists, ...allStudios, ...allGigs];
+            console.log(`📊 Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Solo: ${allSoloArtists.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`);
 
             // Filter New Arrivals (Sort by created_at desc)
             const sortedByDate = [...allItemsList].sort((a, b) => {
@@ -299,9 +325,11 @@ export default function HomeScreen() {
 
                     if (pVec && Array.isArray(pVec)) {
                         sortedItems.sort((a, b) => {
-                            if (!a.embedding || !b.embedding) return 0;
+                            if (!a.embedding || !b.embedding) return 0; // Handle missing embeddings for solo artists if any
                             const aVec = typeof a.embedding === 'string' ? JSON.parse(a.embedding) : a.embedding;
                             const bVec = typeof b.embedding === 'string' ? JSON.parse(b.embedding) : b.embedding;
+                            if (!aVec) return 1;
+                            if (!bVec) return -1;
                             return dot(pVec, bVec) - dot(pVec, aVec); // Descending
                         });
                     }
@@ -540,6 +568,7 @@ export default function HomeScreen() {
                 onPress={handleCardPress}
                 onInvite={handleInvite}
                 variant="horizontal"
+                hasGroups={hasGroups}
             />
         );
     };
@@ -739,6 +768,7 @@ export default function HomeScreen() {
             <SearchBottomSheet
                 ref={searchSheetRef}
                 onClose={() => { }}
+                hasGroups={hasGroups}
                 onItemPress={(id) => {
                     console.log('=== SearchBottomSheet onItemPress ===');
                     console.log('Item ID from search:', id);

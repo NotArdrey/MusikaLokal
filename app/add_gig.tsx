@@ -82,6 +82,7 @@ export default function AddGigScreen() {
     const [requiredInstruments, setRequiredInstruments] = useState<string[]>([]);
     const [newInstrument, setNewInstrument] = useState('');
     const [experienceLevel, setExperienceLevel] = useState('');
+    const [musicianType, setMusicianType] = useState<'solo' | 'group' | 'both'>('both');
 
     // Form Steps Configuration
     const steps = [
@@ -206,6 +207,7 @@ export default function AddGigScreen() {
                     experience_level: experienceLevel || null,
                     event_start_time: eventStartTime,
                     event_end_time: eventEndTime,
+                    musician_type: musicianType,
                 },
             };
 
@@ -816,6 +818,45 @@ export default function AddGigScreen() {
                                                 { color: experienceLevel === level ? '#fff' : colors.text }
                                             ]}>
                                                 {level}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </View>
+
+                            {/* Musician Type - Looking For */}
+                            <View style={styles.inputContainer}>
+                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Looking For</Text>
+                                <View style={styles.experienceLevelContainer}>
+                                    {[
+                                        { value: 'solo', label: 'Solo Artists', icon: 'person' },
+                                        { value: 'group', label: 'Bands/Groups', icon: 'people' },
+                                        { value: 'both', label: 'Both', icon: 'people-circle' },
+                                    ].map((option) => (
+                                        <TouchableOpacity
+                                            key={option.value}
+                                            onPress={() => setMusicianType(option.value as 'solo' | 'group' | 'both')}
+                                            style={[
+                                                styles.experienceButton,
+                                                {
+                                                    backgroundColor: musicianType === option.value ? colors.primary : (isDark ? '#1F2937' : '#F9FAFB'),
+                                                    borderColor: musicianType === option.value ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                                                    flexDirection: 'row',
+                                                    alignItems: 'center',
+                                                    gap: 6,
+                                                }
+                                            ]}
+                                        >
+                                            <Ionicons
+                                                name={option.icon as any}
+                                                size={16}
+                                                color={musicianType === option.value ? '#fff' : colors.text}
+                                            />
+                                            <Text style={[
+                                                styles.experienceButtonText,
+                                                { color: musicianType === option.value ? '#fff' : colors.text }
+                                            ]}>
+                                                {option.label}
                                             </Text>
                                         </TouchableOpacity>
                                     ))}
