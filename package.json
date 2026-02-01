@@ -9,7 +9,13 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "mcp:start": "npx -y @supabase/mcp-server-supabase@latest"
+    "mcp:start": "npx -y @supabase/mcp-server-supabase@latest",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "supabase:reset": "supabase db reset",
+    "supabase:diff": "supabase db diff -f local_schema",
+    "supabase:seed": "supabase db dump --local --data-only > supabase/seed.sql"
   },
   "dependencies": {
     "@expo-google-fonts/poppins": "^0.4.1",

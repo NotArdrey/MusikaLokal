@@ -181,9 +181,9 @@ export default function BookingsScreen() {
   };
 
   const handleConfirmBooking = async (bookingId: string) => {
-    // Use 'accepted' for gig applications, 'confirmed' for studio bookings
-    const status = selectedItem?.type_id === 'gig_application' ? 'accepted' : 'confirmed';
-    await handleStatusUpdate(bookingId, status, selectedItem?.type_id || 'studio_booking');
+    // Open modal instead of confirming immediately
+    setModalMode('confirm');
+    setModalVisible(true);
   };
 
   const handleCancelBooking = async (bookingId: string) => {
@@ -588,7 +588,7 @@ export default function BookingsScreen() {
                         ) : (
                           // Musician View: Withdraw Button
                           <TouchableOpacity
-                            onPress={() => handleCancelBooking(item.id)} // Use handleCancelBooking for withdraw flow
+                            onPress={() => { setSelectedItem(item); handleCancelBooking(item.id); }} // Use handleCancelBooking for withdraw flow
                             style={{ flex: 1, backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEF2F2', padding: 10, borderRadius: 8, alignItems: 'center' }}
                           >
                             <Text style={{ color: '#EF4444', fontFamily: 'Poppins_600SemiBold', fontSize: 12 }}>Withdraw Application</Text>
@@ -983,6 +983,12 @@ export default function BookingsScreen() {
         danger={modalMode === 'fire' || modalMode === 'decline' || modalMode === 'cancel'}
         onInputChange={setCancellationReason}
         onConfirm={async () => {
+          // Validation for modes that require input
+          if ((modalMode === 'cancel' || modalMode === 'decline' || modalMode === 'fire') && !cancellationReason.trim()) {
+            Alert.alert('Required', 'Please provide a reason.');
+            return;
+          }
+
           if (selectedItem) {
             console.log('🔍 Modal onConfirm - selectedItem:', selectedItem);
             console.log('🔍 Modal onConfirm - modalMode:', modalMode);

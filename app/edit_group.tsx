@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
-import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
@@ -24,10 +24,32 @@ export default function EditGroupScreen() {
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [images, setImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
-  const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Custom Alert State
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[]
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   // Members
   const [members, setMembers] = useState<string[]>([]);
@@ -66,7 +88,7 @@ export default function EditGroupScreen() {
       });
 
       if (profile?.role !== 'musician') {
-        Alert.alert('Unauthorized', 'Only musicians can edit groups.');
+        showAlert('error', 'Unauthorized', 'Only musicians can edit groups.');
         router.replace('/home');
         return;
       }
@@ -97,7 +119,7 @@ export default function EditGroupScreen() {
       // Ensure id is a string, not an array
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
-        Alert.alert('Error', 'Invalid group ID');
+        showAlert('error', 'Error', 'Invalid group ID');
         router.replace('/home');
         return;
       }
@@ -110,7 +132,7 @@ export default function EditGroupScreen() {
 
       // If no data returned, user doesn't own this group
       if (!data) {
-        Alert.alert('Not Found', 'Group not found or you do not have permission to edit it.');
+        showAlert('error', 'Not Found', 'Group not found or you do not have permission to edit it.');
         router.replace('/home');
         return;
       }
@@ -129,7 +151,7 @@ export default function EditGroupScreen() {
       }
     } catch (e) {
       console.log('Error fetching group details:', e);
-      Alert.alert('Error', 'Failed to load group details.');
+      showAlert('error', 'Error', 'Failed to load group details.');
       router.replace('/home');
     } finally {
       setLoading(false);
@@ -138,27 +160,27 @@ export default function EditGroupScreen() {
 
   const validateForm = (): boolean => {
     if (!groupName.trim()) {
-      Alert.alert('Required Field', 'Please enter a group name');
+      showAlert('error', 'Required Field', 'Please enter a group name');
       return false;
     }
     if (!genre.trim()) {
-      Alert.alert('Required Field', 'Please enter a genre');
+      showAlert('error', 'Required Field', 'Please enter a genre');
       return false;
     }
     if (!description.trim()) {
-      Alert.alert('Required Field', 'Please enter a description');
+      showAlert('error', 'Required Field', 'Please enter a description');
       return false;
     }
     if (!address || !latitude || !longitude) {
-      Alert.alert('Required Field', 'Please select a location on the map');
+      showAlert('error', 'Required Field', 'Please select a location on the map');
       return false;
     }
     if (!rate.trim() || parseFloat(rate) <= 0) {
-      Alert.alert('Required Field', 'Please enter a valid hourly rate');
+      showAlert('error', 'Required Field', 'Please enter a valid hourly rate');
       return false;
     }
     if (images.length === 0) {
-      Alert.alert('Required Field', 'Please upload at least one group photo');
+      showAlert('error', 'Required Field', 'Please upload at least one group photo');
       return false;
     }
     return true;
@@ -169,42 +191,54 @@ export default function EditGroupScreen() {
       return;
     }
 
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+    showAlert('warning', 'Save Changes', 'Are you sure you want to update this group profile?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Save & Update',
+        style: 'default',
+        onPress: async () => {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
 
-      // Ensure id is a string, not an array
-      const groupId = Array.isArray(id) ? id[0] : id;
-      if (!groupId) {
-        alert('Invalid group ID');
-        return;
+            // Ensure id is a string, not an array
+            const groupId = Array.isArray(id) ? id[0] : id;
+            if (!groupId) {
+              showAlert('error', 'Error', 'Invalid group ID');
+              return;
+            }
+
+            const payload = {
+              name: groupName,
+              genre,
+              description,
+              location: address,
+              latitude,
+              longitude,
+              members,
+              images: images,
+              rate: parseFloat(rate) || 0,
+            };
+
+            const { error } = await supabase.functions.invoke('manage-listings', {
+              body: { action: 'update', type: 'group', id: groupId, userId: user.id, payload }
+            });
+
+            if (error) throw error;
+
+            console.log('✅ Group Updated');
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/manage_group');
+            }
+          } catch (e: any) {
+            console.log('❌ Error updating group:', e);
+            showAlert('error', 'Error', `Failed to update group: ${e?.message || 'Unknown error'}`);
+          }
+        }
       }
-
-      const payload = {
-        name: groupName,
-        genre,
-        description,
-        location: address,
-        latitude,
-        longitude,
-        members,
-        images: images,
-        rate: parseFloat(rate) || 0,
-      };
-
-      const { error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'group', id: groupId, userId: user.id, payload }
-      });
-
-      if (error) throw error;
-
-      setModalVisible(false);
-      console.log('Group Updated');
-      router.back();
-    } catch (e) {
-      console.log('Error updating group:', e);
-      alert('Failed to update group');
-    }
+    ]);
   };
 
   const addMember = () => {
@@ -302,25 +336,30 @@ export default function EditGroupScreen() {
 
       if (error) {
         console.error('Error creating transfer request:', error);
-        Alert.alert('Error', 'Failed to send transfer request. ' + (error.message || ''));
+        showAlert('error', 'Error', 'Failed to send transfer request. ' + (error.message || ''));
         return;
       }
 
       // Send notification to new leader
-      await supabase.from('notifications').insert({
-        user_id: selectedNewLeader.user_id,
-        type: 'info',
-        title: 'Leadership Transfer Request',
-        message: `You have been invited to become the leader of "${groupName}". Open to accept or decline.`,
-        meta: {
-          type: 'leadership_transfer',
-          request_id: data.id,
-          group_id: groupId,
-          group_name: groupName
+      await supabase.functions.invoke('manage-listings', {
+        body: {
+          action: 'create_notification',
+          userId: currentUserId,
+          targetUserId: selectedNewLeader.user_id,
+          type: 'info',
+          title: 'Leadership Transfer Request',
+          message: `You have been invited to become the leader of "${groupName}". Open to accept or decline.`,
+          meta: {
+            type: 'leadership_transfer',
+            request_id: data.id,
+            group_id: groupId,
+            group_name: groupName
+          }
         }
       });
 
-      Alert.alert(
+      showAlert(
+        'success',
         'Request Sent',
         `Leadership transfer request sent to ${selectedNewLeader.full_name}. They must accept to complete the transfer.`
       );
@@ -333,7 +372,7 @@ export default function EditGroupScreen() {
 
     } catch (e) {
       console.error('Error initiating transfer:', e);
-      Alert.alert('Error', 'Failed to send transfer request.');
+      showAlert('error', 'Error', 'Failed to send transfer request.');
     } finally {
       setIsTransferring(false);
     }
@@ -343,32 +382,28 @@ export default function EditGroupScreen() {
   const cancelTransfer = async () => {
     if (!pendingTransfer) return;
 
-    Alert.alert(
-      'Cancel Transfer',
-      'Are you sure you want to cancel this leadership transfer request?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase.rpc('cancel_leadership_transfer', {
-                request_id: pendingTransfer.id
-              });
+    showAlert('warning', 'Cancel Transfer', 'Are you sure you want to cancel this leadership transfer request?', [
+      { text: 'No', style: 'cancel' },
+      {
+        text: 'Yes, Cancel',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const { error } = await supabase.rpc('cancel_leadership_transfer', {
+              request_id: pendingTransfer.id
+            });
 
-              if (error) throw error;
+            if (error) throw error;
 
-              Alert.alert('Cancelled', 'Transfer request has been cancelled.');
-              setPendingTransfer(null);
-            } catch (e) {
-              console.error('Error cancelling transfer:', e);
-              Alert.alert('Error', 'Failed to cancel transfer request.');
-            }
+            showAlert('success', 'Cancelled', 'Transfer request has been cancelled.');
+            setPendingTransfer(null);
+          } catch (e) {
+            console.error('Error cancelling transfer:', e);
+            showAlert('error', 'Error', 'Failed to cancel transfer request.');
           }
         }
-      ]
-    );
+      }
+    ]);
   };
 
   // Fetch group members and pending transfer when group loads
@@ -563,7 +598,7 @@ export default function EditGroupScreen() {
               style={[styles.transferButton, { borderColor: '#F59E0B' }]}
               onPress={() => {
                 if (groupMembers.length === 0) {
-                  Alert.alert(
+                  showAlert('info',
                     'No Eligible Members',
                     'There are no other members in the group_members table to transfer leadership to. Add members to the group first.'
                   );
@@ -586,7 +621,7 @@ export default function EditGroupScreen() {
           <View style={styles.footerActions}>
             <TouchableOpacity
               style={[styles.saveButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
-              onPress={() => setModalVisible(true)}
+              onPress={handleSave}
             >
               <Text style={styles.saveButtonText}>Save Changes</Text>
             </TouchableOpacity>
@@ -604,13 +639,13 @@ export default function EditGroupScreen() {
         <Navbar />
       </View>
 
-      <Modal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Save Changes"
-        message="Are you sure you want to update this group profile?"
-        buttonText="Save & Update"
-        onConfirm={handleSave}
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
       />
 
       <LocationPicker

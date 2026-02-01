@@ -6,7 +6,6 @@ import { router } from 'expo-router';
 import React, { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     BackHandler,
     Dimensions,
     Image,
@@ -15,7 +14,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { supabase } from '../../lib/supabase';
@@ -101,6 +100,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         type: 'success' | 'error' | 'warning' | 'info';
         title: string;
         message: string;
+        buttons?: any[];
     }>({ type: 'info', title: '', message: '' });
 
     // Booking Request State (Invites)
@@ -191,15 +191,18 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         console.log('🔵 handleConfirm called');
 
         // Profile Check Gate
+        // Profile Check Gate
         if (!isProfileComplete) {
-            Alert.alert(
-                "Profile Incomplete",
-                "You need to complete your profile details (contact & address) before you can proceed.",
-                [
-                    { text: "Cancel", style: "cancel" },
-                    { text: "Complete Now", onPress: () => router.push('/edit_profile') }
+            setAlertConfig({
+                type: 'warning',
+                title: 'Profile Incomplete',
+                message: 'You need to complete your profile details (contact & address) before you can proceed.',
+                buttons: [
+                    { text: "Cancel", style: "cancel", onPress: () => setAlertVisible(false) },
+                    { text: "Complete Now", onPress: () => { setAlertVisible(false); router.push('/edit_profile'); } }
                 ]
-            );
+            });
+            setAlertVisible(true);
             return;
         }
 
@@ -420,13 +423,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
     // Handle Submit Application for Gigs
     const handleSubmitApplication = async () => {
+        // ... (validation checks same as before) ...
         console.log('=== handleSubmitApplication CALLED ===');
-        console.log('userId:', userId);
-        console.log('listingId:', listingId);
-        console.log('group:', group);
-        console.log('pitchMessage:', pitchMessage);
-        console.log('videoUrl:', videoUrl);
-        console.log('selectedGroupId:', selectedGroupId);
 
         if (!userId || !listingId || !group) {
             console.error('Missing required data for application:', { userId, listingId, group });
@@ -468,7 +466,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         }
 
         // Validate CV
-        if (!cvFile) {
+        if (!cvFile && !cvUrl) { // Check if new file selected OR existing CV exists (though logic resets cvUrl on load, but good to be safe)
             setAlertConfig({
                 type: 'error',
                 title: 'CV Required',
@@ -478,6 +476,14 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             return;
         }
 
+        // CONFIRMATION STEP
+        setConfirmTitle("Submit Application?");
+        setConfirmMessage("Are you sure you want to submit this application? This action cannot be undone.");
+        setConfirmAction(() => processApplicationSubmission); // Delegate to actual submission function
+        setModalVisible(true);
+    };
+
+    const processApplicationSubmission = async () => {
         setIsSubmittingApplication(true);
         console.log('Inserting application into database...');
 
@@ -499,6 +505,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     setIsSubmittingApplication(false);
                     return;
                 }
+            } else if (cvUrl) {
+                uploadedCvUrl = cvUrl;
             }
 
             const { data, error } = await supabase
@@ -518,7 +526,6 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
             if (error) {
                 console.error('Error submitting application:', error);
-                console.error('Error details:', JSON.stringify(error, null, 2));
 
                 // Check for unique constraint violation (group already applied)
                 if (error.code === '23505') {
@@ -539,6 +546,32 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             }
 
             console.log('✅ Application submitted successfully!', data);
+
+            // ... (rest of notification logic same as before) ...
+            if (group?.organizer_id && data) {
+                try {
+                    if (group.organizer_id !== userId) {
+                        await supabase.functions.invoke('manage-listings', {
+                            body: {
+                                action: 'create_notification',
+                                userId,
+                                targetUserId: group.organizer_id,
+                                type: 'info',
+                                title: 'New Gig Application',
+                                message: `You have a new application for "${group.name}".`,
+                                meta: {
+                                    gig_id: listingId,
+                                    application_id: data.id,
+                                    applicant_id: userId,
+                                    group_id: selectedGroupId || null
+                                }
+                            }
+                        });
+                    }
+                } catch (notifyErr) {
+                    console.error('Failed to notify gig organizer:', notifyErr);
+                }
+            }
 
             // Notify group members if this is a group application
             if (selectedGroupId && data) {
@@ -563,12 +596,17 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             meta: { gig_id: listingId, application_id: data.id }
                         }));
 
-                        await supabase.from('notifications').insert(notifications);
+                        await supabase.functions.invoke('manage-listings', {
+                            body: {
+                                action: 'create_notifications',
+                                userId,
+                                notifications
+                            }
+                        });
                         console.log('📬 Notified group members:', members.length);
                     }
                 } catch (notifyErr) {
                     console.error('Failed to notify group members:', notifyErr);
-                    // Don't block the success flow for notification failures
                 }
             }
 
@@ -598,8 +636,15 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     ref.current.dismiss();
                 }
             }, 2500);
+
         } catch (err) {
             console.error('Unexpected error:', err);
+            setAlertConfig({
+                type: 'error',
+                title: 'Error',
+                message: 'An unexpected error occurred. Please try again.'
+            });
+            setAlertVisible(true);
         } finally {
             setIsSubmittingApplication(false);
         }

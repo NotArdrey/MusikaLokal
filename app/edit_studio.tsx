@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
-import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
@@ -61,10 +61,32 @@ export default function EditStudioScreen() {
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   const [cost, setCost] = useState('');
   const [studioType, setStudioType] = useState<'Rehearsal' | 'Recording'>('Rehearsal');
-  const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Custom Alert State
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[]
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   const [amenities, setAmenities] = useState<string[]>([]);
   const [newAmenity, setNewAmenity] = useState('');
@@ -130,7 +152,7 @@ export default function EditStudioScreen() {
       });
 
       if (profile?.role !== 'studio-owner') {
-        Alert.alert('Unauthorized', 'Only studio owners can edit studios.');
+        showAlert('error', 'Unauthorized', 'Only studio owners can edit studios.');
         router.replace('/home');
         return;
       }
@@ -164,7 +186,7 @@ export default function EditStudioScreen() {
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
       if (!studioId) {
-        Alert.alert('Error', 'Invalid studio ID');
+        showAlert('error', 'Error', 'Invalid studio ID');
         router.replace('/home');
         return;
       }
@@ -177,7 +199,7 @@ export default function EditStudioScreen() {
 
       // If no data returned, user doesn't own this studio
       if (!data) {
-        Alert.alert('Not Found', 'Studio not found or you do not have permission to edit it.');
+        showAlert('error', 'Not Found', 'Studio not found or you do not have permission to edit it.');
         router.replace('/home');
         return;
       }
@@ -238,7 +260,7 @@ export default function EditStudioScreen() {
       }
     } catch (e) {
       console.log('Error fetching studio details:', e);
-      Alert.alert('Error', 'Failed to load studio details.');
+      showAlert('error', 'Error', 'Failed to load studio details.');
       router.replace('/home');
     } finally {
       setLoading(false);
@@ -247,23 +269,23 @@ export default function EditStudioScreen() {
 
   const validateForm = (): boolean => {
     if (!studioName.trim()) {
-      Alert.alert('Required Field', 'Please enter a studio name');
+      showAlert('error', 'Required Field', 'Please enter a studio name');
       return false;
     }
     if (!description.trim()) {
-      Alert.alert('Required Field', 'Please enter a description');
+      showAlert('error', 'Required Field', 'Please enter a description');
       return false;
     }
     if (!address || !latitude || !longitude) {
-      Alert.alert('Required Field', 'Please select a location on the map');
+      showAlert('error', 'Required Field', 'Please select a location on the map');
       return false;
     }
     if (!cost.trim() || parseFloat(cost) <= 0) {
-      Alert.alert('Required Field', 'Please enter a valid hourly rate');
+      showAlert('error', 'Required Field', 'Please enter a valid hourly rate');
       return false;
     }
     if (selectedImages.length === 0) {
-      Alert.alert('Required Field', 'Please upload at least one studio photo');
+      showAlert('error', 'Required Field', 'Please upload at least one studio photo');
       return false;
     }
     return true;
@@ -274,136 +296,144 @@ export default function EditStudioScreen() {
       return;
     }
 
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+    showAlert('warning', 'Save Changes', 'Are you sure you want to update this studio profile?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Save & Update',
+        style: 'default',
+        onPress: async () => {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
 
-      // Ensure id is a string, not an array
-      const studioId = Array.isArray(id) ? id[0] : id;
-      if (!studioId) {
-        alert('Invalid studio ID');
-        return;
-      }
+            // Ensure id is a string, not an array
+            const studioId = Array.isArray(id) ? id[0] : id;
+            if (!studioId) {
+              showAlert('error', 'Error', 'Invalid studio ID');
+              return;
+            }
 
-      const payload = {
-        name: studioName,
-        type: studioType,
-        description,
-        address,
-        hourly_rate: parseFloat(cost) || 0,
-        amenities,
-        instruments: selectedInstruments,
-        latitude,
-        longitude,
-        images: selectedImages,
-        contract_url: contractUrl || null,
-        availability: availability
-          .filter(day => day.slots.length > 0)
-          .map(day => {
-            // Helper function to convert 12-hour to 24-hour format
-            const convertTo24Hour = (time12: string): string => {
-              const [time, modifier] = time12.split(' ');
-              if (!modifier) return time; // Already 24h or invalid
-              let [hours, minutes] = time.split(':');
-              if (hours === '12') {
-                hours = '00';
-              }
-              if (modifier === 'PM') {
-                hours = String(parseInt(hours, 10) + 12);
-              }
-              return `${hours}:${minutes}`;
+            const payload = {
+              name: studioName,
+              type: studioType,
+              description,
+              address,
+              hourly_rate: parseFloat(cost) || 0,
+              amenities,
+              instruments: selectedInstruments,
+              latitude,
+              longitude,
+              images: selectedImages,
+              contract_url: contractUrl || null,
+              availability: availability
+                .filter(day => day.slots.length > 0)
+                .map(day => {
+                  // Helper function to convert 12-hour to 24-hour format
+                  const convertTo24Hour = (time12: string): string => {
+                    const [time, modifier] = time12.split(' ');
+                    if (!modifier) return time; // Already 24h or invalid
+                    let [hours, minutes] = time.split(':');
+                    if (hours === '12') {
+                      hours = '00';
+                    }
+                    if (modifier === 'PM') {
+                      hours = String(parseInt(hours, 10) + 12);
+                    }
+                    return `${hours}:${minutes}`;
+                  };
+
+                  return {
+                    ...day,
+                    slots: day.slots.map(slot => ({
+                      start: convertTo24Hour(slot.start),
+                      end: convertTo24Hour(slot.end)
+                    }))
+                  };
+                })
             };
 
-            return {
-              ...day,
-              slots: day.slots.map(slot => ({
-                start: convertTo24Hour(slot.start),
-                end: convertTo24Hour(slot.end)
-              }))
-            };
-          })
-      };
+            console.log(' RAW availability state:', JSON.stringify(availability, null, 2));
+            console.log('📅 FILTERED availability (days with slots):', payload.availability);
+            console.log('📅 Number of days with availability:', payload.availability.length);
+            console.log('🔵 Updating studio with payload:', JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload }, null, 2));
 
-      console.log('� RAW availability state:', JSON.stringify(availability, null, 2));
-      console.log('📅 FILTERED availability (days with slots):', payload.availability);
-      console.log('📅 Number of days with availability:', payload.availability.length);
-      console.log('�🔵 Updating studio with payload:', JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload }, null, 2));
-
-      const response = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'studio', id: studioId, userId: user.id, payload }
-      });
-
-      console.log('🔵 Response data:', response.data);
-      console.log('🔵 Response error:', response.error);
-
-      if (response.error) {
-        console.error('❌ Error details:', JSON.stringify(response.error, null, 2));
-
-        // Try to read the actual error message from the response body
-        let errorMessage = 'Unknown error occurred';
-        let errorDetails = null;
-
-        try {
-          // Check if there's a response context with body
-          if (response.error.context && response.error.context._bodyBlob) {
-            console.log('🔍 Attempting to read error response body...');
-            // Try to read the body as text
-            const errorResponse = await fetch(response.error.context.url, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload })
+            const response = await supabase.functions.invoke('manage-listings', {
+              body: { action: 'update', type: 'studio', id: studioId, userId: user.id, payload }
             });
 
-            const errorBody = await errorResponse.text();
-            console.log('🔍 Raw error response:', errorBody);
+            console.log('🔵 Response data:', response.data);
+            console.log('🔵 Response error:', response.error);
 
-            try {
-              errorDetails = JSON.parse(errorBody);
-              errorMessage = errorDetails.error || errorDetails.message || errorMessage;
-              console.error('❌ Server error message:', errorMessage);
-              console.error('❌ Server error details:', errorDetails.details);
-              console.error('❌ Server error code:', errorDetails.code);
-              console.error('❌ Server error hint:', errorDetails.hint);
-            } catch (parseError) {
-              errorMessage = errorBody || errorMessage;
+            if (response.error) {
+              console.error('❌ Error details:', JSON.stringify(response.error, null, 2));
+
+              // Try to read the actual error message from the response body
+              let errorMessage = 'Unknown error occurred';
+              let errorDetails = null;
+
+              try {
+                // Check if there's a response context with body
+                if (response.error.context && response.error.context._bodyBlob) {
+                  console.log('🔍 Attempting to read error response body...');
+                  // Try to read the body as text
+                  const errorResponse = await fetch(response.error.context.url, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload })
+                  });
+
+                  const errorBody = await errorResponse.text();
+                  console.log('🔍 Raw error response:', errorBody);
+
+                  try {
+                    errorDetails = JSON.parse(errorBody);
+                    errorMessage = errorDetails.error || errorDetails.message || errorMessage;
+                    console.error('❌ Server error message:', errorMessage);
+                    console.error('❌ Server error details:', errorDetails.details);
+                    console.error('❌ Server error code:', errorDetails.code);
+                    console.error('❌ Server error hint:', errorDetails.hint);
+                  } catch (parseError) {
+                    errorMessage = errorBody || errorMessage;
+                  }
+                } else if (response.data && typeof response.data === 'object') {
+                  errorMessage = response.data.error || response.data.message || errorMessage;
+                  console.error('❌ Server error message:', errorMessage);
+                  console.error('❌ Server error details:', response.data.details);
+                } else if (response.error.message) {
+                  errorMessage = response.error.message;
+                }
+              } catch (readError) {
+                console.error('❌ Failed to read error body:', readError);
+              }
+
+              console.error('❌ Final error message:', errorMessage);
+              throw new Error(errorMessage);
             }
-          } else if (response.data && typeof response.data === 'object') {
-            errorMessage = response.data.error || response.data.message || errorMessage;
-            console.error('❌ Server error message:', errorMessage);
-            console.error('❌ Server error details:', response.data.details);
-          } else if (response.error.message) {
-            errorMessage = response.error.message;
+
+            // Check if data indicates an error
+            if (!response.data) {
+              throw new Error('No data returned from server');
+            }
+
+            console.log('✅ Studio Updated successfully');
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.push('/manage_studio');
+            }
+          } catch (e: any) {
+            console.error('❌ Error updating studio:', e);
+            console.error('❌ Error message:', e?.message);
+            console.error('❌ Error stack:', e?.stack);
+            console.error('❌ Full error object:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
+            showAlert('error', 'Error', `Failed to update studio: ${e?.message || 'Unknown error'}`);
           }
-        } catch (readError) {
-          console.error('❌ Failed to read error body:', readError);
         }
-
-        console.error('❌ Final error message:', errorMessage);
-        throw new Error(errorMessage);
       }
-
-      // Check if data indicates an error
-      if (!response.data) {
-        throw new Error('No data returned from server');
-      }
-
-      setModalVisible(false);
-      console.log('✅ Studio Updated successfully');
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.push('/manage_studio');
-      }
-    } catch (e: any) {
-      console.error('❌ Error updating studio:', e);
-      console.error('❌ Error message:', e?.message);
-      console.error('❌ Error stack:', e?.stack);
-      console.error('❌ Full error object:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
-      alert(`Failed to update studio: ${e?.message || 'Unknown error'}`);
-    }
+    ]);
   };
 
   const addAmenity = () => {
@@ -447,7 +477,7 @@ export default function EditStudioScreen() {
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        Alert.alert('Error', 'Session expired. Please log in again.');
+        showAlert('error', 'Error', 'Session expired. Please log in again.');
         setUploadingContract(false);
         return;
       }
@@ -471,10 +501,10 @@ export default function EditStudioScreen() {
 
       setContractUrl(publicUrl);
       setContractFileName(fileName);
-      Alert.alert('Success', 'Contract uploaded successfully!');
+      showAlert('success', 'Success', 'Contract uploaded successfully!');
     } catch (error) {
       console.error('Error uploading contract:', error);
-      Alert.alert('Error', 'Failed to upload contract. Please try again.');
+      showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
     } finally {
       setUploadingContract(false);
     }
@@ -495,7 +525,7 @@ export default function EditStudioScreen() {
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        Alert.alert('Error', 'Session expired. Please log in again.');
+        showAlert('error', 'Error', 'Session expired. Please log in again.');
         setUploadingContract(false);
         return;
       }
@@ -516,10 +546,10 @@ export default function EditStudioScreen() {
 
       setContractUrl(publicUrl);
       setContractFileName(fileName);
-      Alert.alert('Success', 'Contract uploaded successfully!');
+      showAlert('success', 'Success', 'Contract uploaded successfully!');
     } catch (error) {
       console.error('Error uploading contract:', error);
-      Alert.alert('Error', 'Failed to upload contract. Please try again.');
+      showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
     } finally {
       setUploadingContract(false);
       if (event.target) {
@@ -925,7 +955,7 @@ export default function EditStudioScreen() {
           <View style={styles.footerActions}>
             <TouchableOpacity
               style={[styles.saveButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
-              onPress={() => setModalVisible(true)}
+              onPress={handleSave}
             >
               <Text style={styles.saveButtonText}>Save Changes</Text>
             </TouchableOpacity>
@@ -943,13 +973,13 @@ export default function EditStudioScreen() {
         <Navbar />
       </View>
 
-      <Modal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Save Changes"
-        message="Are you sure you want to update this studio profile?"
-        buttonText="Save & Update"
-        onConfirm={handleSave}
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
       />
 
       <LocationPicker

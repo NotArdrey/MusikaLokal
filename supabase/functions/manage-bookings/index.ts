@@ -22,6 +22,14 @@ serve(async (req: Request) => {
             { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
         )
 
+        // Service role client for cross-user notifications
+        const supabaseAdmin = createClient(
+            // @ts-ignore
+            Deno.env.get('SUPABASE_URL') ?? '',
+            // @ts-ignore
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        )
+
         const { action, ...params } = await req.json()
 
         // 1. FETCH BOOKINGS & APPLICATIONS
@@ -676,6 +684,34 @@ serve(async (req: Request) => {
                 throw error;
             }
 
+            // Notify studio owner of new booking request
+            try {
+                const { data: studioInfo } = await supabaseClient
+                    .from('studios')
+                    .select('owner_id, name')
+                    .eq('id', studio_id)
+                    .single();
+
+                if (studioInfo?.owner_id) {
+                    await supabaseAdmin
+                        .from('notifications')
+                        .insert({
+                            user_id: studioInfo.owner_id,
+                            type: 'info',
+                            title: 'New Booking Request',
+                            message: `New booking request for ${studioInfo.name} on ${date}.`,
+                            read: false,
+                            meta: {
+                                studio_id,
+                                booking_id: data.id,
+                                booking_date: date
+                            }
+                        });
+                }
+            } catch (notifyError) {
+                console.error('Error sending booking request notification:', notifyError);
+            }
+
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 201,
@@ -730,10 +766,12 @@ serve(async (req: Request) => {
                             .single();
 
                         if (bookingInfo) {
-                            if (new_status === 'cancelled' && cancellation_reason) {
+                            if (new_status === 'cancelled') {
                                 targetUserId = bookingInfo.user_id;
                                 notificationTitle = 'Booking Declined';
-                                notificationMessage = `Your booking at ${bookingInfo.studio.name} has been declined/cancelled. Reason: ${cancellation_reason}`;
+                                notificationMessage = cancellation_reason
+                                    ? `Your booking at ${bookingInfo.studio.name} has been declined/cancelled. Reason: ${cancellation_reason}`
+                                    : `Your booking at ${bookingInfo.studio.name} has been declined/cancelled.`;
                                 notificationType = 'error';
                             } else if (new_status === 'confirmed') {
                                 targetUserId = bookingInfo.user_id;
@@ -766,7 +804,7 @@ serve(async (req: Request) => {
                     }
 
                     if (targetUserId) {
-                        await supabaseClient
+                        await supabaseAdmin
                             .from('notifications')
                             .insert({
                                 user_id: targetUserId,

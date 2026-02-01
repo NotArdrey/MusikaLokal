@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
+import CustomAlert from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import ListingCard from '../src/components/ListingCard';
 import ListingDetailsSheet from '../src/components/ListingDetailsSheet';
@@ -45,7 +46,7 @@ const moderateScale = (size: number, factor = 0.3) => {
     return size + (scaled - size) * factor; // Reduced factor from 0.5 to 0.3 for less aggressive scaling
 };
 
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '../src/context/AuthContext';
 
 export default function HomeScreen() {
@@ -66,6 +67,15 @@ export default function HomeScreen() {
     const searchSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
     const recentlyViewedSheetRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
     const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+
+    // Alert State
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: 'success' | 'error' | 'warning' | 'info';
+        title: string;
+        message: string;
+        buttons?: any[];
+    }>({ type: 'info', title: '', message: '' });
 
     // Safe handler for opening search sheet - prevents reanimated timing issues
     const openSearchSheet = useCallback(() => {
@@ -551,7 +561,22 @@ export default function HomeScreen() {
 
 
     // Handle invite action - opens the details sheet for booking/connecting
+    // Handle invite action - opens the details sheet for booking/connecting
     const handleInvite = (item: any) => {
+        if (!userId) {
+            setAlertConfig({
+                type: 'info',
+                title: 'Login Required',
+                message: 'Please login or sign up to connect with this user.',
+                buttons: [
+                    { text: 'Cancel', style: 'cancel', onPress: () => setAlertVisible(false) },
+                    { text: 'Login', onPress: () => router.push('/') }
+                ]
+            });
+            setAlertVisible(true);
+            return;
+        }
+
         setSelectedListingId(item.id);
         // Use safe handler with requestAnimationFrame
         setTimeout(() => openDetailsSheet(), 50);
@@ -791,6 +816,15 @@ export default function HomeScreen() {
                         console.log('openDetailsSheet called from recently viewed');
                     }, 150);
                 }}
+            />
+
+            <CustomAlert
+                visible={alertVisible}
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
             />
         </View>
     );

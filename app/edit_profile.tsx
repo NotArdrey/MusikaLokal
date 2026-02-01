@@ -2,10 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
-import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
@@ -19,9 +19,31 @@ export default function EditProfileScreen() {
   const [contactNumber, setContactNumber] = useState('');
   const [address, setAddress] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
-  const [modalVisible, setModalVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  // Custom Alert State
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[]
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   // Expanded role list
   const availableRoles = [
@@ -34,7 +56,7 @@ export default function EditProfileScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      Alert.alert('Starting Verification', 'Redirecting to Didit secure verification...');
+      showAlert('info', 'Starting Verification', 'Redirecting to Didit secure verification...');
 
       const { data, error } = await supabase.functions.invoke('verify-identity', {
         body: { action: 'create_session', userId: user.id }
@@ -45,11 +67,11 @@ export default function EditProfileScreen() {
       if (data && data.url) {
         // In a real app, use WebBrowser.openBrowserAsync(data.url)
         console.log('Verification URL:', data.url);
-        Alert.alert('Mock Success', `Opened verification URL: ${data.url}\n\n(In production this opens the browser)`);
+        showAlert('success', 'Mock Success', `Opened verification URL: ${data.url}\n\n(In production this opens the browser)`);
       }
     } catch (e: any) {
       console.log('Verification error:', e);
-      Alert.alert('Error', 'Failed to start verification');
+      showAlert('error', 'Error', 'Failed to start verification');
     }
   };
 
@@ -57,7 +79,7 @@ export default function EditProfileScreen() {
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
-        Alert.alert('Permission needed', 'Please allow access to your photos.');
+        showAlert('warning', 'Permission needed', 'Please allow access to your photos.');
         return;
       }
 
@@ -98,10 +120,10 @@ export default function EditProfileScreen() {
         body: { action: 'update', userId, avatar_url: urlData.publicUrl }
       });
 
-      Alert.alert('Success', 'Profile picture updated!');
+      showAlert('success', 'Success', 'Profile picture updated!');
     } catch (e: any) {
       console.log('Upload error:', e);
-      Alert.alert('Error', e.message || 'Failed to upload image');
+      showAlert('error', 'Error', e.message || 'Failed to upload image');
     } finally {
       setUploading(false);
     }
@@ -144,27 +166,27 @@ export default function EditProfileScreen() {
 
   const validateForm = (): boolean => {
     if (!name.trim()) {
-      Alert.alert('Required Field', 'Name cannot be empty');
+      showAlert('error', 'Required Field', 'Name cannot be empty');
       return false;
     }
     if (selectedRoles.length === 0) {
-      Alert.alert('Required Field', 'Please select at least one role/instrument');
+      showAlert('error', 'Required Field', 'Please select at least one role/instrument');
       return false;
     }
     if (!bio.trim()) {
-      Alert.alert('Required Field', 'Please enter a bio');
+      showAlert('error', 'Required Field', 'Please enter a bio');
       return false;
     }
     if (!contactNumber.trim()) {
-      Alert.alert('Required Field', 'Contact number is required');
+      showAlert('error', 'Required Field', 'Contact number is required');
       return false;
     }
     if (!address.trim()) {
-      Alert.alert('Required Field', 'Address is required');
+      showAlert('error', 'Required Field', 'Address is required');
       return false;
     }
     if (!avatarUrl) {
-      Alert.alert('Required Field', 'Please upload a profile picture');
+      showAlert('error', 'Required Field', 'Please upload a profile picture');
       return false;
     }
     return true;
@@ -175,30 +197,38 @@ export default function EditProfileScreen() {
       return;
     }
 
-    if (!userId) return;
-    setSaving(true);
-    try {
-      const genreArray = genres.split(',').map(g => g.trim()).filter(g => g);
-      const { error } = await supabase.functions.invoke('manage-profile', {
-        body: {
-          action: 'update',
-          userId,
-          skills: selectedRoles,
-          genres: genreArray,
-          bio,
-          contact_number: contactNumber,
-          address
+    showAlert('warning', 'Save Changes', 'Are you sure you want to update your profile?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Save Changes',
+        style: 'default',
+        onPress: async () => {
+          if (!userId) return;
+          setSaving(true);
+          try {
+            const genreArray = genres.split(',').map(g => g.trim()).filter(g => g);
+            const { error } = await supabase.functions.invoke('manage-profile', {
+              body: {
+                action: 'update',
+                userId,
+                skills: selectedRoles,
+                genres: genreArray,
+                bio,
+                contact_number: contactNumber,
+                address
+              }
+            });
+            if (error) throw error;
+            router.back();
+          } catch (e) {
+            console.log('Error saving profile:', e);
+            showAlert('error', 'Error', 'Failed to save profile.');
+          } finally {
+            setSaving(false);
+          }
         }
-      });
-      if (error) throw error;
-      setModalVisible(false);
-      router.back();
-    } catch (e) {
-      console.log('Error saving profile:', e);
-      alert('Failed to save profile.');
-    } finally {
-      setSaving(false);
-    }
+      }
+    ]);
   };
 
   return (
@@ -361,7 +391,7 @@ export default function EditProfileScreen() {
             {/* Action Buttons */}
             <View style={styles.actionsContainer}>
               <TouchableOpacity
-                onPress={() => setModalVisible(true)}
+                onPress={handleSave}
                 style={[styles.saveButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
               >
                 <Text style={styles.saveButtonText}>Save Profile</Text>
@@ -380,13 +410,13 @@ export default function EditProfileScreen() {
         <Navbar />
       </View>
 
-      <Modal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Save Changes"
-        message="Are you sure you want to update your profile?"
-        buttonText="Save Changes"
-        onConfirm={handleSave}
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
       />
     </>
   );
@@ -557,4 +587,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 });
+
 

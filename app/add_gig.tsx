@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
@@ -65,6 +66,24 @@ export default function AddGigScreen() {
     const [modalVisible, setModalVisible] = useState(false);
     const [authorized, setAuthorized] = useState(false);
     const [checkingAuth, setCheckingAuth] = useState(true);
+
+    // Custom Alert State
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: AlertType;
+        title: string;
+        message: string;
+        buttons?: any[];
+    }>({
+        type: 'info',
+        title: '',
+        message: '',
+    });
+
+    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+        setAlertConfig({ type, title, message, buttons });
+        setAlertVisible(true);
+    };
 
     // Images state
     const [images, setImages] = useState<string[]>([]);
@@ -129,31 +148,31 @@ export default function AddGigScreen() {
     const validateStep = (currentStep: number): boolean => {
         if (currentStep === 1) {
             if (!gigName.trim()) {
-                Alert.alert('Required Field', 'Please enter a gig name');
+                showAlert('error', 'Required Field', 'Please enter a gig name');
                 return false;
             }
             if (!description.trim()) {
-                Alert.alert('Required Field', 'Please enter a description');
+                showAlert('error', 'Required Field', 'Please enter a description');
                 return false;
             }
             if (!address || !latitude || !longitude) {
-                Alert.alert('Required Field', 'Please select a location on the map');
+                showAlert('error', 'Required Field', 'Please select a location on the map');
                 return false;
             }
             if (!cost.trim() || parseFloat(cost) <= 0) {
-                Alert.alert('Required Field', 'Please enter a valid budget/fee');
+                showAlert('error', 'Required Field', 'Please enter a valid budget/fee');
                 return false;
             }
             if (images.length === 0) {
-                Alert.alert('Required Field', 'Please upload at least one event photo');
+                showAlert('error', 'Required Field', 'Please upload at least one event photo');
                 return false;
             }
             if (!eventDate.trim()) {
-                Alert.alert('Required Field', 'Please select an event date');
+                showAlert('error', 'Required Field', 'Please select an event date');
                 return false;
             }
             if (!eventStartTime || !eventEndTime) {
-                Alert.alert('Required Field', 'Please set event start and end times');
+                showAlert('error', 'Required Field', 'Please set event start and end times');
                 return false;
             }
         }
@@ -168,7 +187,16 @@ export default function AddGigScreen() {
         if (step < 3) {
             setStep(step + 1);
         } else {
-            await createGig();
+            // Confirmation before creating
+            showAlert(
+                'warning',
+                'Confirm Gig Creation',
+                'Are you sure you want to create this gig? Please review all details before proceeding.',
+                [
+                    { text: 'Cancel', style: 'cancel', onPress: () => { } },
+                    { text: 'Create', style: 'default', onPress: () => createGig() }
+                ]
+            );
         }
     };
 
@@ -185,7 +213,7 @@ export default function AddGigScreen() {
             // Refresh session to ensure valid token
             const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
             if (sessionError || !session || !session.user) {
-                Alert.alert('Session Expired', 'Please log in again.');
+                showAlert('error', 'Session Expired', 'Please log in again.');
                 router.replace('/');
                 return;
             }
@@ -247,7 +275,7 @@ export default function AddGigScreen() {
             console.error('❌ Error message:', e?.message);
             console.error('❌ Error stack:', e?.stack);
             console.error('❌ Full error object:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
-            Alert.alert('Error', `Failed to create gig: ${e?.message || 'Unknown error'}`);
+            showAlert('error', 'Error', `Failed to create gig: ${e?.message || 'Unknown error'}`);
         } finally {
             setCreating(false);
         }
@@ -359,10 +387,10 @@ export default function AddGigScreen() {
 
             setContractUrl(publicUrl);
             setContractFileName(fileName);
-            Alert.alert('Success', 'Contract uploaded successfully!');
+            showAlert('success', 'Success', 'Contract uploaded successfully!');
         } catch (error) {
             console.error('Error uploading contract:', error);
-            Alert.alert('Error', 'Failed to upload contract. Please try again.');
+            showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
         } finally {
             setUploadingContract(false);
         }
@@ -968,6 +996,15 @@ export default function AddGigScreen() {
                     setLongitude(location.lng);
                     setLocationPickerVisible(false);
                 }}
+            />
+
+            <CustomAlert
+                visible={alertVisible}
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
             />
         </>
     );

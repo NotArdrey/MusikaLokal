@@ -81,6 +81,82 @@ serve(async (req: Request) => {
         // Use the authenticated user ID for all operations
         const effectiveUserId = userId || authenticatedUserId
 
+        // CREATE SINGLE NOTIFICATION (server-side)
+        if (action === 'create_notification') {
+            const { targetUserId, title, message, type, image, meta } = params
+
+            if (!targetUserId || !title || !message) {
+                return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data, error } = await supabaseClient
+                .from('notifications')
+                .insert({
+                    user_id: targetUserId,
+                    type: type || 'info',
+                    title,
+                    message,
+                    image: image || null,
+                    meta: meta || null,
+                    read: false
+                })
+                .select()
+                .single()
+
+            if (error) throw error
+
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
+        // CREATE MULTIPLE NOTIFICATIONS (server-side)
+        if (action === 'create_notifications') {
+            const { notifications } = params
+
+            if (!Array.isArray(notifications) || notifications.length === 0) {
+                return new Response(JSON.stringify({ error: 'No notifications provided' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const payload = notifications
+                .filter((n: any) => n && n.user_id && n.title && n.message)
+                .map((n: any) => ({
+                    user_id: n.user_id,
+                    type: n.type || 'info',
+                    title: n.title,
+                    message: n.message,
+                    image: n.image || null,
+                    meta: n.meta || null,
+                    read: false
+                }))
+
+            if (payload.length === 0) {
+                return new Response(JSON.stringify({ error: 'Invalid notification payload' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data, error } = await supabaseClient
+                .from('notifications')
+                .insert(payload)
+                .select()
+
+            if (error) throw error
+
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            })
+        }
+
         // --- FETCH LISTS (MY GIGS, GROUPS, STUDIOS) ---
 
         // FETCH MY GIGS (using view with computed stats)

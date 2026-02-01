@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
@@ -26,6 +27,24 @@ export default function AddGroupScreen() {
   const [newMember, setNewMember] = useState('');
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Custom Alert State
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   // Musician search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -113,27 +132,27 @@ export default function AddGroupScreen() {
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
       if (!groupName.trim()) {
-        Alert.alert('Required Field', 'Please enter a group name');
+        showAlert('error', 'Required Field', 'Please enter a group name');
         return false;
       }
       if (!genre.trim()) {
-        Alert.alert('Required Field', 'Please enter a genre');
+        showAlert('error', 'Required Field', 'Please enter a genre');
         return false;
       }
       if (!description.trim()) {
-        Alert.alert('Required Field', 'Please enter a description');
+        showAlert('error', 'Required Field', 'Please enter a description');
         return false;
       }
       if (!address || !latitude || !longitude) {
-        Alert.alert('Required Field', 'Please select a location on the map');
+        showAlert('error', 'Required Field', 'Please select a location on the map');
         return false;
       }
       if (!hourlyRate.trim() || parseFloat(hourlyRate) <= 0) {
-        Alert.alert('Required Field', 'Please enter a valid hourly rate');
+        showAlert('error', 'Required Field', 'Please enter a valid hourly rate');
         return false;
       }
       if (images.length === 0) {
-        Alert.alert('Required Field', 'Please upload at least one group photo');
+        showAlert('error', 'Required Field', 'Please upload at least one group photo');
         return false;
       }
     }
@@ -144,11 +163,20 @@ export default function AddGroupScreen() {
     if (!validateStep(step)) {
       return;
     }
-    
+
     if (step < 3) {
       setStep(step + 1);
     } else {
-      await createGroup();
+      // Confirmation before creating
+      showAlert(
+        'warning',
+        'Confirm Group Creation',
+        'Are you sure you want to create this group? Please review all details before proceeding.',
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => { } },
+          { text: 'Create', style: 'default', onPress: () => createGroup() }
+        ]
+      );
     }
   };
 
@@ -165,7 +193,7 @@ export default function AddGroupScreen() {
       // Refresh session to ensure valid token
       const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
       if (sessionError || !session || !session.user) {
-        Alert.alert('Session Expired', 'Please log in again.');
+        showAlert('error', 'Session Expired', 'Please log in again.');
         router.replace('/');
         return;
       }
@@ -191,9 +219,9 @@ export default function AddGroupScreen() {
       setNewGroupId(data.id);
       setModalVisible(true);
       console.log('Group Created');
-    } catch (e) {
+    } catch (e: any) {
       console.log('Error creating group:', e);
-      Alert.alert('Error', 'Failed to create group');
+      showAlert('error', 'Error', 'Failed to create group');
     } finally {
       setCreating(false);
     }
@@ -532,6 +560,14 @@ export default function AddGroupScreen() {
           setLongitude(location.lng);
           setLocationPickerVisible(false);
         }}
+      />
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
       />
     </>
   );

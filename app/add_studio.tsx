@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
@@ -64,6 +65,24 @@ export default function AddStudioScreen() {
     const [checkingAuth, setCheckingAuth] = useState(true);
     const [creating, setCreating] = useState(false);
     const [newStudioId, setNewStudioId] = useState<string | null>(null);
+
+    // Custom Alert State
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: AlertType;
+        title: string;
+        message: string;
+        buttons?: any[];
+    }>({
+        type: 'info',
+        title: '',
+        message: '',
+    });
+
+    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+        setAlertConfig({ type, title, message, buttons });
+        setAlertVisible(true);
+    };
 
     // Arrays
     const [amenities, setAmenities] = useState<string[]>([]);
@@ -156,23 +175,23 @@ export default function AddStudioScreen() {
     const validateStep = (currentStep: number): boolean => {
         if (currentStep === 1) {
             if (!studioName.trim()) {
-                Alert.alert('Required Field', 'Please enter a studio name');
+                showAlert('error', 'Required Field', 'Please enter a studio name');
                 return false;
             }
             if (!description.trim()) {
-                Alert.alert('Required Field', 'Please enter a description');
+                showAlert('error', 'Required Field', 'Please enter a description');
                 return false;
             }
             if (!address || !latitude || !longitude) {
-                Alert.alert('Required Field', 'Please select a location on the map');
+                showAlert('error', 'Required Field', 'Please select a location on the map');
                 return false;
             }
             if (!cost.trim() || parseFloat(cost) <= 0) {
-                Alert.alert('Required Field', 'Please enter a valid hourly rate');
+                showAlert('error', 'Required Field', 'Please enter a valid hourly rate');
                 return false;
             }
             if (images.length === 0) {
-                Alert.alert('Required Field', 'Please upload at least one studio photo');
+                showAlert('error', 'Required Field', 'Please upload at least one studio photo');
                 return false;
             }
         }
@@ -187,8 +206,16 @@ export default function AddStudioScreen() {
         if (step < 4) {
             setStep(step + 1);
         } else {
-            // We are on step 4, perform creation
-            await createStudio();
+            // Confirmation before creating
+            showAlert(
+                'warning',
+                'Confirm Studio Listing',
+                'Are you sure you want to create this studio listing? Please review all details before proceeding.',
+                [
+                    { text: 'Cancel', style: 'cancel', onPress: () => { } },
+                    { text: 'Create', style: 'default', onPress: () => createStudio() }
+                ]
+            );
         }
     };
 
@@ -211,7 +238,7 @@ export default function AddStudioScreen() {
             });
 
             if (sessionError || !session || !session.user) {
-                Alert.alert('Session Expired', 'Please log in again.');
+                showAlert('error', 'Session Expired', 'Please log in again.');
                 router.replace('/');
                 return;
             }
@@ -276,7 +303,7 @@ export default function AddStudioScreen() {
             console.error('❌ Error message:', e?.message);
             console.error('❌ Error stack:', e?.stack);
             console.error('❌ Full error object:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
-            Alert.alert('Error', `Failed to create studio: ${e?.message || 'Unknown error'}`);
+            showAlert('error', 'Error', `Failed to create studio: ${e?.message || 'Unknown error'}`);
         } finally {
             setCreating(false);
         }
@@ -352,7 +379,7 @@ export default function AddStudioScreen() {
             // Get current user session
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) {
-                Alert.alert('Error', 'Session expired. Please log in again.');
+                showAlert('error', 'Error', 'Session expired. Please log in again.');
                 setUploadingContract(false);
                 return;
             }
@@ -380,10 +407,10 @@ export default function AddStudioScreen() {
 
             setContractUrl(publicUrl);
             setContractFileName(fileName);
-            Alert.alert('Success', 'Contract uploaded successfully!');
+            showAlert('success', 'Success', 'Contract uploaded successfully!');
         } catch (error) {
             console.error('Error uploading contract:', error);
-            Alert.alert('Error', 'Failed to upload contract. Please try again.');
+            showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
         } finally {
             setUploadingContract(false);
         }
@@ -404,7 +431,7 @@ export default function AddStudioScreen() {
 
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) {
-                Alert.alert('Error', 'Session expired. Please log in again.');
+                showAlert('error', 'Error', 'Session expired. Please log in again.');
                 setUploadingContract(false);
                 return;
             }
@@ -425,10 +452,10 @@ export default function AddStudioScreen() {
 
             setContractUrl(publicUrl);
             setContractFileName(fileName);
-            Alert.alert('Success', 'Contract uploaded successfully!');
+            showAlert('success', 'Success', 'Contract uploaded successfully!');
         } catch (error) {
             console.error('Error uploading contract:', error);
-            Alert.alert('Error', 'Failed to upload contract. Please try again.');
+            showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
         } finally {
             setUploadingContract(false);
             if (event.target) {

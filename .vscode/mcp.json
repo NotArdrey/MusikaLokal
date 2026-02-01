@@ -1,55 +1,8 @@
 {
-	"servers": {
-		"com.supabase/mcp": {
-			"type": "stdio",
-			"command": "npx",
-				"args": [
-					"@supabase/mcp-server-supabase@0.6.2",
-					"--project-ref",
-					"aefldxegsvzecshlayza",
-					"--read-only",
-					"--features",
-					"database,storage", 
-					"--api-url",
-					"https://aefldxegsvzecshlayza.supabase.co"
-				],
-			"env": {
-				"SUPABASE_ACCESS_TOKEN": "sbp_329b45d4f523b89b05bc579dbf5a7383ac4f5238"
-			},
-			"gallery": "https://api.mcp.github.com",
-			"version": "0.6.2"
-		}
-	},
-	"inputs": [
-		{
-			"id": "project-ref",
-			"type": "promptString",
-			"description": "Supabase project reference ID",
-			"password": false
-		},
-		{
-			"id": "read-only",
-			"type": "promptString",
-			"description": "Enable read-only mode",
-			"password": false
-		},
-		{
-			"id": "features",
-			"type": "promptString",
-			"description": "Comma-separated list of features to enable",
-			"password": false
-		},
-		{
-			"id": "api-url",
-			"type": "promptString",
-			"description": "Custom API URL",
-			"password": false
-		},
-		{
-			"id": "SUPABASE_ACCESS_TOKEN",
-			"type": "promptString",
-			"description": "Personal access token for Supabase API",
-			"password": true
-		}
-	]
+  "mcpServers": {
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp"
+    }
+  }
 }

@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
@@ -12,11 +13,7 @@ export default function NotificationsScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
-    useEffect(() => {
-        fetchNotifications();
-    }, []);
-
-    const fetchNotifications = async () => {
+    const fetchNotifications = useCallback(async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
@@ -33,7 +30,13 @@ export default function NotificationsScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            fetchNotifications();
+        }, [fetchNotifications])
+    );
 
     const onRefresh = React.useCallback(() => {
         setRefreshing(true);
@@ -95,6 +98,7 @@ export default function NotificationsScreen() {
                     onPress: async () => {
                         setProcessingTransferId(requestId);
                         try {
+                            const { data: { user } } = await supabase.auth.getUser();
                             const { error } = await supabase.rpc('accept_leadership_transfer', {
                                 request_id: requestId
                             });
@@ -110,12 +114,16 @@ export default function NotificationsScreen() {
 
                             if (request) {
                                 // Notify old leader
-                                await supabase.from('notifications').insert({
-                                    user_id: request.from_user_id,
-                                    type: 'success',
-                                    title: 'Leadership Transfer Accepted',
-                                    message: `Your leadership transfer request for "${(request.groups as any)?.name}" was accepted.`,
-                                    meta: { type: 'leadership_transfer_accepted', group_id: request.group_id }
+                                await supabase.functions.invoke('manage-listings', {
+                                    body: {
+                                        action: 'create_notification',
+                                        userId: user?.id,
+                                        targetUserId: request.from_user_id,
+                                        type: 'success',
+                                        title: 'Leadership Transfer Accepted',
+                                        message: `Your leadership transfer request for "${(request.groups as any)?.name}" was accepted.`,
+                                        meta: { type: 'leadership_transfer_accepted', group_id: request.group_id }
+                                    }
                                 });
 
                                 // Notify group members
@@ -125,7 +133,6 @@ export default function NotificationsScreen() {
                                     .eq('group_id', request.group_id)
                                     .neq('user_id', request.from_user_id);
 
-                                const { data: { user } } = await supabase.auth.getUser();
                                 if (members && members.length > 0 && user) {
                                     const memberNotifications = members
                                         .filter(m => m.user_id !== user.id)
@@ -138,7 +145,13 @@ export default function NotificationsScreen() {
                                         }));
 
                                     if (memberNotifications.length > 0) {
-                                        await supabase.from('notifications').insert(memberNotifications);
+                                        await supabase.functions.invoke('manage-listings', {
+                                            body: {
+                                                action: 'create_notifications',
+                                                userId: user?.id,
+                                                notifications: memberNotifications
+                                            }
+                                        });
                                     }
                                 }
                             }
@@ -179,6 +192,7 @@ export default function NotificationsScreen() {
                     onPress: async () => {
                         setProcessingTransferId(requestId);
                         try {
+                            const { data: { user } } = await supabase.auth.getUser();
                             const { error } = await supabase.rpc('decline_leadership_transfer', {
                                 request_id: requestId
                             });
@@ -193,12 +207,16 @@ export default function NotificationsScreen() {
                                 .single();
 
                             if (request) {
-                                await supabase.from('notifications').insert({
-                                    user_id: request.from_user_id,
-                                    type: 'warning',
-                                    title: 'Leadership Transfer Declined',
-                                    message: `Your leadership transfer request for "${(request.groups as any)?.name}" was declined.`,
-                                    meta: { type: 'leadership_transfer_declined' }
+                                await supabase.functions.invoke('manage-listings', {
+                                    body: {
+                                        action: 'create_notification',
+                                        userId: user?.id,
+                                        targetUserId: request.from_user_id,
+                                        type: 'warning',
+                                        title: 'Leadership Transfer Declined',
+                                        message: `Your leadership transfer request for "${(request.groups as any)?.name}" was declined.`,
+                                        meta: { type: 'leadership_transfer_declined' }
+                                    }
                                 });
                             }
 

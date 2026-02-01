@@ -1,12 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Calendar } from 'react-native-calendars';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
-import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
@@ -64,10 +64,32 @@ export default function EditGigScreen() {
   const [eventDate, setEventDate] = useState('');
   const [eventStartTime, setEventStartTime] = useState('06:00 PM');
   const [eventEndTime, setEventEndTime] = useState('11:00 PM');
-  const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Custom Alert State
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[]
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   // Mock Data
   const [documents, setDocuments] = useState(['Contract.pdf', 'Rider_v2.pdf']);
@@ -99,7 +121,7 @@ export default function EditGigScreen() {
       });
 
       if (profile?.role !== 'venue-owner') {
-        Alert.alert('Unauthorized', 'Only venue owners can edit gigs.');
+        showAlert('error', 'Unauthorized', 'Only venue owners can edit gigs.');
         router.replace('/home');
         return;
       }
@@ -130,7 +152,7 @@ export default function EditGigScreen() {
       // Ensure id is a string, not an array
       const gigId = Array.isArray(id) ? id[0] : id;
       if (!gigId) {
-        Alert.alert('Error', 'Invalid gig ID');
+        showAlert('error', 'Error', 'Invalid gig ID');
         router.replace('/home');
         return;
       }
@@ -143,7 +165,7 @@ export default function EditGigScreen() {
 
       // If no data returned, user doesn't own this gig
       if (!data) {
-        Alert.alert('Not Found', 'Gig not found or you do not have permission to edit it.');
+        showAlert('error', 'Not Found', 'Gig not found or you do not have permission to edit it.');
         router.replace('/home');
         return;
       }
@@ -170,7 +192,7 @@ export default function EditGigScreen() {
       }
     } catch (e) {
       console.log('Error fetching gig details:', e);
-      Alert.alert('Error', 'Failed to load gig details.');
+      showAlert('error', 'Error', 'Failed to load gig details.');
       router.replace('/home');
     } finally {
       setLoading(false);
@@ -179,31 +201,31 @@ export default function EditGigScreen() {
 
   const validateForm = (): boolean => {
     if (!gigName.trim()) {
-      Alert.alert('Required Field', 'Please enter a gig name');
+      showAlert('error', 'Required Field', 'Please enter a gig name');
       return false;
     }
     if (!description.trim()) {
-      Alert.alert('Required Field', 'Please enter a description');
+      showAlert('error', 'Required Field', 'Please enter a description');
       return false;
     }
     if (!address || !latitude || !longitude) {
-      Alert.alert('Required Field', 'Please select a location on the map');
+      showAlert('error', 'Required Field', 'Please select a location on the map');
       return false;
     }
     if (!cost.trim() || parseFloat(cost) <= 0) {
-      Alert.alert('Required Field', 'Please enter a valid budget/fee');
+      showAlert('error', 'Required Field', 'Please enter a valid budget/fee');
       return false;
     }
     if (images.length === 0) {
-      Alert.alert('Required Field', 'Please upload at least one event photo');
+      showAlert('error', 'Required Field', 'Please upload at least one event photo');
       return false;
     }
     if (!eventDate.trim()) {
-      Alert.alert('Required Field', 'Please select an event date');
+      showAlert('error', 'Required Field', 'Please select an event date');
       return false;
     }
     if (!eventStartTime || !eventEndTime) {
-      Alert.alert('Required Field', 'Please set event start and end times');
+      showAlert('error', 'Required Field', 'Please set event start and end times');
       return false;
     }
     return true;
@@ -214,88 +236,63 @@ export default function EditGigScreen() {
       return;
     }
 
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Ensure id is a string, not an array
-      const gigId = Array.isArray(id) ? id[0] : id;
-      if (!gigId) {
-        alert('Invalid gig ID');
-        return;
-      }
-
-      const payload = {
-        name: gigName,
-        description,
-        location: address,
-        budget: parseFloat(cost) || 0,
-        images: images,
-        contract_url: contractUrl || null,
-        latitude,
-        longitude,
-        event_date: eventDate,
-        requirements: {
-          event_start_time: eventStartTime,
-          event_end_time: eventEndTime,
-          musician_type: musicianType,
-        },
-      };
-
-      console.log('🔵 Updating gig with payload:', JSON.stringify({ action: 'update', type: 'gig', id: gigId, userId: user.id, payload }, null, 2));
-
-      const response = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'gig', id: gigId, userId: user.id, payload }
-      });
-
-      console.log('🔵 Full response:', response);
-      console.log('🔵 Response data:', response.data);
-      console.log('🔵 Response error:', response.error);
-
-      // Try to read response body if available
-      if ((response as any).response) {
-        try {
-          const rawResponse = (response as any).response as Response;
-          const clonedResponse = rawResponse.clone();
-          const responseText = await clonedResponse.text();
-          console.log('🔵 Raw response body:', responseText);
+    showAlert('warning', 'Save Changes', 'Are you sure you want to update this gig profile?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Save & Update',
+        style: 'default',
+        onPress: async () => {
           try {
-            const responseJson = JSON.parse(responseText);
-            console.log('🔵 Parsed response JSON:', responseJson);
-          } catch (parseErr) {
-            console.log('🔵 Could not parse response as JSON');
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            // Ensure id is a string, not an array
+            const gigId = Array.isArray(id) ? id[0] : id;
+            if (!gigId) {
+              showAlert('error', 'Error', 'Invalid gig ID');
+              return;
+            }
+
+            const payload = {
+              name: gigName,
+              description,
+              location: address,
+              budget: parseFloat(cost) || 0,
+              images: images,
+              contract_url: contractUrl || null,
+              latitude,
+              longitude,
+              event_date: eventDate,
+              requirements: {
+                event_start_time: eventStartTime,
+                event_end_time: eventEndTime,
+                musician_type: musicianType,
+              },
+            };
+
+            console.log('🔵 Updating gig with payload:', JSON.stringify({ action: 'update', type: 'gig', id: gigId, userId: user.id, payload }, null, 2));
+
+            const response = await supabase.functions.invoke('manage-listings', {
+              body: { action: 'update', type: 'gig', id: gigId, userId: user.id, payload }
+            });
+
+            if (response.error) {
+              throw response.error;
+            }
+
+            console.log('✅ Gig Updated successfully');
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.push('/manage_gig');
+            }
+          } catch (e: any) {
+            console.error('❌ Error updating gig:', e);
+            showAlert('error', 'Error', `Failed to update gig: ${e?.message || 'Unknown error'}`);
           }
-        } catch (readErr) {
-          console.log('🔵 Could not read raw response:', readErr);
         }
       }
-
-      if (response.error) {
-        console.error('❌ Error details:', JSON.stringify(response.error, null, 2));
-        // Try to get more error info from data
-        if (response.data) {
-          console.error('❌ Error data from response:', JSON.stringify(response.data, null, 2));
-          throw new Error(JSON.stringify(response.data));
-        }
-        throw response.error;
-      }
-
-      const { data, error } = response;
-
-      setModalVisible(false);
-      console.log('✅ Gig Updated successfully');
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.push('/manage_gig');
-      }
-    } catch (e: any) {
-      console.error('❌ Error updating gig:', e);
-      console.error('❌ Error message:', e?.message);
-      console.error('❌ Error stack:', e?.stack);
-      console.error('❌ Full error object:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
-      alert(`Failed to update gig: ${e?.message || 'Unknown error'}`);
-    }
+    ]);
   };
 
   const renderSectionHeader = (title: string, icon: string) => (
@@ -359,7 +356,7 @@ export default function EditGigScreen() {
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        Alert.alert('Error', 'Session expired. Please log in again.');
+        showAlert('error', 'Error', 'Session expired. Please log in again.');
         setUploadingContract(false);
         return;
       }
@@ -384,10 +381,10 @@ export default function EditGigScreen() {
 
       setContractUrl(publicUrl);
       setContractFileName(fileName);
-      Alert.alert('Success', 'Contract uploaded successfully!');
+      showAlert('success', 'Success', 'Contract uploaded successfully!');
     } catch (error) {
       console.error('Error uploading contract:', error);
-      Alert.alert('Error', 'Failed to upload contract. Please try again.');
+      showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
     } finally {
       setUploadingContract(false);
     }
@@ -408,7 +405,7 @@ export default function EditGigScreen() {
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        Alert.alert('Error', 'Session expired. Please log in again.');
+        showAlert('error', 'Error', 'Session expired. Please log in again.');
         setUploadingContract(false);
         return;
       }
@@ -429,10 +426,10 @@ export default function EditGigScreen() {
 
       setContractUrl(publicUrl);
       setContractFileName(fileName);
-      Alert.alert('Success', 'Contract uploaded successfully!');
+      showAlert('success', 'Success', 'Contract uploaded successfully!');
     } catch (error) {
       console.error('Error uploading contract:', error);
-      Alert.alert('Error', 'Failed to upload contract. Please try again.');
+      showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
     } finally {
       setUploadingContract(false);
       if (event.target) {
@@ -729,7 +726,7 @@ export default function EditGigScreen() {
           <View style={styles.footerActions}>
             <TouchableOpacity
               style={[styles.saveButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
-              onPress={() => setModalVisible(true)}
+              onPress={handleSave}
             >
               <Text style={styles.saveButtonText}>Save Changes</Text>
             </TouchableOpacity>
@@ -747,13 +744,13 @@ export default function EditGigScreen() {
         <Navbar />
       </View>
 
-      <Modal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Save Changes"
-        message="Are you sure you want to update this gig profile?"
-        buttonText="Save & Update"
-        onConfirm={handleSave}
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
       />
 
       <LocationPicker
