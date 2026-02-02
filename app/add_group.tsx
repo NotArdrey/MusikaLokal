@@ -27,6 +27,8 @@ export default function AddGroupScreen() {
   const [newMember, setNewMember] = useState('');
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [currentUserName, setCurrentUserName] = useState<string>('');
+  const [currentUserId, setCurrentUserId] = useState<string>('');
 
   // Custom Alert State
   const [alertVisible, setAlertVisible] = useState(false);
@@ -117,6 +119,12 @@ export default function AddGroupScreen() {
         return;
       }
 
+      // Store current user info and add them as first member
+      setCurrentUserId(user.id);
+      const userName = profile?.full_name || 'Me';
+      setCurrentUserName(userName);
+      setMembers([userName + ' (You)']); // Auto-add current user to members
+
       setAuthorized(true);
     } catch (e) {
       console.error('Authorization check failed:', e);
@@ -167,14 +175,13 @@ export default function AddGroupScreen() {
     if (step < 3) {
       setStep(step + 1);
     } else {
-      // Confirmation before creating
-      showAlert(
-        'warning',
+      // Confirmation before creating - use native Alert for reliability
+      Alert.alert(
         'Confirm Group Creation',
         'Are you sure you want to create this group? Please review all details before proceeding.',
         [
-          { text: 'Cancel', style: 'cancel', onPress: () => { } },
-          { text: 'Create', style: 'default', onPress: () => createGroup() }
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Create', onPress: () => createGroup() }
         ]
       );
     }
@@ -261,6 +268,11 @@ export default function AddGroupScreen() {
   };
 
   const removeMember = (index: number) => {
+    // Prevent removing yourself (first member)
+    if (index === 0) {
+      Alert.alert('Cannot Remove', 'You cannot remove yourself from the group.');
+      return;
+    }
     setMembers(members.filter((_, i) => i !== index));
   };
 
@@ -460,19 +472,29 @@ export default function AddGroupScreen() {
                 </View>
               ) : (
                 <View style={styles.membersList}>
-                  {members.map((member, index) => (
-                    <View key={index} style={[styles.memberItem, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#F3F4F6' }]}>
-                      <View style={styles.memberInfo}>
-                        <View style={[styles.avatarPlaceholder, { backgroundColor: '#E0E7FF' }]}>
-                          <Text style={styles.avatarText}>{member.charAt(0)}</Text>
+                  {members.map((member, index) => {
+                    const isCurrentUser = index === 0;
+                    return (
+                      <View key={index} style={[styles.memberItem, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: isDark ? '#374151' : '#F3F4F6' }]}>
+                        <View style={styles.memberInfo}>
+                          <View style={[styles.avatarPlaceholder, { backgroundColor: isCurrentUser ? colors.primary : '#E0E7FF' }]}>
+                            <Text style={[styles.avatarText, { color: isCurrentUser ? '#fff' : '#4F46E5' }]}>{member.charAt(0)}</Text>
+                          </View>
+                          <View>
+                            <Text style={[styles.memberName, { color: colors.text }]}>{member}</Text>
+                            {isCurrentUser && (
+                              <Text style={{ fontSize: 11, color: colors.primary, fontFamily: 'Poppins_500Medium' }}>Group Creator</Text>
+                            )}
+                          </View>
                         </View>
-                        <Text style={[styles.memberName, { color: colors.text }]}>{member}</Text>
+                        {!isCurrentUser && (
+                          <TouchableOpacity onPress={() => removeMember(index)}>
+                            <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
+                          </TouchableOpacity>
+                        )}
                       </View>
-                      <TouchableOpacity onPress={() => removeMember(index)}>
-                        <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </View>
               )}
             </View>
@@ -518,15 +540,29 @@ export default function AddGroupScreen() {
               <TouchableOpacity
                 onPress={handleBack}
                 disabled={creating}
-                style={[styles.backBtn, { borderColor: isDark ? '#374151' : '#E5E7EB', opacity: creating ? 0.5 : 1 }]}
+                style={[
+                  styles.backBtn, 
+                  { 
+                    borderColor: isDark ? '#6366F1' : '#E5E7EB',
+                    backgroundColor: isDark ? 'transparent' : '#fff',
+                    opacity: creating ? 0.5 : 1 
+                  }
+                ]}
               >
-                <Text style={[styles.backBtnText, { color: colors.text }]}>Back</Text>
+                <Text style={[styles.backBtnText, { color: isDark ? '#A5B4FC' : colors.text }]}>Back</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
               onPress={handleNext}
               disabled={creating}
-              style={[styles.nextBtn, { backgroundColor: colors.primary, shadowColor: colors.primary, opacity: creating ? 0.7 : 1 }]}
+              style={[
+                styles.nextBtn, 
+                { 
+                  backgroundColor: creating ? (isDark ? '#4338CA' : '#9CA3AF') : colors.primary,
+                  opacity: creating ? 0.7 : 1,
+                },
+                step > 1 ? { flex: 1 } : { width: '100%' }
+              ]}
             >
               {creating ? (
                 <ActivityIndicator color="#fff" size="small" />
@@ -763,24 +799,26 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
+    height: 56,
   },
   backBtnText: {
     fontFamily: 'Poppins_600SemiBold',
+    fontSize: 16,
   },
   nextBtn: {
-    flex: 1,
     paddingVertical: 16,
+    paddingHorizontal: 24,
     borderRadius: 12,
     alignItems: 'center',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    justifyContent: 'center',
+    height: 56,
   },
   nextBtnText: {
     fontFamily: 'Poppins_600SemiBold',
     color: '#fff',
+    fontSize: 16,
   },
   searchResultsContainer: {
     marginTop: 8,

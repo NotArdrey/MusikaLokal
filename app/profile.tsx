@@ -1,13 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
+import { ResizeMode, Video } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import { Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const GRID_GAP = 2;
+const NUM_COLUMNS = 3;
+const ITEM_SIZE = (SCREEN_WIDTH - (GRID_GAP * (NUM_COLUMNS + 1))) / NUM_COLUMNS;
 
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
@@ -18,11 +24,14 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
 
-  React.useEffect(() => {
-    if (!authLoading) {
-      fetchProfile();
-    }
-  }, [params.userId, authLoading, currentUserId]);
+  // Refresh profile data every time the screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (!authLoading) {
+        fetchProfile();
+      }
+    }, [params.userId, authLoading, currentUserId])
+  );
 
   async function fetchProfile() {
     try {
@@ -79,6 +88,19 @@ export default function ProfileScreen() {
   ];
 
   const [uploading, setUploading] = useState(false);
+  const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
+  const [mediaModalVisible, setMediaModalVisible] = useState(false);
+
+  // Check if URL is a video
+  const isVideo = (url: string) => {
+    const videoExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
+    return videoExtensions.some(ext => url.toLowerCase().includes(ext));
+  };
+
+  const openMediaViewer = (url: string) => {
+    setSelectedMedia(url);
+    setMediaModalVisible(true);
+  };
 
   const addMediaToPortfolio = async () => {
     try {
@@ -95,30 +117,65 @@ export default function ProfileScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'all', // Images + Videos
+        mediaTypes: ['images', 'videos'],
         allowsEditing: true,
-        quality: 0.8,
+        quality: 0.5,
       });
 
       if (result.canceled || !result.assets[0]) return;
 
-      setUploading(true);
       const file = result.assets[0];
-      const fileExt = file.uri.split('.').pop() || 'jpg';
-      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+      setUploading(true);
+      
+      const fileExt = file.uri.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileName = `${user.id}/portfolio/${Date.now()}.${fileExt}`;
+      const mimeType = file.mimeType || (fileExt === 'mp4' ? 'video/mp4' : `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`);
 
-      const response = await fetch(file.uri);
-      const blob = await response.blob();
+      console.log('📤 Uploading portfolio media...');
+      console.log('📍 File URI:', file.uri);
+      console.log('📁 File name:', fileName);
 
-      const { data, error } = await supabase.storage
-        .from('portfolio')
-        .upload(fileName, blob, { contentType: file.type || `image/${fileExt}` });
+      // Create FormData for upload
+      const formData = new FormData();
+      formData.append('file', {
+        uri: file.uri,
+        name: fileName.split('/').pop(),
+        type: mimeType,
+      } as any);
 
-      if (error) throw error;
+      // Get Supabase URL and key from the client
+      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+      
+      // Get current session for auth
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token || supabaseKey;
 
+      // Upload directly via fetch with FormData
+      const uploadResponse = await fetch(
+        `${supabaseUrl}/storage/v1/object/avatars/${fileName}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'x-upsert': 'true',
+          },
+          body: formData,
+        }
+      );
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error('❌ Upload failed:', errorText);
+        throw new Error(errorText || 'Upload failed');
+      }
+
+      // Get public URL
       const { data: urlData } = supabase.storage
-        .from('portfolio')
-        .getPublicUrl(data.path);
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      console.log('✅ Uploaded:', urlData.publicUrl);
 
       // Add URL to portfolio_urls via Edge Function
       await supabase.functions.invoke('manage-profile', {
@@ -252,41 +309,100 @@ export default function ProfileScreen() {
             </View>
           )}
 
-          {/* Media Section */}
+          {/* Media Section - Instagram Style Grid */}
           <View style={styles.mediaSection}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Media & Portfolio</Text>
+            <View style={styles.mediaSectionHeader}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Media & Portfolio</Text>
+              {isOwner && profile?.portfolio_urls?.length > 0 && (
+                <TouchableOpacity
+                  onPress={addMediaToPortfolio}
+                  disabled={uploading}
+                  style={[styles.addMediaBtn, { backgroundColor: colors.primary }]}
+                >
+                  <Ionicons name="add" size={20} color="#fff" />
+                </TouchableOpacity>
+              )}
+            </View>
+            
             {(!profile?.portfolio_urls || profile.portfolio_urls.length === 0) ? (
               <View style={[styles.emptyMedia, { borderColor: colors.border }]}>
-                <Ionicons name="images-outline" size={32} color={colors.textSecondary} />
-                <Text style={{ marginTop: 8, fontSize: 14, fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>No media yet</Text>
+                <Ionicons name="images-outline" size={48} color={colors.textSecondary} />
+                <Text style={[styles.emptyMediaText, { color: colors.textSecondary }]}>No media yet</Text>
+                <Text style={[styles.emptyMediaSubtext, { color: colors.muted }]}>
+                  {isOwner ? "Share your best work!" : "This musician hasn't added media yet"}
+                </Text>
                 {isOwner && (
                   <TouchableOpacity
                     onPress={addMediaToPortfolio}
                     disabled={uploading}
                     style={[styles.uploadBtn, { backgroundColor: uploading ? colors.textSecondary : colors.primary }]}
                   >
+                    <Ionicons name="cloud-upload-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
                     <Text style={styles.uploadBtnText}>
-                      {uploading ? 'Uploading...' : 'Add Media'}
+                      {uploading ? 'Uploading...' : 'Add Photos & Videos'}
                     </Text>
                   </TouchableOpacity>
                 )}
               </View>
             ) : (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaScroll}>
+              <View style={styles.mediaGrid}>
                 {profile.portfolio_urls.map((url: string, i: number) => (
-                  <View key={i} style={[styles.mediaItem, { backgroundColor: colors.surface }]}>
+                  <TouchableOpacity 
+                    key={i} 
+                    style={styles.gridItem}
+                    onPress={() => openMediaViewer(url)}
+                    activeOpacity={0.8}
+                  >
                     <Image
                       source={{ uri: url }}
-                      style={[styles.mediaImage, { opacity: 0.9 }]}
+                      style={styles.gridImage}
+                      resizeMode="cover"
                     />
-                    <View style={styles.playOverlay}>
-                      <Ionicons name="play-circle" size={40} color="#fff" />
-                    </View>
-                  </View>
+                    {isVideo(url) && (
+                      <View style={styles.videoIndicator}>
+                        <Ionicons name="play" size={24} color="#fff" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
                 ))}
-              </ScrollView>
+              </View>
             )}
           </View>
+
+          {/* Media Viewer Modal */}
+          <Modal
+            visible={mediaModalVisible}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setMediaModalVisible(false)}
+          >
+            <View style={styles.modalContainer}>
+              <TouchableOpacity 
+                style={styles.modalCloseBtn}
+                onPress={() => setMediaModalVisible(false)}
+              >
+                <Ionicons name="close" size={28} color="#fff" />
+              </TouchableOpacity>
+              
+              {selectedMedia && (
+                isVideo(selectedMedia) ? (
+                  <Video
+                    source={{ uri: selectedMedia }}
+                    style={styles.modalMedia}
+                    useNativeControls
+                    resizeMode={ResizeMode.CONTAIN}
+                    shouldPlay
+                  />
+                ) : (
+                  <Image
+                    source={{ uri: selectedMedia }}
+                    style={styles.modalMedia}
+                    resizeMode="contain"
+                  />
+                )
+              )}
+            </View>
+          </Modal>
 
         </ScrollView>
         <Navbar />
@@ -418,61 +534,100 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   mediaSection: {
-    paddingHorizontal: 24,
     marginTop: 24,
   },
-  sectionTitle: {
+  mediaSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 24,
     marginBottom: 16,
+  },
+  sectionTitle: {
     fontSize: 16,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  addMediaBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyMedia: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 40,
-    borderWidth: 1,
+    paddingVertical: 48,
+    marginHorizontal: 24,
+    borderWidth: 2,
     borderStyle: 'dashed',
     borderRadius: 16,
   },
-  uploadBtn: {
+  emptyMediaText: {
     marginTop: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    fontSize: 16,
+    fontFamily: 'Poppins_500Medium',
+  },
+  emptyMediaSubtext: {
+    marginTop: 4,
+    fontSize: 13,
+    fontFamily: 'Poppins_400Regular',
+    textAlign: 'center',
+    paddingHorizontal: 32,
+  },
+  uploadBtn: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   uploadBtnText: {
     fontFamily: 'Poppins_500Medium',
     color: '#fff',
-    fontSize: 12,
+    fontSize: 14,
   },
-  mediaScroll: {
-    marginLeft: -24,
-    paddingHorizontal: 24,
-    gap: 12,
-    marginRight: -24,
+  mediaGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: GRID_GAP,
   },
-  mediaItem: {
-    width: 256,
-    height: 160,
-    borderRadius: 16,
-    overflow: 'hidden',
+  gridItem: {
+    width: ITEM_SIZE,
+    height: ITEM_SIZE,
+    margin: GRID_GAP / 2,
     position: 'relative',
-    shadowOpacity: 0.1,
-    elevation: 2,
   },
-  mediaImage: {
+  gridImage: {
     width: '100%',
     height: '100%',
+    backgroundColor: '#1a1a1a',
   },
-  playOverlay: {
+  videoIndicator: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 4,
+    padding: 4,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-  }
+    alignItems: 'center',
+  },
+  modalCloseBtn: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+  },
+  modalMedia: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_WIDTH,
+  },
 });
 

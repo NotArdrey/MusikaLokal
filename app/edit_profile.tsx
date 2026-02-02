@@ -1,591 +1,475 @@
-import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { supabase } from '../lib/supabase';
-import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import Header from '../src/components/header';
-import Navbar from '../src/components/navbar';
-import { useTheme } from '../src/context/ThemeContext';
+import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import { router } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { supabase } from "../lib/supabase";
+import Header from "../src/components/header";
+import Navbar from "../src/components/navbar";
+import { useTheme } from "../src/context/ThemeContext";
+
+const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop";
+
+const ROLES = [
+  "Vocalist", "Guitarist", "Bassist", "Drummer", "Keyboardist", "DJ", "Producer",
+  "Sound Engineer", "Saxophonist", "Violinist", "Cellist", "Pianist", "Flutist",
+  "Trumpeter", "Percussionist", "Harpist", "Ukulele Player", "Banjo Player",
+  "Harmonica Player", "Beatboxer", "Rapper", "Songwriter", "Composer",
+  "Music Director", "Conductor", "Session Musician", "Live Sound Engineer",
+  "Recording Engineer", "Mixing Engineer"
+];
+
+const GENRES = [
+  "Rock", "Pop", "Jazz", "Blues", "Hip Hop", "R&B", "Country", "Electronic",
+  "Classical", "Reggae", "Metal", "Punk", "Folk", "Soul", "Funk", "Disco",
+  "Indie", "Alternative", "Latin", "World Music", "Gospel", "EDM", "House",
+  "Techno", "Dubstep", "Acoustic", "Instrumental", "Ambient", "Lo-Fi", "OPM"
+];
 
 export default function EditProfileScreen() {
   const { colors, isDark } = useTheme();
+  
   const [userId, setUserId] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
-  const [genres, setGenres] = useState('');
-  const [bio, setBio] = useState('');
-  const [contactNumber, setContactNumber] = useState('');
-  const [address, setAddress] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState('');
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  
+  const [displayName, setDisplayName] = useState("");
+  const [contactNumber, setContactNumber] = useState("");
+  const [location, setLocation] = useState("");
+  const [bio, setBio] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState(DEFAULT_AVATAR);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
 
-  // Custom Alert State
-  const [alertVisible, setAlertVisible] = useState(false);
-  const [alertConfig, setAlertConfig] = useState<{
-    type: AlertType;
-    title: string;
-    message: string;
-    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
-  }>({
-    type: 'info',
-    title: '',
-    message: '',
-  });
+  useEffect(() => {
+    loadProfile();
+  }, []);
 
-  const showAlert = (
-    type: AlertType,
-    title: string,
-    message: string,
-    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[]
-  ) => {
-    setAlertConfig({ type, title, message, buttons });
-    setAlertVisible(true);
-  };
-
-  // Expanded role list
-  const availableRoles = [
-    'Vocalist', 'Guitarist', 'Bassist', 'Drummer',
-    'Keyboardist', 'DJ', 'Producer', 'Sound Engineer'
-  ];
-
-  const handleVerifyIdentity = async () => {
+  async function loadProfile() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      showAlert('info', 'Starting Verification', 'Redirecting to Didit secure verification...');
-
-      const { data, error } = await supabase.functions.invoke('verify-identity', {
-        body: { action: 'create_session', userId: user.id }
-      });
-
-      if (error) throw error;
-
-      if (data && data.url) {
-        // In a real app, use WebBrowser.openBrowserAsync(data.url)
-        console.log('Verification URL:', data.url);
-        showAlert('success', 'Mock Success', `Opened verification URL: ${data.url}\n\n(In production this opens the browser)`);
+      if (!user) {
+        Alert.alert("Error", "Please log in first");
+        router.back();
+        return;
       }
-    } catch (e: any) {
-      console.log('Verification error:', e);
-      showAlert('error', 'Error', 'Failed to start verification');
-    }
-  };
+      
+      setUserId(user.id);
 
-  const pickAndUploadAvatar = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+
+      if (error && error.code !== "PGRST116") {
+        console.error("Load profile error:", error);
+      }
+
+      if (data) {
+        setDisplayName(data.full_name || "");
+        setContactNumber(data.contact_number || "");
+        setLocation(data.address || data.location || "");
+        setBio(data.bio || "");
+        setAvatarUrl(data.avatar_url || DEFAULT_AVATAR);
+        setSelectedRoles(Array.isArray(data.skills) ? data.skills : []);
+        setSelectedGenres(Array.isArray(data.genres) ? data.genres : []);
+      }
+    } catch (err) {
+      console.error("Load error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggleRole(role: string) {
+    setSelectedRoles(prev => 
+      prev.includes(role) ? prev.filter(r => r !== role) : [...prev, role]
+    );
+  }
+
+  function toggleGenre(genre: string) {
+    setSelectedGenres(prev =>
+      prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
+    );
+  }
+
+  async function handleChangePhoto() {
+    if (!userId) return;
+
     try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permissionResult.granted) {
-        showAlert('warning', 'Permission needed', 'Please allow access to your photos.');
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission Required", "Please allow access to your photos");
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images',
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.8,
+        quality: 0.5,
+        base64: true, // Request base64 directly from ImagePicker
       });
 
-      if (result.canceled || !result.assets[0]) return;
+      if (result.canceled || !result.assets?.[0]) return;
 
-      setUploading(true);
-      const file = result.assets[0];
-      const fileExt = file.uri.split('.').pop() || 'jpg';
-      const fileName = `${userId}/${Date.now()}.${fileExt}`;
+      const asset = result.assets[0];
+      
+      if (!asset.base64) {
+        Alert.alert("Error", "Could not read image data");
+        return;
+      }
 
-      // Fetch the file and convert to blob
-      const response = await fetch(file.uri);
-      const blob = await response.blob();
+      setUploadingPhoto(true);
 
-      // Upload to Supabase Storage
+      const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const path = `${userId}/${Date.now()}.${ext}`;
+      const contentType = `image/${ext === "jpg" ? "jpeg" : ext}`;
+
+      console.log("📤 Uploading photo...");
+      console.log("📦 Base64 length:", asset.base64.length);
+
+      // Decode base64 to ArrayBuffer
+      const base64 = asset.base64;
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      const lookup = new Uint8Array(256);
+      for (let i = 0; i < chars.length; i++) {
+        lookup[chars.charCodeAt(i)] = i;
+      }
+
+      let bufferLength = base64.length * 0.75;
+      if (base64[base64.length - 1] === "=") bufferLength--;
+      if (base64[base64.length - 2] === "=") bufferLength--;
+
+      const bytes = new Uint8Array(Math.floor(bufferLength));
+      let p = 0;
+
+      for (let i = 0; i < base64.length; i += 4) {
+        const e1 = lookup[base64.charCodeAt(i)];
+        const e2 = lookup[base64.charCodeAt(i + 1)];
+        const e3 = lookup[base64.charCodeAt(i + 2)];
+        const e4 = lookup[base64.charCodeAt(i + 3)];
+
+        if (p < bytes.length) bytes[p++] = (e1 << 2) | (e2 >> 4);
+        if (p < bytes.length) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+        if (p < bytes.length) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+      }
+
+      console.log("📤 Bytes length:", bytes.length);
+
       const { data, error } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, blob, { contentType: `image/${fileExt}`, upsert: true });
+        .from("avatars")
+        .upload(path, bytes, {
+          contentType,
+          upsert: true,
+        });
 
-      if (error) throw error;
+      setUploadingPhoto(false);
 
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(data.path);
+      if (error) {
+        console.error("❌ Upload error:", error);
+        Alert.alert("Upload Failed", error.message);
+        return;
+      }
 
-      setAvatarUrl(urlData.publicUrl);
+      const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(data.path);
+      const newAvatarUrl = urlData.publicUrl;
 
-      // Update profile with new avatar URL
-      await supabase.functions.invoke('manage-profile', {
-        body: { action: 'update', userId, avatar_url: urlData.publicUrl }
-      });
+      console.log("✅ Uploaded:", newAvatarUrl);
 
-      showAlert('success', 'Success', 'Profile picture updated!');
-    } catch (e: any) {
-      console.log('Upload error:', e);
-      showAlert('error', 'Error', e.message || 'Failed to upload image');
-    } finally {
-      setUploading(false);
-    }
-  };
+      const { error: updateErr } = await supabase
+        .from("profiles")
+        .update({ avatar_url: newAvatarUrl })
+        .eq("id", userId);
 
-  React.useEffect(() => {
-    fetchProfile();
-  }, []);
+      if (updateErr) {
+        console.error("❌ Profile update error:", updateErr);
+        Alert.alert("Error", "Photo uploaded but failed to save to profile");
+        return;
+      }
 
-  async function fetchProfile() {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      setUserId(user.id);
-
-      const { data, error } = await supabase.functions.invoke('manage-profile', {
-        body: { action: 'fetch', userId: user.id }
-      });
-      if (error) throw error;
-
-      setName(data?.full_name || '');
-      setSelectedRoles(data?.skills || []);
-      setGenres(data?.genres?.join(', ') || '');
-      setBio(data?.bio || '');
-      setContactNumber(data?.contact_number || '');
-      setAddress(data?.address || '');
-      setAvatarUrl(data?.avatar_url || '');
-    } catch (e) {
-      console.log('Error fetching profile:', e);
+      setAvatarUrl(newAvatarUrl);
+      Alert.alert("Success", "Profile photo updated!");
+    } catch (err: any) {
+      setUploadingPhoto(false);
+      console.error("❌ Error:", err);
+      Alert.alert("Error", err.message || "Failed to upload photo");
     }
   }
 
-  const toggleRole = (role: string) => {
-    if (selectedRoles.includes(role)) {
-      setSelectedRoles(selectedRoles.filter(r => r !== role));
-    } else {
-      setSelectedRoles([...selectedRoles, role]);
-    }
-  };
-
-  const validateForm = (): boolean => {
-    if (!name.trim()) {
-      showAlert('error', 'Required Field', 'Name cannot be empty');
-      return false;
-    }
-    if (selectedRoles.length === 0) {
-      showAlert('error', 'Required Field', 'Please select at least one role/instrument');
-      return false;
-    }
-    if (!bio.trim()) {
-      showAlert('error', 'Required Field', 'Please enter a bio');
-      return false;
-    }
-    if (!contactNumber.trim()) {
-      showAlert('error', 'Required Field', 'Contact number is required');
-      return false;
-    }
-    if (!address.trim()) {
-      showAlert('error', 'Required Field', 'Address is required');
-      return false;
-    }
-    if (!avatarUrl) {
-      showAlert('error', 'Required Field', 'Please upload a profile picture');
-      return false;
-    }
-    return true;
-  };
-
-  const handleSave = async () => {
-    if (!validateForm()) {
+  async function handleSave() {
+    if (!userId) {
+      Alert.alert("Error", "Not authenticated");
       return;
     }
 
-    showAlert('warning', 'Save Changes', 'Are you sure you want to update your profile?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Save Changes',
-        style: 'default',
-        onPress: async () => {
-          if (!userId) return;
-          setSaving(true);
-          try {
-            const genreArray = genres.split(',').map(g => g.trim()).filter(g => g);
-            const { error } = await supabase.functions.invoke('manage-profile', {
-              body: {
-                action: 'update',
-                userId,
-                skills: selectedRoles,
-                genres: genreArray,
-                bio,
-                contact_number: contactNumber,
-                address
-              }
-            });
-            if (error) throw error;
-            router.back();
-          } catch (e) {
-            console.log('Error saving profile:', e);
-            showAlert('error', 'Error', 'Failed to save profile.');
-          } finally {
-            setSaving(false);
-          }
-        }
-      }
+    setSaving(true);
+
+    const updateData = {
+      skills: selectedRoles,
+      genres: selectedGenres,
+      bio,
+      contact_number: contactNumber,
+      address: location,
+      location: location,
+    };
+
+    const { error } = await supabase
+      .from("profiles")
+      .update(updateData)
+      .eq("id", userId);
+
+    setSaving(false);
+
+    if (error) {
+      Alert.alert("Error", error.message || "Failed to save");
+      return;
+    }
+
+    Alert.alert("Success", "Profile updated!", [
+      { text: "OK", onPress: () => router.back() }
     ]);
-  };
+  }
+
+  if (loading) {
+    return (
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+          Loading...
+        </Text>
+      </View>
+    );
+  }
 
   return (
-    <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Edit Profile" />
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Header title="Edit Profile" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} style={styles.flex1}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Avatar */}
+        <View style={styles.avatarContainer}>
+          <View style={styles.avatarWrapper}>
+            <Image
+              source={{ uri: avatarUrl }}
+              style={[styles.avatar, { borderColor: colors.primary }]}
+            />
+            <TouchableOpacity
+              style={[styles.cameraBtn, { backgroundColor: colors.primary }]}
+              onPress={handleChangePhoto}
+              disabled={uploadingPhoto}
+            >
+              {uploadingPhoto ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="camera" size={18} color="#fff" />
+              )}
+            </TouchableOpacity>
+          </View>
+          <Text style={[styles.changePhotoText, { color: colors.primary }]}>
+            {uploadingPhoto ? "Uploading..." : "Change Photo"}
+          </Text>
+        </View>
 
-          <View style={styles.contentContainer}>
+        {/* Display Name (read-only) */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>DISPLAY NAME</Text>
+          <View style={[styles.disabledInput, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}>
+            <Text style={[styles.disabledText, { color: colors.muted }]}>{displayName || "Not set"}</Text>
+          </View>
+          <Text style={[styles.helper, { color: colors.textSecondary }]}>Cannot be changed</Text>
+        </View>
 
-            {/* Profile Image */}
-            <View style={styles.profileImageContainer}>
-              <View style={styles.imageWrapper}>
-                <View
+        {/* Contact Number */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>CONTACT NUMBER</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.inputBackground, borderColor: colors.border, color: colors.text }]}
+            value={contactNumber}
+            onChangeText={setContactNumber}
+            placeholder="Your contact number"
+            placeholderTextColor={colors.textSecondary}
+            keyboardType="phone-pad"
+          />
+        </View>
+
+        {/* Location */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>LOCATION</Text>
+          <TextInput
+            style={[styles.input, { backgroundColor: colors.inputBackground, borderColor: colors.border, color: colors.text }]}
+            value={location}
+            onChangeText={setLocation}
+            placeholder="Your location"
+            placeholderTextColor={colors.textSecondary}
+          />
+        </View>
+
+        {/* Roles */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>ROLES & INSTRUMENTS</Text>
+          <View style={styles.chips}>
+            {ROLES.map(role => {
+              const selected = selectedRoles.includes(role);
+              return (
+                <TouchableOpacity
+                  key={role}
+                  onPress={() => toggleRole(role)}
                   style={[
-                    styles.imageContainer,
+                    styles.chip,
                     {
-                      borderColor: colors.surface
-                    }
+                      borderColor: selected ? colors.primary : colors.border,
+                      backgroundColor: selected
+                        ? isDark ? "rgba(124, 58, 237, 0.3)" : "#EEF2FF"
+                        : "transparent",
+                    },
                   ]}
                 >
-                  <Image
-                    source={{ uri: avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop' }}
-                    style={styles.image}
-                    resizeMode="cover"
-                  />
-                </View>
-                <TouchableOpacity
-                  onPress={pickAndUploadAvatar}
-                  disabled={uploading}
-                  style={[styles.uploadButton, { backgroundColor: uploading ? colors.textSecondary : colors.primary }]}
-                >
-                  <Ionicons name={uploading ? "hourglass" : "camera"} size={20} color="#fff" />
+                  <Text style={[
+                    styles.chipText,
+                    { color: selected ? (isDark ? "#A78BFA" : colors.primary) : colors.textSecondary }
+                  ]}>
+                    {role}
+                  </Text>
                 </TouchableOpacity>
-              </View>
-              <Text style={[styles.uploadText, { color: colors.primary }]}>
-                {uploading ? 'Uploading...' : 'Change Photo'}
-              </Text>
-            </View>
-
-            {/* Identity Verification Section */}
-            <View style={[styles.verificationContainer, { backgroundColor: isDark ? 'rgba(30, 58, 138, 0.2)' : '#EFF6FF', borderColor: isDark ? '#1E40AF' : '#DBEAFE' }]}>
-              <View style={styles.verificationHeader}>
-                <View style={styles.verificationTitleWrapper}>
-                  <Ionicons name="shield-checkmark" size={20} color={colors.primary} />
-                  <Text style={[styles.verificationTitle, { color: colors.text }]}>Identity Verification</Text>
-                </View>
-                <View style={[styles.unverifiedBadge, { backgroundColor: isDark ? 'rgba(113, 63, 18, 0.3)' : '#FEF9C3' }]}>
-                  <Text style={styles.unverifiedText}>Unverified</Text>
-                </View>
-              </View>
-              <Text style={[styles.verificationDescription, { color: colors.textSecondary }]}>
-                Verify your government ID and face liveliness to get a "Verified" badge and boost trust.
-              </Text>
-              <TouchableOpacity
-                onPress={handleVerifyIdentity}
-                style={[styles.verifyButton, { borderColor: isDark ? '#1D4ED8' : '#BFDBFE', backgroundColor: isDark ? 'rgba(30, 58, 138, 0.1)' : '#FFFFFF' }]}
-              >
-                <Text style={[styles.verifyButtonText, { color: colors.primary }]}>Verify with Didit</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Form Fields */}
-            <View style={styles.formContainer}>
-              <View>
-                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Display Name</Text>
-                <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                  <Text style={[styles.inputValue, { color: colors.muted }]}>{name}</Text>
-                </View>
-                <Text style={[styles.inputHelper, { color: colors.textSecondary }]}>Display Name cannot be changed.</Text>
-              </View>
-
-              <View>
-                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Contact Number</Text>
-                <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
-                  <TextInput
-                    value={contactNumber}
-                    onChangeText={setContactNumber}
-                    placeholder="+1 234 567 890"
-                    placeholderTextColor={colors.textSecondary}
-                    keyboardType="phone-pad"
-                    style={[styles.textInput, { color: colors.text }]}
-                  />
-                </View>
-              </View>
-
-              <View>
-                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Address / Location</Text>
-                <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
-                  <TextInput
-                    value={address}
-                    onChangeText={setAddress}
-                    placeholder="City, Country"
-                    placeholderTextColor={colors.textSecondary}
-                    style={[styles.textInput, { color: colors.text }]}
-                  />
-                </View>
-              </View>
-
-              <View>
-                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Roles & Instruments</Text>
-                <View style={styles.rolesWrapper}>
-                  {availableRoles.map((role) => {
-                    const isSelected = selectedRoles.includes(role);
-                    return (
-                      <TouchableOpacity
-                        key={role}
-                        onPress={() => toggleRole(role)}
-                        style={[
-                          styles.roleItem,
-                          {
-                            borderColor: isSelected ? colors.primary : colors.border,
-                            backgroundColor: isSelected ? (isDark ? colors.primaryLight : '#EEF2FF') : 'transparent'
-                          }
-                        ]}
-                      >
-                        <Text style={[
-                          styles.roleText,
-                          {
-                            color: isSelected ? colors.primary : colors.textSecondary
-                          }
-                        ]}>
-                          {role}
-                        </Text>
-                      </TouchableOpacity>
-                    )
-                  })}
-                </View>
-              </View>
-
-              <View>
-                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genres</Text>
-                <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
-                  <TextInput
-                    value={genres}
-                    onChangeText={setGenres}
-                    placeholder="e.g. Rock, Indie, Pop"
-                    placeholderTextColor={colors.textSecondary}
-                    style={[styles.textInput, { color: colors.text }]}
-                  />
-                </View>
-              </View>
-
-              <View>
-                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Bio</Text>
-                <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
-                  <TextInput
-                    value={bio}
-                    onChangeText={setBio}
-                    placeholder="Tell us a bit about yourself..."
-                    placeholderTextColor={colors.textSecondary}
-                    multiline
-                    style={[styles.textInput, { color: colors.text, height: 120, textAlignVertical: 'top' }]}
-                  />
-                </View>
-              </View>
-            </View>
-
-            {/* Action Buttons */}
-            <View style={styles.actionsContainer}>
-              <TouchableOpacity
-                onPress={handleSave}
-                style={[styles.saveButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
-              >
-                <Text style={styles.saveButtonText}>Save Profile</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => router.back()}
-                style={[styles.cancelButton, { borderColor: colors.border }]}
-              >
-                <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-
+              );
+            })}
           </View>
-        </ScrollView>
-        <Navbar />
-      </View>
+        </View>
 
-      <CustomAlert
-        visible={alertVisible}
-        type={alertConfig.type}
-        title={alertConfig.title}
-        message={alertConfig.message}
-        buttons={alertConfig.buttons}
-        onClose={() => setAlertVisible(false)}
-      />
-    </>
+        {/* Genres */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>GENRES</Text>
+          <View style={styles.chips}>
+            {GENRES.map(genre => {
+              const selected = selectedGenres.includes(genre);
+              return (
+                <TouchableOpacity
+                  key={genre}
+                  onPress={() => toggleGenre(genre)}
+                  style={[
+                    styles.chip,
+                    {
+                      borderColor: selected ? colors.primary : colors.border,
+                      backgroundColor: selected
+                        ? isDark ? "rgba(124, 58, 237, 0.3)" : "#EEF2FF"
+                        : "transparent",
+                    },
+                  ]}
+                >
+                  <Text style={[
+                    styles.chipText,
+                    { color: selected ? (isDark ? "#A78BFA" : colors.primary) : colors.textSecondary }
+                  ]}>
+                    {genre}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Bio */}
+        <View style={styles.field}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>BIO</Text>
+          <TextInput
+            style={[styles.textArea, { backgroundColor: colors.inputBackground, borderColor: colors.border, color: colors.text }]}
+            value={bio}
+            onChangeText={setBio}
+            placeholder="Tell us about yourself..."
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            numberOfLines={4}
+            textAlignVertical="top"
+          />
+        </View>
+
+        {/* Buttons */}
+        <TouchableOpacity
+          style={[styles.saveBtn, { backgroundColor: saving ? colors.textSecondary : colors.primary }]}
+          onPress={handleSave}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.saveBtnText}>Save Profile</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.cancelBtn, { borderColor: colors.border }]}
+          onPress={() => router.back()}
+          disabled={saving}
+        >
+          <Text style={[styles.cancelBtnText, { color: colors.text }]}>Cancel</Text>
+        </TouchableOpacity>
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+
+      <Navbar />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  flex1: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 40,
-  },
-  contentContainer: {
-    paddingHorizontal: 24,
-    marginTop: 24,
-  },
-  profileImageContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  imageWrapper: {
-    position: 'relative',
-  },
-  imageContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    overflow: 'hidden',
-    borderWidth: 4,
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-  },
-  uploadButton: {
-    position: 'absolute',
+  container: { flex: 1 },
+  centered: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText: { marginTop: 12, fontSize: 14, fontFamily: "Poppins_400Regular" },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 20, paddingBottom: 100 },
+  
+  avatarContainer: { alignItems: "center", marginBottom: 24 },
+  avatarWrapper: { position: "relative" },
+  avatar: { width: 110, height: 110, borderRadius: 55, borderWidth: 3 },
+  cameraBtn: {
+    position: "absolute",
     bottom: 0,
     right: 0,
-    padding: 12,
-    borderRadius: 999,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
+      android: { elevation: 3 },
+    }),
   },
-  uploadText: {
-    marginTop: 12,
-    fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
-  },
-  verificationContainer: {
-    marginBottom: 32,
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  verificationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  verificationTitleWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  verificationTitle: {
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  unverifiedBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  unverifiedText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 10,
-    color: '#EAB308',
-  },
-  verificationDescription: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: 12,
-    marginBottom: 12,
-  },
-  verifyButton: {
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  verifyButtonText: {
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  formContainer: {
-    gap: 24,
-  },
-  inputLabel: {
-    marginBottom: 8,
-    fontSize: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  inputWrapper: {
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  inputValue: {
-    fontFamily: 'Poppins_500Medium',
-    padding: 16,
-  },
-  inputHelper: {
-    marginTop: 4,
-    fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
-  },
-  rolesWrapper: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  roleItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  roleText: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: 13,
-  },
-  textInput: {
-    fontFamily: 'Poppins_400Regular',
-    textAlignVertical: 'center',
-    padding: 16,
-  },
-  actionsContainer: {
-    marginTop: 32,
-    marginBottom: 20,
-    gap: 12,
-  },
-  saveButton: {
-    width: '100%',
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  saveButtonText: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: 16,
-    color: '#fff',
-  },
-  cancelButton: {
-    width: '100%',
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  cancelButtonText: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: 16,
-  },
+  changePhotoText: { marginTop: 10, fontSize: 14, fontFamily: "Poppins_500Medium" },
+
+  field: { marginBottom: 20 },
+  label: { fontSize: 11, fontFamily: "Poppins_600SemiBold", letterSpacing: 0.5, marginBottom: 6 },
+  input: { borderWidth: 1, borderRadius: 10, padding: 14, fontSize: 15, fontFamily: "Poppins_400Regular" },
+  disabledInput: { borderWidth: 1, borderRadius: 10, padding: 14 },
+  disabledText: { fontSize: 15, fontFamily: "Poppins_500Medium" },
+  helper: { fontSize: 11, fontFamily: "Poppins_400Regular", marginTop: 4 },
+  textArea: { borderWidth: 1, borderRadius: 10, padding: 14, fontSize: 15, fontFamily: "Poppins_400Regular", minHeight: 100 },
+
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, borderWidth: 1 },
+  chipText: { fontSize: 13, fontFamily: "Poppins_500Medium" },
+
+  saveBtn: { paddingVertical: 15, borderRadius: 10, alignItems: "center", marginTop: 10 },
+  saveBtnText: { color: "#fff", fontSize: 16, fontFamily: "Poppins_600SemiBold" },
+  cancelBtn: { paddingVertical: 15, borderRadius: 10, alignItems: "center", borderWidth: 1, marginTop: 10 },
+  cancelBtnText: { fontSize: 16, fontFamily: "Poppins_600SemiBold" },
 });
-
-
