@@ -127,6 +127,11 @@ export default function GigDetailsScreen() {
 
   const tabs = ['About', 'Applicants', 'Review'];
 
+  const formatMusicianType = (type?: string) => {
+    if (!type) return 'Not specified';
+    return type.charAt(0).toUpperCase() + type.slice(1);
+  };
+
   // Show loading while checking authorization
   if (checkingAuth) {
     return (
@@ -223,6 +228,56 @@ export default function GigDetailsScreen() {
                   <Text style={[styles.aboutText, { color: colors.textSecondary }]}>
                     {gig?.description || 'No description available.'}
                   </Text>
+                </View>
+
+                <View>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Needs</Text>
+
+                  <View style={{ gap: 12 }}>
+                    <View>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, marginBottom: 6 }}>Genres</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                        {gig?.requirements?.genres?.length ? (
+                          gig.requirements.genres.map((genre: string, idx: number) => (
+                            <View key={idx} style={[styles.skillTag, { backgroundColor: colors.inputBackground }]}>
+                              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, color: colors.text }}>{genre}</Text>
+                            </View>
+                          ))
+                        ) : (
+                          <Text style={{ color: colors.textSecondary }}>No specific genres</Text>
+                        )}
+                      </View>
+                    </View>
+
+                    <View>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, marginBottom: 6 }}>Instruments</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                        {gig?.requirements?.instruments?.length ? (
+                          gig.requirements.instruments.map((instrument: string, idx: number) => (
+                            <View key={idx} style={[styles.skillTag, { backgroundColor: colors.inputBackground }]}>
+                              <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 12, color: colors.text }}>{instrument}</Text>
+                            </View>
+                          ))
+                        ) : (
+                          <Text style={{ color: colors.textSecondary }}>No specific instruments</Text>
+                        )}
+                      </View>
+                    </View>
+
+                    <View>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, marginBottom: 6 }}>Experience Level</Text>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>
+                        {gig?.requirements?.experience_level || 'Not specified'}
+                      </Text>
+                    </View>
+
+                    <View>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary, marginBottom: 6 }}>Musician Type</Text>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>
+                        {formatMusicianType(gig?.requirements?.musician_type)}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
 
                 {/* The "Deal" Card */}

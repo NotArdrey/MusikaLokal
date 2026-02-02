@@ -328,14 +328,16 @@ export default function AddStudioScreen() {
                     }))
                 }));
 
-            const instrumentsPayload = equipment.length > 0
-                ? equipment.map(e => ({
-                    name: e.name,
-                    quantity: e.quantity,
-                    description: e.description,
-                    image: e.image
-                }))
-                : selectedInstruments;
+            const equipmentPayload = equipment.map(e => ({
+                name: e.name,
+                quantity: e.quantity,
+                description: e.description,
+                image: e.image
+            }));
+            const presetPayload = selectedInstruments
+                .filter(preset => !equipment.some(e => e.name === preset.name))
+                .map(preset => ({ name: preset.name, image: preset.image }));
+            const instrumentsPayload = [...equipmentPayload, ...presetPayload];
 
             const payload = {
                 name: studioName,

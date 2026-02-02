@@ -97,6 +97,11 @@ export default function EditGigScreen() {
   const [images, setImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
   const [musicianType, setMusicianType] = useState<'solo' | 'group' | 'both'>('both');
+  const [requiredGenres, setRequiredGenres] = useState<string[]>([]);
+  const [newGenre, setNewGenre] = useState('');
+  const [requiredInstruments, setRequiredInstruments] = useState<string[]>([]);
+  const [newInstrument, setNewInstrument] = useState('');
+  const [experienceLevel, setExperienceLevel] = useState('');
 
   // Contract state
   const [contractUrl, setContractUrl] = useState<string>('');
@@ -182,6 +187,9 @@ export default function EditGigScreen() {
       setEventStartTime(data.requirements?.event_start_time || '06:00 PM');
       setEventEndTime(data.requirements?.event_end_time || '11:00 PM');
       setMusicianType(data.requirements?.musician_type || 'both');
+      setRequiredGenres(Array.isArray(data.requirements?.genres) ? data.requirements.genres : []);
+      setRequiredInstruments(Array.isArray(data.requirements?.instruments) ? data.requirements.instruments : []);
+      setExperienceLevel(data.requirements?.experience_level || '');
       setContractUrl(data.contract_url || '');
       if (data.contract_url) {
         const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
@@ -262,6 +270,9 @@ export default function EditGigScreen() {
         longitude,
         event_date: eventDate,
         requirements: {
+          genres: requiredGenres,
+          instruments: requiredInstruments,
+          experience_level: experienceLevel || null,
           event_start_time: eventStartTime,
           event_end_time: eventEndTime,
           musician_type: musicianType,
@@ -683,6 +694,121 @@ export default function EditGigScreen() {
             </View>
           </View>
 
+          {renderSectionHeader('Requirements', 'list')}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genres</Text>
+            <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
+              <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                <TextInput
+                  value={newGenre}
+                  onChangeText={setNewGenre}
+                  placeholder="Add genre (e.g., Rock, Jazz)..."
+                  placeholderTextColor={colors.textSecondary}
+                  style={[styles.textInput, { color: colors.text }]}
+                  onSubmitEditing={() => {
+                    if (newGenre.trim()) {
+                      setRequiredGenres([...requiredGenres, newGenre.trim()]);
+                      setNewGenre('');
+                    }
+                  }}
+                />
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  if (newGenre.trim()) {
+                    setRequiredGenres([...requiredGenres, newGenre.trim()]);
+                    setNewGenre('');
+                  }
+                }}
+                style={[styles.addBtn, { backgroundColor: colors.primary }]}
+              >
+                <Ionicons name="add" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            {requiredGenres.length > 0 && (
+              <View style={styles.chipContainer}>
+                {requiredGenres.map((genre, index) => (
+                  <View key={index} style={[styles.chip, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                    <Text style={[styles.chipText, { color: colors.text }]}>{genre}</Text>
+                    <TouchableOpacity onPress={() => setRequiredGenres(requiredGenres.filter((_, i) => i !== index))}>
+                      <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Instruments</Text>
+            <View style={[styles.addMemberRow, { marginBottom: 8 }]}
+              <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                <TextInput
+                  value={newInstrument}
+                  onChangeText={setNewInstrument}
+                  placeholder="Add instrument (e.g., Guitar, Drums)..."
+                  placeholderTextColor={colors.textSecondary}
+                  style={[styles.textInput, { color: colors.text }]}
+                  onSubmitEditing={() => {
+                    if (newInstrument.trim()) {
+                      setRequiredInstruments([...requiredInstruments, newInstrument.trim()]);
+                      setNewInstrument('');
+                    }
+                  }}
+                />
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  if (newInstrument.trim()) {
+                    setRequiredInstruments([...requiredInstruments, newInstrument.trim()]);
+                    setNewInstrument('');
+                  }
+                }}
+                style={[styles.addBtn, { backgroundColor: colors.primary }]}
+              >
+                <Ionicons name="add" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            {requiredInstruments.length > 0 && (
+              <View style={styles.chipContainer}>
+                {requiredInstruments.map((instrument, index) => (
+                  <View key={index} style={[styles.chip, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                    <Text style={[styles.chipText, { color: colors.text }]}>{instrument}</Text>
+                    <TouchableOpacity onPress={() => setRequiredInstruments(requiredInstruments.filter((_, i) => i !== index))}>
+                      <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Experience Level</Text>
+            <View style={styles.experienceLevelContainer}>
+              {['Beginner', 'Intermediate', 'Advanced', 'Professional'].map((level) => (
+                <TouchableOpacity
+                  key={level}
+                  onPress={() => setExperienceLevel(level)}
+                  style={[
+                    styles.experienceButton,
+                    {
+                      backgroundColor: experienceLevel === level ? colors.primary : (isDark ? '#1F2937' : '#F9FAFB'),
+                      borderColor: experienceLevel === level ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                    }
+                  ]}
+                >
+                  <Text style={[
+                    styles.experienceButtonText,
+                    { color: experienceLevel === level ? '#fff' : colors.text }
+                  ]}>
+                    {level}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
           {renderSectionHeader('Visuals', 'image')}
           <ImageUploader
             images={images}
@@ -966,6 +1092,59 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 12,
     marginBottom: 8,
+  },
+  addMemberRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  addBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingLeft: 12,
+    paddingRight: 8,
+    borderRadius: 20,
+  },
+  chipText: {
+    fontSize: 13,
+    fontFamily: 'Poppins_400Regular',
+  },
+  experienceLevelContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  experienceButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    flex: 1,
+    minWidth: '45%',
+    alignItems: 'center',
+  },
+  experienceButtonText: {
+    fontSize: 13,
+    fontFamily: 'Poppins_500Medium',
+  },
+  textInput: {
+    padding: 16,
+    fontFamily: 'Poppins_400Regular',
   },
 });
 

@@ -257,15 +257,23 @@ export default function EditStudioScreen() {
         setContractFileName(decodeURIComponent(fileName));
       }
 
-      // Load equipment
-      if (data.equipment && Array.isArray(data.equipment)) {
-        setEquipment(data.equipment.map((eq: any, index: number) => ({
+      // Load equipment/instruments from instruments JSONB
+      const instrumentsData = Array.isArray(data.instruments) ? data.instruments : [];
+      const equipmentItems = instrumentsData
+        .filter((item: any) => item && typeof item === 'object' && (item.quantity !== undefined || item.description !== undefined))
+        .map((eq: any, index: number) => ({
           id: eq.id || `eq-${index}`,
           name: eq.name || '',
           quantity: eq.quantity || 1,
           description: eq.description || '',
           image: eq.image || ''
-        })));
+        }));
+      const presetItems = instrumentsData
+        .filter((item: any) => item && typeof item === 'object' && item.name && item.image && item.quantity === undefined && item.description === undefined)
+        .map((item: any) => ({ name: item.name, image: item.image }));
+
+      if (equipmentItems.length > 0) {
+        setEquipment(equipmentItems);
       }
 
       // Load calendar availability from date overrides table
@@ -345,9 +353,9 @@ export default function EditStudioScreen() {
         setAvailability(daysOfWeek.map(day => ({ day, slots: [] })));
       }
 
-      // Load instruments
-      if (data.instruments && Array.isArray(data.instruments)) {
-        setSelectedInstruments(data.instruments);
+      // Load preset instruments
+      if (presetItems.length > 0) {
+        setSelectedInstruments(presetItems);
       }
 
       // Load studio settings (booking settings)
@@ -843,6 +851,17 @@ export default function EditStudioScreen() {
           }))
         }));
 
+      const equipmentPayload = equipment.map(e => ({
+        name: e.name,
+        quantity: e.quantity,
+        description: e.description,
+        image: e.image
+      }));
+      const presetPayload = selectedInstruments
+        .filter(preset => !equipment.some(e => e.name === preset.name))
+        .map(preset => ({ name: preset.name, image: preset.image }));
+      const instrumentsPayload = [...equipmentPayload, ...presetPayload];
+
       const payload = {
         name: studioName,
         type: studioType,
@@ -854,14 +873,7 @@ export default function EditStudioScreen() {
         recording_rate: parseFloat(recordingRate) || 0,
         pax: pax ? parseInt(pax) : null,
         amenities,
-        instruments: selectedInstruments,
-        // Include full equipment details
-        equipment: equipment.map(e => ({
-          name: e.name,
-          quantity: e.quantity,
-          description: e.description,
-          image: e.image
-        })),
+        instruments: instrumentsPayload,
         latitude,
         longitude,
         images: selectedImages,

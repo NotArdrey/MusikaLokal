@@ -208,9 +208,47 @@ export default function GroupDetailsScreen() {
                     <Text style={[styles.infoValue, { color: colors.text }]}>{group?.members?.length || 0}</Text>
                   </View>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Rate</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>₱{(group?.rate || 0).toLocaleString()}/hr</Text>
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 16 }}>
+                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
                     <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Genre</Text>
                     <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 14 }}>{group?.genre || 'N/A'}</Text>
                   </View>
+                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Group Type</Text>
+                    <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 14, textTransform: 'capitalize' }}>
+                      {group?.group_type || 'N/A'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12 }]}>Members & Roles</Text>
+                  {group?.members && group.members.length > 0 ? (
+                    group.members.map((member: any, index: number) => {
+                      const memberName = typeof member === 'string' ? member : (member?.name || member?.full_name || 'Member');
+                      const memberInstrument = typeof member === 'string' ? '' : (member?.instrument || '');
+                      const memberRole = typeof member === 'string' ? '' : (member?.role || '');
+                      return (
+                        <View key={index} style={[styles.memberRow, { borderColor: colors.border }]}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.memberName, { color: colors.text }]}>{memberName}</Text>
+                            {(memberInstrument || memberRole) && (
+                              <Text style={[styles.memberMeta, { color: colors.textSecondary }]}>
+                                {memberInstrument}{memberInstrument && memberRole ? ' • ' : ''}{memberRole}
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })
+                  ) : (
+                    <Text style={{ color: colors.textSecondary }}>No members listed.</Text>
+                  )}
                 </View>
 
 
@@ -412,6 +450,19 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: 18,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  memberRow: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  memberName: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 14,
+  },
+  memberMeta: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 12,
+    marginTop: 2,
   },
   availabilityCard: {
     padding: 16,

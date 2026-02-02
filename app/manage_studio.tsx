@@ -354,14 +354,23 @@ export default function StudioDetailsScreen() {
 
                 <View style={{ flexDirection: 'row', gap: 16 }}>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Rate</Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}>₱{studio?.hourly_rate}/hr</Text>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Type</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>{studio?.type || 'N/A'}</Text>
                   </View>
                   <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
-                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Amenities</Text>
-                    <Text style={{ fontFamily: 'Poppins_500Medium', fontSize: 14, color: colors.text }} numberOfLines={2}>
-                      {studio?.amenities?.join(', ') || 'None'}
-                    </Text>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Capacity</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>{studio?.pax ? `${studio.pax} pax` : 'N/A'}</Text>
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 16 }}>
+                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Rehearsal Rate</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>₱{(studio?.rehearsal_rate || 0).toLocaleString()}/hr</Text>
+                  </View>
+                  <View style={[styles.infoCard, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Recording Rate</Text>
+                    <Text style={[styles.infoValue, { color: colors.text }]}>₱{(studio?.recording_rate || 0).toLocaleString()}/hr</Text>
                   </View>
                 </View>
 
@@ -443,6 +452,89 @@ export default function StudioDetailsScreen() {
                   ))}
                   {(!studio?.amenities || studio.amenities.length === 0) && (
                     <Text style={{ color: colors.textSecondary }}>No amenities listed.</Text>
+                  )}
+                </View>
+
+                <View>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12, marginTop: 16 }]}>Equipment & Instruments</Text>
+                  <View style={styles.tagsContainer}>
+                    {studio?.instruments?.length ? (
+                      studio.instruments.map((item: any, i: number) => {
+                        const name = item?.name || item;
+                        const quantity = item?.quantity ? ` ×${item.quantity}` : '';
+                        return (
+                          <View key={i} style={[styles.tag, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                            <Text style={[styles.tagText, { color: colors.text }]}>{`${name}${quantity}`}</Text>
+                          </View>
+                        );
+                      })
+                    ) : (
+                      <Text style={{ color: colors.textSecondary }}>No equipment listed.</Text>
+                    )}
+                  </View>
+                </View>
+
+                <View>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12, marginTop: 16 }]}>Availability</Text>
+                  {studio?.availability?.length ? (
+                    studio.availability.map((day: any, i: number) => (
+                      <View key={i} style={{ marginBottom: 8 }}>
+                        <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>{day.day}</Text>
+                        <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                          {day.slots?.length ? day.slots.map((slot: any) => `${formatTime(slot.start)} - ${formatTime(slot.end)}`).join(', ') : 'No slots'}
+                        </Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={{ color: colors.textSecondary }}>No weekly availability set.</Text>
+                  )}
+
+                  {studio?.calendar_availability?.length ? (
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text, marginBottom: 6 }}>Custom Dates</Text>
+                      {studio.calendar_availability.map((entry: any, i: number) => (
+                        <View key={i} style={{ marginBottom: 8 }}>
+                          <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.text }}>
+                            {new Date(entry.date).toLocaleDateString()}
+                          </Text>
+                          <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                            {entry.slots?.length ? entry.slots.map((slot: any) => `${formatTime(slot.start)} - ${formatTime(slot.end)}`).join(', ') : 'No slots'}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+
+                <View>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 12, marginTop: 16 }]}>Booking Settings</Text>
+                  {studio?.booking_settings ? (
+                    <View style={{ gap: 8 }}>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>
+                        Lead Time: {studio.booking_settings.lead_time_hours || 0} hours
+                      </Text>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>
+                        Weekend Multiplier: {studio.booking_settings.weekend_multiplier || 1.0}x
+                      </Text>
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>
+                        Peak Season Multiplier: {studio.booking_settings.peak_season_multiplier || 1.0}x
+                      </Text>
+                      {studio.booking_settings.peak_season_dates?.length ? (
+                        <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                          Peak Season Dates: {studio.booking_settings.peak_season_dates.map((d: any) => `${new Date(d.start).toLocaleDateString()} - ${new Date(d.end).toLocaleDateString()}`).join('; ')}
+                        </Text>
+                      ) : null}
+                      <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.textSecondary }}>
+                        Off-Peak Multiplier: {studio.booking_settings.off_peak_multiplier || 1.0}x
+                      </Text>
+                      {studio.booking_settings.off_peak_dates?.length ? (
+                        <Text style={{ fontFamily: 'Poppins_400Regular', color: colors.textSecondary }}>
+                          Off-Peak Dates: {studio.booking_settings.off_peak_dates.map((d: any) => `${new Date(d.start).toLocaleDateString()} - ${new Date(d.end).toLocaleDateString()}`).join('; ')}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <Text style={{ color: colors.textSecondary }}>No booking settings configured.</Text>
                   )}
                 </View>
 
