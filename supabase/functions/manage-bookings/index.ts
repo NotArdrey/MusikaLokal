@@ -87,13 +87,16 @@ serve(async (req: Request) => {
                         name: b.studio?.name || 'Unknown Studio',
                         date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
                         image: b.studio?.images?.[0] || 'https://picsum.photos/400/300',
-                        status: b.status === 'pending' ? 'Waiting for Approval' :
-                            b.status === 'confirmed' ? 'Confirmed' :
+                        status: b.status === 'pending' 
+                            ? (b.payment_status === 'unpaid' ? 'Payment Required' : 'Waiting for Approval')
+                            : b.status === 'confirmed' ? 'Confirmed' :
                                 b.status === 'checked_in' ? 'In Progress' :
                                     b.status === 'cancelled' ? 'Declined' : b.status,
                         type: isVenue ? 'Venue Booking' : 'Studio Booking',
                         isCancelled: b.status === 'cancelled',
-                        action: b.status === 'pending' ? 'View Details' : 'Details',
+                        action: b.status === 'pending' 
+                            ? (b.payment_status === 'unpaid' ? 'Pay Now' : 'View Details') 
+                            : 'Details',
                         duration_hours: b.hours,
                         base_rate: b.base_rate,
                         total_cost: b.final_price,
@@ -101,7 +104,13 @@ serve(async (req: Request) => {
                         notes: b.notes,
                         reviewed_by_customer: b.reviewed_by_customer || false,
                         reviewed_by_owner: b.reviewed_by_owner || false,
-                        proof_url: b.proof_url
+                        proof_url: b.proof_url,
+                        // Payment fields for PayMongo integration
+                        payment_status: b.payment_status || 'unpaid',
+                        payment_amount: b.payment_amount || b.final_price,
+                        payment_type: b.payment_type || 'full',
+                        remaining_balance: b.remaining_balance || 0,
+                        checkout_session_id: b.checkout_session_id
                     }
 
                     if (b.status === 'pending') {
@@ -199,7 +208,12 @@ serve(async (req: Request) => {
                             customer_address: b.profile?.address,
                             reviewed_by_customer: b.reviewed_by_customer || false,
                             reviewed_by_owner: b.reviewed_by_owner || false,
-                            proof_url: b.proof_url
+                            proof_url: b.proof_url,
+                            // Payment fields
+                            payment_status: b.payment_status || 'unpaid',
+                            payment_amount: b.payment_amount || b.final_price,
+                            payment_type: b.payment_type || 'full',
+                            remaining_balance: b.remaining_balance || 0
                         }
 
                         if (b.status === 'pending') {
@@ -484,6 +498,31 @@ serve(async (req: Request) => {
                 })
             }
 
+            // Check if user has any unpaid booking for this studio (must pay before booking again)
+            const { data: unpaidBooking, error: unpaidError } = await supabaseClient
+                .from('studio_bookings')
+                .select('id, status, payment_status, booking_date, final_price')
+                .eq('studio_id', studio_id)
+                .eq('user_id', user_id)
+                .eq('status', 'confirmed')
+                .in('payment_status', ['unpaid', 'pending', 'failed'])
+                .maybeSingle()
+
+            if (unpaidError) {
+                console.error('Error checking unpaid bookings:', unpaidError)
+            }
+
+            if (unpaidBooking) {
+                return new Response(JSON.stringify({
+                    error: `You have an unpaid booking for this studio (₱${unpaidBooking.final_price?.toLocaleString() || 0} on ${unpaidBooking.booking_date}). Please complete your payment before creating a new booking.`,
+                    existing_booking_id: unpaidBooking.id,
+                    reason: 'unpaid'
+                }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409, // Conflict
+                })
+            }
+
             // Convert slots to JSONB format for database function
             const slotsJsonb = JSON.stringify(slots);
 
@@ -710,13 +749,15 @@ serve(async (req: Request) => {
                     end_time: overallEnd,
                     time_slots: slots,  // Detailed slots
                     notes: notes || null,
-                    status: 'pending', // Await owner approval
+                    status: 'pending', // Now requires payment - stays in Pending until paid
+                    payment_status: 'unpaid', // PayMongo integration - requires payment
                     // Store pricing details - use validated values
                     base_rate: finalBaseRate,
                     hours: finalHours,
                     subtotal: pricingData.subtotal || (finalBaseRate * finalHours),
                     modifiers_applied: pricingData.modifiers || {},
-                    final_price: pricingData.final_price || (finalBaseRate * finalHours)
+                    final_price: pricingData.final_price || (finalBaseRate * finalHours),
+                    payment_amount: pricingData.final_price || (finalBaseRate * finalHours)
                 })
                 .select()
                 .single()
@@ -726,7 +767,7 @@ serve(async (req: Request) => {
                 throw error;
             }
 
-            // Notify studio owner of new booking request
+            // Notify studio owner of new booking
             try {
                 const { data: studioInfo } = await supabaseClient
                     .from('studios')
@@ -741,20 +782,27 @@ serve(async (req: Request) => {
                             user_id: studioInfo.owner_id,
                             type: 'info',
                             title: 'New Booking Request',
-                            message: `New booking request for ${studioInfo.name} on ${date}.`,
+                            message: `A musician has requested to book ${studioInfo.name} on ${date}. Awaiting payment.`,
                             read: false,
                             meta: {
                                 studio_id,
                                 booking_id: data.id,
-                                booking_date: date
+                                booking_date: date,
+                                requires_payment: true
                             }
                         });
                 }
             } catch (notifyError) {
-                console.error('Error sending booking request notification:', notifyError);
+                console.error('Error sending booking notification:', notifyError);
             }
 
-            return new Response(JSON.stringify(data), {
+            // Return booking data with payment info for frontend to initiate payment
+            return new Response(JSON.stringify({
+                ...data,
+                requires_payment: true,
+                payment_amount: data.final_price,
+                message: 'Booking created. Please complete payment to confirm.'
+            }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 201,
             })

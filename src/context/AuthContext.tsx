@@ -1,8 +1,16 @@
 
 import { Session } from '@supabase/supabase-js';
 import { router } from 'expo-router';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { Alert } from 'react-native';
 import { supabase } from '../../lib/supabase';
+
+type UnpaidBooking = {
+    id: string;
+    remaining_balance: number;
+    studio_name: string;
+    booking_date: string;
+};
 
 type AuthContextType = {
     session: Session | null;
@@ -10,6 +18,12 @@ type AuthContextType = {
     isAdmin: boolean;
     userRole: string | null;
     userId: string | null;
+    // System lock for unpaid balances
+    isSystemLocked: boolean;
+    unpaidBalance: number;
+    unpaidBookings: UnpaidBooking[];
+    checkSystemLock: () => Promise<void>;
+    showLockAlert: () => void;
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -18,6 +32,11 @@ const AuthContext = createContext<AuthContextType>({
     isAdmin: false,
     userRole: null,
     userId: null,
+    isSystemLocked: false,
+    unpaidBalance: 0,
+    unpaidBookings: [],
+    checkSystemLock: async () => {},
+    showLockAlert: () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -41,6 +60,65 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [loading, setLoading] = useState(true);
     const [isAdmin, setIsAdmin] = useState(false);
     const [userRole, setUserRole] = useState<string | null>(null);
+    
+    // System lock state
+    const [isSystemLocked, setIsSystemLocked] = useState(false);
+    const [unpaidBalance, setUnpaidBalance] = useState(0);
+    const [unpaidBookings, setUnpaidBookings] = useState<UnpaidBooking[]>([]);
+
+    // Check for unpaid balances
+    const checkSystemLock = useCallback(async () => {
+        if (!session?.user?.id) {
+            setIsSystemLocked(false);
+            setUnpaidBalance(0);
+            setUnpaidBookings([]);
+            return;
+        }
+
+        try {
+            const { data: bookings, error } = await supabase
+                .from('studio_bookings')
+                .select('id, remaining_balance, booking_date, studio:studios(name)')
+                .eq('user_id', session.user.id)
+                .gt('remaining_balance', 0)
+                .in('status', ['pending', 'confirmed']);
+
+            if (error) {
+                console.log('Error checking system lock:', error);
+                return;
+            }
+
+            if (bookings && bookings.length > 0) {
+                const totalBalance = bookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0);
+                setUnpaidBalance(totalBalance);
+                setUnpaidBookings(bookings.map(b => ({
+                    id: b.id,
+                    remaining_balance: b.remaining_balance,
+                    studio_name: (b.studio as any)?.name || 'Unknown Studio',
+                    booking_date: b.booking_date
+                })));
+                setIsSystemLocked(true);
+            } else {
+                setIsSystemLocked(false);
+                setUnpaidBalance(0);
+                setUnpaidBookings([]);
+            }
+        } catch (e) {
+            console.log('Error in checkSystemLock:', e);
+        }
+    }, [session?.user?.id]);
+
+    // Show lock alert and redirect to wallet
+    const showLockAlert = useCallback(() => {
+        Alert.alert(
+            'Action Blocked',
+            `You have an outstanding balance of ₱${unpaidBalance.toLocaleString()}. Please settle your payment to continue using the app.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Pay Now', onPress: () => router.push('/wallet') }
+            ]
+        );
+    }, [unpaidBalance]);
 
     useEffect(() => {
         // Helper to filter/block unverified sessions (prevents auto-login during signup)
@@ -73,12 +151,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             } else {
                 setIsAdmin(false);
                 setUserRole(null);
+                setIsSystemLocked(false);
+                setUnpaidBalance(0);
+                setUnpaidBookings([]);
             }
             setLoading(false);
         });
 
         return () => subscription.unsubscribe();
     }, []);
+
+    // Check system lock when session changes
+    useEffect(() => {
+        if (session?.user?.id) {
+            checkSystemLock();
+        }
+    }, [session?.user?.id, checkSystemLock]);
 
     const checkAdmin = async (userId: string) => {
         // Optional: If you have an 'admin' role in your profiles table or metadata
@@ -114,7 +202,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     return (
-        <AuthContext.Provider value={{ session, loading, isAdmin, userRole, userId: session?.user?.id || null }}>
+        <AuthContext.Provider value={{ 
+            session, 
+            loading, 
+            isAdmin, 
+            userRole, 
+            userId: session?.user?.id || null,
+            isSystemLocked,
+            unpaidBalance,
+            unpaidBookings,
+            checkSystemLock,
+            showLockAlert
+        }}>
             {children}
         </AuthContext.Provider>
     );

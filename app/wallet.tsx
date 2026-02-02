@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import * as ExpoLinking from 'expo-linking';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Linking, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
@@ -10,12 +11,15 @@ import { useTheme } from '../src/context/ThemeContext';
 
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
+  const router = useRouter();
   const [modalVisible, setModalVisible] = useState(false);
 
   const [balance, setBalance] = useState(0.00);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [unpaidBookings, setUnpaidBookings] = useState<any[]>([]);
+  const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
 
   const fetchWallet = async () => {
     try {
@@ -57,11 +61,77 @@ export default function WalletScreen() {
         setTransactions(txs || []);
       }
 
+      // 3. Get Unpaid Bookings (remaining balance > 0)
+      const { data: bookings, error: bookingsError } = await supabase
+        .from('studio_bookings')
+        .select('*, studio:studios(name, images)')
+        .eq('user_id', user.id)
+        .gt('remaining_balance', 0)
+        .in('status', ['pending', 'confirmed'])
+        .order('booking_date', { ascending: true });
+
+      if (!bookingsError && bookings) {
+        setUnpaidBookings(bookings);
+      }
+
     } catch (e) {
       console.log('Error fetching wallet:', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  // Pay remaining balance
+  const handlePayBalance = async (booking: any) => {
+    try {
+      setPayingBookingId(booking.id);
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Generate environment-aware redirect URLs (works with Expo Go and production)
+      const redirectUrl = ExpoLinking.createURL('payment-result', { 
+        queryParams: { status: 'success', booking_id: booking.id } 
+      });
+      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', { 
+        queryParams: { status: 'cancelled', booking_id: booking.id } 
+      });
+
+      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('paymongo', {
+        body: {
+          action: 'create_checkout',
+          booking_id: booking.id,
+          user_id: user.id,
+          amount: booking.remaining_balance,
+          total_amount: booking.final_price,
+          payment_type: 'balance',
+          remaining_balance: 0,
+          studio_name: booking.studio?.name,
+          booking_date: booking.booking_date,
+          description: `Remaining balance for booking at ${booking.studio?.name}`,
+          redirect_url: redirectUrl,
+          cancel_redirect_url: cancelRedirectUrl
+        }
+      });
+
+      if (paymentError) {
+        Alert.alert('Error', 'Failed to create payment session. Please try again.');
+        return;
+      }
+
+      if (paymentData?.checkout_url) {
+        const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
+        if (canOpen) {
+          await Linking.openURL(paymentData.checkout_url);
+        } else {
+          Alert.alert('Error', 'Unable to open payment page.');
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to initiate payment.');
+    } finally {
+      setPayingBookingId(null);
     }
   };
 
@@ -143,6 +213,71 @@ export default function WalletScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Unpaid Balances Section */}
+          {unpaidBookings.length > 0 && (
+            <View style={styles.cardWrapper}>
+              <View style={[styles.unpaidSection, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
+                <View style={styles.unpaidHeader}>
+                  <View style={styles.unpaidHeaderLeft}>
+                    <Ionicons name="warning" size={24} color="#DC2626" />
+                    <View>
+                      <Text style={styles.unpaidTitle}>Outstanding Balance</Text>
+                      <Text style={styles.unpaidSubtitle}>
+                        {unpaidBookings.length} booking{unpaidBookings.length > 1 ? 's' : ''} with pending payment
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.unpaidTotal}>
+                    ₱{unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
+                  </Text>
+                </View>
+
+                {/* Unpaid Booking Items */}
+                {unpaidBookings.map((booking, index) => (
+                  <View 
+                    key={booking.id} 
+                    style={[
+                      styles.unpaidItem,
+                      { borderTopWidth: index === 0 ? 1 : 0, borderTopColor: '#FECACA' }
+                    ]}
+                  >
+                    <Image 
+                      source={{ uri: booking.studio?.images?.[0] || 'https://picsum.photos/100' }}
+                      style={styles.unpaidImage}
+                    />
+                    <View style={styles.unpaidInfo}>
+                      <Text style={styles.unpaidName} numberOfLines={1}>{booking.studio?.name}</Text>
+                      <Text style={styles.unpaidDate}>
+                        {new Date(booking.booking_date).toLocaleDateString()} • {booking.start_time?.slice(0, 5)}
+                      </Text>
+                      <Text style={styles.unpaidAmount}>
+                        Balance: ₱{booking.remaining_balance?.toLocaleString()}
+                      </Text>
+                    </View>
+                    <TouchableOpacity 
+                      onPress={() => handlePayBalance(booking)}
+                      disabled={payingBookingId === booking.id}
+                      style={styles.payNowBtn}
+                    >
+                      {payingBookingId === booking.id ? (
+                        <ActivityIndicator size="small" color="white" />
+                      ) : (
+                        <>
+                          <Ionicons name="card" size={16} color="white" />
+                          <Text style={styles.payNowText}>Pay Now</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ))}
+
+                <Text style={styles.unpaidWarning}>
+                  ⚠️ Please settle your outstanding balance to continue using the app
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* Subscription Card */}
           <View style={styles.cardWrapper}>
@@ -407,5 +542,90 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+  },
+  // Unpaid Section Styles
+  unpaidSection: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+  },
+  unpaidHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  unpaidHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  unpaidTitle: {
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+    color: '#DC2626',
+  },
+  unpaidSubtitle: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+    color: '#B91C1C',
+  },
+  unpaidTotal: {
+    fontSize: 20,
+    fontFamily: 'Poppins_700Bold',
+    color: '#DC2626',
+  },
+  unpaidItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    gap: 12,
+  },
+  unpaidImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+  },
+  unpaidInfo: {
+    flex: 1,
+  },
+  unpaidName: {
+    fontSize: 14,
+    fontFamily: 'Poppins_600SemiBold',
+    color: '#1F2937',
+  },
+  unpaidDate: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+    color: '#6B7280',
+  },
+  unpaidAmount: {
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+    color: '#DC2626',
+  },
+  payNowBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  payNowText: {
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+    color: 'white',
+  },
+  unpaidWarning: {
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+    color: '#B91C1C',
+    textAlign: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#FECACA',
   },
 });

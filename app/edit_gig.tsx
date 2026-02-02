@@ -163,44 +163,115 @@ export default function EditGigScreen() {
         return;
       }
 
+      console.log('📡 Calling edge function with params:', {
+        action: 'fetch_one',
+        type: 'gig',
+        id: gigId,
+        userId: user.id
+      });
+
       const { data, error } = await supabase.functions.invoke('manage-listings', {
         body: { action: 'fetch_one', type: 'gig', id: gigId, userId: user.id }
       });
+
+      console.log('📥 ===== EDGE FUNCTION RESPONSE =====');
+      console.log('📥 Error object:', error);
+      console.log('📥 Data object:', data);
+      console.log('📥 Data type:', typeof data);
+      console.log('📥 Data stringified:', JSON.stringify(data, null, 2));
 
       if (error) throw error;
 
       // If no data returned, user doesn't own this gig
       if (!data) {
+        console.error('❌ No data returned from edge function');
         showAlert('error', 'Not Found', 'Gig not found or you do not have permission to edit it.');
         router.replace('/home');
         return;
       }
 
+      console.log('📦 ===== GIG DATA ANALYSIS =====');
+      console.log('📦 name:', data.name);
+      console.log('📦 description:', data.description?.substring(0, 50));
+      console.log('📦 location:', data.location);
+      console.log('📦 budget:', data.budget, '(type:', typeof data.budget, ')');
+      console.log('📦 event_date:', data.event_date);
+      console.log('📦 requirements:', data.requirements);
+      console.log('📦 requirements type:', typeof data.requirements);
+      console.log('📦 requirements stringified:', JSON.stringify(data.requirements, null, 2));
+      console.log('📦 requirements?.genres:', data.requirements?.genres);
+      console.log('📦 requirements?.instruments:', data.requirements?.instruments);
+      console.log('📦 requirements?.experience_level:', data.requirements?.experience_level);
+      console.log('📦 requirements?.event_start_time:', data.requirements?.event_start_time);
+      console.log('📦 requirements?.event_end_time:', data.requirements?.event_end_time);
+      console.log('📦 requirements?.musician_type:', data.requirements?.musician_type);
+      console.log('📦 contract_url:', data.contract_url);
+      console.log('📦 images:', data.images);
+
+      console.log('🔧 ===== SETTING STATE VALUES =====');
+      
       setGigName(data.name);
+      console.log('🔧 setGigName:', data.name);
+      
       setDescription(data.description);
+      console.log('🔧 setDescription:', data.description?.substring(0, 50));
+      
       setAddress(data.location);
+      console.log('🔧 setAddress:', data.location);
+      
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
+      console.log('🔧 setLatitude/Longitude:', data.latitude, data.longitude);
+      
       setCost(data.budget?.toString() || '');
+      console.log('🔧 setCost:', data.budget?.toString() || '');
+      
       setEventDate(data.event_date || '');
+      console.log('🔧 setEventDate:', data.event_date || '');
+      
       // Read event times from requirements JSONB field
-      setEventStartTime(data.requirements?.event_start_time || '06:00 PM');
-      setEventEndTime(data.requirements?.event_end_time || '11:00 PM');
-      setMusicianType(data.requirements?.musician_type || 'both');
-      setRequiredGenres(Array.isArray(data.requirements?.genres) ? data.requirements.genres : []);
-      setRequiredInstruments(Array.isArray(data.requirements?.instruments) ? data.requirements.instruments : []);
-      setExperienceLevel(data.requirements?.experience_level || '');
+      const startTime = data.requirements?.event_start_time || '06:00 PM';
+      const endTime = data.requirements?.event_end_time || '11:00 PM';
+      setEventStartTime(startTime);
+      setEventEndTime(endTime);
+      console.log('🔧 setEventStartTime:', startTime);
+      console.log('🔧 setEventEndTime:', endTime);
+      
+      const musicianTypeValue = data.requirements?.musician_type || 'both';
+      setMusicianType(musicianTypeValue);
+      console.log('🔧 setMusicianType:', musicianTypeValue);
+      
+      const genresValue = Array.isArray(data.requirements?.genres) ? data.requirements.genres : [];
+      setRequiredGenres(genresValue);
+      console.log('🔧 setRequiredGenres:', genresValue);
+      
+      const instrumentsValue = Array.isArray(data.requirements?.instruments) ? data.requirements.instruments : [];
+      setRequiredInstruments(instrumentsValue);
+      console.log('🔧 setRequiredInstruments:', instrumentsValue);
+      
+      const expLevel = data.requirements?.experience_level || '';
+      setExperienceLevel(expLevel);
+      console.log('🔧 setExperienceLevel:', expLevel);
+      
       setContractUrl(data.contract_url || '');
+      console.log('🔧 setContractUrl:', data.contract_url || '');
+      
       if (data.contract_url) {
         const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
         setContractFileName(decodeURIComponent(fileName));
+        console.log('🔧 setContractFileName:', fileName);
       }
       setImages(data.images || []);
+      console.log('🔧 setImages:', data.images || []);
+      
       if (data.images && data.images.length > 0) {
         setThumbnailIndex(0);
       }
+      
+      console.log('✅ ===== FETCH GIG DETAILS COMPLETED =====');
     } catch (e) {
-      console.log('Error fetching gig details:', e);
+      console.error('❌ ===== FETCH GIG DETAILS FAILED =====');
+      console.error('❌ Error:', e);
       showAlert('error', 'Error', 'Failed to load gig details.');
       router.replace('/home');
     } finally {
@@ -259,12 +330,16 @@ export default function EditGigScreen() {
         return;
       }
 
+      const orderedImages = images.length > 0 && images[thumbnailIndex]
+        ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
+        : images;
+
       const payload = {
         name: gigName,
         description,
         location: address,
         budget: parseFloat(cost) || 0,
-        images: images,
+        images: orderedImages,
         contract_url: contractUrl || null,
         latitude,
         longitude,
@@ -279,17 +354,24 @@ export default function EditGigScreen() {
         },
       };
 
-      console.log('🔵 Updating gig with payload:', JSON.stringify({ action: 'update', type: 'gig', id: gigId, userId: user.id, payload }, null, 2));
+      console.log('🔵 ===== UPDATING GIG =====');
+      console.log('🔵 Payload being sent:', JSON.stringify(payload, null, 2));
+      console.log('🔵 Requirements being sent:', JSON.stringify(payload.requirements, null, 2));
 
       const response = await supabase.functions.invoke('manage-listings', {
         body: { action: 'update', type: 'gig', id: gigId, userId: user.id, payload }
       });
 
+      console.log('📥 Update response data:', JSON.stringify(response.data, null, 2));
+      console.log('📥 Update response error:', response.error);
+
       if (response.error) {
+        console.error('❌ Update failed with error:', response.error);
         throw response.error;
       }
 
       console.log('✅ Gig Updated successfully');
+      console.log('✅ Returned data:', JSON.stringify(response.data, null, 2));
       showAlert('success', 'Success', 'Gig updated successfully!', [
         {
           text: 'OK',
@@ -741,7 +823,7 @@ export default function EditGigScreen() {
 
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Instruments</Text>
-            <View style={[styles.addMemberRow, { marginBottom: 8 }]}
+            <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
               <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
                 <TextInput
                   value={newInstrument}

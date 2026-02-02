@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
-import React, { useState } from 'react';
-import { Alert, Dimensions, Image, Linking, Modal as RNModal, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import * as ExpoLinking from 'expo-linking';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, AppState, Dimensions, Image, Linking, Modal as RNModal, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { supabase } from '../lib/supabase';
 import BookingDetailsSheet from '../src/components/BookingDetailsSheet';
@@ -36,17 +37,28 @@ type Tab = 'Applicants' | 'Active Musicians' | 'Pending' | 'Upcoming' | 'Ongoing
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+  const params = useLocalSearchParams<{ 
+    tab?: string; 
+    payment_result?: string; 
+    booking_id?: string;
+    retry_payment?: string;
+  }>();
   const [activeTab, setActiveTab] = useState<Tab>('Pending');
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [cancellationReason, setCancellationReason] = useState('');
   const bookingDetailsRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
   const { width } = useWindowDimensions();
-  const [modalMode, setModalMode] = useState<'confirm' | 'cancel' | 'decline' | 'fire' | 'complete' | 'renew'>('confirm');
+  const [modalMode, setModalMode] = useState<'confirm' | 'cancel' | 'decline' | 'fire' | 'complete' | 'renew' | 'refund'>('confirm');
 
   // Renew Contract State
   const [showRenewModal, setShowRenewModal] = useState(false);
   const [renewGigId, setRenewGigId] = useState<string | null>(null);
+
+  // Payment Option State
+  const [showPaymentOptionModal, setShowPaymentOptionModal] = useState(false);
+  const [paymentItem, setPaymentItem] = useState<any>(null);
+  const [selectedPaymentType, setSelectedPaymentType] = useState<'full' | 'downpayment'>('full');
 
   // QR Check-in State
   const [showQRModal, setShowQRModal] = useState(false);
@@ -74,7 +86,79 @@ export default function BookingsScreen() {
   const [loading, setLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>('');
 
-  React.useEffect(() => {
+  // Track if user went to payment page (to auto-refresh on return)
+  const paymentInProgressRef = useRef(false);
+  const appState = useRef(AppState.currentState);
+
+  // Handle route params (from payment result screen)
+  useEffect(() => {
+    if (params.tab) {
+      const validTabs: Tab[] = ['Applicants', 'Active Musicians', 'Pending', 'Upcoming', 'Ongoing', 'Review'];
+      if (validTabs.includes(params.tab as Tab)) {
+        setActiveTab(params.tab as Tab);
+      }
+    }
+    
+    // If coming from payment result with retry_payment, trigger payment for that booking
+    if (params.retry_payment && userId) {
+      const bookingId = params.retry_payment;
+      // Find the booking and trigger payment
+      setTimeout(async () => {
+        const { data: booking } = await supabase
+          .from('studio_bookings')
+          .select('*')
+          .eq('id', bookingId)
+          .single();
+          
+        if (booking) {
+          handlePayNow(booking);
+        }
+      }, 500);
+    }
+  }, [params.tab, params.retry_payment, userId]);
+
+  // Auto-refresh when returning from payment browser
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      // User returned to app from background (payment browser)
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        console.log('📱 App returned to foreground');
+        
+        // If we were in payment flow, check status and refresh
+        if (paymentInProgressRef.current && userId) {
+          console.log('💳 Checking payment status after return...');
+          paymentInProgressRef.current = false;
+          
+          // Small delay to let payment webhook process
+          setTimeout(async () => {
+            await fetchBookings(userId);
+            
+            // Check if any booking moved to Upcoming (payment success)
+            const { data: upcomingBookings } = await supabase
+              .from('studio_bookings')
+              .select('id, status, payment_status')
+              .eq('user_id', userId)
+              .eq('payment_status', 'paid')
+              .order('created_at', { ascending: false })
+              .limit(1);
+            
+            if (upcomingBookings && upcomingBookings.length > 0) {
+              // Payment was successful, switch to Upcoming tab
+              setActiveTab('Upcoming');
+              Alert.alert('Payment Successful! 🎉', 'Your booking has been confirmed and moved to Upcoming.');
+            }
+          }, 1500); // Wait for webhook to process
+        }
+      }
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [userId]);
+
+  useEffect(() => {
     if (isAuthenticated && userId) {
       fetchBookings(userId);
     }
@@ -342,6 +426,242 @@ export default function BookingsScreen() {
       Alert.alert('Error', e?.message || 'Failed to renew contract. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Show payment option modal before paying
+  const showPaymentOptions = (item: any) => {
+    setPaymentItem(item);
+    setSelectedPaymentType('full'); // Reset to full payment as default
+    setShowPaymentOptionModal(true);
+  };
+
+  // PayMongo Payment Handler
+  const handlePayNow = async (item: any, paymentType: 'full' | 'downpayment' = 'full') => {
+    if (!item || !userId) return;
+
+    try {
+      setLoading(true);
+      const totalAmount = item.payment_amount || item.total_cost;
+      const payAmount = paymentType === 'downpayment' ? Math.round(totalAmount / 2) : totalAmount;
+      const remainingBalance = paymentType === 'downpayment' ? Math.round(totalAmount / 2) : 0;
+      
+      console.log('💳 Initiating payment for booking:', item.id, 'Type:', paymentType, 'Amount:', payAmount);
+
+      // Generate environment-aware redirect URL (works with Expo Go and production)
+      const redirectUrl = ExpoLinking.createURL('payment-result', { 
+        queryParams: { status: 'success', booking_id: item.id } 
+      });
+      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', { 
+        queryParams: { status: 'cancelled', booking_id: item.id } 
+      });
+
+      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('paymongo', {
+        body: {
+          action: 'create_checkout',
+          booking_id: item.id,
+          user_id: userId,
+          amount: payAmount,
+          total_amount: totalAmount,
+          payment_type: paymentType,
+          remaining_balance: remainingBalance,
+          studio_name: item.name,
+          booking_date: item.raw_date,
+          description: paymentType === 'downpayment' 
+            ? `Downpayment (50%) for studio booking at ${item.name}` 
+            : `Studio booking at ${item.name}`,
+          redirect_url: redirectUrl,
+          cancel_redirect_url: cancelRedirectUrl
+        }
+      });
+
+      if (paymentError) {
+        console.error('Payment error:', paymentError);
+        Alert.alert('Error', 'Failed to create payment session. Please try again.');
+        return;
+      }
+
+      if (paymentData?.checkout_url) {
+        console.log('✅ Opening checkout URL:', paymentData.checkout_url);
+        const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
+        if (canOpen) {
+          // Set flag to track payment in progress
+          paymentInProgressRef.current = true;
+          await Linking.openURL(paymentData.checkout_url);
+        } else {
+          Alert.alert('Error', 'Unable to open payment page. Please try again.');
+        }
+      } else {
+        Alert.alert('Error', 'Failed to get payment URL. Please try again.');
+      }
+    } catch (e: any) {
+      console.error('Pay now error:', e);
+      Alert.alert('Error', e?.message || 'Failed to initiate payment. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Pay Remaining Balance Handler
+  const handlePayBalance = async (item: any) => {
+    if (!item || !userId || !item.remaining_balance) return;
+
+    try {
+      setLoading(true);
+      console.log('💳 Paying remaining balance for booking:', item.id, 'Amount:', item.remaining_balance);
+
+      // Generate environment-aware redirect URL (works with Expo Go and production)
+      const redirectUrl = ExpoLinking.createURL('payment-result', { 
+        queryParams: { status: 'success', booking_id: item.id } 
+      });
+      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', { 
+        queryParams: { status: 'cancelled', booking_id: item.id } 
+      });
+
+      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('paymongo', {
+        body: {
+          action: 'create_checkout',
+          booking_id: item.id,
+          user_id: userId,
+          amount: item.remaining_balance,
+          total_amount: item.total_cost,
+          payment_type: 'balance',
+          remaining_balance: 0, // After this payment, balance will be 0
+          studio_name: item.name,
+          booking_date: item.raw_date,
+          description: `Remaining balance payment for studio booking at ${item.name}`,
+          redirect_url: redirectUrl,
+          cancel_redirect_url: cancelRedirectUrl
+        }
+      });
+
+      if (paymentError) {
+        console.error('Payment error:', paymentError);
+        Alert.alert('Error', 'Failed to create payment session. Please try again.');
+        return;
+      }
+
+      if (paymentData?.checkout_url) {
+        console.log('✅ Opening checkout URL:', paymentData.checkout_url);
+        const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
+        if (canOpen) {
+          paymentInProgressRef.current = true;
+          await Linking.openURL(paymentData.checkout_url);
+        } else {
+          Alert.alert('Error', 'Unable to open payment page. Please try again.');
+        }
+      } else {
+        Alert.alert('Error', 'Failed to get payment URL. Please try again.');
+      }
+    } catch (e: any) {
+      console.error('Pay balance error:', e);
+      Alert.alert('Error', e?.message || 'Failed to initiate payment. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Check payment status (for returning from payment)
+  const checkPaymentStatus = async (bookingId: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('paymongo', {
+        body: {
+          action: 'check_payment',
+          booking_id: bookingId
+        }
+      });
+
+      if (data?.payment_status === 'paid') {
+        Alert.alert('Success', 'Payment confirmed! Your booking is now in Upcoming.');
+        if (userId) fetchBookings(userId);
+      }
+    } catch (e) {
+      console.error('Check payment error:', e);
+    }
+  };
+
+  // Request Refund Handler
+  const handleRequestRefund = (item: any) => {
+    setSelectedItem(item);
+    setCancellationReason('');
+    setModalMode('refund');
+    setModalVisible(true);
+  };
+
+  const processRefund = async () => {
+    if (!selectedItem || !userId) return;
+
+    try {
+      setLoading(true);
+      console.log('💸 Processing refund for booking:', selectedItem.id);
+
+      const { data: refundData, error: refundError } = await supabase.functions.invoke('paymongo', {
+        body: {
+          action: 'request_refund',
+          booking_id: selectedItem.id,
+          user_id: userId,
+          reason: cancellationReason || 'Customer requested cancellation'
+        }
+      });
+
+      if (refundError) {
+        console.error('Refund error:', refundError);
+        Alert.alert('Error', 'Failed to process refund. Please try again.');
+        return;
+      }
+
+      if (refundData?.success) {
+        Alert.alert(
+          'Refund Processed', 
+          refundData.message || `Your refund of ₱${refundData.refund_amount?.toLocaleString()} has been processed.`,
+          [{ text: 'OK', onPress: () => { if (userId) fetchBookings(userId); } }]
+        );
+      } else {
+        Alert.alert('Error', refundData?.error || 'Failed to process refund.');
+      }
+
+      setModalVisible(false);
+    } catch (e: any) {
+      console.error('Refund error:', e);
+      Alert.alert('Error', e?.message || 'Failed to process refund. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Calculate refund amount for display
+  const getRefundInfo = (item: any) => {
+    if (!item?.raw_date || !item?.payment_amount) return { percentage: 0, amount: 0, message: '' };
+    
+    const bookingDate = new Date(item.raw_date);
+    const now = new Date();
+    const diffTime = bookingDate.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays > 7) {
+      return { 
+        percentage: 80, 
+        amount: Math.round(item.payment_amount * 0.8),
+        message: 'You will receive an 80% refund (cancelled >7 days before).'
+      };
+    } else if (diffDays >= 3) {
+      return { 
+        percentage: 70, 
+        amount: Math.round(item.payment_amount * 0.7),
+        message: 'You will receive a 70% refund (cancelled 3-7 days before).'
+      };
+    } else if (diffDays >= 0) {
+      return { 
+        percentage: 0, 
+        amount: 0,
+        message: 'No refund available (cancelled <3 days before booking).'
+      };
+    } else {
+      return { 
+        percentage: 100, 
+        amount: item.payment_amount,
+        message: 'Full refund available (booking date passed without check-in).'
+      };
     }
   };
 
@@ -846,6 +1166,8 @@ export default function BookingsScreen() {
                           <Ionicons name="play-circle" size={16} color="#10B981" />
                         ) : activeTab === 'Review' ? (
                           <Ionicons name="checkmark-done-circle" size={16} color={colors.textSecondary} />
+                        ) : activeTab === 'Pending' && item.payment_status === 'unpaid' ? (
+                          <Ionicons name="card-outline" size={16} color="#EF4444" />
                         ) : activeTab === 'Pending' ? (
                           <Ionicons name="time-outline" size={16} color="#F59E0B" />
                         ) : (
@@ -856,12 +1178,27 @@ export default function BookingsScreen() {
                           style={[
                             styles.statusText,
                             {
-                              color: item.isCancelled ? "#EF4444" : activeTab === 'Pending' ? "#F59E0B" : activeTab === 'Ongoing' ? "#10B981" : activeTab === 'Review' ? colors.textSecondary : "#10B981"
+                              color: item.isCancelled ? "#EF4444" 
+                                : activeTab === 'Pending' && item.payment_status === 'unpaid' ? "#EF4444"
+                                : activeTab === 'Pending' ? "#F59E0B" 
+                                : activeTab === 'Ongoing' ? "#10B981" 
+                                : activeTab === 'Review' ? colors.textSecondary 
+                                : "#10B981"
                             }
                           ]}
                         >
                           {item.status}
                         </Text>
+
+                        {/* Downpayment Badge */}
+                        {item.payment_type === 'downpayment' && item.remaining_balance > 0 && (
+                          <View style={[styles.downpaymentBadge, { backgroundColor: '#F59E0B20' }]}>
+                            <Ionicons name="warning" size={12} color="#F59E0B" />
+                            <Text style={[styles.downpaymentText, { color: '#F59E0B' }]}>
+                              Balance: ₱{item.remaining_balance?.toLocaleString()}
+                            </Text>
+                          </View>
+                        )}
                       </View>
 
 
@@ -869,7 +1206,25 @@ export default function BookingsScreen() {
                         styles.actionButtonsContainer,
                         { marginTop: 0, width: '100%' }
                       ]}>
-                        {activeTab === 'Pending' && item.action === 'Confirm Now' ? (
+                        {/* PAY NOW - For musicians with unpaid bookings */}
+                        {activeTab === 'Pending' && item.action === 'Pay Now' && item.payment_status === 'unpaid' ? (
+                          <View style={{ flexDirection: 'row', gap: scale(8), flex: 1 }}>
+                            <TouchableOpacity
+                              onPress={() => handleDetailsPress(item)}
+                              style={[styles.outlineButton, { borderColor: colors.border, flex: 1, justifyContent: 'center', alignItems: 'center' }]}
+                            >
+                              <Text style={[styles.outlineButtonText, { color: colors.textSecondary }]}>Details</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => showPaymentOptions(item)}
+                              style={[styles.actionButton, { backgroundColor: '#10B981', flex: 2, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 6 }]}
+                            >
+                              <Ionicons name="card-outline" size={18} color="white" />
+                              <Text style={[styles.actionButtonText, { color: 'white' }]}>Pay ₱{(item.payment_amount || item.total_cost)?.toLocaleString()}</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : activeTab === 'Pending' && item.action === 'Confirm Now' ? (
                           <View style={{ flexDirection: 'row', gap: scale(8), flex: 1 }}>
                             {/* Details Button */}
                             <TouchableOpacity
@@ -911,6 +1266,19 @@ export default function BookingsScreen() {
                           // Default / Upcoming Buttons
                           <View style={{ width: '100%', gap: moderateScale(8) }}>
 
+                            {/* 0. Pay Remaining Balance Button (for downpayments) */}
+                            {activeTab === 'Upcoming' && item.payment_type === 'downpayment' && item.remaining_balance > 0 && userRole !== 'studio-owner' && (
+                              <TouchableOpacity
+                                onPress={() => handlePayBalance(item)}
+                                style={[styles.actionButton, { backgroundColor: '#F59E0B', width: '100%', alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }]}
+                              >
+                                <Ionicons name="wallet-outline" size={18} color="white" style={{ marginRight: 8 }} />
+                                <Text style={[styles.actionButtonText, { color: 'white', fontSize: moderateScale(14) }]}>
+                                  Pay Balance ₱{item.remaining_balance?.toLocaleString()}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+
                             {/* 1. Primary Action: QR Check-in (Full Width) */}
                             {activeTab === 'Upcoming' && item.type_id === 'studio_booking' && item.status === 'Confirmed' && (
                               userRole === 'studio-owner' ? (
@@ -932,7 +1300,7 @@ export default function BookingsScreen() {
                               )
                             )}
 
-                            {/* 2. Secondary Actions: Details & Cancel (Row) */}
+                            {/* 2. Secondary Actions: Details & Cancel/Refund (Row) */}
                             <View style={{ flexDirection: 'row', gap: scale(8) }}>
                               <TouchableOpacity
                                 onPress={() => handleDetailsPress(item)}
@@ -941,14 +1309,26 @@ export default function BookingsScreen() {
                               </TouchableOpacity>
 
                               {activeTab === 'Upcoming' && !item.isCancelled && (
-                                <TouchableOpacity onPress={() => {
-                                  setSelectedItem(item);
-                                  setModalMode('cancel');
-                                  setCancellationReason('');
-                                  setModalVisible(true);
-                                }} style={[styles.cancelButton, { backgroundColor: isDark ? 'rgba(127, 29, 29, 0.2)' : '#FEF2F2', flex: 1, alignItems: 'center' }]}>
-                                  <Text style={[styles.cancelButtonText, isDark ? { color: '#F87171' } : { color: '#DC2626' }]}>Cancel</Text>
-                                </TouchableOpacity>
+                                item.payment_status === 'paid' ? (
+                                  // Show Refund button for paid bookings
+                                  <TouchableOpacity 
+                                    onPress={() => handleRequestRefund(item)} 
+                                    style={[styles.cancelButton, { backgroundColor: isDark ? 'rgba(245, 158, 11, 0.2)' : '#FEF3C7', flex: 1, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 4 }]}
+                                  >
+                                    <Ionicons name="return-down-back-outline" size={14} color="#F59E0B" />
+                                    <Text style={[styles.cancelButtonText, { color: '#F59E0B' }]}>Refund</Text>
+                                  </TouchableOpacity>
+                                ) : (
+                                  // Show Cancel button for unpaid bookings
+                                  <TouchableOpacity onPress={() => {
+                                    setSelectedItem(item);
+                                    setModalMode('cancel');
+                                    setCancellationReason('');
+                                    setModalVisible(true);
+                                  }} style={[styles.cancelButton, { backgroundColor: isDark ? 'rgba(127, 29, 29, 0.2)' : '#FEF2F2', flex: 1, alignItems: 'center' }]}>
+                                    <Text style={[styles.cancelButtonText, isDark ? { color: '#F87171' } : { color: '#DC2626' }]}>Cancel</Text>
+                                  </TouchableOpacity>
+                                )
                               )}
                             </View>
 
@@ -984,7 +1364,9 @@ export default function BookingsScreen() {
                   ? "Complete Contract"
                   : modalMode === 'renew'
                     ? "Renew Contract"
-                    : (selectedItem?.type_id === 'gig_application' ? "Withdraw from Gig" : "Cancel Booking")
+                    : modalMode === 'refund'
+                      ? "Request Refund"
+                      : (selectedItem?.type_id === 'gig_application' ? "Withdraw from Gig" : "Cancel Booking")
         }
         message={
           modalMode === 'confirm'
@@ -1001,7 +1383,12 @@ export default function BookingsScreen() {
                   ? "Confirm efficient completion of this gig? You will be redirected to review the musician."
                   : modalMode === 'renew'
                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || 'this musician'}? They will receive a notification and can accept or decline the offer.`
-                    : (() => {
+                    : modalMode === 'refund'
+                      ? (() => {
+                          const refundInfo = getRefundInfo(selectedItem);
+                          return `${refundInfo.message}\n\nRefund Amount: ₱${refundInfo.amount.toLocaleString()} (${refundInfo.percentage}%)\n\nPlease provide a reason for cancellation:`;
+                        })()
+                      : (() => {
                     // Cancel mode
                     if (selectedItem?.type_id === 'gig_application') {
                       // For gig applications
@@ -1051,13 +1438,15 @@ export default function BookingsScreen() {
                   ? "Complete & Review"
                   : modalMode === 'renew'
                     ? "Send Renewal Offer"
-                    : "Yes, Cancel Booking"
+                    : modalMode === 'refund'
+                      ? `Request Refund (₱${getRefundInfo(selectedItem).amount.toLocaleString()})`
+                      : "Yes, Cancel Booking"
         }
-        showInput={modalMode !== 'confirm' && modalMode !== 'complete' && modalMode !== 'renew'} // Show input for cancel AND decline AND fire
-        danger={modalMode === 'fire' || modalMode === 'decline' || modalMode === 'cancel'}
+        showInput={modalMode !== 'confirm' && modalMode !== 'complete' && modalMode !== 'renew'}
+        danger={modalMode === 'fire' || modalMode === 'decline' || modalMode === 'cancel' || modalMode === 'refund'}
         onInputChange={setCancellationReason}
         onConfirm={async () => {
-          // Validation for modes that require input
+          // Validation for modes that require input (refund reason is optional)
           if ((modalMode === 'cancel' || modalMode === 'decline' || modalMode === 'fire') && !cancellationReason.trim()) {
             Alert.alert('Required', 'Please provide a reason.');
             return;
@@ -1071,6 +1460,12 @@ export default function BookingsScreen() {
             // Handle renew contract separately
             if (modalMode === 'renew') {
               await processRenewContract();
+              return;
+            }
+
+            // Handle refund separately
+            if (modalMode === 'refund') {
+              await processRefund();
               return;
             }
 
@@ -1114,6 +1509,115 @@ export default function BookingsScreen() {
         onConfirm={handleConfirmBooking}
         onCancel={handleCancelBooking}
       />
+
+      {/* Payment Option Modal */}
+      <RNModal 
+        visible={showPaymentOptionModal} 
+        transparent 
+        animationType="fade" 
+        onRequestClose={() => setShowPaymentOptionModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.paymentOptionContainer, { backgroundColor: colors.card }]}>
+            <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>Choose Payment Option</Text>
+            <Text style={[styles.paymentOptionSubtitle, { color: colors.textSecondary }]}>
+              Total Amount: ₱{(paymentItem?.payment_amount || paymentItem?.total_cost || 0).toLocaleString()}
+            </Text>
+            
+            {/* Full Payment Option */}
+            <TouchableOpacity 
+              onPress={() => setSelectedPaymentType('full')}
+              style={[
+                styles.paymentOptionCard, 
+                { 
+                  backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+                  borderColor: selectedPaymentType === 'full' ? colors.primary : colors.border,
+                  borderWidth: selectedPaymentType === 'full' ? 2 : 1,
+                }
+              ]}
+            >
+              <View style={styles.paymentOptionRow}>
+                <View style={[
+                  styles.paymentOptionRadio,
+                  { 
+                    borderColor: selectedPaymentType === 'full' ? colors.primary : colors.border,
+                    backgroundColor: selectedPaymentType === 'full' ? colors.primary : 'transparent',
+                  }
+                ]}>
+                  {selectedPaymentType === 'full' && <View style={styles.paymentOptionRadioInner} />}
+                </View>
+                <View style={styles.paymentOptionInfo}>
+                  <Text style={[styles.paymentOptionLabel, { color: colors.text }]}>Full Payment</Text>
+                  <Text style={[styles.paymentOptionAmount, { color: colors.primary }]}>
+                    ₱{(paymentItem?.payment_amount || paymentItem?.total_cost || 0).toLocaleString()}
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.paymentOptionDesc, { color: colors.textSecondary }]}>
+                Pay the full amount now and complete your booking
+              </Text>
+            </TouchableOpacity>
+
+            {/* Downpayment Option */}
+            <TouchableOpacity 
+              onPress={() => setSelectedPaymentType('downpayment')}
+              style={[
+                styles.paymentOptionCard, 
+                { 
+                  backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+                  borderColor: selectedPaymentType === 'downpayment' ? colors.primary : colors.border,
+                  borderWidth: selectedPaymentType === 'downpayment' ? 2 : 1,
+                }
+              ]}
+            >
+              <View style={styles.paymentOptionRow}>
+                <View style={[
+                  styles.paymentOptionRadio,
+                  { 
+                    borderColor: selectedPaymentType === 'downpayment' ? colors.primary : colors.border,
+                    backgroundColor: selectedPaymentType === 'downpayment' ? colors.primary : 'transparent',
+                  }
+                ]}>
+                  {selectedPaymentType === 'downpayment' && <View style={styles.paymentOptionRadioInner} />}
+                </View>
+                <View style={styles.paymentOptionInfo}>
+                  <Text style={[styles.paymentOptionLabel, { color: colors.text }]}>Downpayment (50%)</Text>
+                  <Text style={[styles.paymentOptionAmount, { color: colors.primary }]}>
+                    ₱{Math.round((paymentItem?.payment_amount || paymentItem?.total_cost || 0) / 2).toLocaleString()}
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.paymentOptionDesc, { color: colors.textSecondary }]}>
+                Pay half now, remaining ₱{Math.round((paymentItem?.payment_amount || paymentItem?.total_cost || 0) / 2).toLocaleString()} due before session
+              </Text>
+            </TouchableOpacity>
+
+            {/* Action Buttons */}
+            <View style={styles.paymentOptionButtons}>
+              <TouchableOpacity 
+                onPress={() => setShowPaymentOptionModal(false)}
+                style={[styles.paymentOptionCancelBtn, { borderColor: colors.border }]}
+              >
+                <Text style={[styles.paymentOptionCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => {
+                  setShowPaymentOptionModal(false);
+                  handlePayNow(paymentItem, selectedPaymentType);
+                }}
+                style={[styles.paymentOptionConfirmBtn, { backgroundColor: colors.primary }]}
+              >
+                <Ionicons name="card-outline" size={18} color="white" style={{ marginRight: 6 }} />
+                <Text style={styles.paymentOptionConfirmText}>
+                  Pay ₱{selectedPaymentType === 'downpayment' 
+                    ? Math.round((paymentItem?.payment_amount || paymentItem?.total_cost || 0) / 2).toLocaleString()
+                    : (paymentItem?.payment_amount || paymentItem?.total_cost || 0).toLocaleString()}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </RNModal>
 
       {/* QR Code Modal (Musician) */}
       <RNModal visible={showQRModal} transparent animationType="slide" onRequestClose={() => setShowQRModal(false)}>
@@ -1448,5 +1952,116 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+  },
+  // Downpayment Badge Styles
+  downpaymentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  downpaymentText: {
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  // Payment Option Modal Styles
+  paymentOptionContainer: {
+    width: '90%',
+    borderRadius: 20,
+    padding: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  paymentOptionTitle: {
+    fontSize: 20,
+    fontFamily: 'Poppins_600SemiBold',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  paymentOptionSubtitle: {
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  paymentOptionCard: {
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  paymentOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  paymentOptionRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  paymentOptionRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: 'white',
+  },
+  paymentOptionInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  paymentOptionLabel: {
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  paymentOptionAmount: {
+    fontSize: 18,
+    fontFamily: 'Poppins_700Bold',
+  },
+  paymentOptionDesc: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+    marginLeft: 34,
+  },
+  paymentOptionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  paymentOptionCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentOptionCancelText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_500Medium',
+  },
+  paymentOptionConfirmBtn: {
+    flex: 2,
+    paddingVertical: 14,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentOptionConfirmText: {
+    color: 'white',
+    fontSize: 14,
+    fontFamily: 'Poppins_600SemiBold',
   },
 });

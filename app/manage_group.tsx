@@ -6,12 +6,14 @@ import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 import { useLocalSearchParams } from 'expo-router';
 
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { isSystemLocked, showLockAlert } = useAuth();
   const { id } = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState('About');
   const [modalVisible, setModalVisible] = useState(false);
@@ -100,6 +102,12 @@ export default function GroupDetailsScreen() {
   };
 
   const handleAction = (action: string) => {
+    // Block accepting invitations if user has unpaid balance
+    if (action === 'accept' && isSystemLocked) {
+      showLockAlert();
+      return;
+    }
+
     if (action === 'accept') {
       setModalTitle('Accept Invitation');
       setModalMessage('Are you sure you want to accept this invitation?');

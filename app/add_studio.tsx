@@ -11,6 +11,7 @@ import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 // Helper function to format time input
@@ -53,6 +54,7 @@ const formatTimeInput = (text: string): string => {
 
 export default function AddStudioScreen() {
     const { colors, isDark } = useTheme();
+    const { isSystemLocked, showLockAlert } = useAuth();
     const [step, setStep] = useState(1);
     const [studioName, setStudioName] = useState('');
     const [description, setDescription] = useState('');
@@ -158,13 +160,7 @@ export default function AddStudioScreen() {
         daysOfWeek.map(day => ({ day, slots: [] }))
     );
 
-    // Booking Settings State
-    const [leadTimeHours, setLeadTimeHours] = useState('24'); // Day before rule
-    const [weekendMultiplier, setWeekendMultiplier] = useState('1.0');
-    const [peakSeasonMultiplier, setPeakSeasonMultiplier] = useState('1.0');
-    const [peakSeasonDates, setPeakSeasonDates] = useState<{ start: string; end: string }[]>([]);
-    const [offPeakMultiplier, setOffPeakMultiplier] = useState('1.0');
-    const [offPeakDates, setOffPeakDates] = useState<{ start: string; end: string }[]>([]);
+
 
     const steps = [
         { id: 1, title: 'Details', icon: 'business' },
@@ -256,6 +252,12 @@ export default function AddStudioScreen() {
         if (step < 4) {
             setStep(step + 1);
         } else {
+            // System lock check
+            if (isSystemLocked) {
+                showLockAlert();
+                return;
+            }
+
             // Confirmation before creating
             showAlert(
                 'warning',
@@ -339,6 +341,10 @@ export default function AddStudioScreen() {
                 .map(preset => ({ name: preset.name, image: preset.image }));
             const instrumentsPayload = [...equipmentPayload, ...presetPayload];
 
+            const orderedImages = images.length > 0 && images[thumbnailIndex]
+                ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
+                : images;
+
             const payload = {
                 name: studioName,
                 type: studioType,
@@ -351,28 +357,31 @@ export default function AddStudioScreen() {
                 pax: pax ? parseInt(pax) : null,
                 amenities,
                 instruments: instrumentsPayload,
-                images: images,
+                images: orderedImages,
                 contract_url: contractUrl || null,
                 // Include both weekly and calendar availability
                 availability: weeklyAvailability,
                 calendar_availability: calendarAvailability,
                 latitude,
                 longitude,
-                // Booking settings
+                // Booking settings - default 24hr advance booking
                 booking_settings: {
-                    lead_time_hours: parseInt(leadTimeHours) || 24,
-                    weekend_multiplier: parseFloat(weekendMultiplier) || 1.0,
-                    peak_season_multiplier: parseFloat(peakSeasonMultiplier) || 1.0,
-                    peak_season_dates: peakSeasonDates,
-                    off_peak_multiplier: parseFloat(offPeakMultiplier) || 1.0,
-                    off_peak_dates: offPeakDates,
+                    lead_time_hours: 24,
+                    weekend_multiplier: 1.0,
+                    peak_season_multiplier: 1.0,
+                    peak_season_dates: [],
+                    off_peak_multiplier: 1.0,
+                    off_peak_dates: [],
                 },
             };
 
-            console.log('� RAW availability state:', JSON.stringify(availability, null, 2));
+            console.log('📦 PAX being sent:', payload.pax);
+            console.log('🎸 EQUIPMENT payload:', JSON.stringify(instrumentsPayload, null, 2));
+            console.log('⚙️ BOOKING SETTINGS payload:', JSON.stringify(payload.booking_settings, null, 2));
+            console.log('📅 RAW availability state:', JSON.stringify(availability, null, 2));
             console.log('📅 FILTERED availability (days with slots):', payload.availability);
             console.log('📅 Number of days with availability:', payload.availability.length);
-            console.log('�🔵 Creating studio with payload:', JSON.stringify({ action: 'create', type: 'studio', userId: session.user.id, payload }, null, 2));
+            console.log('🔵 Creating studio with payload:', JSON.stringify({ action: 'create', type: 'studio', userId: session.user.id, payload }, null, 2));
 
             const { data, error } = await supabase.functions.invoke('manage-listings', {
                 body: { action: 'create', type: 'studio', userId: session.user.id, payload }
@@ -1488,167 +1497,6 @@ export default function AddStudioScreen() {
                                 </View>
                             ))}
 
-                            {/* Booking Settings Section */}
-                            <View style={{ marginTop: 24 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                                    <Ionicons name="settings" size={16} color={colors.primary} />
-                                    <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Booking Settings</Text>
-                                </View>
-
-                                {/* Lead Time (Day Before Rule) */}
-                                <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={[styles.dayLabel, { color: colors.text }]}>Advance Booking Required</Text>
-                                            <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
-                                                How many hours before can clients book?
-                                            </Text>
-                                        </View>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                            <TextInput
-                                                value={leadTimeHours}
-                                                onChangeText={(text) => setLeadTimeHours(text.replace(/[^0-9]/g, ''))}
-                                                keyboardType="numeric"
-                                                style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
-                                            />
-                                            <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>hours</Text>
-                                        </View>
-                                    </View>
-                                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>
-                                        💡 Set to 24 for "Day Before" booking rule
-                                    </Text>
-                                </View>
-
-                                {/* Weekend Pricing Multiplier */}
-                                <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={[styles.dayLabel, { color: colors.text }]}>Weekend Rate</Text>
-                                            <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
-                                                Price multiplier for Sat-Sun
-                                            </Text>
-                                        </View>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                            <TextInput
-                                                value={weekendMultiplier}
-                                                onChangeText={(text) => setWeekendMultiplier(text.replace(/[^0-9.]/g, ''))}
-                                                keyboardType="decimal-pad"
-                                                style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
-                                            />
-                                            <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>×</Text>
-                                        </View>
-                                    </View>
-                                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>
-                                        💡 1.0 = no change, 1.2 = 20% higher
-                                    </Text>
-                                </View>
-
-                                {/* Peak Season Pricing */}
-                                <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                        <View style={{ flex: 1 }}>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                                <Ionicons name="trending-up" size={14} color="#EF4444" />
-                                                <Text style={[styles.dayLabel, { color: colors.text }]}>Peak Season Rate</Text>
-                                            </View>
-                                            <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
-                                                Higher prices for busy periods (holidays, events)
-                                            </Text>
-                                        </View>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                            <TextInput
-                                                value={peakSeasonMultiplier}
-                                                onChangeText={(text) => setPeakSeasonMultiplier(text.replace(/[^0-9.]/g, ''))}
-                                                keyboardType="decimal-pad"
-                                                style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
-                                            />
-                                            <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>×</Text>
-                                        </View>
-                                    </View>
-
-                                    {peakSeasonDates.map((range, idx) => (
-                                        <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: isDark ? '#374151' : '#FEE2E2', borderRadius: 8 }}>
-                                            <Text style={{ color: '#EF4444', fontSize: 12, fontFamily: 'Poppins_500Medium', flex: 1 }}>
-                                                {new Date(range.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(range.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                            </Text>
-                                            <TouchableOpacity onPress={() => setPeakSeasonDates(peakSeasonDates.filter((_, i) => i !== idx))}>
-                                                <Ionicons name="close-circle" size={18} color="#EF4444" />
-                                            </TouchableOpacity>
-                                        </View>
-                                    ))}
-
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            // Add a date range (default: next month)
-                                            const start = new Date();
-                                            start.setMonth(start.getMonth() + 1, 1);
-                                            const end = new Date(start);
-                                            end.setDate(end.getDate() + 6);
-                                            setPeakSeasonDates([...peakSeasonDates, {
-                                                start: start.toISOString().split('T')[0],
-                                                end: end.toISOString().split('T')[0]
-                                            }]);
-                                        }}
-                                        style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                                    >
-                                        <Ionicons name="add-circle-outline" size={16} color="#EF4444" />
-                                        <Text style={{ color: '#EF4444', fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Peak Season Period</Text>
-                                    </TouchableOpacity>
-                                </View>
-
-                                {/* Off-Peak Pricing */}
-                                <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
-                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                        <View style={{ flex: 1 }}>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                                <Ionicons name="trending-down" size={14} color="#10B981" />
-                                                <Text style={[styles.dayLabel, { color: colors.text }]}>Off-Peak Rate</Text>
-                                            </View>
-                                            <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
-                                                Discounted prices for slower periods
-                                            </Text>
-                                        </View>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                            <TextInput
-                                                value={offPeakMultiplier}
-                                                onChangeText={(text) => setOffPeakMultiplier(text.replace(/[^0-9.]/g, ''))}
-                                                keyboardType="decimal-pad"
-                                                style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
-                                            />
-                                            <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>×</Text>
-                                        </View>
-                                    </View>
-
-                                    {offPeakDates.map((range, idx) => (
-                                        <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: isDark ? '#374151' : '#D1FAE5', borderRadius: 8 }}>
-                                            <Text style={{ color: '#10B981', fontSize: 12, fontFamily: 'Poppins_500Medium', flex: 1 }}>
-                                                {new Date(range.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(range.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                            </Text>
-                                            <TouchableOpacity onPress={() => setOffPeakDates(offPeakDates.filter((_, i) => i !== idx))}>
-                                                <Ionicons name="close-circle" size={18} color="#10B981" />
-                                            </TouchableOpacity>
-                                        </View>
-                                    ))}
-
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            // Add a date range (default: 2 months from now)
-                                            const start = new Date();
-                                            start.setMonth(start.getMonth() + 2, 1);
-                                            const end = new Date(start);
-                                            end.setDate(end.getDate() + 6);
-                                            setOffPeakDates([...offPeakDates, {
-                                                start: start.toISOString().split('T')[0],
-                                                end: end.toISOString().split('T')[0]
-                                            }]);
-                                        }}
-                                        style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                                    >
-                                        <Ionicons name="add-circle-outline" size={16} color="#10B981" />
-                                        <Text style={{ color: '#10B981', fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Off-Peak Period</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
                         </View>
                     )}
 

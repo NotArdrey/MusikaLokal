@@ -69,12 +69,13 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         // Count active filters (excluding defaults)
         const activeFilterCount = useMemo(() => {
             let count = 0;
+            if (activeFilter !== 'All') count++;
             if (selectedGenre !== 'All') count++;
             if (minRating > 0) count++;
             if (priceRange !== 'all') count++;
             if (sortBy !== 'newest') count++;
             return count;
-        }, [selectedGenre, minRating, priceRange, sortBy]);
+        }, [activeFilter, selectedGenre, minRating, priceRange, sortBy]);
 
         const renderBackdrop = useCallback(
             (props: any) => (
@@ -101,6 +102,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
         // Reset all filters
         const resetFilters = useCallback(() => {
+            setActiveFilter('All');
             setSelectedGenre('All');
             setMinRating(0);
             setPriceRange('all');
@@ -215,13 +217,15 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                             const mapped = qData.map((item: any) => ({
                                 ...item,
                                 id: item.id,
-                                type: item.type || type,
+                                type: type, // Category type (Studio/Group/Artist/Gig)
+                                studio_type: table.includes('studio') ? item.type : undefined, // Rehearsal, Recording, or Both
                                 name: item.name || item.full_name, // Handle profile name
                                 image: item.images?.[0] || item.image || item.avatar_url, // Handle profile avatar
                                 images: item.images || (item.avatar_url ? [item.avatar_url] : []),
                                 rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
                                 rating: item.rating || 0, // Default 0 for profiles
-                                location: item.location || item.address // Handle profile address
+                                location: item.location || item.address, // Handle profile address
+                                pax: item.pax, // Studio capacity
                             }));
                             results.push(...mapped);
                         }
@@ -308,6 +312,32 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
             return (
                 <View style={[styles.filterPanel, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+                    {/* Listing Type Filter (Moved from Header) - Only for Non-Owners or Owners with multiple options */}
+                    {TYPE_FILTERS.length > 1 && (
+                        <View style={styles.filterSection}>
+                            <Text style={[styles.filterLabel, { color: colors.text }]}>Listing Type</Text>
+                            <View style={styles.filterRow}>
+                                {TYPE_FILTERS.map((filter) => (
+                                    <TouchableOpacity
+                                        key={filter}
+                                        style={[
+                                            styles.filterChip,
+                                            activeFilter === filter
+                                                ? { backgroundColor: colors.primary }
+                                                : { backgroundColor: isDark ? '#374151' : '#F3F4F6' }
+                                        ]}
+                                        onPress={() => setActiveFilter(filter)}
+                                    >
+                                        <Text style={[
+                                            styles.filterChipText,
+                                            activeFilter === filter ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' }
+                                        ]}>{filter}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+                    )}
+
                     {/* Genre Filter */}
                     <View style={styles.filterSection}>
                         <Text style={[styles.filterLabel, { color: colors.text }]}>Genre</Text>
@@ -347,10 +377,18 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                                     ]}
                                     onPress={() => setMinRating(option.value)}
                                 >
-                                    {option.value > 0 && <Ionicons name="star" size={12} color={minRating === option.value ? '#FFF' : '#FBBF24'} style={{ marginRight: 4 }} />}
+                                    {option.value > 0 && (
+                                        <Ionicons
+                                            name="star"
+                                            size={14}
+                                            color={minRating === option.value ? '#FFF' : '#FBBF24'}
+                                            style={{ marginRight: 6, marginTop: -1 }}
+                                        />
+                                    )}
                                     <Text style={[
                                         styles.filterChipText,
-                                        minRating === option.value ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' }
+                                        minRating === option.value ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' },
+                                        { lineHeight: 18 } // Enforce line height for vertical centering
                                     ]}>{option.label}</Text>
                                 </TouchableOpacity>
                             ))}
@@ -487,32 +525,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                         </Text>
                     </View>
 
-                    {/* Type Filter Chips */}
-                    {!isOwner && (
-                        <View style={styles.chipsRow}>
-                            {TYPE_FILTERS.map((filter) => {
-                                const isActive = filter === activeFilter;
-                                return (
-                                    <TouchableOpacity
-                                        key={filter}
-                                        style={[
-                                            styles.chip,
-                                            isActive
-                                                ? { backgroundColor: colors.primary, borderWidth: 0 }
-                                                : { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderWidth: 0 },
-                                        ]}
-                                        onPress={() => setActiveFilter(filter)}
-                                        activeOpacity={0.8}
-                                    >
-                                        <Text style={[
-                                            styles.chipText,
-                                            isActive ? { color: '#FFF' } : { color: isDark ? '#D1D5DB' : '#4B5563' },
-                                        ]}>{filter}</Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-                    )}
+                    {/* Type Filter Chips Removed from Header */}
                 </View>
 
                 {/* Filter Panel */}

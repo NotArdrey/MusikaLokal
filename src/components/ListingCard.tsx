@@ -36,6 +36,31 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
         hasGroups === false &&
         userRole === 'musician';
 
+    // Gig Application Deadline Logic (24hrs before event)
+    const getGigDeadlineInfo = () => {
+        if (item.type !== 'Gig' || !item.event_date) return null;
+        const eventDate = new Date(item.event_date);
+        const eventStartTime = item.requirements?.event_start_time;
+        if (eventStartTime) {
+            const [time, period] = eventStartTime.split(' ');
+            const [hours, minutes] = time.split(':').map(Number);
+            let hour24 = hours;
+            if (period === 'PM' && hours !== 12) hour24 += 12;
+            if (period === 'AM' && hours === 12) hour24 = 0;
+            eventDate.setHours(hour24, minutes, 0, 0);
+        }
+        const deadline = new Date(eventDate.getTime() - 24 * 60 * 60 * 1000);
+        const now = new Date();
+        const hoursUntilDeadline = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);
+        return {
+            deadline,
+            isPassed: hoursUntilDeadline <= 0,
+            isUrgent: hoursUntilDeadline > 0 && hoursUntilDeadline < 48,
+            hoursLeft: Math.max(0, Math.floor(hoursUntilDeadline))
+        };
+    };
+    const gigDeadlineInfo = getGigDeadlineInfo();
+
     // Determine "Subtitle" (Location or Genre)
     let subtitle = item.location || item.address;
     if ((item.type === 'Group' || item.type === 'Artist') && item.genre) {
@@ -45,9 +70,9 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
     // Determine "Price/Rate" Label - handle dynamic pricing for studios
     let priceLabel = '';
     let secondaryPriceLabel = '';
-    
+
     // Check for dual pricing (Rehearsal + Recording)
-    if (item.type === 'Studio' && item.rehearsal_rate && item.recording_rate && 
+    if (item.type === 'Studio' && item.rehearsal_rate && item.recording_rate &&
         item.rehearsal_rate !== '0' && item.recording_rate !== '0') {
         priceLabel = `₱${parseInt(item.rehearsal_rate).toLocaleString()} / hr (Rehearsal)`;
         secondaryPriceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / hr (Recording)`;
@@ -67,6 +92,29 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
         }
     } else {
         priceLabel = 'Inquire for rates'; // Fallback
+    }
+
+    // Determine Badge Color & Label
+    let badgeLabel = item.type;
+    let badgeColor = '#7C3AED'; // Default Purple (Studio)
+
+    const normalizedType = item.type || (item.hourly_rate ? 'Studio' : 'Artist');
+
+    if (normalizedType === 'Studio') {
+        badgeLabel = item.studio_type === 'Both' ? 'Rehearsal & Recording' : (item.studio_type || 'Studio');
+        badgeColor = '#7C3AED'; // Purple
+    } else if (normalizedType === 'Gig') {
+        badgeLabel = 'Gig';
+        badgeColor = '#10B981'; // Emerald
+    } else if (normalizedType === 'Group') {
+        badgeLabel = 'Group';
+        badgeColor = '#3B82F6'; // Blue
+    } else if (normalizedType === 'Artist') {
+        badgeLabel = 'Artist';
+        badgeColor = '#EC4899'; // Pink
+    } else {
+        badgeLabel = normalizedType;
+        badgeColor = '#7C3AED';
     }
 
     // Shared actions
@@ -202,6 +250,23 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                             </View>
                         )}
 
+                        {/* Gig Application Deadline Badge (Horizontal) */}
+                        {gigDeadlineInfo && (
+                            <View style={[styles.glassBadge, {
+                                backgroundColor: gigDeadlineInfo.isPassed ? '#6B7280' : gigDeadlineInfo.isUrgent ? '#F59E0B' : '#10B981',
+                                marginLeft: 8
+                            }]}>
+                                <Ionicons name="time" size={12} color="#FFF" />
+                                <Text style={styles.glassBadgeText}>
+                                    {gigDeadlineInfo.isPassed
+                                        ? 'Closed'
+                                        : gigDeadlineInfo.hoursLeft < 24
+                                            ? `${gigDeadlineInfo.hoursLeft}h left`
+                                            : `${Math.ceil(gigDeadlineInfo.hoursLeft / 24)}d left`}
+                                </Text>
+                            </View>
+                        )}
+
                         <View style={{ flex: 1 }} />
 
                         {/* Invite Button Glass */}
@@ -236,8 +301,10 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                     <View style={styles.immersiveBottomContent}>
                         {/* Type Badge with Pax for Studios */}
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                            <View style={styles.tagBadge}>
-                                <Text style={styles.tagText}>{item.type || (item.hourly_rate ? 'Studio' : 'Artist')}</Text>
+                            <View style={[styles.tagBadge, { backgroundColor: badgeColor }]}>
+                                <Text style={styles.tagText}>
+                                    {badgeLabel}
+                                </Text>
                             </View>
                             {item.pax && (item.type === 'Studio' || item.hourly_rate) && (
                                 <View style={[styles.tagBadge, { backgroundColor: '#10B981' }]}>
@@ -379,22 +446,30 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                         />
                     )}
 
-                    {/* Modern Overlay Badge */}
-                    <View style={styles.typeOverlayBadge}>
-                        <Text style={styles.typeOverlayText}>{item.type || (item.hourly_rate ? 'Studio' : 'Artist')}</Text>
-                    </View>
 
-                    {/* Pax Badge for Studios (Vertical) */}
-                    {item.pax && (item.type === 'Studio' || item.hourly_rate) && (
-                        <View style={[styles.typeOverlayBadge, { top: 40, backgroundColor: '#10B981' }]}>
-                            <Text style={styles.typeOverlayText}>{item.pax} pax</Text>
-                        </View>
-                    )}
 
                     {/* Group Required Warning Badge (Vertical) */}
                     {showGroupWarning && (
-                        <View style={[styles.typeOverlayBadge, { top: item.pax && (item.type === 'Studio' || item.hourly_rate) ? 70 : 40, backgroundColor: '#EF4444' }]}>
+                        <View style={[styles.typeOverlayBadge, { top: 45, backgroundColor: '#EF4444' }]}>
                             <Text style={styles.typeOverlayText}>Group Required</Text>
+                        </View>
+                    )}
+
+                    {/* Gig Application Deadline Badge (Vertical) */}
+                    {gigDeadlineInfo && (
+                        <View style={[styles.typeOverlayBadge, {
+                            top: showGroupWarning
+                                ? 75
+                                : 45,
+                            backgroundColor: gigDeadlineInfo.isPassed ? '#6B7280' : gigDeadlineInfo.isUrgent ? '#F59E0B' : '#10B981'
+                        }]}>
+                            <Text style={styles.typeOverlayText}>
+                                {gigDeadlineInfo.isPassed
+                                    ? 'Applications Closed'
+                                    : gigDeadlineInfo.hoursLeft < 24
+                                        ? `Apply within ${gigDeadlineInfo.hoursLeft}h`
+                                        : `Apply within ${Math.ceil(gigDeadlineInfo.hoursLeft / 24)}d`}
+                            </Text>
                         </View>
                     )}
 
@@ -446,11 +521,31 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
 
                 {/* Info Section */}
                 <View style={styles.info}>
+                    {/* Type & Pax Badges (Moved from Image Overlay) */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                        <View style={[styles.tagBadge, { backgroundColor: badgeColor, paddingVertical: 3, paddingHorizontal: 8, marginBottom: 0 }]}>
+                            <Text style={[styles.tagText, { fontSize: 10 }]}>
+                                {badgeLabel}
+                            </Text>
+                        </View>
+                        {item.pax && (item.type === 'Studio' || item.hourly_rate) && (
+                            <View style={[styles.tagBadge, { backgroundColor: '#10B981', paddingVertical: 3, paddingHorizontal: 8, marginBottom: 0 }]}>
+                                <Text style={[styles.tagText, { fontSize: 10 }]}>{item.pax} pax</Text>
+                            </View>
+                        )}
+                        {/* Special Schedule Badge */}
+                        {item.has_special_dates && (item.type === 'Studio' || item.hourly_rate) && (
+                            <View style={[styles.tagBadge, { backgroundColor: '#F59E0B', paddingVertical: 3, paddingHorizontal: 8, marginBottom: 0 }]}>
+                                <Text style={[styles.tagText, { fontSize: 10 }]}>Special Hours</Text>
+                            </View>
+                        )}
+                    </View>
+
                     <View>
-                        <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                            <Ionicons name="location-outline" size={12} color={colors.textSecondary} />
-                            <Text style={[styles.subtitle, { color: colors.textSecondary, flex: 1 }]} numberOfLines={1}>{subtitle}</Text>
+                        <Text style={[styles.title, { color: colors.text }]}>{item.name}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                            <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
+                            <Text style={[styles.subtitle, { color: colors.textSecondary, flex: 1, marginTop: 0 }]} numberOfLines={1}>{subtitle}</Text>
                         </View>
                     </View>
 
@@ -664,12 +759,13 @@ const styles = StyleSheet.create({
         elevation: 2,
     },
     info: {
-        padding: 16, // Increased padding
-        gap: 4, // Tighter gap
+        padding: 16,
+        gap: 8, // Better separation
     },
     title: {
         fontFamily: 'Poppins_600SemiBold',
         fontSize: 16,
+        lineHeight: 22,
         marginRight: 8,
     },
     typeMini: {
@@ -682,8 +778,7 @@ const styles = StyleSheet.create({
     },
     subtitle: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 13,
-        marginTop: 2,
+        fontSize: 13, // Standardized
     },
     priceRow: {
         flexDirection: 'row',

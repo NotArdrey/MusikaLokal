@@ -281,6 +281,9 @@ export default function HomeScreen() {
                 embedding: item.embedding, // Profiles might have interest_vector but listing card uses embedding
                 created_at: item.created_at, // Added for New Arrivals
                 genre: item.genres?.join(', ') || item.genre || '', // For solo artists
+                // Studio-specific fields
+                studio_type: item.type, // Rehearsal, Recording, or Both from studios table
+                pax: item.pax, // Studio capacity
                 // Seasonal pricing fields for studios
                 has_seasonal_pricing: item.has_seasonal_pricing || false,
                 has_special_dates: item.has_special_dates || false,

@@ -10,6 +10,7 @@ import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 // Helper function to format time input
@@ -52,6 +53,7 @@ const formatTimeInput = (text: string): string => {
 
 export default function AddGigScreen() {
     const { colors, isDark } = useTheme();
+    const { isSystemLocked, showLockAlert } = useAuth();
     const [step, setStep] = useState(1);
     const [gigName, setGigName] = useState('');
     const [description, setDescription] = useState('');
@@ -187,6 +189,12 @@ export default function AddGigScreen() {
         if (step < 3) {
             setStep(step + 1);
         } else {
+            // System lock check
+            if (isSystemLocked) {
+                showLockAlert();
+                return;
+            }
+
             // Confirmation before creating
             showAlert(
                 'warning',
@@ -218,13 +226,17 @@ export default function AddGigScreen() {
                 return;
             }
 
+            const orderedImages = images.length > 0 && images[thumbnailIndex]
+                ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
+                : images;
+
             const payload = {
                 name: gigName,
                 description,
                 location: address,
                 budget: parseFloat(cost) || 0,
                 status: 'open',
-                images: images,
+                images: orderedImages,
                 contract_url: contractUrl || null,
                 latitude,
                 longitude,
@@ -239,14 +251,25 @@ export default function AddGigScreen() {
                 },
             };
 
-            console.log('🔵 Creating gig with payload:', JSON.stringify({ action: 'create', type: 'gig', userId: session.user.id, payload }, null, 2));
+            console.log('🔵 ===== CREATING GIG =====');
+            console.log('🔵 Payload being sent:', JSON.stringify(payload, null, 2));
+            console.log('🔵 Requirements being sent:', JSON.stringify(payload.requirements, null, 2));
+            console.log('🔵 Genres:', requiredGenres);
+            console.log('🔵 Instruments:', requiredInstruments);
+            console.log('🔵 Experience Level:', experienceLevel);
+            console.log('🔵 Event Start Time:', eventStartTime);
+            console.log('🔵 Event End Time:', eventEndTime);
+            console.log('🔵 Musician Type:', musicianType);
 
             const { data, error } = await supabase.functions.invoke('manage-listings', {
                 body: { action: 'create', type: 'gig', userId: session.user.id, payload }
             });
 
-            console.log('🔵 Response data:', JSON.stringify(data, null, 2));
-            console.log('🔵 Response error:', error);
+            console.log('📥 Response data:', JSON.stringify(data, null, 2));
+            console.log('📥 Response error:', error);
+            if (data) {
+                console.log('📥 Created gig requirements saved:', JSON.stringify(data.requirements, null, 2));
+            }
 
             // When there's a FunctionsHttpError, the actual error details are in the data field
             if (error) {

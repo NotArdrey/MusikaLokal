@@ -209,11 +209,44 @@ serve(async (req: Request) => {
 
             if (error) throw error
 
+            let settingsByStudioId = new Map<string, any>()
+            const studioIds = (data || []).map((item: any) => item.id).filter(Boolean)
+            if (studioIds.length > 0) {
+                const { data: settingsData, error: settingsError } = await supabaseClient
+                    .from('studio_settings')
+                    .select('studio_id, lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates')
+                    .in('studio_id', studioIds)
+
+                if (!settingsError && settingsData) {
+                    settingsByStudioId = new Map(settingsData.map((row: any) => [row.studio_id, row]))
+                }
+            }
+
             // View columns already named 'rating' and 'review_count'
             const mapped = (data || []).map((item: any) => ({
                 ...item,
                 rating: item.rating || 0,
-                review_count: item.review_count || 0
+                review_count: item.review_count || 0,
+                ...(settingsByStudioId.get(item.id)
+                    ? {
+                        lead_time_hours: settingsByStudioId.get(item.id).lead_time_hours,
+                        weekend_multiplier: settingsByStudioId.get(item.id).weekend_multiplier,
+                        peak_season_multiplier: settingsByStudioId.get(item.id).peak_season_multiplier,
+                        peak_season_dates: settingsByStudioId.get(item.id).peak_season_dates,
+                        off_peak_multiplier: settingsByStudioId.get(item.id).off_peak_multiplier,
+                        off_peak_dates: settingsByStudioId.get(item.id).off_peak_dates,
+                        booking_settings: {
+                            lead_time_hours: settingsByStudioId.get(item.id).lead_time_hours,
+                            weekend_multiplier: settingsByStudioId.get(item.id).weekend_multiplier,
+                            peak_season_multiplier: settingsByStudioId.get(item.id).peak_season_multiplier,
+                            peak_season_dates: settingsByStudioId.get(item.id).peak_season_dates,
+                            off_peak_multiplier: settingsByStudioId.get(item.id).off_peak_multiplier,
+                            off_peak_dates: settingsByStudioId.get(item.id).off_peak_dates,
+                        }
+                    }
+                    : {
+                        booking_settings: null
+                    })
             }))
 
             return new Response(JSON.stringify(mapped), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
@@ -225,6 +258,8 @@ serve(async (req: Request) => {
             const viewName = type + 's_with_stats'
             const ownerField = type === 'gig' ? 'organizer_id' : 'owner_id'
 
+            console.log('📥 Fetching single entity:', { type, id, viewName, ownerField, userId });
+
             const { data, error } = await supabaseClient
                 .from(viewName)
                 .select('*')
@@ -232,10 +267,19 @@ serve(async (req: Request) => {
                 .eq(ownerField, userId)
                 .maybeSingle()
 
-            if (error) throw error
+            if (error) {
+                console.error('❌ Fetch error:', JSON.stringify(error, null, 2));
+                throw error;
+            }
+
+            console.log('📥 Fetched data:', JSON.stringify(data, null, 2));
+            if (type === 'gig' && data) {
+                console.log('📦 Gig requirements from DB:', JSON.stringify(data.requirements, null, 2));
+            }
 
             // Return null if not found (user doesn't own this entity or doesn't exist)
             if (!data) {
+                console.log('⚠️ No data found for entity');
                 return new Response(JSON.stringify(null), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
             }
 
@@ -262,6 +306,29 @@ serve(async (req: Request) => {
                     });
                     data.availability = availability;
                 }
+
+                const { data: studioSettings, error: settingsError } = await supabaseClient
+                    .from('studio_settings')
+                    .select('lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates')
+                    .eq('studio_id', id)
+                    .maybeSingle();
+
+                if (!settingsError && studioSettings) {
+                    data.lead_time_hours = studioSettings.lead_time_hours;
+                    data.weekend_multiplier = studioSettings.weekend_multiplier;
+                    data.peak_season_multiplier = studioSettings.peak_season_multiplier;
+                    data.peak_season_dates = studioSettings.peak_season_dates;
+                    data.off_peak_multiplier = studioSettings.off_peak_multiplier;
+                    data.off_peak_dates = studioSettings.off_peak_dates;
+                    data.booking_settings = {
+                        lead_time_hours: studioSettings.lead_time_hours,
+                        weekend_multiplier: studioSettings.weekend_multiplier,
+                        peak_season_multiplier: studioSettings.peak_season_multiplier,
+                        peak_season_dates: studioSettings.peak_season_dates,
+                        off_peak_multiplier: studioSettings.off_peak_multiplier,
+                        off_peak_dates: studioSettings.off_peak_dates
+                    };
+                }
             }
 
             // View columns already named 'rating' and 'review_count'
@@ -285,6 +352,27 @@ serve(async (req: Request) => {
             let calendarAvailability = null;
             let bookingSettings = null;
             let insertPayload = { ...payload };
+
+            // For studios, only allow valid columns to prevent PGRST204 errors
+            // This filters out any extra fields that don't exist in the studios table
+            if (type === 'studio') {
+                const validStudioColumns = [
+                    'name', 'address', 'hourly_rate', 'description', 'amenities',
+                    'images', 'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
+                    'recording_rate', 'open_dates', 'pax'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validStudioColumns) {
+                    if (insertPayload[key] !== undefined) {
+                        filteredPayload[key] = insertPayload[key];
+                    }
+                }
+                // Preserve special fields for later processing
+                if (insertPayload.calendar_availability) filteredPayload.calendar_availability = insertPayload.calendar_availability;
+                if (insertPayload.booking_settings) filteredPayload.booking_settings = insertPayload.booking_settings;
+                insertPayload = filteredPayload;
+            }
 
             // SPAM PREVENTION: Check for blocking rule for Gig Applications
             if (type === 'gig_application') {
@@ -320,18 +408,26 @@ serve(async (req: Request) => {
                 studioAvailability = insertPayload.availability;
                 delete insertPayload.availability; // Remove from payload so it doesn't fail insert
             }
-            
+
             // Extract calendar_availability (specific date overrides)
             if (type === 'studio' && insertPayload.calendar_availability) {
                 calendarAvailability = insertPayload.calendar_availability;
                 delete insertPayload.calendar_availability; // Remove from payload so it doesn't fail insert
             }
-            
+
             // Extract booking_settings for studio
             if (type === 'studio' && insertPayload.booking_settings) {
                 bookingSettings = insertPayload.booking_settings;
                 delete insertPayload.booking_settings; // Remove from payload so it doesn't fail insert
             }
+
+            // Log gig requirements if creating a gig
+            if (type === 'gig') {
+                console.log('📦 Creating gig with requirements:', JSON.stringify(insertPayload.requirements, null, 2));
+            }
+
+            console.log('📤 Inserting into table:', table);
+            console.log('📤 Insert payload:', JSON.stringify(insertPayload, null, 2));
 
             const { data, error } = await supabaseClient
                 .from(table)
@@ -339,7 +435,12 @@ serve(async (req: Request) => {
                 .select()
                 .single()
 
-            if (error) throw error
+            if (error) {
+                console.error('❌ Insert error:', JSON.stringify(error, null, 2));
+                throw error;
+            }
+
+            console.log('✅ Insert successful, returned data:', JSON.stringify(data, null, 2));
 
             // If creating a studio, create operating hours and settings
             if (type === 'studio') {
@@ -352,7 +453,7 @@ serve(async (req: Request) => {
                     bulk_discount_threshold_hours: 10,
                     bulk_discount_percentage: 0
                 };
-                
+
                 if (bookingSettings) {
                     if (bookingSettings.lead_time_hours) settingsPayload.lead_time_hours = parseInt(bookingSettings.lead_time_hours) || 24;
                     if (bookingSettings.weekend_multiplier) settingsPayload.weekend_multiplier = parseFloat(bookingSettings.weekend_multiplier) || 1.0;
@@ -361,7 +462,7 @@ serve(async (req: Request) => {
                     if (bookingSettings.off_peak_multiplier) settingsPayload.off_peak_multiplier = parseFloat(bookingSettings.off_peak_multiplier) || 1.0;
                     if (bookingSettings.off_peak_dates) settingsPayload.off_peak_dates = bookingSettings.off_peak_dates;
                 }
-                
+
                 await supabaseClient.from('studio_settings').insert(settingsPayload)
 
                 // Create operating hours
@@ -409,11 +510,11 @@ serve(async (req: Request) => {
                 }
 
                 await supabaseClient.from('studio_operating_hours').insert(operatingHours)
-                
+
                 // Insert calendar-based date overrides (specific dates)
                 if (calendarAvailability && Array.isArray(calendarAvailability) && calendarAvailability.length > 0) {
                     const dateOverrides: any[] = [];
-                    
+
                     for (const dateEntry of calendarAvailability) {
                         if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
                             // For each slot in the date, create an override entry
@@ -421,10 +522,10 @@ serve(async (req: Request) => {
                             // For multiple slots, we use the earliest start and latest end
                             const allStarts = dateEntry.slots.map((s: any) => s.start);
                             const allEnds = dateEntry.slots.map((s: any) => s.end);
-                            
+
                             // Use first slot for now (can be extended for multiple slots per date)
                             const firstSlot = dateEntry.slots[0];
-                            
+
                             dateOverrides.push({
                                 studio_id: studioId,
                                 override_date: dateEntry.date,
@@ -435,7 +536,7 @@ serve(async (req: Request) => {
                             });
                         }
                     }
-                    
+
                     if (dateOverrides.length > 0) {
                         await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
                         console.log(`📅 Inserted ${dateOverrides.length} date overrides for studio ${studioId}`);
@@ -446,7 +547,7 @@ serve(async (req: Request) => {
             // If creating a group, add owner to group_members table
             if (type === 'group') {
                 const groupId = data.id;
-                
+
                 // Insert owner as a member with 'owner' role
                 const { error: memberError } = await supabaseClient
                     .from('group_members')
@@ -455,13 +556,13 @@ serve(async (req: Request) => {
                         user_id: userId,
                         role: 'owner'
                     });
-                
+
                 if (memberError) {
                     console.error('⚠️ Failed to add owner to group_members:', memberError);
                 } else {
                     console.log(`👤 Added owner ${userId} to group_members for group ${groupId}`);
                 }
-                
+
                 // Also add any other members that have user_id in the members JSONB array
                 const membersArray = insertPayload.members || [];
                 if (Array.isArray(membersArray)) {
@@ -472,12 +573,12 @@ serve(async (req: Request) => {
                             user_id: m.user_id,
                             role: 'member'
                         }));
-                    
+
                     if (additionalMembers.length > 0) {
                         const { error: additionalError } = await supabaseClient
                             .from('group_members')
                             .insert(additionalMembers);
-                        
+
                         if (additionalError) {
                             console.error('⚠️ Failed to add additional members:', additionalError);
                         } else {
@@ -503,24 +604,54 @@ serve(async (req: Request) => {
             let bookingSettings = null;
             let updatePayload = { ...payload };
 
+            // For studios, only allow valid columns to prevent PGRST204 errors
+            // This filters out any extra fields that don't exist in the studios table
+            if (type === 'studio') {
+                const validStudioColumns = [
+                    'name', 'address', 'hourly_rate', 'description', 'amenities',
+                    'images', 'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
+                    'recording_rate', 'open_dates', 'pax'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validStudioColumns) {
+                    if (updatePayload[key] !== undefined) {
+                        filteredPayload[key] = updatePayload[key];
+                    }
+                }
+                // Preserve special fields for later processing
+                if (updatePayload.calendar_availability) filteredPayload.calendar_availability = updatePayload.calendar_availability;
+                if (updatePayload.booking_settings) filteredPayload.booking_settings = updatePayload.booking_settings;
+                updatePayload = filteredPayload;
+            }
+
             if (type === 'studio' && updatePayload.availability) {
                 studioAvailability = updatePayload.availability;
                 // Keep availability in payload if column exists in table
                 // If you want to use normalized tables instead, uncomment the line below:
                 // delete updatePayload.availability;
             }
-            
+
             // Extract calendar_availability (specific date overrides)
             if (type === 'studio' && updatePayload.calendar_availability) {
                 calendarAvailability = updatePayload.calendar_availability;
                 delete updatePayload.calendar_availability; // Remove from payload so it doesn't fail update
             }
-            
+
             // Extract booking_settings for studio
             if (type === 'studio' && updatePayload.booking_settings) {
                 bookingSettings = updatePayload.booking_settings;
                 delete updatePayload.booking_settings; // Remove from payload so it doesn't fail update
             }
+
+            // Log gig requirements if updating a gig
+            if (type === 'gig') {
+                console.log('📦 Updating gig with requirements:', JSON.stringify(updatePayload.requirements, null, 2));
+            }
+
+            console.log('📤 Updating table:', table);
+            console.log('📤 Update payload:', JSON.stringify(updatePayload, null, 2));
+            console.log('📤 Entity ID:', id);
 
             const { data, error } = await supabaseClient
                 .from(table)
@@ -530,7 +661,15 @@ serve(async (req: Request) => {
                 .select()
                 .single()
 
-            if (error) throw error
+            if (error) {
+                console.error('❌ Update error:', JSON.stringify(error, null, 2));
+                throw error;
+            }
+
+            console.log('✅ Update successful, returned data:', JSON.stringify(data, null, 2));
+            if (type === 'gig') {
+                console.log('✅ Gig requirements after update:', JSON.stringify(data.requirements, null, 2));
+            }
 
             // Update studio operating hours if availability was provided
             if (type === 'studio' && studioAvailability && Array.isArray(studioAvailability)) {
@@ -569,24 +708,24 @@ serve(async (req: Request) => {
                     await supabaseClient.from('studio_operating_hours').insert(operatingHours);
                 }
             }
-            
+
             // Update studio date overrides if calendar_availability was provided
             if (type === 'studio' && calendarAvailability && Array.isArray(calendarAvailability)) {
                 const studioId = id;
-                
+
                 // Delete existing date overrides for this studio
                 await supabaseClient
                     .from('studio_date_overrides')
                     .delete()
                     .eq('studio_id', studioId);
-                
+
                 // Insert new date overrides
                 const dateOverrides: any[] = [];
-                
+
                 for (const dateEntry of calendarAvailability) {
                     if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
                         const firstSlot = dateEntry.slots[0];
-                        
+
                         dateOverrides.push({
                             studio_id: studioId,
                             override_date: dateEntry.date,
@@ -597,17 +736,17 @@ serve(async (req: Request) => {
                         });
                     }
                 }
-                
+
                 if (dateOverrides.length > 0) {
                     await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
                     console.log(`📅 Updated ${dateOverrides.length} date overrides for studio ${studioId}`);
                 }
             }
-            
+
             // Update studio settings if booking_settings was provided
             if (type === 'studio' && bookingSettings) {
                 const studioId = id;
-                
+
                 const settingsUpdate: any = {};
                 if (bookingSettings.lead_time_hours !== undefined) settingsUpdate.lead_time_hours = parseInt(bookingSettings.lead_time_hours) || 24;
                 if (bookingSettings.weekend_multiplier !== undefined) settingsUpdate.weekend_multiplier = parseFloat(bookingSettings.weekend_multiplier) || 1.0;
@@ -615,14 +754,14 @@ serve(async (req: Request) => {
                 if (bookingSettings.peak_season_dates !== undefined) settingsUpdate.peak_season_dates = bookingSettings.peak_season_dates;
                 if (bookingSettings.off_peak_multiplier !== undefined) settingsUpdate.off_peak_multiplier = parseFloat(bookingSettings.off_peak_multiplier) || 1.0;
                 if (bookingSettings.off_peak_dates !== undefined) settingsUpdate.off_peak_dates = bookingSettings.off_peak_dates;
-                
+
                 settingsUpdate.updated_at = new Date().toISOString();
-                
+
                 const { error: settingsError } = await supabaseClient
                     .from('studio_settings')
                     .update(settingsUpdate)
                     .eq('studio_id', studioId);
-                
+
                 if (settingsError) {
                     console.error('⚠️ Failed to update studio settings:', settingsError);
                 } else {
@@ -634,20 +773,20 @@ serve(async (req: Request) => {
             if (type === 'group' && updatePayload.members) {
                 const groupId = id;
                 const membersArray = updatePayload.members || [];
-                
+
                 if (Array.isArray(membersArray)) {
                     // Get members with user_id (registered users)
                     const registeredMembers = membersArray.filter((m: any) => m.user_id);
-                    
+
                     // Get current group_members entries
                     const { data: currentMembers } = await supabaseClient
                         .from('group_members')
                         .select('user_id, role')
                         .eq('group_id', groupId);
-                    
+
                     const currentUserIds = new Set((currentMembers || []).map((m: any) => m.user_id));
                     const newUserIds = new Set(registeredMembers.map((m: any) => m.user_id));
-                    
+
                     // Find members to add (in new list but not in current)
                     const toAdd = registeredMembers
                         .filter((m: any) => !currentUserIds.has(m.user_id))
@@ -656,29 +795,29 @@ serve(async (req: Request) => {
                             user_id: m.user_id,
                             role: m.role === 'Leader' ? 'owner' : 'member'
                         }));
-                    
+
                     // Find members to remove (in current but not in new, except owner)
                     const ownerIds = (currentMembers || [])
                         .filter((m: any) => m.role === 'owner')
                         .map((m: any) => m.user_id);
-                    
+
                     const toRemove = (currentMembers || [])
                         .filter((m: any) => !newUserIds.has(m.user_id) && m.role !== 'owner')
                         .map((m: any) => m.user_id);
-                    
+
                     // Add new members
                     if (toAdd.length > 0) {
                         const { error: addError } = await supabaseClient
                             .from('group_members')
                             .insert(toAdd);
-                        
+
                         if (addError) {
                             console.error('⚠️ Failed to add group members:', addError);
                         } else {
                             console.log(`👥 Added ${toAdd.length} members to group_members`);
                         }
                     }
-                    
+
                     // Remove members that are no longer in the list
                     if (toRemove.length > 0) {
                         const { error: removeError } = await supabaseClient
@@ -686,7 +825,7 @@ serve(async (req: Request) => {
                             .delete()
                             .eq('group_id', groupId)
                             .in('user_id', toRemove);
-                        
+
                         if (removeError) {
                             console.error('⚠️ Failed to remove group members:', removeError);
                         } else {
@@ -1195,14 +1334,14 @@ serve(async (req: Request) => {
         // FETCH GROUP MEMBERS (from group_members table with profile info)
         if (action === 'fetch_group_members') {
             const { groupId } = params;
-            
+
             if (!groupId) {
                 return new Response(JSON.stringify({ error: 'Missing groupId' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 });
             }
-            
+
             const { data, error } = await supabaseClient
                 .from('group_members')
                 .select(`
@@ -1214,9 +1353,9 @@ serve(async (req: Request) => {
                 `)
                 .eq('group_id', groupId)
                 .order('joined_at', { ascending: true });
-            
+
             if (error) throw error;
-            
+
             return new Response(JSON.stringify(data || []), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
@@ -1226,35 +1365,35 @@ serve(async (req: Request) => {
         // ADD MEMBER TO GROUP (by user_id)
         if (action === 'add_group_member') {
             const { groupId, targetUserId, memberRole } = params;
-            
+
             if (!groupId || !targetUserId) {
                 return new Response(JSON.stringify({ error: 'Missing groupId or targetUserId' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 });
             }
-            
+
             // Verify the requester is the owner of the group
             const { data: group, error: groupError } = await supabaseClient
                 .from('groups')
                 .select('owner_id, name')
                 .eq('id', groupId)
                 .single();
-            
+
             if (groupError || !group) {
                 return new Response(JSON.stringify({ error: 'Group not found' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 404,
                 });
             }
-            
+
             if (group.owner_id !== effectiveUserId) {
                 return new Response(JSON.stringify({ error: 'Only the group owner can add members' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,
                 });
             }
-            
+
             // Check if user is already a member
             const { data: existingMember } = await supabaseClient
                 .from('group_members')
@@ -1262,14 +1401,14 @@ serve(async (req: Request) => {
                 .eq('group_id', groupId)
                 .eq('user_id', targetUserId)
                 .maybeSingle();
-            
+
             if (existingMember) {
                 return new Response(JSON.stringify({ error: 'User is already a member of this group' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 });
             }
-            
+
             // Add the member
             const { data, error } = await supabaseClient
                 .from('group_members')
@@ -1280,9 +1419,9 @@ serve(async (req: Request) => {
                 })
                 .select()
                 .single();
-            
+
             if (error) throw error;
-            
+
             // Notify the new member
             await supabaseClient.from('notifications').insert({
                 user_id: targetUserId,
@@ -1291,7 +1430,7 @@ serve(async (req: Request) => {
                 message: `You have been added to the group "${group.name}"`,
                 meta: { type: 'group_member_added', group_id: groupId }
             });
-            
+
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
@@ -1301,28 +1440,28 @@ serve(async (req: Request) => {
         // REMOVE MEMBER FROM GROUP
         if (action === 'remove_group_member') {
             const { groupId, targetUserId } = params;
-            
+
             if (!groupId || !targetUserId) {
                 return new Response(JSON.stringify({ error: 'Missing groupId or targetUserId' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 });
             }
-            
+
             // Verify the requester is the owner of the group
             const { data: group, error: groupError } = await supabaseClient
                 .from('groups')
                 .select('owner_id, name')
                 .eq('id', groupId)
                 .single();
-            
+
             if (groupError || !group) {
                 return new Response(JSON.stringify({ error: 'Group not found' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 404,
                 });
             }
-            
+
             // Allow owner to remove members, or member to leave the group (self-removal)
             if (group.owner_id !== effectiveUserId && targetUserId !== effectiveUserId) {
                 return new Response(JSON.stringify({ error: 'Only the group owner can remove members, or members can leave themselves' }), {
@@ -1330,7 +1469,7 @@ serve(async (req: Request) => {
                     status: 403,
                 });
             }
-            
+
             // Prevent owner from removing themselves (they must transfer leadership first)
             if (targetUserId === group.owner_id) {
                 return new Response(JSON.stringify({ error: 'The group owner cannot be removed. Transfer leadership first.' }), {
@@ -1338,16 +1477,16 @@ serve(async (req: Request) => {
                     status: 400,
                 });
             }
-            
+
             // Remove the member
             const { error } = await supabaseClient
                 .from('group_members')
                 .delete()
                 .eq('group_id', groupId)
                 .eq('user_id', targetUserId);
-            
+
             if (error) throw error;
-            
+
             // Notify the removed member (if removed by owner)
             if (targetUserId !== effectiveUserId) {
                 await supabaseClient.from('notifications').insert({
@@ -1358,7 +1497,7 @@ serve(async (req: Request) => {
                     meta: { type: 'group_member_removed', group_id: groupId }
                 });
             }
-            
+
             return new Response(JSON.stringify({ success: true }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
@@ -1368,28 +1507,28 @@ serve(async (req: Request) => {
         // UPDATE MEMBER ROLE IN GROUP
         if (action === 'update_group_member_role') {
             const { groupId, targetUserId, newRole } = params;
-            
+
             if (!groupId || !targetUserId || !newRole) {
                 return new Response(JSON.stringify({ error: 'Missing required fields' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 400,
                 });
             }
-            
+
             // Verify the requester is the owner
             const { data: group, error: groupError } = await supabaseClient
                 .from('groups')
                 .select('owner_id')
                 .eq('id', groupId)
                 .single();
-            
+
             if (groupError || !group || group.owner_id !== effectiveUserId) {
                 return new Response(JSON.stringify({ error: 'Only the group owner can update member roles' }), {
                     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                     status: 403,
                 });
             }
-            
+
             // Cannot change owner's role via this action (use leadership transfer)
             if (targetUserId === group.owner_id) {
                 return new Response(JSON.stringify({ error: 'Cannot change owner role. Use leadership transfer instead.' }), {
@@ -1397,7 +1536,7 @@ serve(async (req: Request) => {
                     status: 400,
                 });
             }
-            
+
             const { data, error } = await supabaseClient
                 .from('group_members')
                 .update({ role: newRole })
@@ -1405,9 +1544,9 @@ serve(async (req: Request) => {
                 .eq('user_id', targetUserId)
                 .select()
                 .single();
-            
+
             if (error) throw error;
-            
+
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
