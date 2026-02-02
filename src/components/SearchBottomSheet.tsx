@@ -36,20 +36,19 @@ const SORT_OPTIONS = [
 ];
 
 interface SearchBottomSheetProps {
-    onClose: () => void;
-    onItemPress: (id: string) => void;
-    hasGroups?: boolean;
+    onClose?: () => void;
+    onItemPress?: (listingId: string) => void;
 }
 
 const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
-    function SearchBottomSheet({ onClose, onItemPress, hasGroups }, ref) {
+    function SearchBottomSheet({ onClose, onItemPress }, ref) {
         const { colors, isDark } = useTheme();
-        const { userRole, userId } = useAuth();
+        const { userRole } = useAuth();
         const snapPoints = useMemo(() => ['94%'], []);
 
         // Filter Chips - safely handle null userRole
         const isOwner = userRole === 'venue-owner' || userRole === 'studio-owner';
-        const TYPE_FILTERS = isOwner ? ['All', 'Group', 'Solo Artist'] : ['All', 'Group', 'Solo Artist', 'Studio', 'Gig'];
+        const TYPE_FILTERS = isOwner ? ['All', 'Musician'] : ['All', 'Musician', 'Studio', 'Gig'];
 
         // Basic State
         const [activeFilter, setActiveFilter] = useState('All');
@@ -116,13 +115,10 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     let tables: string[] = [];
 
                     if (isOwner) {
-                        if (activeFilter === 'All') tables = ['groups_with_stats', 'profiles'];
-                        else if (activeFilter === 'Group') tables = ['groups_with_stats'];
-                        else if (activeFilter === 'Solo Artist') tables = ['profiles'];
+                        tables = ['groups_with_stats'];
                     } else {
-                        if (activeFilter === 'All') tables = ['groups_with_stats', 'profiles', 'studios_with_stats', 'gigs_with_stats'];
-                        else if (activeFilter === 'Group') tables = ['groups_with_stats'];
-                        else if (activeFilter === 'Solo Artist') tables = ['profiles'];
+                        if (activeFilter === 'All') tables = ['groups_with_stats', 'studios_with_stats', 'gigs_with_stats'];
+                        else if (activeFilter === 'Musician') tables = ['groups_with_stats'];
                         else if (activeFilter === 'Studio') tables = ['studios_with_stats'];
                         else if (activeFilter === 'Gig') tables = ['gigs_with_stats'];
                     }
@@ -130,98 +126,63 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     for (const table of tables) {
                         let query = supabase.from(table).select('*');
 
-                        // Handle Profile Specifics
-                        if (table === 'profiles') {
-                            query = query.eq('role', 'musician');
+                        // Text search
+                        if (searchQuery.trim().length > 0) {
+                            query = query.or(`name.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`);
+                        }
 
-                            // Text search for profiles
-                            if (searchQuery.trim().length > 0) {
-                                query = query.or(`full_name.ilike.%${searchQuery}%,address.ilike.%${searchQuery}%`);
-                            }
+                        // Only show open gigs
+                        if (table === 'gigs_with_stats') {
+                            query = query.eq('status', 'open');
+                        }
 
-                            // Genre filter for profiles (check 'genres' array column)
-                            // NOTE: PostgREST array contains check is tricky with ilike. 
-                            // Simplest is to check if text representation contains it.
-                            if (selectedGenre !== 'All') {
-                                query = query.ilike('genres', `%${selectedGenre}%`);
-                            }
+                        // Genre filter (Groups and Gigs)
+                        if (selectedGenre !== 'All' && (table === 'groups_with_stats' || table === 'gigs_with_stats')) {
+                            query = query.ilike('genre', `%${selectedGenre}%`);
+                        }
 
-                            // Profiles don't have rating or price usually, so skip those filters
-                            // unless we add them to profiles later.
-                        } else {
-                            // Standard tables (groups, studios, gigs)
-                            // Text search
-                            if (searchQuery.trim().length > 0) {
-                                query = query.or(`name.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`);
-                            }
+                        // Rating filter
+                        if (minRating > 0) {
+                            query = query.gte('rating', minRating);
+                        }
 
-                            // Only show open gigs
-                            if (table === 'gigs_with_stats') {
-                                query = query.eq('status', 'open');
-                            }
+                        // Price range filter
+                        if (priceRange !== 'all') {
+                            const priceField = table.includes('studio') ? 'hourly_rate' :
+                                table.includes('gig') ? 'budget' : 'rate';
 
-                            // Genre filter (Groups and Gigs)
-                            if (selectedGenre !== 'All' && (table === 'groups_with_stats' || table === 'gigs_with_stats')) {
-                                query = query.ilike('genre', `%${selectedGenre}%`);
-                            }
-
-                            // Rating filter
-                            if (minRating > 0) {
-                                query = query.gte('rating', minRating);
-                            }
-
-                            // Price range filter
-                            if (priceRange !== 'all') {
-                                const priceField = table.includes('studio') ? 'hourly_rate' :
-                                    table.includes('gig') ? 'budget' : 'rate';
-
-                                if (priceRange === 'low') {
-                                    query = query.lte(priceField, 5000);
-                                } else if (priceRange === 'mid') {
-                                    query = query.gte(priceField, 5000).lte(priceField, 15000);
-                                } else if (priceRange === 'high') {
-                                    query = query.gte(priceField, 15000);
-                                }
+                            if (priceRange === 'low') {
+                                query = query.lte(priceField, 5000);
+                            } else if (priceRange === 'mid') {
+                                query = query.gte(priceField, 5000).lte(priceField, 15000);
+                            } else if (priceRange === 'high') {
+                                query = query.gte(priceField, 15000);
                             }
                         }
 
                         // Sort order
-                        if (table !== 'profiles') { // Skip complex sort for profiles for now
-                            if (sortBy === 'rating') {
-                                query = query.order('rating', { ascending: false });
-                            } else if (sortBy === 'price_low') {
-                                const priceField = table.includes('studio') ? 'hourly_rate' :
-                                    table.includes('gig') ? 'budget' : 'rate';
-                                query = query.order(priceField, { ascending: true, nullsFirst: false });
-                            } else if (sortBy === 'price_high') {
-                                const priceField = table.includes('studio') ? 'hourly_rate' :
-                                    table.includes('gig') ? 'budget' : 'rate';
-                                query = query.order(priceField, { ascending: false, nullsFirst: false });
-                            } else {
-                                query = query.order('created_at', { ascending: false });
-                            }
+                        if (sortBy === 'rating') {
+                            query = query.order('rating', { ascending: false });
+                        } else if (sortBy === 'price_low') {
+                            const priceField = table.includes('studio') ? 'hourly_rate' :
+                                table.includes('gig') ? 'budget' : 'rate';
+                            query = query.order(priceField, { ascending: true, nullsFirst: false });
+                        } else if (sortBy === 'price_high') {
+                            const priceField = table.includes('studio') ? 'hourly_rate' :
+                                table.includes('gig') ? 'budget' : 'rate';
+                            query = query.order(priceField, { ascending: false, nullsFirst: false });
                         } else {
-                            // Default sort for profiles
                             query = query.order('created_at', { ascending: false });
                         }
 
                         const { data: qData } = await query.limit(15);
-
                         if (qData) {
-                            const type = table.includes('group') ? 'Group' :
-                                (table.includes('studio') ? 'Studio' :
-                                    (table === 'profiles' ? 'Artist' : 'Gig'));
-
+                            const type = table.includes('group') ? 'Group' : (table.includes('studio') ? 'Studio' : 'Gig');
                             const mapped = qData.map((item: any) => ({
                                 ...item,
-                                id: item.id,
                                 type: item.type || type,
-                                name: item.name || item.full_name, // Handle profile name
-                                image: item.images?.[0] || item.image || item.avatar_url, // Handle profile avatar
-                                images: item.images || (item.avatar_url ? [item.avatar_url] : []),
+                                image: item.images?.[0] || item.image,
                                 rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
-                                rating: item.rating || 0, // Default 0 for profiles
-                                location: item.location || item.address // Handle profile address
                             }));
                             results.push(...mapped);
                         }
@@ -296,9 +257,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 onPress={handleItemPress}
                 variant="vertical"
                 style={{ width: '100%' }}
-                hasGroups={hasGroups}
             />
-        ), [handleItemPress, hasGroups]);
+        ), [handleItemPress]);
 
         const keyExtractor = useCallback((item: any) => item.id.toString(), []);
 
