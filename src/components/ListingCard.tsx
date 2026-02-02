@@ -37,11 +37,21 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
         subtitle = item.genre;
     }
 
-    // Determine "Price/Rate" Label
+    // Determine "Price/Rate" Label - handle dynamic pricing for studios
     let priceLabel = '';
-    // Prioritize explicit rate fields
-    if (item.hourly_rate && item.hourly_rate !== '0') {
+    let secondaryPriceLabel = '';
+    
+    // Check for dual pricing (Rehearsal + Recording)
+    if (item.type === 'Studio' && item.rehearsal_rate && item.recording_rate && 
+        item.rehearsal_rate !== '0' && item.recording_rate !== '0') {
+        priceLabel = `₱${parseInt(item.rehearsal_rate).toLocaleString()} / hr (Rehearsal)`;
+        secondaryPriceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / hr (Recording)`;
+    } else if (item.hourly_rate && item.hourly_rate !== '0') {
         priceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
+    } else if (item.rehearsal_rate && item.rehearsal_rate !== '0') {
+        priceLabel = `₱${parseInt(item.rehearsal_rate).toLocaleString()} / hr`;
+    } else if (item.recording_rate && item.recording_rate !== '0') {
+        priceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / hr`;
     } else if (item.budget && item.budget !== '0') {
         priceLabel = `₱${parseInt(item.budget).toLocaleString()}`;
     } else if (item.rate && item.rate !== '0') {
@@ -208,7 +218,7 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                             <Text style={styles.immersiveSubtitle} numberOfLines={1}>{subtitle}</Text>
                         </View>
 
-                        {/* Instruments Display for Studios/Venues */}
+                        {/* Instruments/Equipment Display for Studios/Venues */}
                         {item.instruments && Array.isArray(item.instruments) && item.instruments.length > 0 && (
                             <View style={styles.instrumentsRow}>
                                 {item.instruments.slice(0, 4).map((inst: { name: string, image: string }, idx: number) => (
@@ -226,7 +236,11 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                             </View>
                         )}
 
+                        {/* Display pricing - show both if available */}
                         <Text style={styles.immersivePrice}>{priceLabel}</Text>
+                        {secondaryPriceLabel && (
+                            <Text style={[styles.immersivePrice, { fontSize: 13, opacity: 0.85, marginTop: 2 }]}>{secondaryPriceLabel}</Text>
+                        )}
                     </View>
                 </View>
             </Pressable>
@@ -341,7 +355,12 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                     </View>
 
                     <View style={[styles.priceRow, { borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
-                        <Text style={[styles.price, { color: colors.primary }]}>{priceLabel}</Text>
+                        <View style={{ flexDirection: 'column' }}>
+                            <Text style={[styles.price, { color: colors.primary }]}>{priceLabel}</Text>
+                            {secondaryPriceLabel && (
+                                <Text style={[styles.price, { color: colors.primary, fontSize: 13, marginTop: 2 }]}>{secondaryPriceLabel}</Text>
+                            )}
+                        </View>
                         <View style={{ flex: 1 }} />
                         {item.review_count > 0 && (
                             <Text style={styles.reviewCount}>({item.review_count} reviews)</Text>

@@ -86,14 +86,12 @@ export default function CustomAlert({
     }, [visible]);
 
     const handleButtonPress = (button: AlertButton) => {
-        // Close the alert first, then call the onPress callback after a delay
-        // This ensures the alert is fully closed before any new alerts might be shown
-        onClose();
+        // Call the onPress callback first, then close the alert
+        // This ensures async operations start immediately
         if (button.onPress) {
-            setTimeout(() => {
-                button.onPress?.();
-            }, 150);
+            button.onPress();
         }
+        onClose();
     };
 
     const getButtonStyle = (style?: string) => {

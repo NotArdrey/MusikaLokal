@@ -25,6 +25,7 @@ export default function EditGroupScreen() {
   const [images, setImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
@@ -186,6 +187,64 @@ export default function EditGroupScreen() {
     return true;
   };
 
+  const performSave = async () => {
+    if (saving) return;
+    setSaving(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setSaving(false);
+        return;
+      }
+
+      // Ensure id is a string, not an array
+      const groupId = Array.isArray(id) ? id[0] : id;
+      if (!groupId) {
+        showAlert('error', 'Error', 'Invalid group ID');
+        setSaving(false);
+        return;
+      }
+
+      const payload = {
+        name: groupName,
+        genre,
+        description,
+        location: address,
+        latitude,
+        longitude,
+        members,
+        images: images,
+        rate: parseFloat(rate) || 0,
+      };
+
+      const { error } = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'update', type: 'group', id: groupId, userId: user.id, payload }
+      });
+
+      if (error) throw error;
+
+      console.log('✅ Group Updated');
+      showAlert('success', 'Success', 'Group updated successfully!', [
+        {
+          text: 'OK',
+          onPress: () => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace('/manage_group');
+            }
+          }
+        }
+      ]);
+    } catch (e: any) {
+      console.log('❌ Error updating group:', e);
+      showAlert('error', 'Error', `Failed to update group: ${e?.message || 'Unknown error'}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!validateForm()) {
       return;
@@ -196,47 +255,7 @@ export default function EditGroupScreen() {
       {
         text: 'Save & Update',
         style: 'default',
-        onPress: async () => {
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            // Ensure id is a string, not an array
-            const groupId = Array.isArray(id) ? id[0] : id;
-            if (!groupId) {
-              showAlert('error', 'Error', 'Invalid group ID');
-              return;
-            }
-
-            const payload = {
-              name: groupName,
-              genre,
-              description,
-              location: address,
-              latitude,
-              longitude,
-              members,
-              images: images,
-              rate: parseFloat(rate) || 0,
-            };
-
-            const { error } = await supabase.functions.invoke('manage-listings', {
-              body: { action: 'update', type: 'group', id: groupId, userId: user.id, payload }
-            });
-
-            if (error) throw error;
-
-            console.log('✅ Group Updated');
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.replace('/manage_group');
-            }
-          } catch (e: any) {
-            console.log('❌ Error updating group:', e);
-            showAlert('error', 'Error', `Failed to update group: ${e?.message || 'Unknown error'}`);
-          }
-        }
+        onPress: () => performSave()
       }
     ]);
   };
@@ -620,10 +639,15 @@ export default function EditGroupScreen() {
 
           <View style={styles.footerActions}>
             <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
+              style={[styles.saveButton, { backgroundColor: saving ? colors.textSecondary : colors.primary, shadowColor: colors.primary }]}
               onPress={handleSave}
+              disabled={saving}
             >
-              <Text style={styles.saveButtonText}>Save Changes</Text>
+              {saving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save Changes</Text>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity

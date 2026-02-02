@@ -1209,7 +1209,13 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     };
 
     const labels = group ? getTypeLabels(group.type) : getTypeLabels('Group');
-    const displayRate = group?.rate ? parseInt(group.rate).toLocaleString() : '0';
+    
+    // Handle dual pricing for studios
+    const rehearsalRate = group?.rehearsal_rate ? parseInt(group.rehearsal_rate).toLocaleString() : null;
+    const recordingRate = group?.recording_rate ? parseInt(group.recording_rate).toLocaleString() : null;
+    const hasDualPricing = group?.type === 'Studio' && rehearsalRate && recordingRate && rehearsalRate !== '0' && recordingRate !== '0';
+    const displayRate = group?.rate ? parseInt(group.rate).toLocaleString() : 
+        (rehearsalRate || recordingRate || group?.hourly_rate ? parseInt(group?.hourly_rate || '0').toLocaleString() : '0');
     const showTabs = labels.tabs.length > 0;
 
     const renderTabs = () => (
@@ -1594,16 +1600,17 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     // Studio: Setup Tab (also used for Venue Specs)
     const renderStudioSetup = () => {
         const amenities = group.amenities || [];
-        const equipment: string[] = [];
+        const studioEquipment = group.instruments || []; // New equipment field with full details
+        const legacyEquipment: string[] = [];
 
-        // Categorize amenities as equipment
-        if (amenities.length > 0) {
+        // Categorize amenities as equipment (legacy support)
+        if (amenities.length > 0 && studioEquipment.length === 0) {
             amenities.forEach((item: string) => {
                 const lower = item.toLowerCase();
                 if (lower.includes('mic') || lower.includes('drum') || lower.includes('guitar') ||
                     lower.includes('bass') || lower.includes('keyboard') || lower.includes('amp') ||
                     lower.includes('console') || lower.includes('interface')) {
-                    equipment.push(item);
+                    legacyEquipment.push(item);
                 }
             });
         }
@@ -1629,11 +1636,43 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     </View>
                 </View>
 
-                {equipment.length > 0 && (
+                {/* New Equipment Section with full details */}
+                {studioEquipment.length > 0 && (
+                    <View style={styles.section}>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>Studio Equipment</Text>
+                        <View style={{ gap: 16 }}>
+                            {studioEquipment.map((item: { name: string; quantity?: number; description?: string; image?: string }, i: number) => (
+                                <View key={i} style={[styles.equipmentCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        {item.image ? (
+                                            <Image source={{ uri: item.image }} style={styles.equipmentImage} />
+                                        ) : (
+                                            <View style={[styles.equipmentIcon, { backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)' }]}>
+                                                <Ionicons name="musical-notes" size={18} color={colors.primary} />
+                                            </View>
+                                        )}
+                                        <View style={{ flex: 1, marginLeft: 12 }}>
+                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>{item.name}</Text>
+                                            {item.quantity && item.quantity > 1 && (
+                                                <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 12 }}>Quantity: {item.quantity}</Text>
+                                            )}
+                                        </View>
+                                    </View>
+                                    {item.description && (
+                                        <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 13, marginTop: 8 }}>{item.description}</Text>
+                                    )}
+                                </View>
+                            ))}
+                        </View>
+                    </View>
+                )}
+
+                {/* Legacy Equipment Support */}
+                {legacyEquipment.length > 0 && studioEquipment.length === 0 && (
                     <View style={styles.section}>
                         <Text style={[styles.sectionTitle, { color: colors.text }]}>Available Equipment</Text>
                         <View style={{ gap: 12 }}>
-                            {equipment.map((item: string, i: number) => (
+                            {legacyEquipment.map((item: string, i: number) => (
                                 <View key={i} style={styles.checkRow}>
                                     <View style={[styles.equipmentIcon, { backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)' }]}>
                                         <Ionicons name="musical-notes" size={18} color={colors.primary} />
@@ -1891,7 +1930,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                 <>
                                     <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
                                     <Text style={[styles.secondaryBtnText, { color: colors.primary, marginLeft: 8 }]}>
-                                        {bookings.length > 0 ? 'Add to Cart' : 'Add Booking'}
+                                        {bookings.length > 0 ? 'Add Session' : 'Add Booking'}
                                     </Text>
                                 </>
                             )}
@@ -1903,7 +1942,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         onPress={() => setShowAddBooking(true)}
                     >
                         <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
-                        <Text style={[styles.secondaryBtnText, { color: colors.primary, marginLeft: 8 }]}>Add Another Date/Time</Text>
+                        <Text style={[styles.secondaryBtnText, { color: colors.primary, marginLeft: 8 }]}>Add Another Session</Text>
                     </TouchableOpacity>
                 ) : null}
 
@@ -2082,7 +2121,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                     alert('An unexpected error occurred. Please try again.');
                                 }
                             },
-                            'Confirm Bookings',
+                            'Confirm Session Booking',
                             `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`
                         )}
                     >
@@ -2090,7 +2129,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             <ActivityIndicator size="small" color="#FFFFFF" />
                         ) : (
                             <Text style={[styles.primaryBtnText, { color: bookings.length > 0 ? '#FFFFFF' : colors.textSecondary }]}>
-                                {bookings.length > 0 ? `Confirm ${bookings.length} Booking${bookings.length > 1 ? 's' : ''}` : 'Add at least one booking'}
+                                {bookings.length > 0 ? `Book ${bookings.length} Session${bookings.length > 1 ? 's' : ''}` : 'Add at least one session'}
                             </Text>
                         )}
                     </TouchableOpacity>
@@ -2970,18 +3009,43 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
                                             {/* Stats Row (Studio/Venue) */}
                                             {(group.type === 'Studio' || group.type === 'Venue') && (
-                                                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
-                                                    <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                                                        <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Hourly Rate</Text>
-                                                        <Text style={[styles.statValue, { color: colors.text }]}>₱{displayRate}/hr</Text>
+                                                <View style={{ flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+                                                    {/* Pricing Row */}
+                                                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                                                        {hasDualPricing ? (
+                                                            <>
+                                                                <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', flex: 1 }]}>
+                                                                    <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rehearsal Rate</Text>
+                                                                    <Text style={[styles.statValue, { color: colors.text }]}>₱{rehearsalRate}/hr</Text>
+                                                                </View>
+                                                                <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', flex: 1 }]}>
+                                                                    <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Recording Rate</Text>
+                                                                    <Text style={[styles.statValue, { color: colors.text }]}>₱{recordingRate}/hr</Text>
+                                                                </View>
+                                                            </>
+                                                        ) : (
+                                                            <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                                                                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Hourly Rate</Text>
+                                                                <Text style={[styles.statValue, { color: colors.text }]}>₱{displayRate}/hr</Text>
+                                                            </View>
+                                                        )}
                                                     </View>
-                                                    <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                                                        <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rating</Text>
-                                                        <Text style={[styles.statValue, { color: colors.text }]}>{group.rating ? group.rating.toFixed(1) : '-'}</Text>
-                                                    </View>
-                                                    <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                                                        <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Completion</Text>
-                                                        <Text style={[styles.statValue, { color: colors.text }]}>{group.completion_rate !== undefined ? `${group.completion_rate}%` : '--'}</Text>
+                                                    {/* Stats Row */}
+                                                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                                                        <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                                                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rating</Text>
+                                                            <Text style={[styles.statValue, { color: colors.text }]}>{group.rating ? group.rating.toFixed(1) : '-'}</Text>
+                                                        </View>
+                                                        <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                                                            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Completion</Text>
+                                                            <Text style={[styles.statValue, { color: colors.text }]}>{group.completion_rate !== undefined ? `${group.completion_rate}%` : '--'}</Text>
+                                                        </View>
+                                                        {group.type === 'Studio' && group.studio_type && (
+                                                            <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                                                                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Type</Text>
+                                                                <Text style={[styles.statValue, { color: colors.text }]}>{group.studio_type}</Text>
+                                                            </View>
+                                                        )}
                                                     </View>
                                                 </View>
                                             )}
@@ -3585,6 +3649,16 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    equipmentCard: {
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    equipmentImage: {
+        width: 48,
+        height: 48,
+        borderRadius: 8,
     },
     // Upload Box
     uploadBox: {

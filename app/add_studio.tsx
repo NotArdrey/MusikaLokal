@@ -58,8 +58,10 @@ export default function AddStudioScreen() {
     const [latitude, setLatitude] = useState<number | null>(null);
     const [longitude, setLongitude] = useState<number | null>(null);
     const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-    const [cost, setCost] = useState('');
-    const [studioType, setStudioType] = useState<'Rehearsal' | 'Recording'>('Rehearsal');
+    // Dynamic pricing per studio type
+    const [rehearsalRate, setRehearsalRate] = useState('');
+    const [recordingRate, setRecordingRate] = useState('');
+    const [studioType, setStudioType] = useState<'Rehearsal' | 'Recording' | 'Both'>('Both');
     const [modalVisible, setModalVisible] = useState(false);
     const [authorized, setAuthorized] = useState(false);
     const [checkingAuth, setCheckingAuth] = useState(true);
@@ -88,7 +90,24 @@ export default function AddStudioScreen() {
     const [amenities, setAmenities] = useState<string[]>([]);
     const [newAmenity, setNewAmenity] = useState('');
 
-    // Instruments state
+    // Studio Equipment state (full details with name, quantity, description, image)
+    interface EquipmentItem {
+        id: string;
+        name: string;
+        quantity: number;
+        description: string;
+        image: string;
+    }
+    const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
+    const [showEquipmentModal, setShowEquipmentModal] = useState(false);
+    const [editingEquipment, setEditingEquipment] = useState<EquipmentItem | null>(null);
+    const [equipmentForm, setEquipmentForm] = useState({ name: '', quantity: '1', description: '', image: '' });
+
+    // Calendar-based availability state
+    const [selectedDates, setSelectedDates] = useState<{ [date: string]: { selected: boolean; slots: { start: string; end: string }[] } }>({});
+    const [currentMonth, setCurrentMonth] = useState(new Date().toISOString().slice(0, 7));
+
+    // Legacy instruments state for backward compatibility
     const [selectedInstruments, setSelectedInstruments] = useState<{ name: string, image: string }[]>([]);
 
     // Predefined instruments with images (using Unsplash for demo, replace with your own CDN)
@@ -186,9 +205,26 @@ export default function AddStudioScreen() {
                 showAlert('error', 'Required Field', 'Please select a location on the map');
                 return false;
             }
-            if (!cost.trim() || parseFloat(cost) <= 0) {
-                showAlert('error', 'Required Field', 'Please enter a valid hourly rate');
-                return false;
+            // Validate pricing based on studio type
+            if (studioType === 'Both') {
+                if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
+                    showAlert('error', 'Required Field', 'Please enter a valid rehearsal rate');
+                    return false;
+                }
+                if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
+                    showAlert('error', 'Required Field', 'Please enter a valid recording rate');
+                    return false;
+                }
+            } else if (studioType === 'Rehearsal') {
+                if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
+                    showAlert('error', 'Required Field', 'Please enter a valid rehearsal rate');
+                    return false;
+                }
+            } else {
+                if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
+                    showAlert('error', 'Required Field', 'Please enter a valid recording rate');
+                    return false;
+                }
             }
             if (images.length === 0) {
                 showAlert('error', 'Required Field', 'Please upload at least one studio photo');
@@ -256,25 +292,51 @@ export default function AddStudioScreen() {
                 return `${hours}:${minutes}`;
             };
 
+            // Convert calendar-based availability to the payload format
+            const calendarAvailability = Object.entries(selectedDates)
+                .filter(([_, data]) => data.selected && data.slots.length > 0)
+                .map(([date, data]) => ({
+                    date,
+                    slots: data.slots.map(slot => ({
+                        start: convertTo24Hour(slot.start),
+                        end: convertTo24Hour(slot.end)
+                    }))
+                }));
+
+            // Also include weekly availability for recurring schedule
+            const weeklyAvailability = availability
+                .filter(day => day.slots.length > 0)
+                .map(day => ({
+                    ...day,
+                    slots: day.slots.map(slot => ({
+                        start: convertTo24Hour(slot.start),
+                        end: convertTo24Hour(slot.end)
+                    }))
+                }));
+
             const payload = {
                 name: studioName,
                 type: studioType,
                 description,
                 address,
-                hourly_rate: parseFloat(cost) || 0,
+                // Dynamic pricing based on studio type
+                hourly_rate: studioType === 'Recording' ? parseFloat(recordingRate) || 0 : parseFloat(rehearsalRate) || 0,
+                rehearsal_rate: parseFloat(rehearsalRate) || 0,
+                recording_rate: parseFloat(recordingRate) || 0,
                 amenities,
                 instruments: selectedInstruments,
+                // Include full equipment details
+                equipment: equipment.map(e => ({
+                    name: e.name,
+                    quantity: e.quantity,
+                    description: e.description,
+                    image: e.image
+                })),
                 images: images,
                 contract_url: contractUrl || null,
-                availability: availability
-                    .filter(day => day.slots.length > 0)
-                    .map(day => ({
-                        ...day,
-                        slots: day.slots.map(slot => ({
-                            start: convertTo24Hour(slot.start),
-                            end: convertTo24Hour(slot.end)
-                        }))
-                    })),
+                // Include both weekly and calendar availability
+                availability: weeklyAvailability,
+                calendar_availability: calendarAvailability,
                 latitude,
                 longitude,
             };
@@ -574,7 +636,7 @@ export default function AddStudioScreen() {
                             <View style={styles.inputContainer}>
                                 <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Studio Type</Text>
                                 <View style={{ flexDirection: 'row', gap: 12 }}>
-                                    {(['Rehearsal', 'Recording'] as const).map((type) => (
+                                    {(['Rehearsal', 'Recording', 'Both'] as const).map((type) => (
                                         <TouchableOpacity
                                             key={type}
                                             onPress={() => setStudioType(type)}
@@ -592,9 +654,9 @@ export default function AddStudioScreen() {
                                             <Text style={{
                                                 color: studioType === type ? '#FFF' : colors.textSecondary,
                                                 fontFamily: 'Poppins_600SemiBold',
-                                                fontSize: 14
+                                                fontSize: type === 'Both' ? 14 : 12
                                             }}>
-                                                {type} Studio
+                                                {type === 'Both' ? 'Both' : type}
                                             </Text>
                                         </TouchableOpacity>
                                     ))}
@@ -637,7 +699,71 @@ export default function AddStudioScreen() {
                                 </TouchableOpacity>
                             </View>
 
-                            {renderInput('Hourly Rate (PHP)', cost, setCost, 'e.g. 500', false, 'numeric')}
+                            {/* Dynamic Pricing Section */}
+                            <View style={styles.inputContainer}>
+                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Pricing</Text>
+                                <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
+                                    Set hourly rates for each studio type
+                                </Text>
+                                
+                                {/* Rehearsal Rate */}
+                                {(studioType === 'Rehearsal' || studioType === 'Both') && (
+                                    <View style={{ marginBottom: 12 }}>
+                                        <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 }]}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                                                <Ionicons name="musical-notes" size={20} color={colors.primary} />
+                                                <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium', minWidth: 80 }}>Rehearsal</Text>
+                                            </View>
+                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', marginRight: 4 }}>₱</Text>
+                                            <TextInput
+                                                value={rehearsalRate}
+                                                onChangeText={setRehearsalRate}
+                                                placeholder="500"
+                                                placeholderTextColor={colors.textSecondary}
+                                                keyboardType="numeric"
+                                                style={{
+                                                    color: colors.text,
+                                                    fontFamily: 'Poppins_600SemiBold',
+                                                    fontSize: 16,
+                                                    minWidth: 80,
+                                                    textAlign: 'right',
+                                                    paddingVertical: 16
+                                                }}
+                                            />
+                                            <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', marginLeft: 4 }}>/hr</Text>
+                                        </View>
+                                    </View>
+                                )}
+
+                                {/* Recording Rate */}
+                                {(studioType === 'Recording' || studioType === 'Both') && (
+                                    <View>
+                                        <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 }]}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                                                <Ionicons name="mic" size={20} color="#EF4444" />
+                                                <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium', minWidth: 80 }}>Recording</Text>
+                                            </View>
+                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', marginRight: 4 }}>₱</Text>
+                                            <TextInput
+                                                value={recordingRate}
+                                                onChangeText={setRecordingRate}
+                                                placeholder="1000"
+                                                placeholderTextColor={colors.textSecondary}
+                                                keyboardType="numeric"
+                                                style={{
+                                                    color: colors.text,
+                                                    fontFamily: 'Poppins_600SemiBold',
+                                                    fontSize: 16,
+                                                    minWidth: 80,
+                                                    textAlign: 'right',
+                                                    paddingVertical: 16
+                                                }}
+                                            />
+                                            <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', marginLeft: 4 }}>/hr</Text>
+                                        </View>
+                                    </View>
+                                )}
+                            </View>
 
                             {/* Contract Upload */}
                             <View style={styles.inputContainer}>
@@ -736,13 +862,90 @@ export default function AddStudioScreen() {
                                 </View>
                             )}
 
-                            {/* Instruments Section */}
+                            {/* Studio Equipment Section */}
                             <View style={{ marginTop: 24 }}>
                                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                                    Available Instruments
+                                    Studio Equipment
                                 </Text>
                                 <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 12 }]}>
-                                    Select the instruments available at your studio
+                                    Add equipment available at your studio with details
+                                </Text>
+
+                                {/* Add Equipment Button */}
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setEditingEquipment(null);
+                                        setEquipmentForm({ name: '', quantity: '1', description: '', image: '' });
+                                        setShowEquipmentModal(true);
+                                    }}
+                                    style={[styles.addEquipmentBtn, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', borderColor: colors.primary }]}
+                                >
+                                    <Ionicons name="add-circle" size={24} color={colors.primary} />
+                                    <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', marginLeft: 8 }}>
+                                        Add Equipment
+                                    </Text>
+                                </TouchableOpacity>
+
+                                {/* Equipment List */}
+                                {equipment.length > 0 && (
+                                    <View style={{ marginTop: 16 }}>
+                                        {equipment.map((item) => (
+                                            <View key={item.id} style={[styles.equipmentCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
+                                                <View style={{ flexDirection: 'row', gap: 12 }}>
+                                                    {item.image ? (
+                                                        <Image source={{ uri: item.image }} style={styles.equipmentImage} />
+                                                    ) : (
+                                                        <View style={[styles.equipmentImage, { backgroundColor: isDark ? '#374151' : '#E5E7EB', alignItems: 'center', justifyContent: 'center' }]}>
+                                                            <Ionicons name="cube-outline" size={24} color={colors.textSecondary} />
+                                                        </View>
+                                                    )}
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={[styles.equipmentName, { color: colors.text }]}>{item.name}</Text>
+                                                        <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular' }}>
+                                                            Qty: {item.quantity}
+                                                        </Text>
+                                                        {item.description && (
+                                                            <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 4 }} numberOfLines={2}>
+                                                                {item.description}
+                                                            </Text>
+                                                        )}
+                                                    </View>
+                                                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                                                        <TouchableOpacity
+                                                            onPress={() => {
+                                                                setEditingEquipment(item);
+                                                                setEquipmentForm({
+                                                                    name: item.name,
+                                                                    quantity: item.quantity.toString(),
+                                                                    description: item.description,
+                                                                    image: item.image
+                                                                });
+                                                                setShowEquipmentModal(true);
+                                                            }}
+                                                        >
+                                                            <Ionicons name="pencil" size={18} color={colors.primary} />
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity
+                                                            onPress={() => setEquipment(equipment.filter(e => e.id !== item.id))}
+                                                        >
+                                                            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </View>
+                                )}
+
+                                {equipment.length > 0 && (
+                                    <Text style={[styles.selectedCount, { color: colors.textSecondary }]}>
+                                        {equipment.length} equipment item{equipment.length !== 1 ? 's' : ''} added
+                                    </Text>
+                                )}
+
+                                {/* Quick Add from Presets */}
+                                <Text style={[styles.subtitle, { color: colors.textSecondary, marginTop: 24, marginBottom: 12 }]}>
+                                    Or quickly select from common equipment
                                 </Text>
 
                                 <View style={styles.instrumentsGrid}>
@@ -779,7 +982,7 @@ export default function AddStudioScreen() {
 
                                 {selectedInstruments.length > 0 && (
                                     <Text style={[styles.selectedCount, { color: colors.textSecondary }]}>
-                                        {selectedInstruments.length} instrument{selectedInstruments.length !== 1 ? 's' : ''} selected
+                                        {selectedInstruments.length} preset{selectedInstruments.length !== 1 ? 's' : ''} selected
                                     </Text>
                                 )}
                             </View>
@@ -792,7 +995,110 @@ export default function AddStudioScreen() {
                                 Set Your Availability
                             </Text>
                             <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 16 }]}>
-                                Choose the days and times when your studio is available for booking
+                                Set your regular weekly schedule and/or select specific dates
+                            </Text>
+
+                            {/* Calendar Date Selection */}
+                            <View style={{ marginBottom: 24 }}>
+                                <Text style={[styles.sectionSubtitle, { color: colors.text, marginBottom: 12 }]}>
+                                    <Ionicons name="calendar" size={16} color={colors.primary} /> Specific Dates
+                                </Text>
+                                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginBottom: 12 }}>
+                                    Tap on dates to set your opening schedule for specific days
+                                </Text>
+                                
+                                <View style={[styles.calendarContainer, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                        {Array.from({ length: 60 }).map((_, i) => {
+                                            const date = new Date();
+                                            date.setDate(date.getDate() + i);
+                                            const dateStr = date.toISOString().split('T')[0];
+                                            const isSelected = selectedDates[dateStr]?.selected;
+                                            const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                                            const dayNum = date.getDate();
+                                            const monthName = date.toLocaleDateString('en-US', { month: 'short' });
+
+                                            return (
+                                                <TouchableOpacity
+                                                    key={dateStr}
+                                                    onPress={() => {
+                                                        const newDates = { ...selectedDates };
+                                                        if (isSelected) {
+                                                            delete newDates[dateStr];
+                                                        } else {
+                                                            newDates[dateStr] = {
+                                                                selected: true,
+                                                                slots: [{ start: '09:00 AM', end: '05:00 PM' }]
+                                                            };
+                                                        }
+                                                        setSelectedDates(newDates);
+                                                    }}
+                                                    style={[
+                                                        styles.dateCard,
+                                                        {
+                                                            backgroundColor: isSelected ? colors.primary : (isDark ? '#374151' : '#FFF'),
+                                                            borderColor: isSelected ? colors.primary : (isDark ? '#4B5563' : '#E5E7EB')
+                                                        }
+                                                    ]}
+                                                >
+                                                    <Text style={{ color: isSelected ? '#FFF' : colors.textSecondary, fontSize: 10, fontFamily: 'Poppins_500Medium' }}>
+                                                        {dayName}
+                                                    </Text>
+                                                    <Text style={{ color: isSelected ? '#FFF' : colors.text, fontSize: 18, fontFamily: 'Poppins_700Bold' }}>
+                                                        {dayNum}
+                                                    </Text>
+                                                    <Text style={{ color: isSelected ? '#FFF' : colors.textSecondary, fontSize: 10, fontFamily: 'Poppins_400Regular' }}>
+                                                        {monthName}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </ScrollView>
+                                </View>
+
+                                {/* Selected Dates with Time Slots */}
+                                {Object.entries(selectedDates).filter(([_, data]) => data.selected).length > 0 && (
+                                    <View style={{ marginTop: 16 }}>
+                                        <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>
+                                            SELECTED DATES
+                                        </Text>
+                                        {Object.entries(selectedDates)
+                                            .filter(([_, data]) => data.selected)
+                                            .sort(([a], [b]) => a.localeCompare(b))
+                                            .map(([dateStr, data]) => {
+                                                const date = new Date(dateStr + 'T00:00:00');
+                                                return (
+                                                    <View key={dateStr} style={[styles.selectedDateCard, { backgroundColor: isDark ? '#374151' : '#FFF', borderColor: colors.border }]}>
+                                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
+                                                                {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                                            </Text>
+                                                            <TouchableOpacity onPress={() => {
+                                                                const newDates = { ...selectedDates };
+                                                                delete newDates[dateStr];
+                                                                setSelectedDates(newDates);
+                                                            }}>
+                                                                <Ionicons name="close-circle" size={20} color="#EF4444" />
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                                                            <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                                                                {data.slots[0]?.start} - {data.slots[0]?.end}
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+                                                );
+                                            })}
+                                    </View>
+                                )}
+                            </View>
+
+                            {/* Weekly Schedule Section */}
+                            <Text style={[styles.sectionSubtitle, { color: colors.text, marginBottom: 12 }]}>
+                                <Ionicons name="repeat" size={16} color={colors.primary} /> Weekly Schedule
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginBottom: 16 }}>
+                                Set recurring availability for each day of the week
                             </Text>
 
                             {availability.map((daySchedule, dayIndex) => (
@@ -937,7 +1243,26 @@ export default function AddStudioScreen() {
                                     <Text style={styles.reviewLabel}>Studio Info</Text>
                                     <Text style={[styles.reviewValue, { color: colors.text }]}>{studioName || 'No Name'}</Text>
                                     <Text style={{ color: colors.textSecondary }}>{address || 'No Address'}</Text>
-                                    <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', marginTop: 4 }}>Rate: ₱{cost}/hr</Text>
+                                    <Text style={{ color: colors.textSecondary, marginTop: 4 }}>Type: {studioType}</Text>
+                                </View>
+
+                                <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
+
+                                {/* Pricing Review */}
+                                <View>
+                                    <Text style={styles.reviewLabel}>Pricing</Text>
+                                    {(studioType === 'Rehearsal' || studioType === 'Both') && (
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                            <Ionicons name="musical-notes" size={14} color={colors.primary} />
+                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>Rehearsal: ₱{rehearsalRate || '0'}/hr</Text>
+                                        </View>
+                                    )}
+                                    {(studioType === 'Recording' || studioType === 'Both') && (
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                            <Ionicons name="mic" size={14} color="#EF4444" />
+                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium' }}>Recording: ₱{recordingRate || '0'}/hr</Text>
+                                        </View>
+                                    )}
                                 </View>
 
                                 <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
@@ -969,7 +1294,23 @@ export default function AddStudioScreen() {
                                 <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
 
                                 <View>
-                                    <Text style={styles.reviewLabel}>Instruments ({selectedInstruments.length})</Text>
+                                    <Text style={styles.reviewLabel}>Studio Equipment ({equipment.length + selectedInstruments.length})</Text>
+                                    {equipment.length > 0 && (
+                                        <View style={{ marginBottom: 8 }}>
+                                            {equipment.map((eq, i) => (
+                                                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                                    {eq.image ? (
+                                                        <Image source={{ uri: eq.image }} style={{ width: 24, height: 24, borderRadius: 4 }} />
+                                                    ) : (
+                                                        <View style={{ width: 24, height: 24, borderRadius: 4, backgroundColor: colors.border, alignItems: 'center', justifyContent: 'center' }}>
+                                                            <Ionicons name="cube" size={12} color={colors.textSecondary} />
+                                                        </View>
+                                                    )}
+                                                    <Text style={{ fontSize: 12, color: colors.text }}>{eq.name} (x{eq.quantity})</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    )}
                                     {selectedInstruments.length > 0 ? (
                                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                                             {selectedInstruments.map((inst, i) => (
@@ -979,9 +1320,9 @@ export default function AddStudioScreen() {
                                                 </View>
                                             ))}
                                         </View>
-                                    ) : (
-                                        <Text style={{ color: colors.textSecondary, fontSize: 12 }}>No instruments selected</Text>
-                                    )}
+                                    ) : equipment.length === 0 && (
+                                        <Text style={{ color: colors.textSecondary, fontSize: 12 }}>No equipment added</Text>
+                                    )}}
                                 </View>
 
                                 <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
@@ -1076,6 +1417,176 @@ export default function AddStudioScreen() {
                     setLocationPickerVisible(false);
                 }}
             />
+
+            {/* Equipment Modal */}
+            {showEquipmentModal && (
+                <View style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.5)',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    padding: 24,
+                    zIndex: 1000
+                }}>
+                    <View style={{
+                        backgroundColor: colors.background,
+                        borderRadius: 16,
+                        padding: 24,
+                        width: '100%',
+                        maxWidth: 400,
+                        maxHeight: '80%'
+                    }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <Text style={{ fontSize: 18, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                                {editingEquipment ? 'Edit Equipment' : 'Add Equipment'}
+                            </Text>
+                            <TouchableOpacity onPress={() => setShowEquipmentModal(false)}>
+                                <Ionicons name="close" size={24} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            {/* Name */}
+                            <View style={{ marginBottom: 16 }}>
+                                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>NAME *</Text>
+                                <TextInput
+                                    value={equipmentForm.name}
+                                    onChangeText={(text) => setEquipmentForm({ ...equipmentForm, name: text })}
+                                    placeholder="e.g. Yamaha DTX Drums"
+                                    placeholderTextColor={colors.textSecondary}
+                                    style={{
+                                        backgroundColor: colors.inputBackground,
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        color: colors.text,
+                                        fontFamily: 'Poppins_400Regular',
+                                        borderWidth: 1,
+                                        borderColor: isDark ? '#374151' : '#E5E7EB'
+                                    }}
+                                />
+                            </View>
+
+                            {/* Quantity */}
+                            <View style={{ marginBottom: 16 }}>
+                                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>QUANTITY *</Text>
+                                <TextInput
+                                    value={equipmentForm.quantity}
+                                    onChangeText={(text) => setEquipmentForm({ ...equipmentForm, quantity: text.replace(/[^0-9]/g, '') })}
+                                    placeholder="1"
+                                    placeholderTextColor={colors.textSecondary}
+                                    keyboardType="numeric"
+                                    style={{
+                                        backgroundColor: colors.inputBackground,
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        color: colors.text,
+                                        fontFamily: 'Poppins_400Regular',
+                                        borderWidth: 1,
+                                        borderColor: isDark ? '#374151' : '#E5E7EB'
+                                    }}
+                                />
+                            </View>
+
+                            {/* Description */}
+                            <View style={{ marginBottom: 16 }}>
+                                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>DESCRIPTION</Text>
+                                <TextInput
+                                    value={equipmentForm.description}
+                                    onChangeText={(text) => setEquipmentForm({ ...equipmentForm, description: text })}
+                                    placeholder="Brief description of the equipment"
+                                    placeholderTextColor={colors.textSecondary}
+                                    multiline
+                                    numberOfLines={3}
+                                    style={{
+                                        backgroundColor: colors.inputBackground,
+                                        borderRadius: 12,
+                                        padding: 16,
+                                        color: colors.text,
+                                        fontFamily: 'Poppins_400Regular',
+                                        borderWidth: 1,
+                                        borderColor: isDark ? '#374151' : '#E5E7EB',
+                                        height: 80,
+                                        textAlignVertical: 'top'
+                                    }}
+                                />
+                            </View>
+
+                            {/* Image Upload */}
+                            <View style={{ marginBottom: 24 }}>
+                                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>IMAGE</Text>
+                                {equipmentForm.image ? (
+                                    <View style={{ position: 'relative' }}>
+                                        <Image source={{ uri: equipmentForm.image }} style={{ width: '100%', height: 150, borderRadius: 12 }} />
+                                        <TouchableOpacity
+                                            onPress={() => setEquipmentForm({ ...equipmentForm, image: '' })}
+                                            style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12, padding: 4 }}
+                                        >
+                                            <Ionicons name="close" size={16} color="#FFF" />
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : (
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: colors.inputBackground,
+                                            borderRadius: 12,
+                                            padding: 24,
+                                            alignItems: 'center',
+                                            borderWidth: 2,
+                                            borderStyle: 'dashed',
+                                            borderColor: isDark ? '#374151' : '#E5E7EB'
+                                        }}
+                                    >
+                                        <Ionicons name="camera-outline" size={32} color={colors.textSecondary} />
+                                        <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>Tap to add image</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+
+                            {/* Submit Button */}
+                            <TouchableOpacity
+                                onPress={() => {
+                                    if (!equipmentForm.name.trim()) {
+                                        showAlert('error', 'Required', 'Please enter equipment name');
+                                        return;
+                                    }
+                                    if (editingEquipment) {
+                                        setEquipment(equipment.map(e =>
+                                            e.id === editingEquipment.id
+                                                ? { ...e, ...equipmentForm, quantity: parseInt(equipmentForm.quantity) || 1 }
+                                                : e
+                                        ));
+                                    } else {
+                                        setEquipment([...equipment, {
+                                            id: Date.now().toString(),
+                                            name: equipmentForm.name,
+                                            quantity: parseInt(equipmentForm.quantity) || 1,
+                                            description: equipmentForm.description,
+                                            image: equipmentForm.image
+                                        }]);
+                                    }
+                                    setShowEquipmentModal(false);
+                                    setEquipmentForm({ name: '', quantity: '1', description: '', image: '' });
+                                    setEditingEquipment(null);
+                                }}
+                                style={{
+                                    backgroundColor: colors.primary,
+                                    borderRadius: 12,
+                                    padding: 16,
+                                    alignItems: 'center'
+                                }}
+                            >
+                                <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold' }}>
+                                    {editingEquipment ? 'Update Equipment' : 'Add Equipment'}
+                                </Text>
+                            </TouchableOpacity>
+                        </ScrollView>
+                    </View>
+                </View>
+            )}
         </>
     );
 }
@@ -1405,5 +1916,55 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
         marginTop: 12,
         textAlign: 'center',
+    },
+    // Equipment styles
+    addEquipmentBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderStyle: 'dashed',
+    },
+    equipmentCard: {
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginBottom: 8,
+    },
+    equipmentImage: {
+        width: 56,
+        height: 56,
+        borderRadius: 8,
+    },
+    equipmentName: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
+    },
+    // Calendar styles
+    calendarContainer: {
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    dateCard: {
+        width: 60,
+        height: 80,
+        borderRadius: 12,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 8,
+    },
+    selectedDateCard: {
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginBottom: 8,
+    },
+    sectionSubtitle: {
+        fontSize: 14,
+        fontFamily: 'Poppins_600SemiBold',
     },
 });

@@ -65,6 +65,7 @@ export default function EditGigScreen() {
   const [eventStartTime, setEventStartTime] = useState('06:00 PM');
   const [eventEndTime, setEventEndTime] = useState('11:00 PM');
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
@@ -231,6 +232,73 @@ export default function EditGigScreen() {
     return true;
   };
 
+  const performSave = async () => {
+    if (saving) return;
+    setSaving(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setSaving(false);
+        return;
+      }
+
+      // Ensure id is a string, not an array
+      const gigId = Array.isArray(id) ? id[0] : id;
+      if (!gigId) {
+        showAlert('error', 'Error', 'Invalid gig ID');
+        setSaving(false);
+        return;
+      }
+
+      const payload = {
+        name: gigName,
+        description,
+        location: address,
+        budget: parseFloat(cost) || 0,
+        images: images,
+        contract_url: contractUrl || null,
+        latitude,
+        longitude,
+        event_date: eventDate,
+        requirements: {
+          event_start_time: eventStartTime,
+          event_end_time: eventEndTime,
+          musician_type: musicianType,
+        },
+      };
+
+      console.log('🔵 Updating gig with payload:', JSON.stringify({ action: 'update', type: 'gig', id: gigId, userId: user.id, payload }, null, 2));
+
+      const response = await supabase.functions.invoke('manage-listings', {
+        body: { action: 'update', type: 'gig', id: gigId, userId: user.id, payload }
+      });
+
+      if (response.error) {
+        throw response.error;
+      }
+
+      console.log('✅ Gig Updated successfully');
+      showAlert('success', 'Success', 'Gig updated successfully!', [
+        {
+          text: 'OK',
+          onPress: () => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.push('/manage_gig');
+            }
+          }
+        }
+      ]);
+    } catch (e: any) {
+      console.error('❌ Error updating gig:', e);
+      showAlert('error', 'Error', `Failed to update gig: ${e?.message || 'Unknown error'}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!validateForm()) {
       return;
@@ -241,56 +309,7 @@ export default function EditGigScreen() {
       {
         text: 'Save & Update',
         style: 'default',
-        onPress: async () => {
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-
-            // Ensure id is a string, not an array
-            const gigId = Array.isArray(id) ? id[0] : id;
-            if (!gigId) {
-              showAlert('error', 'Error', 'Invalid gig ID');
-              return;
-            }
-
-            const payload = {
-              name: gigName,
-              description,
-              location: address,
-              budget: parseFloat(cost) || 0,
-              images: images,
-              contract_url: contractUrl || null,
-              latitude,
-              longitude,
-              event_date: eventDate,
-              requirements: {
-                event_start_time: eventStartTime,
-                event_end_time: eventEndTime,
-                musician_type: musicianType,
-              },
-            };
-
-            console.log('🔵 Updating gig with payload:', JSON.stringify({ action: 'update', type: 'gig', id: gigId, userId: user.id, payload }, null, 2));
-
-            const response = await supabase.functions.invoke('manage-listings', {
-              body: { action: 'update', type: 'gig', id: gigId, userId: user.id, payload }
-            });
-
-            if (response.error) {
-              throw response.error;
-            }
-
-            console.log('✅ Gig Updated successfully');
-            if (router.canGoBack()) {
-              router.back();
-            } else {
-              router.push('/manage_gig');
-            }
-          } catch (e: any) {
-            console.error('❌ Error updating gig:', e);
-            showAlert('error', 'Error', `Failed to update gig: ${e?.message || 'Unknown error'}`);
-          }
-        }
+        onPress: () => performSave()
       }
     ]);
   };
@@ -725,10 +744,15 @@ export default function EditGigScreen() {
 
           <View style={styles.footerActions}>
             <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
+              style={[styles.saveButton, { backgroundColor: saving ? colors.textSecondary : colors.primary, shadowColor: colors.primary }]}
               onPress={handleSave}
+              disabled={saving}
             >
-              <Text style={styles.saveButtonText}>Save Changes</Text>
+              {saving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save Changes</Text>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity

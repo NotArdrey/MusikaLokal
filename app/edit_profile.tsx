@@ -442,36 +442,6 @@ const styles = StyleSheet.create({
   avatar: { width: 110, height: 110, borderRadius: 55, borderWidth: 3 },
   cameraBtn: {
     position: "absolute",
-  flex1: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 170,
-  },
-  contentContainer: {
-    paddingHorizontal: 24,
-    marginTop: 24,
-  },
-  profileImageContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  imageWrapper: {
-    position: 'relative',
-  },
-  imageContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    overflow: 'hidden',
-    borderWidth: 4,
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-  },
-  uploadButton: {
-    position: 'absolute',
     bottom: 0,
     right: 0,
     width: 36,

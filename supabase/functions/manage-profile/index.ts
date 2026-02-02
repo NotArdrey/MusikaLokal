@@ -14,26 +14,30 @@ serve(async (req: Request) => {
     }
 
     try {
+        const { action, ...params } = await req.json()
+        
         // Log authorization header for debugging (remove in production)
         const authHeader = req.headers.get('Authorization')
         console.log('Authorization header present:', !!authHeader)
+        console.log('Action requested:', action)
 
-        if (!authHeader) {
+        // Allow 'create' action without auth header (for signup flow)
+        // The create action uses service role key anyway
+        if (action !== 'create' && !authHeader) {
             return new Response(JSON.stringify({ error: 'No authorization header provided' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 401,
             })
         }
 
-        const supabaseClient = createClient(
+        // Only create supabaseClient if we have auth header (not needed for create action)
+        const supabaseClient = authHeader ? createClient(
             // @ts-ignore
             Deno.env.get('SUPABASE_URL') ?? '',
             // @ts-ignore
             Deno.env.get('SUPABASE_ANON_KEY') ?? '',
             { global: { headers: { Authorization: authHeader } } }
-        )
-
-        const { action, ...params } = await req.json()
+        ) : null
 
         // 1. FETCH PROFILE (using view with computed stats)
         if (action === 'fetch') {
@@ -133,6 +137,14 @@ serve(async (req: Request) => {
         if (action === 'create') {
             const { userId, email, full_name, role, is_verified, verification_status, didit_session_id } = params
 
+            // Validate required parameters
+            if (!userId || !email || !role) {
+                return new Response(JSON.stringify({ error: 'Missing required parameters: userId, email, role' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
             // Initialize Admin Client to bypass RLS
             const supabaseAdmin = createClient(
                 // @ts-ignore
@@ -140,6 +152,18 @@ serve(async (req: Request) => {
                 // @ts-ignore
                 Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
             )
+
+            // Verify the user exists in auth.users before creating profile
+            const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.getUserById(userId)
+            if (authError || !authUser?.user) {
+                console.error('User verification failed:', authError)
+                return new Response(JSON.stringify({ error: 'User not found in auth system' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            console.log('Creating profile for user:', userId, email)
 
             const { data, error } = await supabaseAdmin
                 .from('profiles')
@@ -159,6 +183,8 @@ serve(async (req: Request) => {
                 console.error('Profile creation error:', error)
                 throw error
             }
+
+            console.log('Profile created successfully:', data?.id)
 
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
