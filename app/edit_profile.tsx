@@ -6,13 +6,12 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -442,47 +441,14 @@ const styles = StyleSheet.create({
   avatar: { width: 110, height: 110, borderRadius: 55, borderWidth: 3 },
   cameraBtn: {
     position: "absolute",
-  flex1: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 170,
-  },
-  contentContainer: {
-    paddingHorizontal: 24,
-    marginTop: 24,
-  },
-  profileImageContainer: {
-    alignItems: 'center',
-    marginBottom: 32,
-  },
-  imageWrapper: {
-    position: 'relative',
-  },
-  imageContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    overflow: 'hidden',
-    borderWidth: 4,
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-  },
-  uploadButton: {
-    position: 'absolute',
     bottom: 0,
     right: 0,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: "center",
     alignItems: "center",
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
-      android: { elevation: 3 },
-    }),
+    borderWidth: 2,
   },
   changePhotoText: { marginTop: 10, fontSize: 14, fontFamily: "Poppins_500Medium" },
 
@@ -492,7 +458,7 @@ const styles = StyleSheet.create({
   disabledInput: { borderWidth: 1, borderRadius: 10, padding: 14 },
   disabledText: { fontSize: 15, fontFamily: "Poppins_500Medium" },
   helper: { fontSize: 11, fontFamily: "Poppins_400Regular", marginTop: 4 },
-  textArea: { borderWidth: 1, borderRadius: 10, padding: 14, fontSize: 15, fontFamily: "Poppins_400Regular", minHeight: 100 },
+  textArea: { borderWidth: 1, borderRadius: 10, padding: 14, fontSize: 15, fontFamily: "Poppins_400Regular", minHeight: 100, textAlignVertical: "top" },
 
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, borderWidth: 1 },
