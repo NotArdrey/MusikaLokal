@@ -511,6 +511,7 @@ export default function SignupScreen() {
             <TouchableOpacity
                 disabled={!selectedRole}
                 onPress={() => setStep('details')}
+                activeOpacity={0.8}
                 style={[styles.nextButton, themeStyles.primaryButton, !selectedRole && { opacity: 0.5 }]}
             >
                 <Text style={styles.nextButtonText}>Continue</Text>
@@ -585,6 +586,7 @@ export default function SignupScreen() {
             <TouchableOpacity
                 onPress={handleNext}
                 disabled={loading}
+                activeOpacity={0.8}
                 style={[styles.nextButton, themeStyles.primaryButton]}
             >
                 {loading ? <ActivityIndicator color="white" /> : <Text style={styles.nextButtonText}>Next</Text>}

@@ -427,6 +427,7 @@ export default function LoginScreen() {
             <TouchableOpacity
               onPress={handleLogin}
               disabled={loading}
+              activeOpacity={0.8}
               style={[styles.loginButton, themeStyles.primaryButton, styles.shadow]}
             >
               {loading ? (

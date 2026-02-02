@@ -42,7 +42,11 @@ export default function BookingsScreen() {
   const [cancellationReason, setCancellationReason] = useState('');
   const bookingDetailsRef = React.useRef<import('@gorhom/bottom-sheet').BottomSheetModal>(null);
   const { width } = useWindowDimensions();
-  const [modalMode, setModalMode] = useState<'confirm' | 'cancel' | 'decline' | 'fire' | 'complete'>('confirm');
+  const [modalMode, setModalMode] = useState<'confirm' | 'cancel' | 'decline' | 'fire' | 'complete' | 'renew'>('confirm');
+
+  // Renew Contract State
+  const [showRenewModal, setShowRenewModal] = useState(false);
+  const [renewGigId, setRenewGigId] = useState<string | null>(null);
 
   // QR Check-in State
   const [showQRModal, setShowQRModal] = useState(false);
@@ -303,6 +307,42 @@ export default function BookingsScreen() {
       pathname: '/submit_review',
       params
     } as any);
+  };
+
+  // Renew Contract Logic
+  const handleRenewContract = async (item: any) => {
+    setSelectedItem(item);
+    setModalMode('renew');
+    setModalVisible(true);
+  };
+
+  const processRenewContract = async () => {
+    if (!selectedItem || !userId) return;
+
+    try {
+      setLoading(true);
+
+      const { data, error } = await supabase.functions.invoke('manage-bookings', {
+        body: {
+          action: 'renew_contract',
+          application_id: selectedItem.id,
+          gig_id: selectedItem.gig_id,
+          applicant_id: selectedItem.applicant_id || selectedItem.user_id,
+          organizer_id: userId
+        }
+      });
+
+      if (error) throw error;
+
+      Alert.alert('Success', 'Contract renewal sent! The musician will be notified.');
+      setModalVisible(false);
+      fetchBookings(userId);
+    } catch (e: any) {
+      console.error('Renew contract error:', e);
+      Alert.alert('Error', e?.message || 'Failed to renew contract. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // QR Code Logic
@@ -613,8 +653,29 @@ export default function BookingsScreen() {
                             <Text style={{ color: 'white', fontFamily: 'Poppins_700Bold', fontSize: 12 }}>COMPLETE</Text>
                           </TouchableOpacity>
                         </View>
+                      ) : activeTab === 'Review' ? (
+                        // Review Tab: Leave Review + Renew Contract for venue owners
+                        <View style={{ flexDirection: 'row', gap: 8, flex: 1 }}>
+                          <TouchableOpacity
+                            onPress={() => handleLeaveReview(item)}
+                            style={{ flex: 1, borderColor: colors.primary, borderWidth: 1, padding: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                          >
+                            <Ionicons name="star-outline" size={16} color={colors.primary} />
+                            <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium', fontSize: 12 }}>Leave Review</Text>
+                          </TouchableOpacity>
+
+                          {userRole === 'venue-owner' && (
+                            <TouchableOpacity
+                              onPress={() => handleRenewContract(item)}
+                              style={{ flex: 1, backgroundColor: '#7C3AED', padding: 10, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                            >
+                              <Ionicons name="refresh" size={16} color="white" />
+                              <Text style={{ color: 'white', fontFamily: 'Poppins_600SemiBold', fontSize: 12 }}>Renew</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
                       ) : (
-                        // Default / Details (Review)
+                        // Default / Details
                         <TouchableOpacity
                           onPress={() => handleDetailsPress(item)}
                           style={{ flex: 1, borderColor: colors.border, borderWidth: 1, padding: 10, borderRadius: 8, alignItems: 'center' }}>
@@ -646,6 +707,13 @@ export default function BookingsScreen() {
                     <View style={styles.typeBadge}>
                       <Text style={styles.typeBadgeText}>{item.type}</Text>
                     </View>
+
+                    {/* Pax Badge for Studios */}
+                    {item.pax && (
+                      <View style={[styles.typeBadge, { left: undefined, right: 10, backgroundColor: '#10B981' }]}>
+                        <Text style={styles.typeBadgeText}>{item.pax} pax</Text>
+                      </View>
+                    )}
 
                     {/* Status Overlays */}
                     {activeTab === 'Ongoing' && (
@@ -914,7 +982,9 @@ export default function BookingsScreen() {
                 ? "Terminate Agreement"
                 : modalMode === 'complete'
                   ? "Complete Contract"
-                  : (selectedItem?.type_id === 'gig_application' ? "Withdraw from Gig" : "Cancel Booking")
+                  : modalMode === 'renew'
+                    ? "Renew Contract"
+                    : (selectedItem?.type_id === 'gig_application' ? "Withdraw from Gig" : "Cancel Booking")
         }
         message={
           modalMode === 'confirm'
@@ -929,7 +999,9 @@ export default function BookingsScreen() {
                 ? "Are you sure you want to fire this musician? This will cancel their upcoming gigs with you."
                 : modalMode === 'complete'
                   ? "Confirm efficient completion of this gig? You will be redirected to review the musician."
-                  : (() => {
+                  : modalMode === 'renew'
+                    ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || 'this musician'}? They will receive a notification and can accept or decline the offer.`
+                    : (() => {
                     // Cancel mode
                     if (selectedItem?.type_id === 'gig_application') {
                       // For gig applications
@@ -977,9 +1049,11 @@ export default function BookingsScreen() {
                 ? "Fire Musician"
                 : modalMode === 'complete'
                   ? "Complete & Review"
-                  : "Yes, Cancel Booking"
+                  : modalMode === 'renew'
+                    ? "Send Renewal Offer"
+                    : "Yes, Cancel Booking"
         }
-        showInput={modalMode !== 'confirm' && modalMode !== 'complete'} // Show input for cancel AND decline AND fire
+        showInput={modalMode !== 'confirm' && modalMode !== 'complete' && modalMode !== 'renew'} // Show input for cancel AND decline AND fire
         danger={modalMode === 'fire' || modalMode === 'decline' || modalMode === 'cancel'}
         onInputChange={setCancellationReason}
         onConfirm={async () => {
@@ -993,6 +1067,12 @@ export default function BookingsScreen() {
             console.log('🔍 Modal onConfirm - selectedItem:', selectedItem);
             console.log('🔍 Modal onConfirm - modalMode:', modalMode);
             console.log('🔍 Modal onConfirm - selectedItem.type_id:', selectedItem.type_id);
+
+            // Handle renew contract separately
+            if (modalMode === 'renew') {
+              await processRenewContract();
+              return;
+            }
 
             let status = 'cancelled'; // Default for studio bookings
             if (modalMode === 'confirm') {

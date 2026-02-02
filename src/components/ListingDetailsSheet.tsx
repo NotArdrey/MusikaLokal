@@ -826,6 +826,13 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         .select('*')
                         .eq('studio_id', data.id)
                         .order('slot_order', { ascending: true });
+                    
+                    // Also fetch date overrides (specific dates)
+                    console.log('📅 Fetching studio date overrides...');
+                    const { data: dateOverrides, error: overridesError } = await supabase
+                        .from('studio_date_overrides')
+                        .select('*')
+                        .eq('studio_id', data.id);
 
                     if (!hoursError && operatingHours) {
                         console.log('📅 Operating hours fetched:', operatingHours);
@@ -851,6 +858,35 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             console.log('📅 Using availability from JSONB column:', data.availability);
                         }
                     }
+                    
+                    // Store date overrides for use in availability processing
+                    if (!overridesError && dateOverrides && dateOverrides.length > 0) {
+                        console.log('📅 Date overrides fetched:', dateOverrides);
+                        normalizedData.dateOverrides = dateOverrides;
+                    }
+                    
+                    // Fetch studio settings (booking rules, pricing multipliers)
+                    console.log('⚙️ Fetching studio settings...');
+                    const { data: studioSettings, error: settingsError } = await supabase
+                        .from('studio_settings')
+                        .select('*')
+                        .eq('studio_id', data.id)
+                        .single();
+                    
+                    if (!settingsError && studioSettings) {
+                        console.log('⚙️ Studio settings fetched:', studioSettings);
+                        normalizedData.settings = studioSettings;
+                    } else {
+                        console.log('⚠️ No studio settings found, using defaults');
+                        normalizedData.settings = {
+                            lead_time_hours: 24,
+                            weekend_multiplier: 1.0,
+                            peak_season_multiplier: 1.0,
+                            peak_season_dates: [],
+                            off_peak_multiplier: 1.0,
+                            off_peak_dates: []
+                        };
+                    }
                 }
 
                 console.log('Setting group data:', normalizedData);
@@ -863,10 +899,10 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 const fetchedBookings = bookingData || [];
                 setExistingBookings(fetchedBookings);
 
-                // Process availability (Availability + Bookings)
+                // Process availability (Availability + Bookings + Date Overrides)
                 if (normalizedData.availability) {
                     console.log('📅 Processing availability for calendar...');
-                    processAvailability(normalizedData.availability, fetchedBookings);
+                    processAvailability(normalizedData.availability, fetchedBookings, normalizedData.dateOverrides);
                 } else {
                     console.log('⚠️ No availability data to process');
                 }
@@ -883,13 +919,13 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     };
 
 
-    const processAvailability = (availability: any[], bookings: any[]) => {
-        console.log('📅 processAvailability called with:', { availability, bookingsCount: bookings.length });
+    const processAvailability = (availability: any[], bookings: any[], dateOverrides?: any[]) => {
+        console.log('📅 processAvailability called with:', { availability, bookingsCount: bookings.length, dateOverridesCount: dateOverrides?.length || 0 });
         const marked: any = {};
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        // Map availability for easier lookup
+        // Map availability for easier lookup (weekly schedule)
         const availabilityMap: { [key: number]: any } = {};
         availability.forEach((daySchedule: any) => {
             const dayIndex = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].indexOf(daySchedule.day.toLowerCase());
@@ -898,8 +934,19 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 console.log(`📅 Mapped ${daySchedule.day} (index ${dayIndex}) with ${daySchedule.slots?.length || 0} slots`);
             }
         });
+        
+        // Map date overrides for easier lookup (specific dates override weekly schedule)
+        const dateOverrideMap: { [key: string]: any } = {};
+        if (dateOverrides && Array.isArray(dateOverrides)) {
+            dateOverrides.forEach((override: any) => {
+                const dateStr = override.override_date;
+                dateOverrideMap[dateStr] = override;
+                console.log(`📅 Mapped date override for ${dateStr}: open=${override.is_open}, ${override.open_time} - ${override.close_time}`);
+            });
+        }
 
         console.log('📅 Availability map:', availabilityMap);
+        console.log('📅 Date override map:', dateOverrideMap);
 
         // Loop next 90 days to ensure coverage
         for (let i = 0; i < 90; i++) {
@@ -907,8 +954,28 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             date.setDate(today.getDate() + i);
             const dateStr = date.toISOString().split('T')[0];
             const dayIndex = date.getDay();
-
-            const daySchedule = availabilityMap[dayIndex];
+            
+            // Check if there's a specific date override for this date (priority over weekly schedule)
+            const dateOverride = dateOverrideMap[dateStr];
+            let daySchedule: any = null;
+            
+            if (dateOverride) {
+                // Use date override instead of weekly schedule
+                if (dateOverride.is_open && dateOverride.open_time && dateOverride.close_time) {
+                    daySchedule = {
+                        day: date.toLocaleDateString('en-US', { weekday: 'long' }),
+                        slots: [{ start: dateOverride.open_time, end: dateOverride.close_time }],
+                        isOverride: true
+                    };
+                    console.log(`📅 Using date override for ${dateStr}:`, daySchedule);
+                } else {
+                    // Date is closed via override
+                    daySchedule = null;
+                }
+            } else {
+                // Use weekly schedule
+                daySchedule = availabilityMap[dayIndex];
+            }
 
             // Check if Open
             if (daySchedule && daySchedule.slots && daySchedule.slots.length > 0) {
@@ -959,7 +1026,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 if (availableCount > 0) {
                     marked[dateStr] = {
                         marked: true,
-                        dotColor: colors.primary
+                        dotColor: daySchedule.isOverride ? '#F59E0B' : colors.primary // Orange for overrides
                     };
                 } else {
                     // Fully Booked
@@ -987,6 +1054,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     const fetchAvailableSlots = async (dateStr: string) => {
         console.log('🕐 fetchAvailableSlots called for date:', dateStr);
         console.log('🕐 group.availability:', group?.availability);
+        console.log('🕐 group.dateOverrides:', group?.dateOverrides);
 
         if (!group?.availability) {
             console.log('⚠️ No availability data in group');
@@ -996,8 +1064,34 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         const selectedDate = new Date(dateStr);
         const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][selectedDate.getDay()];
         console.log('🕐 Looking for day:', dayName);
-
-        const daySchedule = group.availability.find((a: any) => a.day.toLowerCase() === dayName);
+        
+        // Check if there's a specific date override for this date
+        let daySchedule: any = null;
+        
+        if (group.dateOverrides && Array.isArray(group.dateOverrides)) {
+            const dateOverride = group.dateOverrides.find((o: any) => o.override_date === dateStr);
+            if (dateOverride) {
+                console.log('🕐 Found date override:', dateOverride);
+                if (dateOverride.is_open && dateOverride.open_time && dateOverride.close_time) {
+                    daySchedule = {
+                        day: dayName,
+                        slots: [{ start: dateOverride.open_time, end: dateOverride.close_time }],
+                        isOverride: true
+                    };
+                } else {
+                    // Date is closed
+                    console.log('⚠️ Date override marks this date as closed');
+                    setAvailableSlots([]);
+                    return;
+                }
+            }
+        }
+        
+        // Fall back to weekly schedule if no override
+        if (!daySchedule) {
+            daySchedule = group.availability.find((a: any) => a.day.toLowerCase() === dayName);
+        }
+        
         console.log('🕐 Found day schedule:', daySchedule);
 
         if (!daySchedule || !daySchedule.slots) {
@@ -1034,13 +1128,23 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             console.log('🕐 Processing slot:', slot);
             const start = new Date(`${dateStr}T${slot.start}`);
             const end = new Date(`${dateStr}T${slot.end}`);
+            
+            // Get lead time for filtering slots that are too soon
+            const leadTimeHours = group?.settings?.lead_time_hours || 0;
+            const minBookingTime = new Date();
+            minBookingTime.setHours(minBookingTime.getHours() + leadTimeHours);
 
             // Generate hourly slots or based on duration
             const current = new Date(start);
             while (current < end) {
                 const timeStr = current.toTimeString().slice(0, 5); // HH:MM
-                // Only add if not blocked
-                if (!blockedTimes.has(timeStr)) {
+                
+                // Check if this slot is past the lead time requirement
+                const slotDateTime = new Date(`${dateStr}T${timeStr}`);
+                const passesLeadTime = slotDateTime >= minBookingTime;
+                
+                // Only add if not blocked AND passes lead time check
+                if (!blockedTimes.has(timeStr) && passesLeadTime) {
                     slotsSet.add(timeStr);
                 }
                 current.setHours(current.getHours() + 1); // Assuming 1-hour slots
@@ -1246,16 +1350,42 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     <View style={[styles.durationBadge, { backgroundColor: isDark ? 'rgba(124, 58, 237, 0.15)' : 'rgba(124, 58, 237, 0.1)' }]}>
                         <Ionicons name="time-outline" size={14} color={colors.primary} />
                         <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary, marginLeft: 4, fontSize: 12 }}>
-                            {duration}h Session
+                            {`${duration}h Session`}
                         </Text>
                     </View>
                 )}
             </View>
 
+            {/* Show lead time notice if applicable */}
+            {group?.settings?.lead_time_hours && group.settings.lead_time_hours > 0 && (
+                <View style={{ 
+                    backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7', 
+                    paddingHorizontal: 12, 
+                    paddingVertical: 8, 
+                    borderRadius: 8, 
+                    marginBottom: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8
+                }}>
+                    <Ionicons name="time" size={16} color="#F59E0B" />
+                    <Text style={{ color: '#D97706', fontSize: 12, fontFamily: 'Poppins_500Medium', flex: 1 }}>
+                        Advance booking required: {group.settings.lead_time_hours} hours before session
+                    </Text>
+                </View>
+            )}
+
             {/* 1. The Calendar (The Anchor) */}
             <Calendar
                 current={new Date().toISOString().split('T')[0]}
-                minDate={new Date().toISOString().split('T')[0]}
+                minDate={(() => {
+                    // Calculate minimum date based on lead_time_hours
+                    const leadTimeHours = group?.settings?.lead_time_hours || 0;
+                    const minDate = new Date();
+                    minDate.setHours(minDate.getHours() + leadTimeHours);
+                    // If lead time pushes us past today, use that date
+                    return minDate.toISOString().split('T')[0];
+                })()}
                 markedDates={{
                     ...markedDates,
                     [selectedDate]: {
@@ -1435,8 +1565,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                                 {validEndTimes.map((durStr) => {
                                     const dur = parseInt(durStr);
-                                    // Calculate if selected
-                                    const currentDur = (endTime.getTime() - date.getTime()) / (1000 * 60 * 60);
+                                    // Calculate if selected - safely check if date and endTime exist
+                                    let currentDur = 0;
+                                    if (date && endTime && date.getTime && endTime.getTime) {
+                                        currentDur = (endTime.getTime() - date.getTime()) / (1000 * 60 * 60);
+                                    }
                                     const isSelected = Math.abs(currentDur - dur) < 0.1;
 
                                     return (
@@ -1451,9 +1584,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                 }
                                             ]}
                                             onPress={() => {
-                                                const newEnd = new Date(date);
-                                                newEnd.setHours(newEnd.getHours() + dur);
-                                                setEndTime(newEnd);
+                                                if (date) {
+                                                    const newEnd = new Date(date);
+                                                    newEnd.setHours(newEnd.getHours() + dur);
+                                                    setEndTime(newEnd);
+                                                }
                                             }}
                                         >
                                             <Text style={{
@@ -1461,7 +1596,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                 fontFamily: isSelected ? 'Poppins_600SemiBold' : 'Poppins_500Medium',
                                                 fontSize: 13
                                             }}>
-                                                {dur} hr{dur > 1 ? 's' : ''}
+                                                {`${dur} hr${dur > 1 ? 's' : ''}`}
                                             </Text>
                                         </TouchableOpacity>
                                     );
@@ -1816,6 +1951,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         <TouchableOpacity
                             style={[styles.secondaryBtn, { borderColor: colors.primary, backgroundColor: 'transparent', marginBottom: 16, opacity: isCheckingAvailability ? 0.6 : 1 }]}
                             disabled={!date || !endTime || isCheckingAvailability}
+                            activeOpacity={0.8}
                             onPress={async () => {
                                 if (date && endTime) {
                                     setIsCheckingAvailability(true);
@@ -1967,11 +2103,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     <View style={[styles.paymentSummary, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB' }]}>
                         <View style={styles.summaryRow}>
                             <Text style={{ color: colors.textSecondary }}>Rate</Text>
-                            <Text style={{ color: colors.text }}>₱{displayRate} / hr</Text>
+                            <Text style={{ color: colors.text }}>{`₱${displayRate} / hr`}</Text>
                         </View>
                         <View style={styles.summaryRow}>
                             <Text style={{ color: colors.textSecondary }}>Total Sessions</Text>
-                            <Text style={{ color: colors.text }}>{bookings.length}</Text>
+                            <Text style={{ color: colors.text }}>{String(bookings.length)}</Text>
                         </View>
                         <View style={[styles.divider, { marginVertical: 12 }]} />
                         <View style={styles.summaryRow}>
@@ -1985,6 +2121,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     <TouchableOpacity
                         style={[styles.primaryBtn, { backgroundColor: bookings.length > 0 ? colors.primary : colors.border, opacity: loading ? 0.6 : 1 }]}
                         disabled={bookings.length === 0 || loading}
+                        activeOpacity={0.8}
                         onPress={() => bookings.length > 0 && handleConfirm(
                             async () => {
                                 // Double check profile just in case, though handleConfirm handles it
@@ -2503,6 +2640,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         );
                     }}
                     disabled={isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication || isBlocked || groupAlreadyApplied || (group.requirements?.musician_type === 'group' && !selectedGroupId)}
+                    activeOpacity={0.8}
                 >
                     {isSubmittingApplication ? (
                         <ActivityIndicator color="#fff" />
@@ -2628,6 +2766,45 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     </View>
                 </View>
 
+                {/* Band Members Section */}
+                {group.members && group.members.length > 0 && (
+                    <View style={[styles.section, { marginBottom: 24 }]}>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                            Band Members ({group.members.length})
+                        </Text>
+                        <View style={{ gap: 12 }}>
+                            {group.members.map((member: any, index: number) => {
+                                const isLeader = member.role === 'Leader' || index === 0;
+                                const memberName = typeof member === 'string' ? member : member.name;
+                                const memberInstrument = typeof member === 'string' ? member : member.instrument;
+                                return (
+                                    <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: isDark ? '#1F2937' : '#F9FAFB', padding: 12, borderRadius: 12 }}>
+                                        <View style={{ 
+                                            width: 44, height: 44, borderRadius: 22, 
+                                            backgroundColor: isLeader ? colors.primary : '#E0E7FF',
+                                            alignItems: 'center', justifyContent: 'center'
+                                        }}>
+                                            {member.avatar_url ? (
+                                                <Image source={{ uri: member.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22 }} />
+                                            ) : (
+                                                <Text style={{ color: isLeader ? '#fff' : '#4F46E5', fontWeight: 'bold', fontSize: 16 }}>{memberName?.charAt(0)}</Text>
+                                            )}
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 14 }}>{memberName}</Text>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                <Ionicons name="musical-note" size={12} color={colors.primary} />
+                                                <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{memberInstrument}</Text>
+                                                {isLeader && <Text style={{ color: colors.primary, fontSize: 10, marginLeft: 4 }}>• Leader</Text>}
+                                            </View>
+                                        </View>
+                                    </View>
+                                );
+                            })}
+                        </View>
+                    </View>
+                )}
+
                 {/* Managed By & Completion Rate */}
                 <View style={[styles.managerCard, { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }]}>
                     <View style={{ marginBottom: 16 }}>
@@ -2645,7 +2822,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                 <View style={{ width: `${completionRate}%`, height: '100%', backgroundColor: completionRate === 100 ? '#10B981' : colors.primary }} />
                             </View>
                             <Text style={{ fontSize: 11, fontFamily: 'Poppins_600SemiBold', color: completionRate === 100 ? '#10B981' : colors.textSecondary }}>
-                                {completionRate}% Complete
+                                {`${completionRate}% Complete`}
                             </Text>
                         </View>
                     </View>
@@ -2850,6 +3027,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
                             onPress={handleSendBookingRequest}
                             disabled={checkingVenue || isSendingRequest}
+                            activeOpacity={0.8}
                         >
                             {isSendingRequest ? (
                                 <ActivityIndicator color="#FFF" />
@@ -3016,17 +3194,17 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                             <>
                                                                 <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', flex: 1 }]}>
                                                                     <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rehearsal Rate</Text>
-                                                                    <Text style={[styles.statValue, { color: colors.text }]}>₱{rehearsalRate}/hr</Text>
+                                                                    <Text style={[styles.statValue, { color: colors.text }]}>{`₱${rehearsalRate}/hr`}</Text>
                                                                 </View>
                                                                 <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', flex: 1 }]}>
                                                                     <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Recording Rate</Text>
-                                                                    <Text style={[styles.statValue, { color: colors.text }]}>₱{recordingRate}/hr</Text>
+                                                                    <Text style={[styles.statValue, { color: colors.text }]}>{`₱${recordingRate}/hr`}</Text>
                                                                 </View>
                                                             </>
                                                         ) : (
                                                             <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                                                                 <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Hourly Rate</Text>
-                                                                <Text style={[styles.statValue, { color: colors.text }]}>₱{displayRate}/hr</Text>
+                                                                <Text style={[styles.statValue, { color: colors.text }]}>{`₱${displayRate}/hr`}</Text>
                                                             </View>
                                                         )}
                                                     </View>
@@ -3044,6 +3222,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                             <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                                                                 <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Type</Text>
                                                                 <Text style={[styles.statValue, { color: colors.text }]}>{group.studio_type}</Text>
+                                                            </View>
+                                                        )}
+                                                        {group.type === 'Studio' && group.pax && (
+                                                            <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                                                                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Capacity</Text>
+                                                                <Text style={[styles.statValue, { color: colors.text }]}>{group.pax} pax</Text>
                                                             </View>
                                                         )}
                                                     </View>
@@ -3085,7 +3269,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                             fontFamily: 'Poppins_600SemiBold',
                                                             color: (group.completion_rate !== undefined ? group.completion_rate : calculateCompletion()) >= 90 ? '#10B981' : colors.textSecondary
                                                         }}>
-                                                            {group.completion_rate !== undefined ? group.completion_rate : calculateCompletion()}% Complete
+                                                            {`${group.completion_rate !== undefined ? group.completion_rate : calculateCompletion()}% Complete`}
                                                         </Text>
                                                     </View>
                                                 </View>
@@ -3131,7 +3315,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border }]}>
                                 <View style={styles.priceContainer}>
                                     <Text style={[styles.priceText, { color: colors.text }]}>
-                                        ₱{displayRate} <Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>{labels.unit}</Text>
+                                        {`₱${displayRate} `}<Text style={{ fontSize: 14, fontWeight: '400', color: colors.textSecondary }}>{labels.unit}</Text>
                                     </Text>
                                 </View>
                                 <TouchableOpacity

@@ -44,6 +44,7 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
         const { colors, isDark } = useTheme();
         const [loading, setLoading] = useState(false);
         const [studioDetails, setStudioDetails] = useState<any>(null);
+        const [dateOverride, setDateOverride] = useState<any>(null);
 
         const snapPoints = useMemo(() => ['85%'], []);
 
@@ -72,6 +73,25 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
 
                 if (error) throw error;
                 setStudioDetails(data);
+                
+                // Check if this booking date has a specific date override
+                if (booking.start_time || booking.raw_date) {
+                    const bookingDate = booking.raw_date 
+                        ? booking.raw_date.split('T')[0] 
+                        : new Date(booking.start_time).toISOString().split('T')[0];
+                    
+                    const { data: override, error: overrideError } = await supabase
+                        .from('studio_date_overrides')
+                        .select('*')
+                        .eq('studio_id', booking.studio_id)
+                        .eq('override_date', bookingDate)
+                        .maybeSingle();
+                    
+                    if (!overrideError && override) {
+                        setDateOverride(override);
+                        console.log('📅 Found date override for booking date:', override);
+                    }
+                }
             } catch (e) {
                 console.log('Error fetching studio details:', e);
             } finally {
@@ -218,6 +238,16 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                                     </Text>
                                                 </View>
                                             )}
+
+                                            {/* Pax/Capacity for Studios */}
+                                            {isStudio && (studioDetails?.pax || booking.pax) && (
+                                                <View style={styles.locationRow}>
+                                                    <Ionicons name="people-outline" size={16} color={colors.textSecondary} />
+                                                    <Text style={[styles.locationText, { color: colors.textSecondary }]}>
+                                                        Capacity: {studioDetails?.pax || booking.pax} persons
+                                                    </Text>
+                                                </View>
+                                            )}
                                         </View>
                                     </View>
                                 )}
@@ -260,6 +290,48 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                     </View>
                                 )}
 
+                                {/* Group Members Card - For Group Applications */}
+                                {isGig && booking.group_members && booking.group_members.length > 0 && (
+                                    <View style={[styles.card, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
+                                        <View style={styles.cardHeader}>
+                                            <Ionicons name="people-outline" size={24} color={colors.primary} />
+                                            <Text style={[styles.cardTitle, { color: colors.text }]}>
+                                                Band Members ({booking.group_members.length})
+                                            </Text>
+                                        </View>
+                                        <View style={{ gap: 12 }}>
+                                            {booking.group_members.map((member: any, index: number) => {
+                                                const isLeader = member.role === 'Leader' || index === 0;
+                                                const memberName = typeof member === 'string' ? member : member.name;
+                                                const memberInstrument = typeof member === 'string' ? member : member.instrument;
+                                                return (
+                                                    <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: isDark ? '#374151' : '#F9FAFB', padding: 10, borderRadius: 10 }}>
+                                                        <View style={{ 
+                                                            width: 40, height: 40, borderRadius: 20, 
+                                                            backgroundColor: isLeader ? colors.primary : '#E0E7FF',
+                                                            alignItems: 'center', justifyContent: 'center'
+                                                        }}>
+                                                            {member.avatar_url ? (
+                                                                <Image source={{ uri: member.avatar_url }} style={{ width: 40, height: 40, borderRadius: 20 }} />
+                                                            ) : (
+                                                                <Text style={{ color: isLeader ? '#fff' : '#4F46E5', fontWeight: 'bold' }}>{memberName?.charAt(0)}</Text>
+                                                            )}
+                                                        </View>
+                                                        <View style={{ flex: 1 }}>
+                                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 14 }}>{memberName}</Text>
+                                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                                <Ionicons name="musical-note" size={12} color={colors.primary} />
+                                                                <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{memberInstrument}</Text>
+                                                                {isLeader && <Text style={{ color: colors.primary, fontSize: 10, marginLeft: 4 }}>• Leader</Text>}
+                                                            </View>
+                                                        </View>
+                                                    </View>
+                                                );
+                                            })}
+                                        </View>
+                                    </View>
+                                )}
+
                                 {/* Session Details Card */}
                                 <View style={[styles.card, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }]}>
                                     <View style={styles.cardHeader}>
@@ -267,6 +339,12 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                         <Text style={[styles.cardTitle, { color: colors.text }]}>
                                             {isGig ? 'Event Details' : 'Session Details'}
                                         </Text>
+                                        {/* Special Schedule Badge */}
+                                        {dateOverride && isStudio && (
+                                            <View style={{ backgroundColor: '#F59E0B20', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginLeft: 'auto' }}>
+                                                <Text style={{ color: '#F59E0B', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>Special Hours</Text>
+                                            </View>
+                                        )}
                                     </View>
 
                                     <View style={styles.detailsGrid}>
@@ -295,6 +373,21 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                                 </Text>
                                             </View>
                                         )}
+                                        
+                                        {/* Show studio operating hours for this day */}
+                                        {dateOverride && isStudio && (
+                                            <View style={styles.detailItem}>
+                                                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Studio Hours (This Day)</Text>
+                                                <Text style={[styles.detailValue, { color: '#F59E0B' }]}>
+                                                    {formatTime(dateOverride.open_time)} - {formatTime(dateOverride.close_time)}
+                                                </Text>
+                                                {dateOverride.reason && (
+                                                    <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginTop: 2 }}>
+                                                        {dateOverride.reason}
+                                                    </Text>
+                                                )}
+                                            </View>
+                                        )}
                                     </View>
 
                                     {booking.notes && (
@@ -313,14 +406,84 @@ const BookingDetailsSheet = forwardRef<BottomSheetModal, BookingDetailsSheetProp
                                             <Text style={[styles.cardTitle, { color: colors.text }]}>Pricing</Text>
                                         </View>
 
-                                        <View style={styles.pricingRow}>
-                                            <Text style={[styles.pricingLabel, { color: colors.textSecondary }]}>
-                                                Rate ({booking.duration_hours || '4'} hrs)
-                                            </Text>
-                                            <Text style={[styles.pricingValue, { color: colors.text }]}>
-                                                ₱{booking.total_cost?.toLocaleString()}
-                                            </Text>
-                                        </View>
+                                        {/* Base Rate */}
+                                        {booking.base_rate && (
+                                            <View style={styles.pricingRow}>
+                                                <Text style={[styles.pricingLabel, { color: colors.textSecondary }]}>
+                                                    Base Rate ({booking.duration_hours || '4'} hrs × ₱{Number(booking.base_rate).toLocaleString()})
+                                                </Text>
+                                                <Text style={[styles.pricingValue, { color: colors.text }]}>
+                                                    ₱{(Number(booking.base_rate) * (booking.duration_hours || 4)).toLocaleString()}
+                                                </Text>
+                                            </View>
+                                        )}
+
+                                        {/* Show Applied Modifiers */}
+                                        {booking.modifiers_applied && Object.keys(booking.modifiers_applied).length > 0 && (
+                                            <>
+                                                {booking.modifiers_applied.peak_season_multiplier && (
+                                                    <View style={styles.pricingRow}>
+                                                        <Text style={[styles.pricingLabel, { color: '#EF4444' }]}>
+                                                            🔥 Peak Season Rate (+{Math.round((booking.modifiers_applied.peak_season_multiplier - 1) * 100)}%)
+                                                        </Text>
+                                                        <Text style={[styles.pricingValue, { color: '#EF4444' }]}>
+                                                            Applied
+                                                        </Text>
+                                                    </View>
+                                                )}
+                                                {booking.modifiers_applied.off_peak_multiplier && (
+                                                    <View style={styles.pricingRow}>
+                                                        <Text style={[styles.pricingLabel, { color: '#10B981' }]}>
+                                                            💚 Off-Peak Discount (-{Math.round((1 - booking.modifiers_applied.off_peak_multiplier) * 100)}%)
+                                                        </Text>
+                                                        <Text style={[styles.pricingValue, { color: '#10B981' }]}>
+                                                            Applied
+                                                        </Text>
+                                                    </View>
+                                                )}
+                                                {booking.modifiers_applied.weekend_multiplier && (
+                                                    <View style={styles.pricingRow}>
+                                                        <Text style={[styles.pricingLabel, { color: '#EC4899' }]}>
+                                                            📅 Weekend Rate (+{Math.round((booking.modifiers_applied.weekend_multiplier - 1) * 100)}%)
+                                                        </Text>
+                                                        <Text style={[styles.pricingValue, { color: '#EC4899' }]}>
+                                                            Applied
+                                                        </Text>
+                                                    </View>
+                                                )}
+                                                {booking.modifiers_applied.late_night_multiplier && (
+                                                    <View style={styles.pricingRow}>
+                                                        <Text style={[styles.pricingLabel, { color: '#8B5CF6' }]}>
+                                                            🌙 Late Night Rate (+{Math.round((booking.modifiers_applied.late_night_multiplier - 1) * 100)}%)
+                                                        </Text>
+                                                        <Text style={[styles.pricingValue, { color: '#8B5CF6' }]}>
+                                                            Applied
+                                                        </Text>
+                                                    </View>
+                                                )}
+                                                {booking.modifiers_applied.bulk_discount && (
+                                                    <View style={styles.pricingRow}>
+                                                        <Text style={[styles.pricingLabel, { color: '#10B981' }]}>
+                                                            🎉 Bulk Discount (-{booking.modifiers_applied.bulk_discount}%)
+                                                        </Text>
+                                                        <Text style={[styles.pricingValue, { color: '#10B981' }]}>
+                                                            Applied
+                                                        </Text>
+                                                    </View>
+                                                )}
+                                            </>
+                                        )}
+
+                                        {!booking.base_rate && (
+                                            <View style={styles.pricingRow}>
+                                                <Text style={[styles.pricingLabel, { color: colors.textSecondary }]}>
+                                                    Rate ({booking.duration_hours || '4'} hrs)
+                                                </Text>
+                                                <Text style={[styles.pricingValue, { color: colors.text }]}>
+                                                    ₱{booking.total_cost?.toLocaleString()}
+                                                </Text>
+                                            </View>
+                                        )}
 
                                         <View style={[styles.divider, { backgroundColor: colors.border }]} />
 

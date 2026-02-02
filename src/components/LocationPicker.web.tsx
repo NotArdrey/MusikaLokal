@@ -112,6 +112,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                             style={[styles.confirmBtn, !currentSelection && styles.disabledBtn]}
                             onPress={() => currentSelection && onSelect(currentSelection)}
                             disabled={!currentSelection}
+                            activeOpacity={0.8}
                         >
                             <Text style={styles.confirmBtnText}>Confirm Location</Text>
                         </TouchableOpacity>

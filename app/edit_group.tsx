@@ -52,9 +52,21 @@ export default function EditGroupScreen() {
     setAlertVisible(true);
   };
 
-  // Members
-  const [members, setMembers] = useState<string[]>([]);
-  const [newMember, setNewMember] = useState('');
+  // Enhanced member structure: { name, instrument, role?, user_id?, avatar_url? }
+  interface MemberDetail {
+    name: string;
+    instrument: string;
+    role?: string;  // "Leader" for group creator
+    user_id?: string;
+    avatar_url?: string;
+  }
+  const [members, setMembers] = useState<MemberDetail[]>([]);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberInstrument, setNewMemberInstrument] = useState('');
+  const [showAddMemberForm, setShowAddMemberForm] = useState(false);
+
+  // Group type: duo (exactly 2 members) or band (3+ members)
+  const [groupType, setGroupType] = useState<'duo' | 'band'>('band');
 
   // Rate
   const [rate, setRate] = useState('');
@@ -144,7 +156,23 @@ export default function EditGroupScreen() {
       setAddress(data.location || '');
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
-      setMembers(data.members || []);
+      // Load group type (default to 'band' for backward compatibility)
+      setGroupType(data.group_type || 'band');
+      // Handle both old string[] format and new MemberDetail[] format
+      const rawMembers = data.members || [];
+      const parsedMembers: MemberDetail[] = rawMembers.map((m: any, index: number) => {
+        if (typeof m === 'string') {
+          // Old format: just a string (instrument or name)
+          return {
+            name: m,
+            instrument: m,
+            role: index === 0 ? 'Leader' : undefined
+          };
+        }
+        // New format: already an object
+        return m;
+      });
+      setMembers(parsedMembers);
       setImages(data.images || []);
       setRate(data.rate?.toString() || '');
       if (data.images && data.images.length > 0) {
@@ -184,6 +212,24 @@ export default function EditGroupScreen() {
       showAlert('error', 'Required Field', 'Please upload at least one group photo');
       return false;
     }
+    // Validate leader has an instrument
+    const leader = members.find(m => m.role === 'Leader');
+    if (!leader?.instrument?.trim()) {
+      showAlert('error', 'Leader Instrument Required', 'Please enter your instrument/role as the group leader.');
+      return false;
+    }
+    // Validate member count based on group type
+    if (groupType === 'duo') {
+      if (members.length !== 2) {
+        showAlert('warning', 'Duo Requirement', 'A duo must have exactly 2 members. Adjust members or change group type.');
+        return false;
+      }
+    } else {
+      if (members.length < 3) {
+        showAlert('warning', 'Band Requirement', 'A band must have at least 3 members. Add more members or change to "Duo" type.');
+        return false;
+      }
+    }
     return true;
   };
 
@@ -216,6 +262,7 @@ export default function EditGroupScreen() {
         members,
         images: images,
         rate: parseFloat(rate) || 0,
+        group_type: groupType, // 'duo' or 'band'
       };
 
       const { error } = await supabase.functions.invoke('manage-listings', {
@@ -261,15 +308,31 @@ export default function EditGroupScreen() {
   };
 
   const addMember = () => {
-    if (newMember.trim()) {
-      setMembers([...members, newMember.trim()]);
-      setNewMember('');
+    if (newMemberName.trim() && newMemberInstrument.trim()) {
+      const newMember: MemberDetail = {
+        name: newMemberName.trim(),
+        instrument: newMemberInstrument.trim()
+      };
+      setMembers([...members, newMember]);
+      setNewMemberName('');
+      setNewMemberInstrument('');
+      setShowAddMemberForm(false);
     }
   };
 
   const removeMember = (index: number) => {
-    members.filter((_, i) => i !== index);
+    // Prevent removing the leader (first member)
+    if (index === 0) {
+      showAlert('warning', 'Cannot Remove', 'You cannot remove the group leader.');
+      return;
+    }
     setMembers(members.filter((_, i) => i !== index));
+  };
+
+  const updateMemberInstrument = (index: number, instrument: string) => {
+    const updated = [...members];
+    updated[index] = { ...updated[index], instrument };
+    setMembers(updated);
   };
 
   // ============================================================
@@ -500,6 +563,78 @@ export default function EditGroupScreen() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} style={styles.flex1}>
 
           {renderSectionHeader('Group Details', 'people')}
+
+          {/* Group Type Selection */}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Group Type</Text>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity
+                onPress={() => setGroupType('duo')}
+                style={[
+                  styles.typeButton,
+                  {
+                    backgroundColor: groupType === 'duo' ? colors.primary : colors.inputBackground,
+                    borderColor: groupType === 'duo' ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                    flex: 1
+                  }
+                ]}
+              >
+                <Ionicons
+                  name="people-outline"
+                  size={24}
+                  color={groupType === 'duo' ? '#FFF' : colors.text}
+                />
+                <Text style={{
+                  color: groupType === 'duo' ? '#FFF' : colors.text,
+                  fontFamily: 'Poppins_600SemiBold',
+                  fontSize: 16,
+                  marginTop: 4
+                }}>
+                  Duo
+                </Text>
+                <Text style={{
+                  color: groupType === 'duo' ? 'rgba(255,255,255,0.8)' : colors.textSecondary,
+                  fontFamily: 'Poppins_400Regular',
+                  fontSize: 12
+                }}>
+                  Exactly 2 members
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setGroupType('band')}
+                style={[
+                  styles.typeButton,
+                  {
+                    backgroundColor: groupType === 'band' ? colors.primary : colors.inputBackground,
+                    borderColor: groupType === 'band' ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
+                    flex: 1
+                  }
+                ]}
+              >
+                <Ionicons
+                  name="musical-notes-outline"
+                  size={24}
+                  color={groupType === 'band' ? '#FFF' : colors.text}
+                />
+                <Text style={{
+                  color: groupType === 'band' ? '#FFF' : colors.text,
+                  fontFamily: 'Poppins_600SemiBold',
+                  fontSize: 16,
+                  marginTop: 4
+                }}>
+                  Band
+                </Text>
+                <Text style={{
+                  color: groupType === 'band' ? 'rgba(255,255,255,0.8)' : colors.textSecondary,
+                  fontFamily: 'Poppins_400Regular',
+                  fontSize: 12
+                }}>
+                  3 or more members
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {renderInput('Group Name', groupName, setGroupName)}
 
           <View style={styles.inputContainer}>
@@ -559,33 +694,83 @@ export default function EditGroupScreen() {
           />
 
           {renderSectionHeader('Band Members', 'person')}
-          <View style={styles.addMemberContainer}>
-            <View style={[styles.addMemberInput, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
-              <TextInput
-                value={newMember}
-                onChangeText={setNewMember}
-                placeholder="Enter member name"
-                placeholderTextColor={colors.textSecondary}
-                style={[styles.input, { fontFamily: 'Poppins_400Regular', color: colors.text }]}
-              />
-            </View>
-            <TouchableOpacity
-              onPress={addMember}
-              style={[styles.addMemberButton, { backgroundColor: colors.primary }]}
-            >
-              <Ionicons name="add" size={24} color="#fff" />
-            </TouchableOpacity>
-          </View>
+          
+          {/* Toggle Add Member Form */}
+          <TouchableOpacity
+            onPress={() => setShowAddMemberForm(!showAddMemberForm)}
+            style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}
+          >
+            <Ionicons name={showAddMemberForm ? "chevron-down" : "add-circle"} size={20} color={colors.primary} />
+            <Text style={{ color: colors.primary, fontFamily: 'Poppins_500Medium' }}>
+              {showAddMemberForm ? 'Hide form' : 'Add new member'}
+            </Text>
+          </TouchableOpacity>
 
-          <View style={styles.membersList}>
-            {members.map((member, index) => (
-              <View key={index} style={[styles.memberItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Text style={[styles.memberText, { color: colors.text }]}>{member}</Text>
-                <TouchableOpacity onPress={() => removeMember(index)}>
-                  <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+          {/* Add Member Form */}
+          {showAddMemberForm && (
+            <View style={[styles.addMemberContainer, { flexDirection: 'column', gap: 8, marginBottom: 16, padding: 12, backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderRadius: 12 }]}>
+              <TextInput
+                value={newMemberName}
+                onChangeText={setNewMemberName}
+                placeholder="Member name"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.input, { fontFamily: 'Poppins_400Regular', color: colors.text, backgroundColor: colors.inputBackground, borderRadius: 8, padding: 12, borderWidth: 1, borderColor: colors.border }]}
+              />
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TextInput
+                  value={newMemberInstrument}
+                  onChangeText={setNewMemberInstrument}
+                  placeholder="Instrument (e.g., Vocals, Guitar)"
+                  placeholderTextColor={colors.textSecondary}
+                  style={[styles.input, { flex: 1, fontFamily: 'Poppins_400Regular', color: colors.text, backgroundColor: colors.inputBackground, borderRadius: 8, padding: 12, borderWidth: 1, borderColor: colors.border }]}
+                />
+                <TouchableOpacity
+                  onPress={addMember}
+                  disabled={!newMemberName.trim() || !newMemberInstrument.trim()}
+                  style={[styles.addMemberButton, { backgroundColor: (!newMemberName.trim() || !newMemberInstrument.trim()) ? '#9CA3AF' : colors.primary }]}
+                >
+                  <Ionicons name="add" size={24} color="#fff" />
                 </TouchableOpacity>
               </View>
-            ))}
+            </View>
+          )}
+
+          <View style={styles.membersList}>
+            {members.map((member, index) => {
+              const isLeader = member.role === 'Leader' || index === 0;
+              return (
+                <View key={index} style={[styles.memberItem, { backgroundColor: colors.card, borderColor: colors.border, padding: 12 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 }}>
+                    <View style={[styles.avatarPlaceholder, { backgroundColor: isLeader ? colors.primary : '#E0E7FF', width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }]}>
+                      {member.avatar_url ? (
+                        <Image source={{ uri: member.avatar_url }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+                      ) : (
+                        <Text style={{ color: isLeader ? '#fff' : '#4F46E5', fontWeight: 'bold' }}>{member.name?.charAt(0)}</Text>
+                      )}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.memberText, { color: colors.text, fontFamily: 'Poppins_500Medium' }]}>{member.name}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Ionicons name="musical-note" size={12} color={colors.primary} />
+                        <TextInput
+                          value={member.instrument}
+                          onChangeText={(text) => updateMemberInstrument(index, text)}
+                          placeholder="Enter instrument..."
+                          placeholderTextColor={colors.textSecondary}
+                          style={{ fontSize: 12, color: colors.primary, fontFamily: 'Poppins_400Regular', flex: 1, padding: 0 }}
+                        />
+                        {isLeader && <Text style={{ fontSize: 10, color: colors.textSecondary }}> • Leader</Text>}
+                      </View>
+                    </View>
+                  </View>
+                  {!isLeader && (
+                    <TouchableOpacity onPress={() => removeMember(index)}>
+                      <Ionicons name="close-circle" size={20} color="#EF4444" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })}
           </View>
 
           {/* Leadership Transfer Section */}
@@ -642,6 +827,7 @@ export default function EditGroupScreen() {
               style={[styles.saveButton, { backgroundColor: saving ? colors.textSecondary : colors.primary, shadowColor: colors.primary }]}
               onPress={handleSave}
               disabled={saving}
+              activeOpacity={0.8}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -769,6 +955,7 @@ export default function EditGroupScreen() {
                 ]}
                 onPress={initiateTransfer}
                 disabled={!selectedNewLeader || isTransferring}
+                activeOpacity={0.8}
               >
                 {isTransferring ? (
                   <ActivityIndicator color="white" size="small" />
@@ -993,5 +1180,13 @@ const styles = StyleSheet.create({
     color: 'white',
     fontFamily: 'Poppins_600SemiBold',
     fontSize: 14,
+  },
+  typeButton: {
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

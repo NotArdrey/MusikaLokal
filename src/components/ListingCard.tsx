@@ -1,10 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
-import { Image, Pressable, Share, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
-import PagerView from 'react-native-pager-view';
+import { Image, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+
+// Conditionally import PagerView only on native platforms
+let PagerView: any = null;
+if (Platform.OS !== 'web') {
+    PagerView = require('react-native-pager-view').default;
+}
 
 interface ListingCardProps {
     item: any;
@@ -123,21 +128,44 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                     {/* Full Background Image / Slideshow */}
                     {hasMultipleImages ? (
                         <View style={StyleSheet.absoluteFillObject}>
-                            <PagerView
-                                style={StyleSheet.absoluteFillObject}
-                                initialPage={0}
-                                onPageSelected={(e) => setPageIndex(e.nativeEvent.position)}
-                            >
-                                {images.map((img: string, index: number) => (
-                                    <View key={index} style={styles.pagerPage}>
-                                        <Image
-                                            source={{ uri: img }}
-                                            style={StyleSheet.absoluteFillObject}
-                                            resizeMode="cover"
-                                        />
-                                    </View>
-                                ))}
-                            </PagerView>
+                            {Platform.OS === 'web' ? (
+                                <ScrollView
+                                    horizontal
+                                    pagingEnabled
+                                    showsHorizontalScrollIndicator={false}
+                                    style={StyleSheet.absoluteFillObject}
+                                    onMomentumScrollEnd={(e) => {
+                                        const newIndex = Math.round(e.nativeEvent.contentOffset.x / cardWidth);
+                                        setPageIndex(newIndex);
+                                    }}
+                                >
+                                    {images.map((img: string, index: number) => (
+                                        <View key={index} style={[styles.pagerPage, { width: cardWidth }]}>
+                                            <Image
+                                                source={{ uri: img }}
+                                                style={StyleSheet.absoluteFillObject}
+                                                resizeMode="cover"
+                                            />
+                                        </View>
+                                    ))}
+                                </ScrollView>
+                            ) : (
+                                <PagerView
+                                    style={StyleSheet.absoluteFillObject}
+                                    initialPage={0}
+                                    onPageSelected={(e: any) => setPageIndex(e.nativeEvent.position)}
+                                >
+                                    {images.map((img: string, index: number) => (
+                                        <View key={index} style={styles.pagerPage}>
+                                            <Image
+                                                source={{ uri: img }}
+                                                style={StyleSheet.absoluteFillObject}
+                                                resizeMode="cover"
+                                            />
+                                        </View>
+                                    ))}
+                                </PagerView>
+                            )}
                         </View>
                     ) : (
                         <Image
@@ -206,9 +234,34 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
 
                     {/* Bottom Content Area */}
                     <View style={styles.immersiveBottomContent}>
-                        {/* Type Badge */}
-                        <View style={styles.tagBadge}>
-                            <Text style={styles.tagText}>{item.type || (item.hourly_rate ? 'Studio' : 'Artist')}</Text>
+                        {/* Type Badge with Pax for Studios */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                            <View style={styles.tagBadge}>
+                                <Text style={styles.tagText}>{item.type || (item.hourly_rate ? 'Studio' : 'Artist')}</Text>
+                            </View>
+                            {item.pax && (item.type === 'Studio' || item.hourly_rate) && (
+                                <View style={[styles.tagBadge, { backgroundColor: '#10B981' }]}>
+                                    <Text style={styles.tagText}>{item.pax} pax</Text>
+                                </View>
+                            )}
+                            {/* Special Schedule Badge for Studios with date overrides */}
+                            {item.has_special_dates && (item.type === 'Studio' || item.hourly_rate) && (
+                                <View style={[styles.tagBadge, { backgroundColor: '#F59E0B' }]}>
+                                    <Text style={styles.tagText}>Special Hours</Text>
+                                </View>
+                            )}
+                            {/* Seasonal Pricing Badge for Studios */}
+                            {item.has_seasonal_pricing && (item.type === 'Studio' || item.hourly_rate) && (
+                                <View style={[styles.tagBadge, { backgroundColor: '#8B5CF6' }]}>
+                                    <Text style={styles.tagText}>Seasonal Rates</Text>
+                                </View>
+                            )}
+                            {/* Weekend Rate Badge */}
+                            {item.weekend_multiplier && parseFloat(item.weekend_multiplier) > 1 && (item.type === 'Studio' || item.hourly_rate) && (
+                                <View style={[styles.tagBadge, { backgroundColor: '#EC4899' }]}>
+                                    <Text style={styles.tagText}>Weekend +{Math.round((parseFloat(item.weekend_multiplier) - 1) * 100)}%</Text>
+                                </View>
+                            )}
                         </View>
 
                         <Text style={styles.immersiveTitle} numberOfLines={2}>{item.name}</Text>
@@ -266,21 +319,45 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                 <View style={[styles.imageContainer, { height: imageHeight }]}>
                     {hasMultipleImages ? (
                         <View style={{ flex: 1 }}>
-                            <PagerView
-                                style={{ flex: 1 }}
-                                initialPage={0}
-                                onPageSelected={(e) => setPageIndex(e.nativeEvent.position)}
-                            >
-                                {images.map((img: string, index: number) => (
-                                    <View key={index} style={styles.pagerPage}>
-                                        <Image
-                                            source={{ uri: img }}
-                                            style={styles.image}
-                                            resizeMode="cover"
-                                        />
-                                    </View>
-                                ))}
-                            </PagerView>
+                            {Platform.OS === 'web' ? (
+                                <ScrollView
+                                    horizontal
+                                    pagingEnabled
+                                    showsHorizontalScrollIndicator={false}
+                                    style={{ flex: 1 }}
+                                    onMomentumScrollEnd={(e) => {
+                                        const containerWidth = e.nativeEvent.layoutMeasurement.width;
+                                        const newIndex = Math.round(e.nativeEvent.contentOffset.x / containerWidth);
+                                        setPageIndex(newIndex);
+                                    }}
+                                >
+                                    {images.map((img: string, index: number) => (
+                                        <View key={index} style={[styles.pagerPage, { width: '100%' }]}>
+                                            <Image
+                                                source={{ uri: img }}
+                                                style={styles.image}
+                                                resizeMode="cover"
+                                            />
+                                        </View>
+                                    ))}
+                                </ScrollView>
+                            ) : (
+                                <PagerView
+                                    style={{ flex: 1 }}
+                                    initialPage={0}
+                                    onPageSelected={(e: any) => setPageIndex(e.nativeEvent.position)}
+                                >
+                                    {images.map((img: string, index: number) => (
+                                        <View key={index} style={styles.pagerPage}>
+                                            <Image
+                                                source={{ uri: img }}
+                                                style={styles.image}
+                                                resizeMode="cover"
+                                            />
+                                        </View>
+                                    ))}
+                                </PagerView>
+                            )}
                             {/* Pagination Dots for Vertical Card */}
                             <View style={[styles.paginationContainer, { bottom: 10 }]}>
                                 {images.map((_: any, i: number) => (
@@ -307,10 +384,33 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                         <Text style={styles.typeOverlayText}>{item.type || (item.hourly_rate ? 'Studio' : 'Artist')}</Text>
                     </View>
 
+                    {/* Pax Badge for Studios (Vertical) */}
+                    {item.pax && (item.type === 'Studio' || item.hourly_rate) && (
+                        <View style={[styles.typeOverlayBadge, { top: 40, backgroundColor: '#10B981' }]}>
+                            <Text style={styles.typeOverlayText}>{item.pax} pax</Text>
+                        </View>
+                    )}
+
                     {/* Group Required Warning Badge (Vertical) */}
                     {showGroupWarning && (
-                        <View style={[styles.typeOverlayBadge, { top: 40, backgroundColor: '#EF4444' }]}>
+                        <View style={[styles.typeOverlayBadge, { top: item.pax && (item.type === 'Studio' || item.hourly_rate) ? 70 : 40, backgroundColor: '#EF4444' }]}>
                             <Text style={styles.typeOverlayText}>Group Required</Text>
+                        </View>
+                    )}
+
+                    {/* Seasonal Rate Badges (Vertical) - Bottom Left Corner */}
+                    {(item.has_seasonal_pricing || (item.weekend_multiplier && parseFloat(item.weekend_multiplier) > 1)) && (item.type === 'Studio' || item.hourly_rate) && (
+                        <View style={{ position: 'absolute', bottom: 10, left: 10, flexDirection: 'row', gap: 4 }}>
+                            {item.has_seasonal_pricing && (
+                                <View style={[styles.typeOverlayBadge, { position: 'relative', top: 0 }]}>
+                                    <Text style={styles.typeOverlayText}>Seasonal Rates</Text>
+                                </View>
+                            )}
+                            {item.weekend_multiplier && parseFloat(item.weekend_multiplier) > 1 && (
+                                <View style={[styles.typeOverlayBadge, { position: 'relative', top: 0, backgroundColor: '#EC4899' }]}>
+                                    <Text style={styles.typeOverlayText}>Weekend +{Math.round((parseFloat(item.weekend_multiplier) - 1) * 100)}%</Text>
+                                </View>
+                            )}
                         </View>
                     )}
 

@@ -317,6 +317,7 @@ export default function ProfileScreen() {
                 <TouchableOpacity
                   onPress={addMediaToPortfolio}
                   disabled={uploading}
+                  activeOpacity={0.8}
                   style={[styles.addMediaBtn, { backgroundColor: colors.primary }]}
                 >
                   <Ionicons name="add" size={20} color="#fff" />
@@ -335,6 +336,7 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     onPress={addMediaToPortfolio}
                     disabled={uploading}
+                    activeOpacity={0.8}
                     style={[styles.uploadBtn, { backgroundColor: uploading ? colors.textSecondary : colors.primary }]}
                   >
                     <Ionicons name="cloud-upload-outline" size={18} color="#fff" style={{ marginRight: 8 }} />

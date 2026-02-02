@@ -723,6 +723,7 @@ export default function EditGigScreen() {
               <TouchableOpacity
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
+                activeOpacity={0.8}
                 style={[styles.uploadContractBtn, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}
               >
                 {uploadingContract ? (
@@ -747,6 +748,7 @@ export default function EditGigScreen() {
               style={[styles.saveButton, { backgroundColor: saving ? colors.textSecondary : colors.primary, shadowColor: colors.primary }]}
               onPress={handleSave}
               disabled={saving}
+              activeOpacity={0.8}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />

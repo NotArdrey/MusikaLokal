@@ -155,6 +155,7 @@ export default function SubmitReviewScreen() {
                 if (selectedValue > 0 && !submitting) setModalVisible(true)
               }}
               disabled={selectedValue === 0 || submitting}
+              activeOpacity={0.8}
             >
               <Text style={styles.submitButtonText}>
                 {submitting ? 'Submitting...' : 'Submit Review'}

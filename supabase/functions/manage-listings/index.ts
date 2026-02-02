@@ -282,6 +282,8 @@ serve(async (req: Request) => {
 
             // Extract availability only if type is studio, to prevent it from being sent to studios table insert
             let studioAvailability = null;
+            let calendarAvailability = null;
+            let bookingSettings = null;
             let insertPayload = { ...payload };
 
             // SPAM PREVENTION: Check for blocking rule for Gig Applications
@@ -318,6 +320,18 @@ serve(async (req: Request) => {
                 studioAvailability = insertPayload.availability;
                 delete insertPayload.availability; // Remove from payload so it doesn't fail insert
             }
+            
+            // Extract calendar_availability (specific date overrides)
+            if (type === 'studio' && insertPayload.calendar_availability) {
+                calendarAvailability = insertPayload.calendar_availability;
+                delete insertPayload.calendar_availability; // Remove from payload so it doesn't fail insert
+            }
+            
+            // Extract booking_settings for studio
+            if (type === 'studio' && insertPayload.booking_settings) {
+                bookingSettings = insertPayload.booking_settings;
+                delete insertPayload.booking_settings; // Remove from payload so it doesn't fail insert
+            }
 
             const { data, error } = await supabaseClient
                 .from(table)
@@ -331,14 +345,24 @@ serve(async (req: Request) => {
             if (type === 'studio') {
                 const studioId = data.id
 
-                // Create default studio settings (30 min buffer, no modifiers)
-                await supabaseClient.from('studio_settings').insert({
+                // Create studio settings with user provided values or defaults
+                const settingsPayload: any = {
                     studio_id: studioId,
                     buffer_minutes: 30,
-                    weekend_multiplier: 1.0,
                     bulk_discount_threshold_hours: 10,
                     bulk_discount_percentage: 0
-                })
+                };
+                
+                if (bookingSettings) {
+                    if (bookingSettings.lead_time_hours) settingsPayload.lead_time_hours = parseInt(bookingSettings.lead_time_hours) || 24;
+                    if (bookingSettings.weekend_multiplier) settingsPayload.weekend_multiplier = parseFloat(bookingSettings.weekend_multiplier) || 1.0;
+                    if (bookingSettings.peak_season_multiplier) settingsPayload.peak_season_multiplier = parseFloat(bookingSettings.peak_season_multiplier) || 1.0;
+                    if (bookingSettings.peak_season_dates) settingsPayload.peak_season_dates = bookingSettings.peak_season_dates;
+                    if (bookingSettings.off_peak_multiplier) settingsPayload.off_peak_multiplier = parseFloat(bookingSettings.off_peak_multiplier) || 1.0;
+                    if (bookingSettings.off_peak_dates) settingsPayload.off_peak_dates = bookingSettings.off_peak_dates;
+                }
+                
+                await supabaseClient.from('studio_settings').insert(settingsPayload)
 
                 // Create operating hours
                 let operatingHours = []
@@ -385,6 +409,82 @@ serve(async (req: Request) => {
                 }
 
                 await supabaseClient.from('studio_operating_hours').insert(operatingHours)
+                
+                // Insert calendar-based date overrides (specific dates)
+                if (calendarAvailability && Array.isArray(calendarAvailability) && calendarAvailability.length > 0) {
+                    const dateOverrides: any[] = [];
+                    
+                    for (const dateEntry of calendarAvailability) {
+                        if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
+                            // For each slot in the date, create an override entry
+                            // The table supports one slot per date, so we'll use the first slot's times
+                            // For multiple slots, we use the earliest start and latest end
+                            const allStarts = dateEntry.slots.map((s: any) => s.start);
+                            const allEnds = dateEntry.slots.map((s: any) => s.end);
+                            
+                            // Use first slot for now (can be extended for multiple slots per date)
+                            const firstSlot = dateEntry.slots[0];
+                            
+                            dateOverrides.push({
+                                studio_id: studioId,
+                                override_date: dateEntry.date,
+                                is_open: true,
+                                open_time: firstSlot.start,
+                                close_time: firstSlot.end,
+                                reason: 'Custom schedule'
+                            });
+                        }
+                    }
+                    
+                    if (dateOverrides.length > 0) {
+                        await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
+                        console.log(`📅 Inserted ${dateOverrides.length} date overrides for studio ${studioId}`);
+                    }
+                }
+            }
+
+            // If creating a group, add owner to group_members table
+            if (type === 'group') {
+                const groupId = data.id;
+                
+                // Insert owner as a member with 'owner' role
+                const { error: memberError } = await supabaseClient
+                    .from('group_members')
+                    .insert({
+                        group_id: groupId,
+                        user_id: userId,
+                        role: 'owner'
+                    });
+                
+                if (memberError) {
+                    console.error('⚠️ Failed to add owner to group_members:', memberError);
+                } else {
+                    console.log(`👤 Added owner ${userId} to group_members for group ${groupId}`);
+                }
+                
+                // Also add any other members that have user_id in the members JSONB array
+                const membersArray = insertPayload.members || [];
+                if (Array.isArray(membersArray)) {
+                    const additionalMembers = membersArray
+                        .filter((m: any) => m.user_id && m.user_id !== userId) // Exclude owner (already added)
+                        .map((m: any) => ({
+                            group_id: groupId,
+                            user_id: m.user_id,
+                            role: 'member'
+                        }));
+                    
+                    if (additionalMembers.length > 0) {
+                        const { error: additionalError } = await supabaseClient
+                            .from('group_members')
+                            .insert(additionalMembers);
+                        
+                        if (additionalError) {
+                            console.error('⚠️ Failed to add additional members:', additionalError);
+                        } else {
+                            console.log(`👥 Added ${additionalMembers.length} additional members to group_members`);
+                        }
+                    }
+                }
             }
 
             // Return with default stats for new entity
@@ -399,6 +499,8 @@ serve(async (req: Request) => {
 
             // Handle availability for studios - store in operating_hours table
             let studioAvailability = null;
+            let calendarAvailability = null;
+            let bookingSettings = null;
             let updatePayload = { ...payload };
 
             if (type === 'studio' && updatePayload.availability) {
@@ -406,6 +508,18 @@ serve(async (req: Request) => {
                 // Keep availability in payload if column exists in table
                 // If you want to use normalized tables instead, uncomment the line below:
                 // delete updatePayload.availability;
+            }
+            
+            // Extract calendar_availability (specific date overrides)
+            if (type === 'studio' && updatePayload.calendar_availability) {
+                calendarAvailability = updatePayload.calendar_availability;
+                delete updatePayload.calendar_availability; // Remove from payload so it doesn't fail update
+            }
+            
+            // Extract booking_settings for studio
+            if (type === 'studio' && updatePayload.booking_settings) {
+                bookingSettings = updatePayload.booking_settings;
+                delete updatePayload.booking_settings; // Remove from payload so it doesn't fail update
             }
 
             const { data, error } = await supabaseClient
@@ -453,6 +567,132 @@ serve(async (req: Request) => {
 
                 if (operatingHours.length > 0) {
                     await supabaseClient.from('studio_operating_hours').insert(operatingHours);
+                }
+            }
+            
+            // Update studio date overrides if calendar_availability was provided
+            if (type === 'studio' && calendarAvailability && Array.isArray(calendarAvailability)) {
+                const studioId = id;
+                
+                // Delete existing date overrides for this studio
+                await supabaseClient
+                    .from('studio_date_overrides')
+                    .delete()
+                    .eq('studio_id', studioId);
+                
+                // Insert new date overrides
+                const dateOverrides: any[] = [];
+                
+                for (const dateEntry of calendarAvailability) {
+                    if (dateEntry.date && dateEntry.slots && dateEntry.slots.length > 0) {
+                        const firstSlot = dateEntry.slots[0];
+                        
+                        dateOverrides.push({
+                            studio_id: studioId,
+                            override_date: dateEntry.date,
+                            is_open: true,
+                            open_time: firstSlot.start,
+                            close_time: firstSlot.end,
+                            reason: 'Custom schedule'
+                        });
+                    }
+                }
+                
+                if (dateOverrides.length > 0) {
+                    await supabaseClient.from('studio_date_overrides').insert(dateOverrides);
+                    console.log(`📅 Updated ${dateOverrides.length} date overrides for studio ${studioId}`);
+                }
+            }
+            
+            // Update studio settings if booking_settings was provided
+            if (type === 'studio' && bookingSettings) {
+                const studioId = id;
+                
+                const settingsUpdate: any = {};
+                if (bookingSettings.lead_time_hours !== undefined) settingsUpdate.lead_time_hours = parseInt(bookingSettings.lead_time_hours) || 24;
+                if (bookingSettings.weekend_multiplier !== undefined) settingsUpdate.weekend_multiplier = parseFloat(bookingSettings.weekend_multiplier) || 1.0;
+                if (bookingSettings.peak_season_multiplier !== undefined) settingsUpdate.peak_season_multiplier = parseFloat(bookingSettings.peak_season_multiplier) || 1.0;
+                if (bookingSettings.peak_season_dates !== undefined) settingsUpdate.peak_season_dates = bookingSettings.peak_season_dates;
+                if (bookingSettings.off_peak_multiplier !== undefined) settingsUpdate.off_peak_multiplier = parseFloat(bookingSettings.off_peak_multiplier) || 1.0;
+                if (bookingSettings.off_peak_dates !== undefined) settingsUpdate.off_peak_dates = bookingSettings.off_peak_dates;
+                
+                settingsUpdate.updated_at = new Date().toISOString();
+                
+                const { error: settingsError } = await supabaseClient
+                    .from('studio_settings')
+                    .update(settingsUpdate)
+                    .eq('studio_id', studioId);
+                
+                if (settingsError) {
+                    console.error('⚠️ Failed to update studio settings:', settingsError);
+                } else {
+                    console.log('⚙️ Updated studio settings:', settingsUpdate);
+                }
+            }
+
+            // Sync group_members when updating a group with members that have user_id
+            if (type === 'group' && updatePayload.members) {
+                const groupId = id;
+                const membersArray = updatePayload.members || [];
+                
+                if (Array.isArray(membersArray)) {
+                    // Get members with user_id (registered users)
+                    const registeredMembers = membersArray.filter((m: any) => m.user_id);
+                    
+                    // Get current group_members entries
+                    const { data: currentMembers } = await supabaseClient
+                        .from('group_members')
+                        .select('user_id, role')
+                        .eq('group_id', groupId);
+                    
+                    const currentUserIds = new Set((currentMembers || []).map((m: any) => m.user_id));
+                    const newUserIds = new Set(registeredMembers.map((m: any) => m.user_id));
+                    
+                    // Find members to add (in new list but not in current)
+                    const toAdd = registeredMembers
+                        .filter((m: any) => !currentUserIds.has(m.user_id))
+                        .map((m: any) => ({
+                            group_id: groupId,
+                            user_id: m.user_id,
+                            role: m.role === 'Leader' ? 'owner' : 'member'
+                        }));
+                    
+                    // Find members to remove (in current but not in new, except owner)
+                    const ownerIds = (currentMembers || [])
+                        .filter((m: any) => m.role === 'owner')
+                        .map((m: any) => m.user_id);
+                    
+                    const toRemove = (currentMembers || [])
+                        .filter((m: any) => !newUserIds.has(m.user_id) && m.role !== 'owner')
+                        .map((m: any) => m.user_id);
+                    
+                    // Add new members
+                    if (toAdd.length > 0) {
+                        const { error: addError } = await supabaseClient
+                            .from('group_members')
+                            .insert(toAdd);
+                        
+                        if (addError) {
+                            console.error('⚠️ Failed to add group members:', addError);
+                        } else {
+                            console.log(`👥 Added ${toAdd.length} members to group_members`);
+                        }
+                    }
+                    
+                    // Remove members that are no longer in the list
+                    if (toRemove.length > 0) {
+                        const { error: removeError } = await supabaseClient
+                            .from('group_members')
+                            .delete()
+                            .eq('group_id', groupId)
+                            .in('user_id', toRemove);
+                        
+                        if (removeError) {
+                            console.error('⚠️ Failed to remove group members:', removeError);
+                        } else {
+                            console.log(`👥 Removed ${toRemove.length} members from group_members`);
+                        }
+                    }
                 }
             }
 
@@ -948,6 +1188,230 @@ serve(async (req: Request) => {
             }
 
             return new Response(JSON.stringify({ success: true, cancellation_count: cancellationCount }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // --- GROUP MEMBER MANAGEMENT ---
+
+        // FETCH GROUP MEMBERS (from group_members table with profile info)
+        if (action === 'fetch_group_members') {
+            const { groupId } = params;
+            
+            if (!groupId) {
+                return new Response(JSON.stringify({ error: 'Missing groupId' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+            
+            const { data, error } = await supabaseClient
+                .from('group_members')
+                .select(`
+                    id,
+                    user_id,
+                    role,
+                    joined_at,
+                    user:profiles!user_id(id, full_name, avatar_url, email, skills, genres)
+                `)
+                .eq('group_id', groupId)
+                .order('joined_at', { ascending: true });
+            
+            if (error) throw error;
+            
+            return new Response(JSON.stringify(data || []), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        // ADD MEMBER TO GROUP (by user_id)
+        if (action === 'add_group_member') {
+            const { groupId, targetUserId, memberRole } = params;
+            
+            if (!groupId || !targetUserId) {
+                return new Response(JSON.stringify({ error: 'Missing groupId or targetUserId' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+            
+            // Verify the requester is the owner of the group
+            const { data: group, error: groupError } = await supabaseClient
+                .from('groups')
+                .select('owner_id, name')
+                .eq('id', groupId)
+                .single();
+            
+            if (groupError || !group) {
+                return new Response(JSON.stringify({ error: 'Group not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+            
+            if (group.owner_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the group owner can add members' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+            
+            // Check if user is already a member
+            const { data: existingMember } = await supabaseClient
+                .from('group_members')
+                .select('id')
+                .eq('group_id', groupId)
+                .eq('user_id', targetUserId)
+                .maybeSingle();
+            
+            if (existingMember) {
+                return new Response(JSON.stringify({ error: 'User is already a member of this group' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+            
+            // Add the member
+            const { data, error } = await supabaseClient
+                .from('group_members')
+                .insert({
+                    group_id: groupId,
+                    user_id: targetUserId,
+                    role: memberRole || 'member'
+                })
+                .select()
+                .single();
+            
+            if (error) throw error;
+            
+            // Notify the new member
+            await supabaseClient.from('notifications').insert({
+                user_id: targetUserId,
+                type: 'success',
+                title: 'Added to Group',
+                message: `You have been added to the group "${group.name}"`,
+                meta: { type: 'group_member_added', group_id: groupId }
+            });
+            
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        // REMOVE MEMBER FROM GROUP
+        if (action === 'remove_group_member') {
+            const { groupId, targetUserId } = params;
+            
+            if (!groupId || !targetUserId) {
+                return new Response(JSON.stringify({ error: 'Missing groupId or targetUserId' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+            
+            // Verify the requester is the owner of the group
+            const { data: group, error: groupError } = await supabaseClient
+                .from('groups')
+                .select('owner_id, name')
+                .eq('id', groupId)
+                .single();
+            
+            if (groupError || !group) {
+                return new Response(JSON.stringify({ error: 'Group not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+            
+            // Allow owner to remove members, or member to leave the group (self-removal)
+            if (group.owner_id !== effectiveUserId && targetUserId !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the group owner can remove members, or members can leave themselves' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+            
+            // Prevent owner from removing themselves (they must transfer leadership first)
+            if (targetUserId === group.owner_id) {
+                return new Response(JSON.stringify({ error: 'The group owner cannot be removed. Transfer leadership first.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+            
+            // Remove the member
+            const { error } = await supabaseClient
+                .from('group_members')
+                .delete()
+                .eq('group_id', groupId)
+                .eq('user_id', targetUserId);
+            
+            if (error) throw error;
+            
+            // Notify the removed member (if removed by owner)
+            if (targetUserId !== effectiveUserId) {
+                await supabaseClient.from('notifications').insert({
+                    user_id: targetUserId,
+                    type: 'warning',
+                    title: 'Removed from Group',
+                    message: `You have been removed from the group "${group.name}"`,
+                    meta: { type: 'group_member_removed', group_id: groupId }
+                });
+            }
+            
+            return new Response(JSON.stringify({ success: true }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        // UPDATE MEMBER ROLE IN GROUP
+        if (action === 'update_group_member_role') {
+            const { groupId, targetUserId, newRole } = params;
+            
+            if (!groupId || !targetUserId || !newRole) {
+                return new Response(JSON.stringify({ error: 'Missing required fields' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+            
+            // Verify the requester is the owner
+            const { data: group, error: groupError } = await supabaseClient
+                .from('groups')
+                .select('owner_id')
+                .eq('id', groupId)
+                .single();
+            
+            if (groupError || !group || group.owner_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the group owner can update member roles' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+            
+            // Cannot change owner's role via this action (use leadership transfer)
+            if (targetUserId === group.owner_id) {
+                return new Response(JSON.stringify({ error: 'Cannot change owner role. Use leadership transfer instead.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+            
+            const { data, error } = await supabaseClient
+                .from('group_members')
+                .update({ role: newRole })
+                .eq('group_id', groupId)
+                .eq('user_id', targetUserId)
+                .select()
+                .single();
+            
+            if (error) throw error;
+            
+            return new Response(JSON.stringify(data), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
         }
 
 

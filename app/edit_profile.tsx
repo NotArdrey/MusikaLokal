@@ -275,6 +275,7 @@ export default function EditProfileScreen() {
               style={[styles.cameraBtn, { backgroundColor: colors.primary }]}
               onPress={handleChangePhoto}
               disabled={uploadingPhoto}
+              activeOpacity={0.8}
             >
               {uploadingPhoto ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -406,6 +407,7 @@ export default function EditProfileScreen() {
           style={[styles.saveBtn, { backgroundColor: saving ? colors.textSecondary : colors.primary }]}
           onPress={handleSave}
           disabled={saving}
+          activeOpacity={0.8}
         >
           {saving ? (
             <ActivityIndicator size="small" color="#fff" />
@@ -418,6 +420,7 @@ export default function EditProfileScreen() {
           style={[styles.cancelBtn, { borderColor: colors.border }]}
           onPress={() => router.back()}
           disabled={saving}
+          activeOpacity={0.8}
         >
           <Text style={[styles.cancelBtnText, { color: colors.text }]}>Cancel</Text>
         </TouchableOpacity>

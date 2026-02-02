@@ -95,7 +95,9 @@ serve(async (req: Request) => {
                         isCancelled: b.status === 'cancelled',
                         action: b.status === 'pending' ? 'View Details' : 'Details',
                         duration_hours: b.hours,
+                        base_rate: b.base_rate,
                         total_cost: b.final_price,
+                        modifiers_applied: b.modifiers_applied || {},
                         notes: b.notes,
                         reviewed_by_customer: b.reviewed_by_customer || false,
                         reviewed_by_owner: b.reviewed_by_owner || false,
@@ -186,7 +188,9 @@ serve(async (req: Request) => {
                             isCancelled: b.status === 'cancelled',
                             action: b.status === 'pending' ? 'Confirm Now' : 'Details',
                             duration_hours: b.hours, // Use stored column
+                            base_rate: b.base_rate,
                             total_cost: b.final_price, // Use stored column
+                            modifiers_applied: b.modifiers_applied || {},
                             studio_name: b.studio?.name,
                             notes: b.notes,
                             customer_name: customerName,
@@ -329,7 +333,7 @@ serve(async (req: Request) => {
                         .select(`
                             *,
                             applicant:applicant_id(full_name, avatar_url),
-                            group:group_id(name, images)
+                            group:group_id(name, images, members)
                         `)
                         .in('gig_id', gigIds)
                         .in('status', ['accepted', 'pending'])
@@ -345,17 +349,26 @@ serve(async (req: Request) => {
                         const dateStr = gig?.event_date || 'TBA'
                         const performerName = app.group?.name || app.applicant?.full_name || 'Performer'
 
+                        // Parse event date for time-based categorization
+                        let eventDate: Date | null = null
+                        if (gig?.event_date) {
+                            eventDate = new Date(gig.event_date)
+                            eventDate.setHours(23, 59, 59, 999)
+                        }
+
                         const item = {
                             id: app.id,
                             type_id: 'gig_application',
                             gig_id: app.gig_id,
+                            group_id: app.group_id, // Include group_id
+                            applicant_id: app.applicant_id, // For renew contract
                             user_id: app.applicant_id, // For profile link
                             raw_date: dateStr,
                             name: `${gig?.name || 'Gig'} - ${performerName}`,
                             date: dateStr,
                             image: app.group?.images?.[0] || app.applicant?.avatar_url || gig?.images?.[0] || 'https://picsum.photos/400/300',
                             status: app.status === 'pending' ? 'Action Required' : 'Confirmed',
-                            type: 'Gig Application',
+                            type: app.group_id ? 'Group Application' : 'Solo Application',
                             isCancelled: false,
                             action: app.status === 'pending' ? 'Confirm Now' : 'View Details',
                             location: gig?.location,
@@ -364,12 +377,41 @@ serve(async (req: Request) => {
                             customer_avatar: app.group?.images?.[0] || app.applicant?.avatar_url,
                             video_url: app.video_url,
                             cv_url: app.cv_url, // Added CV URL
-                            note: app.note
+                            note: app.note,
+                            pitch_message: app.pitch_message, // Added pitch message
+                            group_members: app.group?.members || [], // Include group members for display
+                            reviewed_by_organizer: app.reviewed_by_organizer || false
                         }
 
                         if (app.status === 'pending') {
                             // @ts-ignore
                             categorized.Pending.push(item)
+                        } else if (app.status === 'accepted') {
+                            // Time-based categorization for accepted gigs
+                            if (eventDate) {
+                                const eventStart = new Date(gig.event_date)
+                                eventStart.setHours(0, 0, 0, 0)
+
+                                if (now >= eventStart && now <= eventDate) {
+                                    // Gig is happening today - Ongoing
+                                    // @ts-ignore
+                                    categorized.Ongoing.push({ ...item, status: 'Happening Now' })
+                                } else if (now > eventDate) {
+                                    // Gig has ended - show in Review if not yet reviewed
+                                    if (!app.reviewed_by_organizer) {
+                                        // @ts-ignore
+                                        categorized.Review.push({ ...item, status: 'Completed' })
+                                    }
+                                } else {
+                                    // Gig is in the future
+                                    // @ts-ignore
+                                    categorized.Upcoming.push(item)
+                                }
+                            } else {
+                                // No event date, put in Upcoming by default
+                                // @ts-ignore
+                                categorized.Upcoming.push(item)
+                            }
                         } else {
                             // @ts-ignore
                             categorized.Upcoming.push(item)
@@ -1067,6 +1109,79 @@ serve(async (req: Request) => {
 
             console.log('📷 Check-in successful:', updated);
             return new Response(JSON.stringify({ success: true, booking: updated }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        // 8. RENEW CONTRACT (Venue Owner re-hires a musician)
+        if (action === 'renew_contract') {
+            const { application_id, gig_id, applicant_id, organizer_id } = params;
+
+            console.log('🔄 Renew contract request:', { application_id, gig_id, applicant_id, organizer_id });
+
+            // 1. Verify the original application exists
+            const { data: originalApp, error: fetchError } = await supabaseClient
+                .from('gig_applications')
+                .select('*, gig:gig_id(name, organizer_id)')
+                .eq('id', application_id)
+                .single();
+
+            if (fetchError || !originalApp) {
+                return new Response(JSON.stringify({ error: 'Original application not found.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            // 2. Verify the user is the gig organizer
+            if (originalApp.gig?.organizer_id !== organizer_id) {
+                return new Response(JSON.stringify({ error: 'You are not authorized to renew this contract.' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            // 3. Get the applicant info for the notification
+            const { data: applicantProfile } = await supabaseClient
+                .from('profiles')
+                .select('full_name, email')
+                .eq('id', applicant_id)
+                .single();
+
+            const applicantName = applicantProfile?.full_name || applicantProfile?.email || 'Musician';
+            const gigName = originalApp.gig?.name || 'Gig';
+
+            // 4. Send notification to the musician about the renewal offer
+            const { error: notifyError } = await supabaseAdmin
+                .from('notifications')
+                .insert({
+                    user_id: applicant_id,
+                    type: 'success',
+                    title: 'Contract Renewal Offer! 🎉',
+                    message: `Great news! The venue wants to work with you again for "${gigName}". Check the gig listing to apply!`,
+                    read: false,
+                    meta: {
+                        type: 'contract_renewal',
+                        gig_id: gig_id,
+                        original_application_id: application_id,
+                        organizer_id: organizer_id
+                    }
+                });
+
+            if (notifyError) {
+                console.error('Error sending renewal notification:', notifyError);
+            }
+
+            // 5. Log the renewal for tracking (could be used for analytics later)
+            console.log(`🔄 Contract renewal sent from ${organizer_id} to ${applicant_id} for gig ${gig_id}`);
+
+            return new Response(JSON.stringify({ 
+                success: true, 
+                message: `Renewal offer sent to ${applicantName}!`,
+                applicant_id,
+                gig_id
+            }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
             });

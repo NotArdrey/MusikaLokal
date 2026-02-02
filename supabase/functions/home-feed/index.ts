@@ -35,6 +35,24 @@ serve(async (req: Request) => {
             .select('*')
             .order('rating', { ascending: false })
             .limit(5)
+        
+        // Fetch date overrides count for studios (to show "Special Hours" badge)
+        const studioIds = (featuredStudios || []).map((s: any) => s.id);
+        let studioDateOverridesMap: { [key: string]: boolean } = {};
+        
+        if (studioIds.length > 0) {
+            const { data: dateOverrides, error: overridesError } = await supabaseClient
+                .from('studio_date_overrides')
+                .select('studio_id')
+                .in('studio_id', studioIds)
+                .gte('override_date', new Date().toISOString().split('T')[0]);
+            
+            if (!overridesError && dateOverrides) {
+                dateOverrides.forEach((override: any) => {
+                    studioDateOverridesMap[override.studio_id] = true;
+                });
+            }
+        }
 
         // Fetch New Arrivals (newly created groups) with computed stats
         const { data: newArrivals, error: groupsError } = await supabaseClient
@@ -59,7 +77,8 @@ serve(async (req: Request) => {
                 ...item,
                 type: 'Studio',
                 rating: item.rating || 0,
-                review_count: item.review_count || 0
+                review_count: item.review_count || 0,
+                has_special_dates: studioDateOverridesMap[item.id] || false
             }))
         ].sort((a, b) => (b.rating || 0) - (a.rating || 0)).slice(0, 10);
 

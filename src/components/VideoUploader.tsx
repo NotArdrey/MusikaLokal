@@ -176,6 +176,7 @@ export default function VideoUploader({
           style={[styles.uploadBox, { borderColor: colors.border }]} 
           onPress={pickAndUploadVideo}
           disabled={uploading}
+          activeOpacity={0.8}
         >
           {uploading ? (
             <>

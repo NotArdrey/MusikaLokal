@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { Animated, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 
 export type AlertType = 'error' | 'success' | 'warning' | 'info';
@@ -47,8 +47,6 @@ const alertConfig = {
     },
 };
 
-// useNativeDriver is not supported on web
-const useNativeDriver = Platform.OS !== 'web';
 
 export default function CustomAlert({
     visible,
@@ -61,29 +59,6 @@ export default function CustomAlert({
     const { colors, isDark } = useTheme();
     const config = alertConfig[type];
 
-    const scaleAnim = React.useRef(new Animated.Value(0.9)).current;
-    const opacityAnim = React.useRef(new Animated.Value(0)).current;
-
-    React.useEffect(() => {
-        if (visible) {
-            Animated.parallel([
-                Animated.spring(scaleAnim, {
-                    toValue: 1,
-                    useNativeDriver,
-                    tension: 100,
-                    friction: 8,
-                }),
-                Animated.timing(opacityAnim, {
-                    toValue: 1,
-                    duration: 200,
-                    useNativeDriver,
-                }),
-            ]).start();
-        } else {
-            scaleAnim.setValue(0.9);
-            opacityAnim.setValue(0);
-        }
-    }, [visible]);
 
     const handleButtonPress = (button: AlertButton) => {
         // Call the onPress callback first, then close the alert
@@ -122,13 +97,11 @@ export default function CustomAlert({
             onRequestClose={onClose}
         >
             <View style={styles.overlay}>
-                <Animated.View
+                <View
                     style={[
                         styles.container,
                         {
                             backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
-                            transform: [{ scale: scaleAnim }],
-                            opacity: opacityAnim,
                         },
                     ]}
                 >
@@ -181,7 +154,7 @@ export default function CustomAlert({
                             );
                         })}
                     </View>
-                </Animated.View>
+                </View>
             </View>
         </Modal>
     );

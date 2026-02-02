@@ -165,21 +165,54 @@ export default function GroupDetailsScreen() {
               </View>
               <View style={styles.featureItem}>
                 <Ionicons name="people-outline" size={24} color={colors.text} />
-                <Text style={[styles.featureText, { color: colors.textSecondary }]}>{group.members?.length || '4'} Members</Text>
-              </View>
-              {/* Static fillers for demo */}
-              <View style={styles.featureItem}>
-                <Ionicons name="mic-outline" size={24} color={colors.text} />
-                <Text style={[styles.featureText, { color: colors.textSecondary }]}>Full PA System</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="car-outline" size={24} color={colors.text} />
-                <Text style={[styles.featureText, { color: colors.textSecondary }]}>Own Transport</Text>
+                <Text style={[styles.featureText, { color: colors.textSecondary }]}>
+                  {group.group_type === 'duo' ? 'Duo' : 'Band'} ({group.members?.length || '2'} Members)
+                </Text>
               </View>
             </View>
           </View>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
+
+          {/* Band Members Section */}
+          {group.members && group.members.length > 0 && (
+            <>
+              <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Band Members</Text>
+                <View style={{ gap: 12 }}>
+                  {group.members.map((member: any, index: number) => {
+                    const isLeader = member.role === 'Leader' || index === 0;
+                    const memberName = typeof member === 'string' ? member : member.name;
+                    const memberInstrument = typeof member === 'string' ? member : member.instrument;
+                    return (
+                      <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        <View style={{ 
+                          width: 44, height: 44, borderRadius: 22, 
+                          backgroundColor: isLeader ? colors.primary : '#E0E7FF',
+                          alignItems: 'center', justifyContent: 'center'
+                        }}>
+                          {member.avatar_url ? (
+                            <Image source={{ uri: member.avatar_url }} style={{ width: 44, height: 44, borderRadius: 22 }} />
+                          ) : (
+                            <Text style={{ color: isLeader ? '#fff' : '#4F46E5', fontWeight: 'bold', fontSize: 16 }}>{memberName?.charAt(0)}</Text>
+                          )}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 15 }}>{memberName}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="musical-note" size={12} color={colors.primary} />
+                            <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{memberInstrument}</Text>
+                            {isLeader && <Text style={{ color: colors.primary, fontSize: 11, marginLeft: 4 }}>• Leader</Text>}
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+              <View style={[styles.divider, { backgroundColor: colors.border }]} />
+            </>
+          )}
 
           {/* Reviews Section */}
           <View style={styles.section}>

@@ -708,6 +708,7 @@ export default function AddGigScreen() {
                                     <TouchableOpacity
                                         onPress={handleContractUpload}
                                         disabled={uploadingContract}
+                                        activeOpacity={0.8}
                                         style={[styles.uploadContractBtn, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}
                                     >
                                         {uploadingContract ? (
@@ -954,6 +955,7 @@ export default function AddGigScreen() {
                             <TouchableOpacity
                                 onPress={handleBack}
                                 disabled={creating}
+                                activeOpacity={0.8}
                                 style={[styles.backBtn, { borderColor: isDark ? '#374151' : '#E5E7EB', opacity: creating ? 0.5 : 1 }]}
                             >
                                 <Text style={[styles.backBtnText, { color: colors.text }]}>Back</Text>
@@ -962,6 +964,7 @@ export default function AddGigScreen() {
                         <TouchableOpacity
                             onPress={handleNext}
                             disabled={creating}
+                            activeOpacity={0.8}
                             style={[styles.nextBtn, { backgroundColor: colors.primary, shadowColor: colors.primary, opacity: creating ? 0.7 : 1 }]}
                         >
                             {creating ? (

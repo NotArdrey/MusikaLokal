@@ -281,6 +281,13 @@ export default function HomeScreen() {
                 embedding: item.embedding, // Profiles might have interest_vector but listing card uses embedding
                 created_at: item.created_at, // Added for New Arrivals
                 genre: item.genres?.join(', ') || item.genre || '', // For solo artists
+                // Seasonal pricing fields for studios
+                has_seasonal_pricing: item.has_seasonal_pricing || false,
+                has_special_dates: item.has_special_dates || false,
+                lead_time_hours: item.lead_time_hours || 24,
+                weekend_multiplier: item.weekend_multiplier || 1.0,
+                peak_season_multiplier: item.peak_season_multiplier || 1.0,
+                off_peak_multiplier: item.off_peak_multiplier || 1.0,
             }));
 
             const allGroups = normalize(groups, 'Group');

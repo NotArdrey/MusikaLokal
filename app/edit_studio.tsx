@@ -1,7 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Calendar } from 'react-native-calendars';
+import ConflictResolutionModal, { ConflictingBooking, ConflictResolution } from '../src/components/ConflictResolutionModal';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
@@ -63,6 +66,7 @@ export default function EditStudioScreen() {
   const [rehearsalRate, setRehearsalRate] = useState('');
   const [recordingRate, setRecordingRate] = useState('');
   const [studioType, setStudioType] = useState<'Rehearsal' | 'Recording' | 'Both'>('Both');
+  const [pax, setPax] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [authorized, setAuthorized] = useState(false);
@@ -126,6 +130,19 @@ export default function EditStudioScreen() {
 
   // Calendar-based availability state
   const [selectedDates, setSelectedDates] = useState<{ [date: string]: { selected: boolean; slots: { start: string; end: string }[] } }>({});
+
+  // Booking Settings State
+  const [leadTimeHours, setLeadTimeHours] = useState('24');
+  const [weekendMultiplier, setWeekendMultiplier] = useState('1.0');
+  const [peakSeasonMultiplier, setPeakSeasonMultiplier] = useState('1.0');
+  const [peakSeasonDates, setPeakSeasonDates] = useState<{ start: string; end: string }[]>([]);
+  const [offPeakMultiplier, setOffPeakMultiplier] = useState('1.0');
+  const [offPeakDates, setOffPeakDates] = useState<{ start: string; end: string }[]>([]);
+
+  // Conflict Resolution State
+  const [conflictModalVisible, setConflictModalVisible] = useState(false);
+  const [conflictingBookings, setConflictingBookings] = useState<ConflictingBooking[]>([]);
+  const [pendingSavePayload, setPendingSavePayload] = useState<any>(null);
 
   // Predefined instruments with images
   const INSTRUMENT_OPTIONS = [
@@ -232,6 +249,7 @@ export default function EditStudioScreen() {
       setRehearsalRate(data.rehearsal_rate?.toString() || data.hourly_rate?.toString() || '');
       setRecordingRate(data.recording_rate?.toString() || '');
       setStudioType(data.type || 'Both');
+      setPax(data.pax?.toString() || '');
       setAmenities(data.amenities || []);
       setContractUrl(data.contract_url || '');
       if (data.contract_url) {
@@ -250,8 +268,40 @@ export default function EditStudioScreen() {
         })));
       }
 
-      // Load calendar availability
-      if (data.calendar_availability && Array.isArray(data.calendar_availability)) {
+      // Load calendar availability from date overrides table
+      const { data: dateOverrides, error: overridesError } = await supabase
+        .from('studio_date_overrides')
+        .select('*')
+        .eq('studio_id', studioId)
+        .gte('override_date', new Date().toISOString().split('T')[0]); // Only future dates
+
+      if (!overridesError && dateOverrides && dateOverrides.length > 0) {
+        // Helper function to convert 24-hour to 12-hour format
+        const convertTo12Hour = (time24: string) => {
+          if (!time24 || !time24.includes(':')) return '09:00 AM';
+          const [hours, minutes] = time24.split(':');
+          const hour = parseInt(hours, 10);
+          const period = hour >= 12 ? 'PM' : 'AM';
+          const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+          return `${String(hour12).padStart(2, '0')}:${minutes} ${period}`;
+        };
+
+        const calendarDates: { [date: string]: { selected: boolean; slots: { start: string; end: string }[] } } = {};
+        dateOverrides.forEach((override: any) => {
+          if (override.override_date && override.is_open) {
+            calendarDates[override.override_date] = {
+              selected: true,
+              slots: [{
+                start: convertTo12Hour(override.open_time),
+                end: convertTo12Hour(override.close_time)
+              }]
+            };
+          }
+        });
+        setSelectedDates(calendarDates);
+        console.log('📅 Loaded date overrides:', calendarDates);
+      } else if (data.calendar_availability && Array.isArray(data.calendar_availability)) {
+        // Fallback: Load from legacy calendar_availability field
         const calendarDates: { [date: string]: { selected: boolean; slots: { start: string; end: string }[] } } = {};
         data.calendar_availability.forEach((item: any) => {
           if (item.date) {
@@ -298,6 +348,27 @@ export default function EditStudioScreen() {
       // Load instruments
       if (data.instruments && Array.isArray(data.instruments)) {
         setSelectedInstruments(data.instruments);
+      }
+
+      // Load studio settings (booking settings)
+      const { data: studioSettings, error: settingsError } = await supabase
+        .from('studio_settings')
+        .select('*')
+        .eq('studio_id', studioId)
+        .single();
+
+      if (!settingsError && studioSettings) {
+        setLeadTimeHours(studioSettings.lead_time_hours?.toString() || '24');
+        setWeekendMultiplier(studioSettings.weekend_multiplier?.toString() || '1.0');
+        setPeakSeasonMultiplier(studioSettings.peak_season_multiplier?.toString() || '1.0');
+        setOffPeakMultiplier(studioSettings.off_peak_multiplier?.toString() || '1.0');
+        if (studioSettings.peak_season_dates && Array.isArray(studioSettings.peak_season_dates)) {
+          setPeakSeasonDates(studioSettings.peak_season_dates);
+        }
+        if (studioSettings.off_peak_dates && Array.isArray(studioSettings.off_peak_dates)) {
+          setOffPeakDates(studioSettings.off_peak_dates);
+        }
+        console.log('⚙️ Loaded studio settings:', studioSettings);
       }
 
       setSelectedImages(data.images || []);
@@ -373,6 +444,380 @@ export default function EditStudioScreen() {
         return;
       }
 
+      // Helper function to convert 12-hour to 24-hour format for comparison
+      const convertTo24Hour = (time12: string): string => {
+        const [time, modifier] = time12.split(' ');
+        if (!modifier) return time; // Already 24h or invalid
+        let [hours, minutes] = time.split(':');
+        if (hours === '12') {
+          hours = '00';
+        }
+        if (modifier === 'PM') {
+          hours = String(parseInt(hours, 10) + 12);
+        }
+        return `${hours.padStart(2, '0')}:${minutes}`;
+      };
+
+      // Helper to check if times overlap
+      const timesOverlap = (
+        bookingStart: string,
+        bookingEnd: string,
+        slotStart: string,
+        slotEnd: string
+      ): boolean => {
+        // Convert all to minutes for easier comparison
+        const toMinutes = (time: string) => {
+          const [h, m] = time.split(':').map(Number);
+          return h * 60 + m;
+        };
+        const bStart = toMinutes(bookingStart);
+        const bEnd = toMinutes(bookingEnd);
+        const sStart = toMinutes(slotStart);
+        const sEnd = toMinutes(slotEnd);
+        // Booking is within slot if booking times fall within slot times
+        return bStart >= sStart && bEnd <= sEnd;
+      };
+
+      // Check for booking conflicts before saving
+      console.log('🔍 Checking for booking conflicts...');
+      const { data: existingBookings, error: bookingsError } = await supabase
+        .from('studio_bookings')
+        .select(`
+          id, 
+          booking_date, 
+          start_time, 
+          end_time, 
+          status,
+          user_id,
+          profiles:user_id (
+            full_name,
+            email
+          )
+        `)
+        .eq('studio_id', studioId)
+        .in('status', ['pending', 'confirmed'])
+        .gte('booking_date', new Date().toISOString().split('T')[0]);
+
+      if (!bookingsError && existingBookings && existingBookings.length > 0) {
+        console.log('📅 Found existing bookings:', existingBookings.length);
+
+        // Build new availability map (combining weekly schedule and date overrides)
+        const newAvailabilityMap: { [date: string]: { start: string; end: string }[] } = {};
+
+        // Add date-specific overrides
+        Object.entries(selectedDates)
+          .filter(([_, data]) => data.selected && data.slots.length > 0)
+          .forEach(([dateStr, data]) => {
+            newAvailabilityMap[dateStr] = data.slots.map(slot => ({
+              start: convertTo24Hour(slot.start),
+              end: convertTo24Hour(slot.end)
+            }));
+          });
+
+        // For dates that aren't overridden, check weekly schedule
+        const getDayOfWeek = (dateStr: string): string => {
+          const date = new Date(dateStr);
+          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          return days[date.getDay()];
+        };
+
+        // Check each booking for conflicts
+        const conflicts: ConflictingBooking[] = [];
+
+        for (const booking of existingBookings) {
+          const bookingDate = booking.booking_date;
+          const bookingStart = booking.start_time.substring(0, 5); // HH:MM
+          const bookingEnd = booking.end_time.substring(0, 5);
+
+          let availableSlots: { start: string; end: string }[] = [];
+
+          // Check if this date has a specific override
+          if (newAvailabilityMap[bookingDate]) {
+            availableSlots = newAvailabilityMap[bookingDate];
+          } else {
+            // Check weekly schedule
+            const dayName = getDayOfWeek(bookingDate);
+            const daySchedule = availability.find(a => a.day === dayName);
+            if (daySchedule && daySchedule.slots.length > 0) {
+              availableSlots = daySchedule.slots.map(slot => ({
+                start: convertTo24Hour(slot.start),
+                end: convertTo24Hour(slot.end)
+              }));
+            }
+          }
+
+          // Check if booking fits within any available slot
+          const bookingFits = availableSlots.some(slot =>
+            timesOverlap(bookingStart, bookingEnd, slot.start, slot.end)
+          );
+
+          if (!bookingFits) {
+            // This booking conflicts with the new schedule
+            const profile = booking.profiles as any;
+            const conflict: ConflictingBooking = {
+              id: booking.id,
+              booking_date: bookingDate,
+              start_time: booking.start_time,
+              end_time: booking.end_time,
+              status: booking.status,
+              user_id: booking.user_id,
+              user_name: profile?.full_name || 'Unknown',
+              user_email: profile?.email || '',
+              conflictType: availableSlots.length === 0 ? 'date_removed' : 'time_overlap',
+              newAvailableSlot: null // Will be calculated
+            };
+
+            // Find next available slot for this booking
+            const nextSlot = await findNextAvailableSlot(
+              studioId,
+              bookingDate,
+              bookingStart,
+              bookingEnd
+            );
+            conflict.newAvailableSlot = nextSlot;
+
+            conflicts.push(conflict);
+          }
+        }
+
+        if (conflicts.length > 0) {
+          console.log('⚠️ Found conflicts:', conflicts.length);
+          // Store conflicts and show the resolution modal
+          setConflictingBookings(conflicts);
+          setConflictModalVisible(true);
+          setSaving(false);
+          return;
+        }
+      }
+
+      await executeSave();
+    } catch (e: any) {
+      console.error('❌ Error checking bookings:', e);
+      showAlert('error', 'Error', `Failed to save: ${e?.message || 'Unknown error'}`);
+      setSaving(false);
+    }
+  };
+
+  // Find next available slot for a booking
+  const findNextAvailableSlot = async (
+    studioId: string,
+    currentDate: string,
+    bookingStart: string,
+    bookingEnd: string
+  ): Promise<{ date: string; start_time: string; end_time: string } | null> => {
+    const bookingDuration = (() => {
+      const [sH, sM] = bookingStart.split(':').map(Number);
+      const [eH, eM] = bookingEnd.split(':').map(Number);
+      return (eH * 60 + eM) - (sH * 60 + sM);
+    })();
+
+    // Helper function to convert 12-hour to 24-hour format
+    const convertTo24Hour = (time12: string): string => {
+      const [time, modifier] = time12.split(' ');
+      if (!modifier) return time;
+      let [hours, minutes] = time.split(':');
+      if (hours === '12') hours = '00';
+      if (modifier === 'PM') hours = String(parseInt(hours, 10) + 12);
+      return `${hours.padStart(2, '0')}:${minutes}`;
+    };
+
+    const getDayOfWeek = (dateStr: string): string => {
+      const date = new Date(dateStr);
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      return days[date.getDay()];
+    };
+
+    // Search for next 30 days
+    const startDate = new Date(currentDate);
+    startDate.setDate(startDate.getDate() + 1); // Start from next day
+
+    for (let i = 0; i < 30; i++) {
+      const checkDate = new Date(startDate);
+      checkDate.setDate(checkDate.getDate() + i);
+      const dateStr = checkDate.toISOString().split('T')[0];
+
+      // Get available slots for this date
+      let availableSlots: { start: string; end: string }[] = [];
+
+      // Check date overrides first
+      if (selectedDates[dateStr]?.selected && selectedDates[dateStr]?.slots.length > 0) {
+        availableSlots = selectedDates[dateStr].slots.map(slot => ({
+          start: convertTo24Hour(slot.start),
+          end: convertTo24Hour(slot.end)
+        }));
+      } else {
+        // Check weekly schedule
+        const dayName = getDayOfWeek(dateStr);
+        const daySchedule = availability.find(a => a.day === dayName);
+        if (daySchedule && daySchedule.slots.length > 0) {
+          availableSlots = daySchedule.slots.map(slot => ({
+            start: convertTo24Hour(slot.start),
+            end: convertTo24Hour(slot.end)
+          }));
+        }
+      }
+
+      if (availableSlots.length === 0) continue;
+
+      // Check existing bookings on this date
+      const { data: existingOnDate } = await supabase
+        .from('studio_bookings')
+        .select('start_time, end_time')
+        .eq('studio_id', studioId)
+        .eq('booking_date', dateStr)
+        .in('status', ['pending', 'confirmed']);
+
+      // Find a slot that can fit the booking
+      for (const slot of availableSlots) {
+        const slotStart = slot.start;
+        const slotEnd = slot.end;
+
+        // Calculate slot duration in minutes
+        const [ssH, ssM] = slotStart.split(':').map(Number);
+        const [seH, seM] = slotEnd.split(':').map(Number);
+        const slotDuration = (seH * 60 + seM) - (ssH * 60 + ssM);
+
+        if (slotDuration < bookingDuration) continue;
+
+        // Check if there's room considering existing bookings
+        const bookedTimes = (existingOnDate || []).map((b: any) => ({
+          start: b.start_time.substring(0, 5),
+          end: b.end_time.substring(0, 5)
+        }));
+
+        // Try to find a free window within the slot
+        let currentTime = ssH * 60 + ssM;
+        const slotEndMinutes = seH * 60 + seM;
+
+        while (currentTime + bookingDuration <= slotEndMinutes) {
+          const proposedStart = `${String(Math.floor(currentTime / 60)).padStart(2, '0')}:${String(currentTime % 60).padStart(2, '0')}`;
+          const proposedEnd = `${String(Math.floor((currentTime + bookingDuration) / 60)).padStart(2, '0')}:${String((currentTime + bookingDuration) % 60).padStart(2, '0')}`;
+
+          // Check if this time conflicts with existing bookings
+          const hasConflict = bookedTimes.some((bt: any) => {
+            const btStart = bt.start.split(':').map(Number);
+            const btEnd = bt.end.split(':').map(Number);
+            const btStartMin = btStart[0] * 60 + btStart[1];
+            const btEndMin = btEnd[0] * 60 + btEnd[1];
+            // Check overlap
+            return !(currentTime + bookingDuration <= btStartMin || currentTime >= btEndMin);
+          });
+
+          if (!hasConflict) {
+            return {
+              date: dateStr,
+              start_time: proposedStart,
+              end_time: proposedEnd
+            };
+          }
+
+          // Move to next slot increment (30 minutes)
+          currentTime += 30;
+        }
+      }
+    }
+
+    return null; // No available slot found
+  };
+
+  // Handle conflict resolution
+  const handleConflictResolution = async (resolutions: ConflictResolution[]) => {
+    setSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setSaving(false);
+        return;
+      }
+
+      const studioId = Array.isArray(id) ? id[0] : id;
+
+      for (const resolution of resolutions) {
+        if (resolution.action === 'cancel') {
+          // Cancel the booking
+          const { error } = await supabase
+            .from('studio_bookings')
+            .update({
+              status: 'cancelled',
+              cancellation_reason: 'Studio schedule was updated by owner. Booking no longer fits available times.'
+            })
+            .eq('id', resolution.bookingId);
+
+          if (error) {
+            console.error('Error cancelling booking:', error);
+            throw error;
+          }
+
+          // Create notification for the user
+          const conflict = conflictingBookings.find(c => c.id === resolution.bookingId);
+          if (conflict) {
+            await supabase.from('notifications').insert({
+              user_id: conflict.user_id,
+              type: 'warning',
+              title: 'Booking Cancelled',
+              message: `Your booking at ${studioName} on ${new Date(conflict.booking_date).toLocaleDateString()} has been cancelled due to schedule changes. You will receive a refund.`,
+              meta: { bookingId: resolution.bookingId, studioId }
+            });
+          }
+        } else if (resolution.action === 'move' && resolution.newSlot) {
+          // Move the booking to the new slot
+          const { error } = await supabase
+            .from('studio_bookings')
+            .update({
+              booking_date: resolution.newSlot.date,
+              start_time: resolution.newSlot.start_time,
+              end_time: resolution.newSlot.end_time
+            })
+            .eq('id', resolution.bookingId);
+
+          if (error) {
+            console.error('Error moving booking:', error);
+            throw error;
+          }
+
+          // Create notification for the user
+          const conflict = conflictingBookings.find(c => c.id === resolution.bookingId);
+          if (conflict) {
+            await supabase.from('notifications').insert({
+              user_id: conflict.user_id,
+              type: 'info',
+              title: 'Booking Rescheduled',
+              message: `Your booking at ${studioName} has been moved to ${new Date(resolution.newSlot.date).toLocaleDateString()} at ${resolution.newSlot.start_time} due to schedule changes.`,
+              meta: { bookingId: resolution.bookingId, studioId }
+            });
+          }
+        }
+      }
+
+      // Close the modal and proceed with save
+      setConflictModalVisible(false);
+      setConflictingBookings([]);
+
+      // Now save the studio changes
+      await executeSave();
+    } catch (e: any) {
+      console.error('Error resolving conflicts:', e);
+      showAlert('error', 'Error', `Failed to resolve conflicts: ${e?.message || 'Unknown error'}`);
+      setSaving(false);
+    }
+  };
+
+  const executeSave = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setSaving(false);
+        return;
+      }
+
+      // Ensure id is a string, not an array
+      const studioId = Array.isArray(id) ? id[0] : id;
+      if (!studioId) {
+        showAlert('error', 'Error', 'Invalid studio ID');
+        setSaving(false);
+        return;
+      }
+
       // Helper function to convert 12-hour to 24-hour format
       const convertTo24Hour = (time12: string): string => {
         const [time, modifier] = time12.split(' ');
@@ -407,6 +852,7 @@ export default function EditStudioScreen() {
         hourly_rate: studioType === 'Recording' ? parseFloat(recordingRate) || 0 : parseFloat(rehearsalRate) || 0,
         rehearsal_rate: parseFloat(rehearsalRate) || 0,
         recording_rate: parseFloat(recordingRate) || 0,
+        pax: pax ? parseInt(pax) : null,
         amenities,
         instruments: selectedInstruments,
         // Include full equipment details
@@ -429,7 +875,16 @@ export default function EditStudioScreen() {
               end: convertTo24Hour(slot.end)
             }))
           })),
-        calendar_availability: calendarAvailability
+        calendar_availability: calendarAvailability,
+        // Booking settings
+        booking_settings: {
+          lead_time_hours: parseInt(leadTimeHours) || 24,
+          weekend_multiplier: parseFloat(weekendMultiplier) || 1.0,
+          peak_season_multiplier: parseFloat(peakSeasonMultiplier) || 1.0,
+          peak_season_dates: peakSeasonDates,
+          off_peak_multiplier: parseFloat(offPeakMultiplier) || 1.0,
+          off_peak_dates: offPeakDates,
+        }
       };
 
       console.log(' RAW availability state:', JSON.stringify(availability, null, 2));
@@ -616,6 +1071,68 @@ export default function EditStudioScreen() {
     setContractFileName('');
   };
 
+  // Equipment image upload state
+  const [uploadingEquipmentImage, setUploadingEquipmentImage] = useState(false);
+
+  // Pick and upload equipment image
+  const pickEquipmentImage = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        showAlert('error', 'Error', 'Session expired. Please log in again.');
+        return;
+      }
+
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        showAlert('error', 'Permission Needed', 'Please allow access to your photos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: 'images',
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+
+      setUploadingEquipmentImage(true);
+      const asset = result.assets[0];
+      const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+      const response = await fetch(asset.uri);
+      if (!response.ok) {
+        throw new Error('Failed to fetch image');
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const { data, error } = await supabase.storage
+        .from('listings')
+        .upload(fileName, arrayBuffer, {
+          contentType: `image/${fileExt}`,
+          upsert: false
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('listings')
+        .getPublicUrl(data.path);
+
+      setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
+    } catch (error) {
+      console.error('Error uploading equipment image:', error);
+      showAlert('error', 'Error', 'Failed to upload image. Please try again.');
+    } finally {
+      setUploadingEquipmentImage(false);
+    }
+  };
+
   const handleWebFileSelect = async (event: any) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -796,7 +1313,7 @@ export default function EditStudioScreen() {
             <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
               Set hourly rates for each studio type
             </Text>
-            
+
             {/* Rehearsal Rate */}
             {(studioType === 'Rehearsal' || studioType === 'Both') && (
               <View style={{ marginBottom: 12 }}>
@@ -856,6 +1373,32 @@ export default function EditStudioScreen() {
             )}
           </View>
 
+          {/* Pax / Capacity */}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Studio Capacity (Pax)</Text>
+            <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
+              Maximum number of people the studio can accommodate
+            </Text>
+            <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 }]}>
+              <Ionicons name="people" size={20} color={colors.primary} style={{ marginRight: 12 }} />
+              <TextInput
+                value={pax}
+                onChangeText={setPax}
+                placeholder="e.g. 10"
+                placeholderTextColor={colors.textSecondary}
+                keyboardType="numeric"
+                style={{
+                  flex: 1,
+                  color: colors.text,
+                  fontFamily: 'Poppins_500Medium',
+                  fontSize: 16,
+                  paddingVertical: 16
+                }}
+              />
+              <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>persons</Text>
+            </View>
+          </View>
+
           {/* Contract Upload */}
           {renderSectionHeader('Contract', 'document-text')}
           <View style={styles.inputContainer}>
@@ -885,6 +1428,7 @@ export default function EditStudioScreen() {
               <TouchableOpacity
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
+                activeOpacity={0.8}
                 style={[styles.uploadContractBtn, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}
               >
                 {uploadingContract ? (
@@ -1061,79 +1605,111 @@ export default function EditStudioScreen() {
 
           {/* Calendar Date Selection */}
           <View style={{ marginBottom: 24 }}>
-            <Text style={[styles.sectionSubtitle, { color: colors.text, marginBottom: 12 }]}>
-              <Ionicons name="calendar" size={16} color={colors.primary} /> Specific Dates
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <Ionicons name="calendar" size={16} color={colors.primary} />
+              <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Specific Dates</Text>
+            </View>
             <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginBottom: 12 }}>
-              Tap on dates to set your opening schedule for specific days
+              Tap on dates to set special hours or override weekly schedule
             </Text>
-            
-            <View style={[styles.calendarContainer, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {Array.from({ length: 60 }).map((_, i) => {
-                  const date = new Date();
-                  date.setDate(date.getDate() + i);
-                  const dateStr = date.toISOString().split('T')[0];
-                  const isSelected = selectedDates[dateStr]?.selected;
-                  const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-                  const dayNum = date.getDate();
-                  const monthName = date.toLocaleDateString('en-US', { month: 'short' });
 
-                  return (
-                    <TouchableOpacity
-                      key={dateStr}
-                      onPress={() => {
-                        const newDates = { ...selectedDates };
-                        if (isSelected) {
-                          delete newDates[dateStr];
-                        } else {
-                          newDates[dateStr] = {
-                            selected: true,
-                            slots: [{ start: '09:00 AM', end: '05:00 PM' }]
-                          };
-                        }
-                        setSelectedDates(newDates);
-                      }}
-                      style={[
-                        styles.dateCard,
-                        {
-                          backgroundColor: isSelected ? colors.primary : (isDark ? '#374151' : '#FFF'),
-                          borderColor: isSelected ? colors.primary : (isDark ? '#4B5563' : '#E5E7EB')
-                        }
-                      ]}
-                    >
-                      <Text style={{ color: isSelected ? '#FFF' : colors.textSecondary, fontSize: 10, fontFamily: 'Poppins_500Medium' }}>
-                        {dayName}
-                      </Text>
-                      <Text style={{ color: isSelected ? '#FFF' : colors.text, fontSize: 18, fontFamily: 'Poppins_700Bold' }}>
-                        {dayNum}
-                      </Text>
-                      <Text style={{ color: isSelected ? '#FFF' : colors.textSecondary, fontSize: 10, fontFamily: 'Poppins_400Regular' }}>
-                        {monthName}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
+            <View style={[styles.calendarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: colors.border }]}>
+              <Calendar
+                current={new Date().toISOString().split('T')[0]}
+                minDate={new Date().toISOString().split('T')[0]}
+                maxDate={(() => {
+                  const maxDate = new Date();
+                  maxDate.setDate(maxDate.getDate() + 90);
+                  return maxDate.toISOString().split('T')[0];
+                })()}
+                markedDates={Object.entries(selectedDates).reduce((acc, [dateStr, data]) => {
+                  if (data.selected) {
+                    acc[dateStr] = {
+                      selected: true,
+                      selectedColor: colors.primary,
+                      selectedTextColor: '#FFFFFF'
+                    };
+                  }
+                  return acc;
+                }, {} as Record<string, any>)}
+                onDayPress={(day) => {
+                  const dateStr = day.dateString;
+                  const newDates = { ...selectedDates };
+                  if (newDates[dateStr]?.selected) {
+                    delete newDates[dateStr];
+                  } else {
+                    newDates[dateStr] = {
+                      selected: true,
+                      slots: [{ start: '09:00 AM', end: '05:00 PM' }]
+                    };
+                  }
+                  setSelectedDates(newDates);
+                }}
+                theme={{
+                  backgroundColor: 'transparent',
+                  calendarBackground: 'transparent',
+                  textSectionTitleColor: colors.textSecondary,
+                  selectedDayBackgroundColor: colors.primary,
+                  selectedDayTextColor: '#FFFFFF',
+                  todayTextColor: colors.primary,
+                  dayTextColor: colors.text,
+                  textDisabledColor: isDark ? '#4B5563' : '#D1D5DB',
+                  dotColor: colors.primary,
+                  selectedDotColor: '#FFFFFF',
+                  arrowColor: colors.primary,
+                  monthTextColor: colors.text,
+                  indicatorColor: colors.primary,
+                  textDayFontFamily: 'Poppins_500Medium',
+                  textMonthFontFamily: 'Poppins_600SemiBold',
+                  textDayHeaderFontFamily: 'Poppins_500Medium',
+                  textDayFontSize: 14,
+                  textMonthFontSize: 16,
+                  textDayHeaderFontSize: 12
+                }}
+              />
+              {Object.keys(selectedDates).filter(d => selectedDates[d]?.selected).length > 0 && (
+                <View style={{ paddingHorizontal: 12, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
+                  <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 13 }}>
+                    {Object.keys(selectedDates).filter(d => selectedDates[d]?.selected).length} date(s) selected
+                  </Text>
+                </View>
+              )}
             </View>
 
             {/* Selected Dates with Time Slots */}
             {Object.entries(selectedDates).filter(([_, data]) => data.selected).length > 0 && (
               <View style={{ marginTop: 16 }}>
                 <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>
-                  SELECTED DATES
+                  SELECTED DATES (OVERRIDES WEEKLY SCHEDULE)
                 </Text>
                 {Object.entries(selectedDates)
                   .filter(([_, data]) => data.selected)
                   .sort(([a], [b]) => a.localeCompare(b))
                   .map(([dateStr, data]) => {
                     const date = new Date(dateStr + 'T00:00:00');
+                    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+                    const weeklySchedule = availability.find(a => a.day === dayName);
+                    const hasConflict = weeklySchedule && weeklySchedule.slots.length > 0;
+
+                    const toggleAmPm = (timeStr: string) => {
+                      const [time, period] = timeStr.split(' ');
+                      return `${time} ${period === 'AM' ? 'PM' : 'AM'}`;
+                    };
+
                     return (
-                      <View key={dateStr} style={[styles.selectedDateCard, { backgroundColor: isDark ? '#374151' : '#FFF', borderColor: colors.border }]}>
+                      <View key={dateStr} style={[styles.selectedDateCard, { backgroundColor: isDark ? '#374151' : '#FFF', borderColor: hasConflict ? '#F59E0B' : colors.border }]}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
-                            {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
+                              {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                            </Text>
+                            {hasConflict && (
+                              <View style={{ backgroundColor: '#F59E0B20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                <Text style={{ color: '#F59E0B', fontSize: 10, fontFamily: 'Poppins_500Medium' }}>Override</Text>
+                              </View>
+                            )}
+                          </View>
                           <TouchableOpacity onPress={() => {
                             const newDates = { ...selectedDates };
                             delete newDates[dateStr];
@@ -1142,11 +1718,108 @@ export default function EditStudioScreen() {
                             <Ionicons name="close-circle" size={20} color="#EF4444" />
                           </TouchableOpacity>
                         </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                            {data.slots[0]?.start} - {data.slots[0]?.end}
+
+                        {/* Editable Time Slots for Specific Date */}
+                        {data.slots.map((slot, slotIndex) => (
+                          <View key={slotIndex} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>START</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <TextInput
+                                  value={slot.start.split(' ')[0]}
+                                  onChangeText={(text) => {
+                                    const formatted = formatTimeInput(text);
+                                    const newDates = { ...selectedDates };
+                                    const period = slot.start.split(' ')[1] || 'AM';
+                                    newDates[dateStr].slots[slotIndex].start = `${formatted} ${period}`;
+                                    setSelectedDates(newDates);
+                                  }}
+                                  placeholder="09:00"
+                                  keyboardType="numeric"
+                                  maxLength={5}
+                                  style={[styles.timeInput, { backgroundColor: isDark ? '#1F2937' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                                />
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    const newDates = { ...selectedDates };
+                                    newDates[dateStr].slots[slotIndex].start = toggleAmPm(slot.start);
+                                    setSelectedDates(newDates);
+                                  }}
+                                  style={[styles.ampmBtn, { backgroundColor: isDark ? '#1F2937' : '#E5E7EB' }]}
+                                >
+                                  <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                                    {slot.start.split(' ')[1] || 'AM'}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                            <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} style={{ marginTop: 20 }} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>END</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <TextInput
+                                  value={slot.end.split(' ')[0]}
+                                  onChangeText={(text) => {
+                                    const formatted = formatTimeInput(text);
+                                    const newDates = { ...selectedDates };
+                                    const period = slot.end.split(' ')[1] || 'PM';
+                                    newDates[dateStr].slots[slotIndex].end = `${formatted} ${period}`;
+                                    setSelectedDates(newDates);
+                                  }}
+                                  placeholder="05:00"
+                                  keyboardType="numeric"
+                                  maxLength={5}
+                                  style={[styles.timeInput, { backgroundColor: isDark ? '#1F2937' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                                />
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    const newDates = { ...selectedDates };
+                                    newDates[dateStr].slots[slotIndex].end = toggleAmPm(slot.end);
+                                    setSelectedDates(newDates);
+                                  }}
+                                  style={[styles.ampmBtn, { backgroundColor: isDark ? '#1F2937' : '#E5E7EB' }]}
+                                >
+                                  <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
+                                    {slot.end.split(' ')[1] || 'PM'}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                            {data.slots.length > 1 && (
+                              <TouchableOpacity
+                                onPress={() => {
+                                  const newDates = { ...selectedDates };
+                                  newDates[dateStr].slots.splice(slotIndex, 1);
+                                  setSelectedDates(newDates);
+                                }}
+                                style={{ marginTop: 20 }}
+                              >
+                                <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        ))}
+
+                        {/* Add Slot Button for Specific Date */}
+                        {data.slots.length < 3 && (
+                          <TouchableOpacity
+                            onPress={() => {
+                              const newDates = { ...selectedDates };
+                              newDates[dateStr].slots.push({ start: '06:00 PM', end: '09:00 PM' });
+                              setSelectedDates(newDates);
+                            }}
+                            style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                          >
+                            <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
+                            <Text style={{ color: colors.primary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Time Slot</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {hasConflict && (
+                          <Text style={{ color: '#F59E0B', fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>
+                            ⚠️ This overrides weekly {dayName} schedule ({weeklySchedule.slots[0]?.start} - {weeklySchedule.slots[0]?.end})
                           </Text>
-                        </View>
+                        )}
                       </View>
                     );
                   })}
@@ -1155,9 +1828,10 @@ export default function EditStudioScreen() {
           </View>
 
           {/* Weekly Schedule Section */}
-          <Text style={[styles.sectionSubtitle, { color: colors.text, marginBottom: 12 }]}>
-            <Ionicons name="repeat" size={16} color={colors.primary} /> Weekly Schedule
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <Ionicons name="repeat" size={16} color={colors.primary} />
+            <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Weekly Schedule</Text>
+          </View>
           <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginBottom: 16 }}>
             Set recurring availability for each day of the week
           </Text>
@@ -1287,6 +1961,166 @@ export default function EditStudioScreen() {
             </View>
           ))}
 
+          {/* Booking Settings Section */}
+          <View style={{ marginTop: 24 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <Ionicons name="settings" size={16} color={colors.primary} />
+              <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Booking Settings</Text>
+            </View>
+
+            {/* Lead Time (Day Before Rule) */}
+            <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.dayLabel, { color: colors.text }]}>Advance Booking Required</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
+                    How many hours before can clients book?
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <TextInput
+                    value={leadTimeHours}
+                    onChangeText={(text) => setLeadTimeHours(text.replace(/[^0-9]/g, ''))}
+                    keyboardType="numeric"
+                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
+                  />
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>hours</Text>
+                </View>
+              </View>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>
+                💡 Set to 24 for "Day Before" booking rule
+              </Text>
+            </View>
+
+            {/* Weekend Pricing Multiplier */}
+            <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.dayLabel, { color: colors.text }]}>Weekend Rate</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
+                    Price multiplier for Sat-Sun
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <TextInput
+                    value={weekendMultiplier}
+                    onChangeText={(text) => setWeekendMultiplier(text.replace(/[^0-9.]/g, ''))}
+                    keyboardType="decimal-pad"
+                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
+                  />
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>×</Text>
+                </View>
+              </View>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>
+                💡 1.0 = no change, 1.2 = 20% higher
+              </Text>
+            </View>
+
+            {/* Peak Season Pricing */}
+            <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="trending-up" size={14} color="#EF4444" />
+                    <Text style={[styles.dayLabel, { color: colors.text }]}>Peak Season Rate</Text>
+                  </View>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
+                    Higher prices for busy periods (holidays, events)
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <TextInput
+                    value={peakSeasonMultiplier}
+                    onChangeText={(text) => setPeakSeasonMultiplier(text.replace(/[^0-9.]/g, ''))}
+                    keyboardType="decimal-pad"
+                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
+                  />
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>×</Text>
+                </View>
+              </View>
+
+              {peakSeasonDates.map((range, idx) => (
+                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: isDark ? '#374151' : '#FEE2E2', borderRadius: 8 }}>
+                  <Text style={{ color: '#EF4444', fontSize: 12, fontFamily: 'Poppins_500Medium', flex: 1 }}>
+                    {new Date(range.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(range.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </Text>
+                  <TouchableOpacity onPress={() => setPeakSeasonDates(peakSeasonDates.filter((_, i) => i !== idx))}>
+                    <Ionicons name="close-circle" size={18} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+
+              <TouchableOpacity
+                onPress={() => {
+                  const start = new Date();
+                  start.setMonth(start.getMonth() + 1, 1);
+                  const end = new Date(start);
+                  end.setDate(end.getDate() + 6);
+                  setPeakSeasonDates([...peakSeasonDates, {
+                    start: start.toISOString().split('T')[0],
+                    end: end.toISOString().split('T')[0]
+                  }]);
+                }}
+                style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+              >
+                <Ionicons name="add-circle-outline" size={16} color="#EF4444" />
+                <Text style={{ color: '#EF4444', fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Peak Season Period</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Off-Peak Pricing */}
+            <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="trending-down" size={14} color="#10B981" />
+                    <Text style={[styles.dayLabel, { color: colors.text }]}>Off-Peak Rate</Text>
+                  </View>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
+                    Discounted prices for slower periods
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <TextInput
+                    value={offPeakMultiplier}
+                    onChangeText={(text) => setOffPeakMultiplier(text.replace(/[^0-9.]/g, ''))}
+                    keyboardType="decimal-pad"
+                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
+                  />
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>×</Text>
+                </View>
+              </View>
+
+              {offPeakDates.map((range, idx) => (
+                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: isDark ? '#374151' : '#D1FAE5', borderRadius: 8 }}>
+                  <Text style={{ color: '#10B981', fontSize: 12, fontFamily: 'Poppins_500Medium', flex: 1 }}>
+                    {new Date(range.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(range.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </Text>
+                  <TouchableOpacity onPress={() => setOffPeakDates(offPeakDates.filter((_, i) => i !== idx))}>
+                    <Ionicons name="close-circle" size={18} color="#10B981" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+
+              <TouchableOpacity
+                onPress={() => {
+                  const start = new Date();
+                  start.setMonth(start.getMonth() + 2, 1);
+                  const end = new Date(start);
+                  end.setDate(end.getDate() + 6);
+                  setOffPeakDates([...offPeakDates, {
+                    start: start.toISOString().split('T')[0],
+                    end: end.toISOString().split('T')[0]
+                  }]);
+                }}
+                style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+              >
+                <Ionicons name="add-circle-outline" size={16} color="#10B981" />
+                <Text style={{ color: '#10B981', fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Off-Peak Period</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {renderSectionHeader('Visuals', 'image')}
           <ImageUploader
             images={selectedImages}
@@ -1304,6 +2138,7 @@ export default function EditStudioScreen() {
               style={[styles.saveButton, { backgroundColor: saving ? colors.textSecondary : colors.primary, shadowColor: colors.primary }]}
               onPress={handleSave}
               disabled={saving}
+              activeOpacity={0.8}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -1332,6 +2167,18 @@ export default function EditStudioScreen() {
         message={alertConfig.message}
         buttons={alertConfig.buttons}
         onClose={() => setAlertVisible(false)}
+      />
+
+      <ConflictResolutionModal
+        visible={conflictModalVisible}
+        conflicts={conflictingBookings}
+        studioName={studioName}
+        onClose={() => {
+          setConflictModalVisible(false);
+          setConflictingBookings([]);
+          setSaving(false);
+        }}
+        onResolve={handleConflictResolution}
       />
 
       <LocationPicker
@@ -1458,6 +2305,9 @@ export default function EditStudioScreen() {
                   </View>
                 ) : (
                   <TouchableOpacity
+                    onPress={pickEquipmentImage}
+                    disabled={uploadingEquipmentImage}
+                    activeOpacity={0.8}
                     style={{
                       backgroundColor: colors.inputBackground,
                       borderRadius: 12,
@@ -1468,8 +2318,14 @@ export default function EditStudioScreen() {
                       borderColor: isDark ? '#374151' : '#E5E7EB'
                     }}
                   >
-                    <Ionicons name="camera-outline" size={32} color={colors.textSecondary} />
-                    <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>Tap to add image</Text>
+                    {uploadingEquipmentImage ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <>
+                        <Ionicons name="camera-outline" size={32} color={colors.textSecondary} />
+                        <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>Tap to add image</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                 )}
               </View>
