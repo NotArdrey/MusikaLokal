@@ -1,1331 +1,1861 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Calendar } from 'react-native-calendars';
-import { supabase } from '../lib/supabase';
-import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import Header from '../src/components/header';
-import ImageUploader from '../src/components/ImageUploader';
-import LocationPicker from '../src/components/LocationPicker';
-import Modal from '../src/components/modal';
-import Navbar from '../src/components/navbar';
-import { useAuth } from '../src/context/AuthContext';
-import { useTheme } from '../src/context/ThemeContext';
+import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { Calendar } from "react-native-calendars";
+import { supabase } from "../lib/supabase";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import Header from "../src/components/header";
+import ImageUploader from "../src/components/ImageUploader";
+import LocationPicker from "../src/components/LocationPicker";
+import Modal from "../src/components/modal";
+import Navbar from "../src/components/navbar";
+import { useTheme } from "../src/context/ThemeContext";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
-    // Remove all non-digit characters except colon
-    let cleaned = text.replace(/[^0-9:]/g, '');
+  // Remove all non-digit characters except colon
+  let cleaned = text.replace(/[^0-9:]/g, "");
 
-    // Limit to 5 characters (HH:MM)
-    if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
+  // Limit to 5 characters (HH:MM)
+  if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
 
-    // Auto-add colon after 2 digits
-    if (cleaned.length === 2 && !cleaned.includes(':')) {
-        cleaned = cleaned + ':';
+  // Auto-add colon after 2 digits
+  if (cleaned.length === 2 && !cleaned.includes(":")) {
+    cleaned = cleaned + ":";
+  }
+
+  // If user types more than 2 digits before colon, insert colon
+  if (cleaned.length > 2 && !cleaned.includes(":")) {
+    cleaned = cleaned.substring(0, 2) + ":" + cleaned.substring(2);
+  }
+
+  // Validate hour (01-12)
+  const parts = cleaned.split(":");
+  if (parts[0] && parts[0].length === 2) {
+    const hour = parseInt(parts[0]);
+    if (hour < 1 || hour > 12) {
+      return cleaned.substring(0, 1);
     }
+  }
 
-    // If user types more than 2 digits before colon, insert colon
-    if (cleaned.length > 2 && !cleaned.includes(':')) {
-        cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
+  // Validate minute (00-59)
+  if (parts[1] && parts[1].length === 2) {
+    const minute = parseInt(parts[1]);
+    if (minute > 59) {
+      return parts[0] + ":" + parts[1].substring(0, 1);
     }
+  }
 
-    // Validate hour (01-12)
-    const parts = cleaned.split(':');
-    if (parts[0] && parts[0].length === 2) {
-        const hour = parseInt(parts[0]);
-        if (hour < 1 || hour > 12) {
-            return cleaned.substring(0, 1);
-        }
-    }
-
-    // Validate minute (00-59)
-    if (parts[1] && parts[1].length === 2) {
-        const minute = parseInt(parts[1]);
-        if (minute > 59) {
-            return parts[0] + ':' + parts[1].substring(0, 1);
-        }
-    }
-
-    return cleaned;
+  return cleaned;
 };
 
 export default function AddGigScreen() {
-    const { colors, isDark } = useTheme();
-    const { isSystemLocked, showLockAlert } = useAuth();
-    const [step, setStep] = useState(1);
-    const [gigName, setGigName] = useState('');
-    const [description, setDescription] = useState('');
-    const [address, setAddress] = useState('');
-    const [latitude, setLatitude] = useState<number | null>(null);
-    const [longitude, setLongitude] = useState<number | null>(null);
-    const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-    const [cost, setCost] = useState('');
-    const [eventDate, setEventDate] = useState('');
-    const [eventStartTime, setEventStartTime] = useState('06:00 PM');
-    const [eventEndTime, setEventEndTime] = useState('11:00 PM');
-    const [modalVisible, setModalVisible] = useState(false);
-    const [authorized, setAuthorized] = useState(false);
-    const [checkingAuth, setCheckingAuth] = useState(true);
+  const { colors, isDark } = useTheme();
+  const [step, setStep] = useState(1);
+  const [gigName, setGigName] = useState("");
+  const [description, setDescription] = useState("");
+  const [address, setAddress] = useState("");
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  const [cost, setCost] = useState("");
+  const [eventDate, setEventDate] = useState("");
+  const [eventStartTime, setEventStartTime] = useState("06:00 PM");
+  const [eventEndTime, setEventEndTime] = useState("11:00 PM");
+  const [modalVisible, setModalVisible] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
-    // Custom Alert State
-    const [alertVisible, setAlertVisible] = useState(false);
-    const [alertConfig, setAlertConfig] = useState<{
-        type: AlertType;
-        title: string;
-        message: string;
-        buttons?: any[];
-    }>({
-        type: 'info',
-        title: '',
-        message: '',
-    });
+  // Custom Alert State
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
 
-    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
-        setAlertConfig({ type, title, message, buttons });
-        setAlertVisible(true);
-    };
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: any[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
-    // Images state
-    const [images, setImages] = useState<string[]>([]);
-    const [thumbnailIndex, setThumbnailIndex] = useState(0);
+  // Images state
+  const [images, setImages] = useState<string[]>([]);
+  const [thumbnailIndex, setThumbnailIndex] = useState(0);
 
-    // Contract state
-    const [contractUrl, setContractUrl] = useState<string>('');
-    const [contractFileName, setContractFileName] = useState<string>('');
-    const [uploadingContract, setUploadingContract] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+  // Contract state
+  const [contractUrl, setContractUrl] = useState<string>("");
+  const [contractFileName, setContractFileName] = useState<string>("");
+  const [uploadingContract, setUploadingContract] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Requirements state
-    const [requiredGenres, setRequiredGenres] = useState<string[]>([]);
-    const [newGenre, setNewGenre] = useState('');
-    const [requiredInstruments, setRequiredInstruments] = useState<string[]>([]);
-    const [newInstrument, setNewInstrument] = useState('');
-    const [experienceLevel, setExperienceLevel] = useState('');
-    const [musicianType, setMusicianType] = useState<'solo' | 'group' | 'both'>('both');
+  // Requirements state
+  const [requiredGenres, setRequiredGenres] = useState<string[]>([]);
+  const [newGenre, setNewGenre] = useState("");
+  const [requiredInstruments, setRequiredInstruments] = useState<string[]>([]);
+  const [newInstrument, setNewInstrument] = useState("");
+  const [experienceLevel, setExperienceLevel] = useState("");
+  const [musicianType, setMusicianType] = useState<"solo" | "group" | "both">(
+    "both",
+  );
 
-    // Form Steps Configuration
-    const steps = [
-        { id: 1, title: 'Gig Details', icon: 'information-circle' },
-        { id: 2, title: 'Needs', icon: 'list' },
-        { id: 3, title: 'Review', icon: 'checkmark-circle' },
-    ];
+  // Form Steps Configuration
+  const steps = [
+    { id: 1, title: "Gig Details", icon: "information-circle" },
+    { id: 2, title: "Needs", icon: "list" },
+    { id: 3, title: "Review", icon: "checkmark-circle" },
+  ];
 
-    // Role-based access control
-    useEffect(() => {
-        checkAuthorization();
-    }, []);
+  // Role-based access control
+  useEffect(() => {
+    checkAuthorization();
+  }, []);
 
-    const checkAuthorization = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) {
-                router.replace('/');
-                return;
-            }
+  const checkAuthorization = async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace("/");
+        return;
+      }
 
-            const { data: profile } = await supabase.functions.invoke('manage-profile', {
-                body: { action: 'fetch', userId: user.id }
-            });
+      const { data: profile } = await supabase.functions.invoke(
+        "manage-profile",
+        {
+          body: { action: "fetch", userId: user.id },
+        },
+      );
 
-            if (profile?.role !== 'venue-owner') {
-                Alert.alert('Unauthorized', 'Only venue owners can create gigs.');
-                router.replace('/home');
-                return;
-            }
+      if (profile?.role !== "venue-owner") {
+        Alert.alert("Unauthorized", "Only venue owners can create gigs.");
+        router.replace("/home");
+        return;
+      }
 
-            setAuthorized(true);
-        } catch (e) {
-            console.error('Authorization check failed:', e);
-            router.replace('/home');
-        } finally {
-            setCheckingAuth(false);
-        }
-    };
+      setAuthorized(true);
+    } catch (e) {
+      console.error("Authorization check failed:", e);
+      router.replace("/home");
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
 
-    const [creating, setCreating] = useState(false);
-    const [newGigId, setNewGigId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newGigId, setNewGigId] = useState<string | null>(null);
 
-    const validateStep = (currentStep: number): boolean => {
-        if (currentStep === 1) {
-            if (!gigName.trim()) {
-                showAlert('error', 'Required Field', 'Please enter a gig name');
-                return false;
-            }
-            if (!description.trim()) {
-                showAlert('error', 'Required Field', 'Please enter a description');
-                return false;
-            }
-            if (!address || !latitude || !longitude) {
-                showAlert('error', 'Required Field', 'Please select a location on the map');
-                return false;
-            }
-            if (!cost.trim() || parseFloat(cost) <= 0) {
-                showAlert('error', 'Required Field', 'Please enter a valid budget/fee');
-                return false;
-            }
-            if (images.length === 0) {
-                showAlert('error', 'Required Field', 'Please upload at least one event photo');
-                return false;
-            }
-            if (!eventDate.trim()) {
-                showAlert('error', 'Required Field', 'Please select an event date');
-                return false;
-            }
-            if (!eventStartTime || !eventEndTime) {
-                showAlert('error', 'Required Field', 'Please set event start and end times');
-                return false;
-            }
-        }
-        return true;
-    };
-
-    const handleNext = async () => {
-        if (!validateStep(step)) {
-            return;
-        }
-
-        if (step < 3) {
-            setStep(step + 1);
-        } else {
-            // System lock check
-            if (isSystemLocked) {
-                showLockAlert();
-                return;
-            }
-
-            // Confirmation before creating
-            showAlert(
-                'warning',
-                'Confirm Gig Creation',
-                'Are you sure you want to create this gig? Please review all details before proceeding.',
-                [
-                    { text: 'Cancel', style: 'cancel', onPress: () => { } },
-                    { text: 'Create', style: 'default', onPress: () => createGig() }
-                ]
-            );
-        }
-    };
-
-    const handleBack = () => {
-        if (step > 1) setStep(step - 1);
-        else router.back();
-    };
-
-    const createGig = async () => {
-        if (creating) return;
-        setCreating(true);
-
-        try {
-            // Refresh session to ensure valid token
-            const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
-            if (sessionError || !session || !session.user) {
-                showAlert('error', 'Session Expired', 'Please log in again.');
-                router.replace('/');
-                return;
-            }
-
-            const orderedImages = images.length > 0 && images[thumbnailIndex]
-                ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
-                : images;
-
-            const payload = {
-                name: gigName,
-                description,
-                location: address,
-                budget: parseFloat(cost) || 0,
-                status: 'open',
-                images: orderedImages,
-                contract_url: contractUrl || null,
-                latitude,
-                longitude,
-                event_date: eventDate,
-                requirements: {
-                    genres: requiredGenres,
-                    instruments: requiredInstruments,
-                    experience_level: experienceLevel || null,
-                    event_start_time: eventStartTime,
-                    event_end_time: eventEndTime,
-                    musician_type: musicianType,
-                },
-            };
-
-            console.log('🔵 ===== CREATING GIG =====');
-            console.log('🔵 Payload being sent:', JSON.stringify(payload, null, 2));
-            console.log('🔵 Requirements being sent:', JSON.stringify(payload.requirements, null, 2));
-            console.log('🔵 Genres:', requiredGenres);
-            console.log('🔵 Instruments:', requiredInstruments);
-            console.log('🔵 Experience Level:', experienceLevel);
-            console.log('🔵 Event Start Time:', eventStartTime);
-            console.log('🔵 Event End Time:', eventEndTime);
-            console.log('🔵 Musician Type:', musicianType);
-
-            const { data, error } = await supabase.functions.invoke('manage-listings', {
-                body: { action: 'create', type: 'gig', userId: session.user.id, payload }
-            });
-
-            console.log('📥 Response data:', JSON.stringify(data, null, 2));
-            console.log('📥 Response error:', error);
-            if (data) {
-                console.log('📥 Created gig requirements saved:', JSON.stringify(data.requirements, null, 2));
-            }
-
-            // When there's a FunctionsHttpError, the actual error details are in the data field
-            if (error) {
-                console.error('❌ Error details:', JSON.stringify(error, null, 2));
-                console.error('❌ Function response data:', JSON.stringify(data, null, 2));
-
-                // The actual error message from the Edge Function is in data
-                if (data && typeof data === 'object') {
-                    const errorMsg = (data as any).error || (data as any).message || 'Unknown function error';
-                    const errorDetails = (data as any).details || '';
-                    const errorHint = (data as any).hint || '';
-                    console.error('❌ Actual error from function:', errorMsg);
-                    console.error('❌ Error details:', errorDetails);
-                    console.error('❌ Error hint:', errorHint);
-                    Alert.alert('Error', `Failed to create gig: ${errorMsg}${errorHint ? '\n\nHint: ' + errorHint : ''}`);
-                    return;
-                }
-                throw error;
-            }
-
-            setNewGigId(data.id);
-            setModalVisible(true);
-            console.log('✅ Gig Created successfully');
-        } catch (e: any) {
-            console.error('❌ Error creating gig:', e);
-            console.error('❌ Error message:', e?.message);
-            console.error('❌ Error stack:', e?.stack);
-            console.error('❌ Full error object:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
-            showAlert('error', 'Error', `Failed to create gig: ${e?.message || 'Unknown error'}`);
-        } finally {
-            setCreating(false);
-        }
-    };
-
-    const handleSuccessRedirect = () => {
-        setModalVisible(false);
-        if (newGigId) {
-            router.replace({ pathname: '/manage_gig', params: { id: newGigId } });
-        } else {
-            router.back();
-        }
-    };
-
-    // Show loading while checking authorization
-    if (checkingAuth) {
-        return (
-            <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
-                    Checking permissions...
-                </Text>
-            </View>
+  const validateStep = (currentStep: number): boolean => {
+    if (currentStep === 1) {
+      if (!gigName.trim()) {
+        showAlert("error", "Required Field", "Please enter a gig name");
+        return false;
+      }
+      if (!description.trim()) {
+        showAlert("error", "Required Field", "Please enter a description");
+        return false;
+      }
+      if (!address || !latitude || !longitude) {
+        showAlert(
+          "error",
+          "Required Field",
+          "Please select a location on the map",
         );
+        return false;
+      }
+      if (!cost.trim() || parseFloat(cost) <= 0) {
+        showAlert(
+          "error",
+          "Required Field",
+          "Please enter a valid payout amount",
+        );
+        return false;
+      }
+      if (images.length === 0) {
+        showAlert(
+          "error",
+          "Required Field",
+          "Please upload at least one event photo",
+        );
+        return false;
+      }
+      if (!eventDate.trim()) {
+        showAlert("error", "Required Field", "Please select an event date");
+        return false;
+      }
+      if (!eventStartTime || !eventEndTime) {
+        showAlert(
+          "error",
+          "Required Field",
+          "Please set event start and end times",
+        );
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleNext = async () => {
+    if (!validateStep(step)) {
+      return;
     }
 
-    // Don't render if not authorized
-    if (!authorized) {
-        return null;
+    if (step < 3) {
+      setStep(step + 1);
+    } else {
+      // Confirmation before creating
+      showAlert(
+        "warning",
+        "Confirm Gig Creation",
+        "Are you sure you want to create this gig? Please review all details before proceeding.",
+        [
+          { text: "Cancel", style: "cancel", onPress: () => {} },
+          { text: "Create", style: "default", onPress: () => createGig() },
+        ],
+      );
     }
+  };
 
-    const renderInput = (label: string, value: string, setValue: (text: string) => void, placeholder: string, multiline = false, keyboardType: any = 'default') => (
-        <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{label}</Text>
-            <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                <TextInput
-                    value={value}
-                    onChangeText={setValue}
-                    placeholder={placeholder}
-                    placeholderTextColor={colors.textSecondary}
-                    multiline={multiline}
-                    numberOfLines={multiline ? 4 : 1}
-                    keyboardType={keyboardType}
-                    style={[
-                        styles.textInput,
-                        {
-                            color: colors.text,
-                            height: multiline ? 120 : 'auto',
-                            textAlignVertical: multiline ? 'top' : 'center'
-                        }
-                    ]}
-                />
-            </View>
-        </View>
-    );
+  const handleBack = () => {
+    if (step > 1) setStep(step - 1);
+    else router.back();
+  };
 
-    const handleContractUpload = async () => {
-        try {
-            setUploadingContract(true);
+  const createGig = async () => {
+    if (creating) return;
+    setCreating(true);
 
-            if (Platform.OS === 'web') {
-                if (fileInputRef.current) {
-                    fileInputRef.current.click();
-                }
-                setUploadingContract(false);
-                return;
-            }
+    try {
+      // Refresh session to ensure valid token
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.refreshSession();
+      if (sessionError || !session || !session.user) {
+        showAlert("error", "Session Expired", "Please log in again.");
+        router.replace("/");
+        return;
+      }
 
-            // Dynamic import for native platforms only
-            const DocumentPicker = await import('expo-document-picker');
-            const result = await DocumentPicker.getDocumentAsync({
-                type: 'application/pdf',
-                copyToCacheDirectory: true,
-            });
+      const payload = {
+        name: gigName,
+        description,
+        location: address,
+        budget: parseFloat(cost) || 0,
+        status: "open",
+        images: images,
+        contract_url: contractUrl || null,
+        latitude,
+        longitude,
+        event_date: eventDate,
+        requirements: {
+          genres: requiredGenres,
+          instruments: requiredInstruments,
+          experience_level: experienceLevel || null,
+          event_start_time: eventStartTime,
+          event_end_time: eventEndTime,
+          musician_type: musicianType,
+        },
+      };
 
-            if (result.canceled) {
-                setUploadingContract(false);
-                return;
-            }
+      console.log(
+        "🔵 Creating gig with payload:",
+        JSON.stringify(
+          { action: "create", type: "gig", userId: session.user.id, payload },
+          null,
+          2,
+        ),
+      );
 
-            const file = result.assets[0];
-            const fileName = file.name;
-            const fileUri = file.uri;
+      const { data, error } = await supabase.functions.invoke(
+        "manage-listings",
+        {
+          body: {
+            action: "create",
+            type: "gig",
+            userId: session.user.id,
+            payload,
+          },
+        },
+      );
 
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                Alert.alert('Error', 'Session expired. Please log in again.');
-                setUploadingContract(false);
-                return;
-            }
+      console.log("🔵 Response data:", JSON.stringify(data, null, 2));
+      console.log("🔵 Response error:", error);
 
-            const response = await fetch(fileUri);
-            const arrayBuffer = await response.arrayBuffer();
-            const bytes = new Uint8Array(arrayBuffer);
+      // When there's a FunctionsHttpError, the actual error details are in the data field
+      if (error) {
+        console.error("❌ Error details:", JSON.stringify(error, null, 2));
+        console.error(
+          "❌ Function response data:",
+          JSON.stringify(data, null, 2),
+        );
 
-            const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
-            const { data, error } = await supabase.storage
-                .from('documents')
-                .upload(filePath, bytes, {
-                    contentType: 'application/pdf',
-                    upsert: false,
-                });
-
-            if (error) throw error;
-
-            const { data: { publicUrl } } = supabase.storage
-                .from('documents')
-                .getPublicUrl(filePath);
-
-            setContractUrl(publicUrl);
-            setContractFileName(fileName);
-            showAlert('success', 'Success', 'Contract uploaded successfully!');
-        } catch (error) {
-            console.error('Error uploading contract:', error);
-            showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
-        } finally {
-            setUploadingContract(false);
+        // The actual error message from the Edge Function is in data
+        if (data && typeof data === "object") {
+          const errorMsg =
+            (data as any).error ||
+            (data as any).message ||
+            "Unknown function error";
+          const errorDetails = (data as any).details || "";
+          const errorHint = (data as any).hint || "";
+          console.error("❌ Actual error from function:", errorMsg);
+          console.error("❌ Error details:", errorDetails);
+          console.error("❌ Error hint:", errorHint);
+          Alert.alert(
+            "Error",
+            `Failed to create gig: ${errorMsg}${errorHint ? "\n\nHint: " + errorHint : ""}`,
+          );
+          return;
         }
-    };
+        throw error;
+      }
 
-    const removeContract = () => {
-        setContractUrl('');
-        setContractFileName('');
-    };
+      setNewGigId(data.id);
+      setModalVisible(true);
+      console.log("✅ Gig Created successfully");
+    } catch (e: any) {
+      console.error("❌ Error creating gig:", e);
+      console.error("❌ Error message:", e?.message);
+      console.error("❌ Error stack:", e?.stack);
+      console.error(
+        "❌ Full error object:",
+        JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
+      );
+      showAlert(
+        "error",
+        "Error",
+        `Failed to create gig: ${e?.message || "Unknown error"}`,
+      );
+    } finally {
+      setCreating(false);
+    }
+  };
 
-    const handleWebFileSelect = async (event: any) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
+  const handleSuccessRedirect = () => {
+    setModalVisible(false);
+    if (newGigId) {
+      router.replace({ pathname: "/manage_gig", params: { id: newGigId } });
+    } else {
+      router.back();
+    }
+  };
 
-        try {
-            setUploadingContract(true);
-            const fileName = file.name;
-
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                Alert.alert('Error', 'Session expired. Please log in again.');
-                setUploadingContract(false);
-                return;
-            }
-
-            const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
-            const { data, error } = await supabase.storage
-                .from('documents')
-                .upload(filePath, file, {
-                    contentType: 'application/pdf',
-                    upsert: false,
-                });
-
-            if (error) throw error;
-
-            const { data: { publicUrl } } = supabase.storage
-                .from('documents')
-                .getPublicUrl(filePath);
-
-            setContractUrl(publicUrl);
-            setContractFileName(fileName);
-            Alert.alert('Success', 'Contract uploaded successfully!');
-        } catch (error) {
-            console.error('Error uploading contract:', error);
-            Alert.alert('Error', 'Failed to upload contract. Please try again.');
-        } finally {
-            setUploadingContract(false);
-            if (event.target) {
-                event.target.value = '';
-            }
-        }
-    };
-
+  // Show loading while checking authorization
+  if (checkingAuth) {
     return (
-        <>
-            {Platform.OS === 'web' && (
-                <input
-                    ref={fileInputRef as any}
-                    type="file"
-                    accept="application/pdf"
-                    onChange={handleWebFileSelect}
-                    style={{ display: 'none' }}
+      <View
+        style={[
+          styles.flex1,
+          styles.centerContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text
+          style={{
+            marginTop: 16,
+            color: colors.textSecondary,
+            fontFamily: "Poppins_400Regular",
+          }}
+        >
+          Checking permissions...
+        </Text>
+      </View>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!authorized) {
+    return null;
+  }
+
+  const renderInput = (
+    label: string,
+    value: string,
+    setValue: (text: string) => void,
+    placeholder: string,
+    multiline = false,
+    keyboardType: any = "default",
+  ) => (
+    <View style={styles.inputContainer}>
+      <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+        {label}
+      </Text>
+      <View
+        style={[
+          styles.inputWrapper,
+          {
+            backgroundColor: colors.inputBackground,
+            borderColor: isDark ? "#374151" : "#E5E7EB",
+          },
+        ]}
+      >
+        <TextInput
+          value={value}
+          onChangeText={setValue}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textSecondary}
+          multiline={multiline}
+          numberOfLines={multiline ? 4 : 1}
+          keyboardType={keyboardType}
+          style={[
+            styles.textInput,
+            {
+              color: colors.text,
+              height: multiline ? 120 : "auto",
+              textAlignVertical: multiline ? "top" : "center",
+            },
+          ]}
+        />
+      </View>
+    </View>
+  );
+
+  const handleContractUpload = async () => {
+    try {
+      setUploadingContract(true);
+
+      if (Platform.OS === "web") {
+        if (fileInputRef.current) {
+          fileInputRef.current.click();
+        }
+        setUploadingContract(false);
+        return;
+      }
+
+      // Dynamic import for native platforms only
+      const DocumentPicker = await import("expo-document-picker");
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "application/pdf",
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        setUploadingContract(false);
+        return;
+      }
+
+      const file = result.assets[0];
+      const fileName = file.name;
+      const fileUri = file.uri;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        Alert.alert("Error", "Session expired. Please log in again.");
+        setUploadingContract(false);
+        return;
+      }
+
+      const response = await fetch(fileUri);
+      const arrayBuffer = await response.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .upload(filePath, bytes, {
+          contentType: "application/pdf",
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+      setContractUrl(publicUrl);
+      setContractFileName(fileName);
+      showAlert("success", "Success", "Contract uploaded successfully!");
+    } catch (error) {
+      console.error("Error uploading contract:", error);
+      showAlert(
+        "error",
+        "Error",
+        "Failed to upload contract. Please try again.",
+      );
+    } finally {
+      setUploadingContract(false);
+    }
+  };
+
+  const removeContract = () => {
+    setContractUrl("");
+    setContractFileName("");
+  };
+
+  const handleWebFileSelect = async (event: any) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingContract(true);
+      const fileName = file.name;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        Alert.alert("Error", "Session expired. Please log in again.");
+        setUploadingContract(false);
+        return;
+      }
+
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .upload(filePath, file, {
+          contentType: "application/pdf",
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+      setContractUrl(publicUrl);
+      setContractFileName(fileName);
+      Alert.alert("Success", "Contract uploaded successfully!");
+    } catch (error) {
+      console.error("Error uploading contract:", error);
+      Alert.alert("Error", "Failed to upload contract. Please try again.");
+    } finally {
+      setUploadingContract(false);
+      if (event.target) {
+        event.target.value = "";
+      }
+    }
+  };
+
+  return (
+    <>
+      {Platform.OS === "web" && (
+        <input
+          ref={fileInputRef as any}
+          type="file"
+          accept="application/pdf"
+          onChange={handleWebFileSelect}
+          style={{ display: "none" }}
+        />
+      )}
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+        <Header title="Create Gig" />
+
+        {/* Enhanced Step Indicator (Fixed at top) */}
+        <View style={styles.stepIndicatorContainer}>
+          <View style={styles.stepIndicatorContent}>
+            {/* Progress Line Background */}
+            <View
+              style={[
+                styles.progressLineBg,
+                { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+              ]}
+            />
+
+            {/* Active Progress Line */}
+            <View
+              style={[
+                styles.activeProgressLine,
+                {
+                  width: `${((step - 1) / (steps.length - 1)) * 100}%`,
+                  backgroundColor: colors.primary,
+                },
+              ]}
+            />
+
+            {steps.map((s) => {
+              const isActive = step >= s.id;
+              const isCurrent = step === s.id;
+              return (
+                <View key={s.id} style={styles.stepItem}>
+                  <View
+                    style={[
+                      styles.stepCircle,
+                      {
+                        backgroundColor: isActive
+                          ? colors.primary
+                          : isDark
+                            ? "#334155"
+                            : "#E5E7EB",
+                        borderColor: isActive
+                          ? "#818cf8"
+                          : isDark
+                            ? "#1E293B"
+                            : "#F3F4F6", // using primaryLight approx
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={isActive ? "checkmark" : (s.icon as any)}
+                      size={18}
+                      color={isActive ? "#fff" : colors.textSecondary}
+                    />
+                  </View>
+                  <Text
+                    style={[
+                      styles.stepText,
+                      {
+                        fontFamily: isCurrent
+                          ? "Poppins_600SemiBold"
+                          : "Poppins_400Regular",
+                        color: isActive ? colors.text : colors.textSecondary,
+                        fontWeight: isCurrent ? "bold" : "normal",
+                      },
+                    ]}
+                  >
+                    {s.title}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        <ScrollView
+          style={styles.formContainer}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+        >
+          {step === 1 && (
+            <View>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                Gig Information
+              </Text>
+              {renderInput(
+                "Event Name",
+                gigName,
+                setGigName,
+                "e.g. Saturday Night Live",
+              )}
+              {renderInput(
+                "Description",
+                description,
+                setDescription,
+                "Brief description of the gig",
+                true,
+              )}
+
+              {/* Image Upload */}
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Event Photos
+                </Text>
+                <ImageUploader
+                  images={images}
+                  onImagesChange={setImages}
+                  thumbnailIndex={thumbnailIndex}
+                  onThumbnailChange={setThumbnailIndex}
+                  maxImages={10}
+                  bucketName="listings"
+                  userId={newGigId || "temp"}
+                  folder="gigs"
                 />
-            )}
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="Create Gig" />
+              </View>
 
-                {/* Enhanced Step Indicator (Fixed at top) */}
-                <View style={styles.stepIndicatorContainer}>
-                    <View style={styles.stepIndicatorContent}>
-                        {/* Progress Line Background */}
-                        <View style={[styles.progressLineBg, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Venue / Location
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setLocationPickerVisible(true)}
+                  style={[
+                    styles.inputWrapper,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: isDark ? "#374151" : "#E5E7EB",
+                      padding: 16,
+                    },
+                  ]}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <Ionicons
+                      name="location-outline"
+                      size={20}
+                      color={colors.textSecondary}
+                    />
+                    <Text
+                      style={{
+                        flex: 1,
+                        color: address ? colors.text : colors.textSecondary,
+                        fontFamily: "Poppins_400Regular",
+                      }}
+                    >
+                      {address || "Tap to select location on map"}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
 
-                        {/* Active Progress Line */}
-                        <View
-                            style={[
-                                styles.activeProgressLine,
-                                {
-                                    width: `${((step - 1) / (steps.length - 1)) * 100}%`,
-                                    backgroundColor: colors.primary
-                                }
-                            ]}
-                        />
+              {renderInput(
+                "Payout (PHP)",
+                cost,
+                setCost,
+                "e.g. 5000",
+                false,
+                "numeric",
+              )}
 
-                        {steps.map((s) => {
-                            const isActive = step >= s.id;
-                            const isCurrent = step === s.id;
-                            return (
-                                <View key={s.id} style={styles.stepItem}>
-                                    <View
-                                        style={[
-                                            styles.stepCircle,
-                                            {
-                                                backgroundColor: isActive ? colors.primary : (isDark ? '#334155' : '#E5E7EB'),
-                                                borderColor: isActive ? '#818cf8' : (isDark ? '#1E293B' : '#F3F4F6') // using primaryLight approx
-                                            }
-                                        ]}
-                                    >
-                                        <Ionicons
-                                            name={isActive ? "checkmark" : s.icon as any}
-                                            size={18}
-                                            color={isActive ? "#fff" : colors.textSecondary}
-                                        />
-                                    </View>
-                                    <Text
-                                        style={[
-                                            styles.stepText,
-                                            {
-                                                fontFamily: isCurrent ? 'Poppins_600SemiBold' : 'Poppins_400Regular',
-                                                color: isActive ? colors.text : colors.textSecondary,
-                                                fontWeight: isCurrent ? 'bold' : 'normal'
-                                            }
-                                        ]}
-                                    >
-                                        {s.title}
-                                    </Text>
-                                </View>
-                            );
+              {/* Event Date & Time Section */}
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Event Date
+                </Text>
+                <View
+                  style={[
+                    styles.calendarContainer,
+                    {
+                      backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <Calendar
+                    current={new Date().toISOString().split("T")[0]}
+                    minDate={new Date().toISOString().split("T")[0]}
+                    markedDates={{
+                      [eventDate]: {
+                        selected: true,
+                        selectedColor: colors.primary,
+                        selectedTextColor: "#FFFFFF",
+                      },
+                    }}
+                    onDayPress={(day) => {
+                      setEventDate(day.dateString);
+                    }}
+                    theme={{
+                      backgroundColor: "transparent",
+                      calendarBackground: "transparent",
+                      textSectionTitleColor: colors.textSecondary,
+                      selectedDayBackgroundColor: colors.primary,
+                      selectedDayTextColor: "#FFFFFF",
+                      todayTextColor: colors.primary,
+                      dayTextColor: colors.text,
+                      textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
+                      dotColor: colors.primary,
+                      selectedDotColor: "#FFFFFF",
+                      arrowColor: colors.primary,
+                      monthTextColor: colors.text,
+                      indicatorColor: colors.primary,
+                      textDayFontFamily: "Poppins_500Medium",
+                      textMonthFontFamily: "Poppins_600SemiBold",
+                      textDayHeaderFontFamily: "Poppins_500Medium",
+                      textDayFontSize: 14,
+                      textMonthFontSize: 16,
+                      textDayHeaderFontSize: 12,
+                    }}
+                  />
+                  {eventDate && (
+                    <View
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingBottom: 12,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <Ionicons
+                        name="calendar"
+                        size={16}
+                        color={colors.primary}
+                      />
+                      <Text
+                        style={{
+                          color: colors.text,
+                          fontFamily: "Poppins_600SemiBold",
+                        }}
+                      >
+                        Selected:{" "}
+                        {new Date(eventDate).toLocaleDateString("en-US", {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
                         })}
+                      </Text>
                     </View>
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Event Time
+                </Text>
+                <View
+                  style={[
+                    styles.dayCard,
+                    {
+                      backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                      borderColor: colors.border,
+                      padding: 16,
+                    },
+                  ]}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          marginBottom: 4,
+                          fontFamily: "Poppins_600SemiBold",
+                        }}
+                      >
+                        START TIME
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <TextInput
+                          value={eventStartTime.split(" ")[0]}
+                          onChangeText={(text) => {
+                            const formatted = formatTimeInput(text);
+                            const period = eventStartTime.split(" ")[1];
+                            setEventStartTime(`${formatted} ${period}`);
+                          }}
+                          placeholder="06:00"
+                          keyboardType="numeric"
+                          maxLength={5}
+                          style={[
+                            styles.timeInput,
+                            {
+                              backgroundColor: isDark ? "#374151" : "white",
+                              borderColor: colors.border,
+                              color: colors.text,
+                              flex: 1,
+                            },
+                          ]}
+                        />
+                        <TouchableOpacity
+                          onPress={() => {
+                            const [time, period] = eventStartTime.split(" ");
+                            setEventStartTime(
+                              `${time} ${period === "AM" ? "PM" : "AM"}`,
+                            );
+                          }}
+                          style={[
+                            styles.ampmBtn,
+                            { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                          ]}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontFamily: "Poppins_600SemiBold",
+                              color: colors.text,
+                            }}
+                          >
+                            {eventStartTime.split(" ")[1]}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <Ionicons
+                      name="arrow-forward"
+                      size={20}
+                      color={colors.textSecondary}
+                      style={{ marginTop: 20 }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          marginBottom: 4,
+                          fontFamily: "Poppins_600SemiBold",
+                        }}
+                      >
+                        END TIME
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <TextInput
+                          value={eventEndTime.split(" ")[0]}
+                          onChangeText={(text) => {
+                            const formatted = formatTimeInput(text);
+                            const period = eventEndTime.split(" ")[1];
+                            setEventEndTime(`${formatted} ${period}`);
+                          }}
+                          placeholder="11:00"
+                          keyboardType="numeric"
+                          maxLength={5}
+                          style={[
+                            styles.timeInput,
+                            {
+                              backgroundColor: isDark ? "#374151" : "white",
+                              borderColor: colors.border,
+                              color: colors.text,
+                              flex: 1,
+                            },
+                          ]}
+                        />
+                        <TouchableOpacity
+                          onPress={() => {
+                            const [time, period] = eventEndTime.split(" ");
+                            setEventEndTime(
+                              `${time} ${period === "AM" ? "PM" : "AM"}`,
+                            );
+                          }}
+                          style={[
+                            styles.ampmBtn,
+                            { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                          ]}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontFamily: "Poppins_600SemiBold",
+                              color: colors.text,
+                            }}
+                          >
+                            {eventEndTime.split(" ")[1]}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              {/* Contract Upload */}
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Custom Contract
+                </Text>
+                <Text
+                  style={[
+                    styles.inputSubLabel,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Upload a PDF contract that musicians will see before applying
+                </Text>
+                {contractUrl ? (
+                  <View
+                    style={[
+                      styles.contractPreview,
+                      {
+                        backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                      },
+                    ]}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 12,
+                        flex: 1,
+                      }}
+                    >
+                      <View
+                        style={[
+                          styles.pdfIcon,
+                          { backgroundColor: colors.primary },
+                        ]}
+                      >
+                        <Ionicons name="document-text" size={24} color="#fff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.contractFileName,
+                            { color: colors.text },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {contractFileName}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.contractFileSize,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          PDF Document
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      onPress={removeContract}
+                      style={styles.removeContractBtn}
+                    >
+                      <Ionicons
+                        name="trash-outline"
+                        size={20}
+                        color="#EF4444"
+                      />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={handleContractUpload}
+                    disabled={uploadingContract}
+                    activeOpacity={0.8}
+                    style={[
+                      styles.uploadContractBtn,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                      },
+                    ]}
+                  >
+                    {uploadingContract ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="cloud-upload-outline"
+                          size={32}
+                          color={colors.textSecondary}
+                        />
+                        <Text
+                          style={[styles.uploadText, { color: colors.text }]}
+                        >
+                          Upload Contract (PDF)
+                        </Text>
+                        <Text
+                          style={[
+                            styles.uploadSubText,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Tap to browse files
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          )}
+
+          {step === 2 && (
+            <View>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                Needs
+              </Text>
+
+              {/* Genre Requirements */}
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Genres
+                </Text>
+                <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      styles.flex1,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                      },
+                    ]}
+                  >
+                    <TextInput
+                      value={newGenre}
+                      onChangeText={setNewGenre}
+                      placeholder="Add genre (e.g., Rock, Jazz)..."
+                      placeholderTextColor={colors.textSecondary}
+                      style={[styles.textInput, { color: colors.text }]}
+                      onSubmitEditing={() => {
+                        if (newGenre.trim()) {
+                          setRequiredGenres([
+                            ...requiredGenres,
+                            newGenre.trim(),
+                          ]);
+                          setNewGenre("");
+                        }
+                      }}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (newGenre.trim()) {
+                        setRequiredGenres([...requiredGenres, newGenre.trim()]);
+                        setNewGenre("");
+                      }
+                    }}
+                    style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                  >
+                    <Ionicons name="add" size={24} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+                {requiredGenres.length > 0 && (
+                  <View style={styles.chipContainer}>
+                    {requiredGenres.map((genre, index) => (
+                      <View
+                        key={index}
+                        style={[
+                          styles.chip,
+                          { backgroundColor: isDark ? "#1F2937" : "#F3F4F6" },
+                        ]}
+                      >
+                        <Text style={[styles.chipText, { color: colors.text }]}>
+                          {genre}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() =>
+                            setRequiredGenres(
+                              requiredGenres.filter((_, i) => i !== index),
+                            )
+                          }
+                        >
+                          <Ionicons
+                            name="close-circle"
+                            size={16}
+                            color={colors.textSecondary}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              {/* Equipment Requirements */}
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Equipments
+                </Text>
+                <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      styles.flex1,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                      },
+                    ]}
+                  >
+                    <TextInput
+                      value={newInstrument}
+                      onChangeText={setNewInstrument}
+                      placeholder="Add equipment (e.g., Guitar, Drums)..."
+                      placeholderTextColor={colors.textSecondary}
+                      style={[styles.textInput, { color: colors.text }]}
+                      onSubmitEditing={() => {
+                        if (newInstrument.trim()) {
+                          setRequiredInstruments([
+                            ...requiredInstruments,
+                            newInstrument.trim(),
+                          ]);
+                          setNewInstrument("");
+                        }
+                      }}
+                    />
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (newInstrument.trim()) {
+                        setRequiredInstruments([
+                          ...requiredInstruments,
+                          newInstrument.trim(),
+                        ]);
+                        setNewInstrument("");
+                      }
+                    }}
+                    style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                  >
+                    <Ionicons name="add" size={24} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+                {requiredInstruments.length > 0 && (
+                  <View style={styles.chipContainer}>
+                    {requiredInstruments.map((instrument, index) => (
+                      <View
+                        key={index}
+                        style={[
+                          styles.chip,
+                          { backgroundColor: isDark ? "#1F2937" : "#F3F4F6" },
+                        ]}
+                      >
+                        <Text style={[styles.chipText, { color: colors.text }]}>
+                          {instrument}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() =>
+                            setRequiredInstruments(
+                              requiredInstruments.filter((_, i) => i !== index),
+                            )
+                          }
+                        >
+                          <Ionicons
+                            name="close-circle"
+                            size={16}
+                            color={colors.textSecondary}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              {/* Experience Level */}
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Experience Level
+                </Text>
+                <View style={styles.experienceLevelContainer}>
+                  {["Beginner", "Intermediate", "Advanced", "Professional"].map(
+                    (level) => (
+                      <TouchableOpacity
+                        key={level}
+                        onPress={() => setExperienceLevel(level)}
+                        style={[
+                          styles.experienceButton,
+                          {
+                            backgroundColor:
+                              experienceLevel === level
+                                ? colors.primary
+                                : isDark
+                                  ? "#1F2937"
+                                  : "#F9FAFB",
+                            borderColor:
+                              experienceLevel === level
+                                ? colors.primary
+                                : isDark
+                                  ? "#374151"
+                                  : "#E5E7EB",
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.experienceButtonText,
+                            {
+                              color:
+                                experienceLevel === level
+                                  ? "#fff"
+                                  : colors.text,
+                            },
+                          ]}
+                        >
+                          {level}
+                        </Text>
+                      </TouchableOpacity>
+                    ),
+                  )}
+                </View>
+              </View>
+
+              {/* Musician Type - Looking For */}
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Looking For
+                </Text>
+                <View style={styles.experienceLevelContainer}>
+                  {[
+                    { value: "solo", label: "Solo Artists", icon: "person" },
+                    { value: "group", label: "Bands/Groups", icon: "people" },
+                    { value: "both", label: "Both", icon: "people-circle" },
+                  ].map((option) => (
+                    <TouchableOpacity
+                      key={option.value}
+                      onPress={() =>
+                        setMusicianType(
+                          option.value as "solo" | "group" | "both",
+                        )
+                      }
+                      style={[
+                        styles.experienceButton,
+                        {
+                          backgroundColor:
+                            musicianType === option.value
+                              ? colors.primary
+                              : isDark
+                                ? "#1F2937"
+                                : "#F9FAFB",
+                          borderColor:
+                            musicianType === option.value
+                              ? colors.primary
+                              : isDark
+                                ? "#374151"
+                                : "#E5E7EB",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={option.icon as any}
+                        size={16}
+                        color={
+                          musicianType === option.value ? "#fff" : colors.text
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.experienceButtonText,
+                          {
+                            color:
+                              musicianType === option.value
+                                ? "#fff"
+                                : colors.text,
+                          },
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </View>
+          )}
+
+          {step === 3 && (
+            <View>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                Review Details
+              </Text>
+
+              <View
+                style={[
+                  styles.reviewContainer,
+                  { backgroundColor: isDark ? "#1F2937" : "#F9FAFB" },
+                ]}
+              >
+                <View>
+                  <Text style={styles.reviewLabel}>Gig Info</Text>
+                  <Text style={[styles.reviewValue, { color: colors.text }]}>
+                    {gigName || "No Name"}
+                  </Text>
+                  <Text style={{ color: colors.textSecondary }}>
+                    {address || "No Location"}
+                  </Text>
+                  <Text
+                    style={{
+                      color: colors.primary,
+                      fontFamily: "Poppins_600SemiBold",
+                      marginTop: 4,
+                    }}
+                  >
+                    Payout: ₱{cost}
+                  </Text>
                 </View>
 
-                <ScrollView
-                    style={styles.formContainer}
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={styles.scrollContent}
-                >
-                    {step === 1 && (
-                        <View>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                                Gig Information
-                            </Text>
-                            {renderInput('Event Name', gigName, setGigName, 'e.g. Saturday Night Live')}
-                            {renderInput('Description', description, setDescription, 'Brief description of the gig', true)}
+                <View
+                  style={[
+                    styles.divider,
+                    { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                  ]}
+                />
 
-                            {/* Image Upload */}
-                            <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Event Photos</Text>
-                                <ImageUploader
-                                    images={images}
-                                    onImagesChange={setImages}
-                                    thumbnailIndex={thumbnailIndex}
-                                    onThumbnailChange={setThumbnailIndex}
-                                    maxImages={10}
-                                    bucketName="listings"
-                                    userId={newGigId || 'temp'}
-                                    folder="gigs"
-                                />
-                            </View>
+                <View>
+                  <Text style={styles.reviewLabel}>Description</Text>
+                  <Text
+                    style={[styles.reviewDescription, { color: colors.text }]}
+                  >
+                    {description || "No description provided."}
+                  </Text>
+                </View>
 
-                            <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Venue / Location</Text>
-                                <TouchableOpacity
-                                    onPress={() => setLocationPickerVisible(true)}
-                                    style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
-                                >
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                        <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
-                                        <Text style={{
-                                            flex: 1,
-                                            color: address ? colors.text : colors.textSecondary,
-                                            fontFamily: 'Poppins_400Regular'
-                                        }}>
-                                            {address || 'Tap to select location on map'}
-                                        </Text>
-                                    </View>
-                                </TouchableOpacity>
-                            </View>
-
-                            {renderInput('Budget / Fee (PHP)', cost, setCost, 'e.g. 5000', false, 'numeric')}
-
-                            {/* Event Date & Time Section */}
-                            <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Event Date</Text>
-                                <View style={[styles.calendarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: colors.border }]}>
-                                    <Calendar
-                                        current={new Date().toISOString().split('T')[0]}
-                                        minDate={new Date().toISOString().split('T')[0]}
-                                        markedDates={{
-                                            [eventDate]: {
-                                                selected: true,
-                                                selectedColor: colors.primary,
-                                                selectedTextColor: '#FFFFFF'
-                                            }
-                                        }}
-                                        onDayPress={(day) => {
-                                            setEventDate(day.dateString);
-                                        }}
-                                        theme={{
-                                            backgroundColor: 'transparent',
-                                            calendarBackground: 'transparent',
-                                            textSectionTitleColor: colors.textSecondary,
-                                            selectedDayBackgroundColor: colors.primary,
-                                            selectedDayTextColor: '#FFFFFF',
-                                            todayTextColor: colors.primary,
-                                            dayTextColor: colors.text,
-                                            textDisabledColor: isDark ? '#4B5563' : '#D1D5DB',
-                                            dotColor: colors.primary,
-                                            selectedDotColor: '#FFFFFF',
-                                            arrowColor: colors.primary,
-                                            monthTextColor: colors.text,
-                                            indicatorColor: colors.primary,
-                                            textDayFontFamily: 'Poppins_500Medium',
-                                            textMonthFontFamily: 'Poppins_600SemiBold',
-                                            textDayHeaderFontFamily: 'Poppins_500Medium',
-                                            textDayFontSize: 14,
-                                            textMonthFontSize: 16,
-                                            textDayHeaderFontSize: 12
-                                        }}
-                                    />
-                                    {eventDate && (
-                                        <View style={{ paddingHorizontal: 12, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                            <Ionicons name="calendar" size={16} color={colors.primary} />
-                                            <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
-                                                Selected: {new Date(eventDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-                                            </Text>
-                                        </View>
-                                    )}
-                                </View>
-                            </View>
-
-                            <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Event Time</Text>
-                                <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, padding: 16 }]}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>START TIME</Text>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                                <TextInput
-                                                    value={eventStartTime.split(' ')[0]}
-                                                    onChangeText={(text) => {
-                                                        const formatted = formatTimeInput(text);
-                                                        const period = eventStartTime.split(' ')[1];
-                                                        setEventStartTime(`${formatted} ${period}`);
-                                                    }}
-                                                    placeholder="06:00"
-                                                    keyboardType="numeric"
-                                                    maxLength={5}
-                                                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
-                                                />
-                                                <TouchableOpacity
-                                                    onPress={() => {
-                                                        const [time, period] = eventStartTime.split(' ');
-                                                        setEventStartTime(`${time} ${period === 'AM' ? 'PM' : 'AM'}`);
-                                                    }}
-                                                    style={[styles.ampmBtn, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}
-                                                >
-                                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                                                        {eventStartTime.split(' ')[1]}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        </View>
-                                        <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} style={{ marginTop: 20 }} />
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>END TIME</Text>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                                <TextInput
-                                                    value={eventEndTime.split(' ')[0]}
-                                                    onChangeText={(text) => {
-                                                        const formatted = formatTimeInput(text);
-                                                        const period = eventEndTime.split(' ')[1];
-                                                        setEventEndTime(`${formatted} ${period}`);
-                                                    }}
-                                                    placeholder="11:00"
-                                                    keyboardType="numeric"
-                                                    maxLength={5}
-                                                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
-                                                />
-                                                <TouchableOpacity
-                                                    onPress={() => {
-                                                        const [time, period] = eventEndTime.split(' ');
-                                                        setEventEndTime(`${time} ${period === 'AM' ? 'PM' : 'AM'}`);
-                                                    }}
-                                                    style={[styles.ampmBtn, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}
-                                                >
-                                                    <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                                                        {eventEndTime.split(' ')[1]}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                        </View>
-                                    </View>
-                                </View>
-                            </View>
-
-                            {/* Contract Upload */}
-                            <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-                                    Custom Contract
-                                </Text>
-                                <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
-                                    Upload a PDF contract that musicians will see before applying
-                                </Text>
-                                {contractUrl ? (
-                                    <View style={[styles.contractPreview, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-                                            <View style={[styles.pdfIcon, { backgroundColor: colors.primary }]}>
-                                                <Ionicons name="document-text" size={24} color="#fff" />
-                                            </View>
-                                            <View style={{ flex: 1 }}>
-                                                <Text style={[styles.contractFileName, { color: colors.text }]} numberOfLines={1}>
-                                                    {contractFileName}
-                                                </Text>
-                                                <Text style={[styles.contractFileSize, { color: colors.textSecondary }]}>
-                                                    PDF Document
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <TouchableOpacity onPress={removeContract} style={styles.removeContractBtn}>
-                                            <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                                        </TouchableOpacity>
-                                    </View>
-                                ) : (
-                                    <TouchableOpacity
-                                        onPress={handleContractUpload}
-                                        disabled={uploadingContract}
-                                        activeOpacity={0.8}
-                                        style={[styles.uploadContractBtn, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}
-                                    >
-                                        {uploadingContract ? (
-                                            <ActivityIndicator size="small" color={colors.primary} />
-                                        ) : (
-                                            <>
-                                                <Ionicons name="cloud-upload-outline" size={32} color={colors.textSecondary} />
-                                                <Text style={[styles.uploadText, { color: colors.text }]}>
-                                                    Upload Contract (PDF)
-                                                </Text>
-                                                <Text style={[styles.uploadSubText, { color: colors.textSecondary }]}>
-                                                    Tap to browse files
-                                                </Text>
-                                            </>
-                                        )}
-                                    </TouchableOpacity>
-                                )}
-                            </View>
+                {(requiredGenres.length > 0 ||
+                  requiredInstruments.length > 0 ||
+                  experienceLevel) && (
+                  <>
+                    <View
+                      style={[
+                        styles.divider,
+                        { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                      ]}
+                    />
+                    <View>
+                      <Text style={styles.reviewLabel}>Needs</Text>
+                      {requiredGenres.length > 0 && (
+                        <View style={{ marginBottom: 8 }}>
+                          <Text
+                            style={[
+                              styles.requirementSubLabel,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
+                            Genres:
+                          </Text>
+                          <Text style={{ color: colors.text }}>
+                            {requiredGenres.join(", ")}
+                          </Text>
                         </View>
-                    )}
-
-                    {step === 2 && (
-                        <View>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                                Needs
-                            </Text>
-
-                            {/* Genre Requirements */}
-                            <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genres</Text>
-                                <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
-                                    <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                                        <TextInput
-                                            value={newGenre}
-                                            onChangeText={setNewGenre}
-                                            placeholder="Add genre (e.g., Rock, Jazz)..."
-                                            placeholderTextColor={colors.textSecondary}
-                                            style={[styles.textInput, { color: colors.text }]}
-                                            onSubmitEditing={() => {
-                                                if (newGenre.trim()) {
-                                                    setRequiredGenres([...requiredGenres, newGenre.trim()]);
-                                                    setNewGenre('');
-                                                }
-                                            }}
-                                        />
-                                    </View>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            if (newGenre.trim()) {
-                                                setRequiredGenres([...requiredGenres, newGenre.trim()]);
-                                                setNewGenre('');
-                                            }
-                                        }}
-                                        style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                                    >
-                                        <Ionicons name="add" size={24} color="#fff" />
-                                    </TouchableOpacity>
-                                </View>
-                                {requiredGenres.length > 0 && (
-                                    <View style={styles.chipContainer}>
-                                        {requiredGenres.map((genre, index) => (
-                                            <View key={index} style={[styles.chip, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                                                <Text style={[styles.chipText, { color: colors.text }]}>{genre}</Text>
-                                                <TouchableOpacity onPress={() => setRequiredGenres(requiredGenres.filter((_, i) => i !== index))}>
-                                                    <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
-                                                </TouchableOpacity>
-                                            </View>
-                                        ))}
-                                    </View>
-                                )}
-                            </View>
-
-                            {/* Instrument Requirements */}
-                            <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Instruments</Text>
-                                <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
-                                    <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                                        <TextInput
-                                            value={newInstrument}
-                                            onChangeText={setNewInstrument}
-                                            placeholder="Add instrument (e.g., Guitar, Drums)..."
-                                            placeholderTextColor={colors.textSecondary}
-                                            style={[styles.textInput, { color: colors.text }]}
-                                            onSubmitEditing={() => {
-                                                if (newInstrument.trim()) {
-                                                    setRequiredInstruments([...requiredInstruments, newInstrument.trim()]);
-                                                    setNewInstrument('');
-                                                }
-                                            }}
-                                        />
-                                    </View>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            if (newInstrument.trim()) {
-                                                setRequiredInstruments([...requiredInstruments, newInstrument.trim()]);
-                                                setNewInstrument('');
-                                            }
-                                        }}
-                                        style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                                    >
-                                        <Ionicons name="add" size={24} color="#fff" />
-                                    </TouchableOpacity>
-                                </View>
-                                {requiredInstruments.length > 0 && (
-                                    <View style={styles.chipContainer}>
-                                        {requiredInstruments.map((instrument, index) => (
-                                            <View key={index} style={[styles.chip, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                                                <Text style={[styles.chipText, { color: colors.text }]}>{instrument}</Text>
-                                                <TouchableOpacity onPress={() => setRequiredInstruments(requiredInstruments.filter((_, i) => i !== index))}>
-                                                    <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
-                                                </TouchableOpacity>
-                                            </View>
-                                        ))}
-                                    </View>
-                                )}
-                            </View>
-
-                            {/* Experience Level */}
-                            <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Experience Level</Text>
-                                <View style={styles.experienceLevelContainer}>
-                                    {['Beginner', 'Intermediate', 'Advanced', 'Professional'].map((level) => (
-                                        <TouchableOpacity
-                                            key={level}
-                                            onPress={() => setExperienceLevel(level)}
-                                            style={[
-                                                styles.experienceButton,
-                                                {
-                                                    backgroundColor: experienceLevel === level ? colors.primary : (isDark ? '#1F2937' : '#F9FAFB'),
-                                                    borderColor: experienceLevel === level ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
-                                                }
-                                            ]}
-                                        >
-                                            <Text style={[
-                                                styles.experienceButtonText,
-                                                { color: experienceLevel === level ? '#fff' : colors.text }
-                                            ]}>
-                                                {level}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                            </View>
-
-                            {/* Musician Type - Looking For */}
-                            <View style={styles.inputContainer}>
-                                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Looking For</Text>
-                                <View style={styles.experienceLevelContainer}>
-                                    {[
-                                        { value: 'solo', label: 'Solo Artists', icon: 'person' },
-                                        { value: 'group', label: 'Bands/Groups', icon: 'people' },
-                                        { value: 'both', label: 'Both', icon: 'people-circle' },
-                                    ].map((option) => (
-                                        <TouchableOpacity
-                                            key={option.value}
-                                            onPress={() => setMusicianType(option.value as 'solo' | 'group' | 'both')}
-                                            style={[
-                                                styles.experienceButton,
-                                                {
-                                                    backgroundColor: musicianType === option.value ? colors.primary : (isDark ? '#1F2937' : '#F9FAFB'),
-                                                    borderColor: musicianType === option.value ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
-                                                    flexDirection: 'row',
-                                                    alignItems: 'center',
-                                                    gap: 6,
-                                                }
-                                            ]}
-                                        >
-                                            <Ionicons
-                                                name={option.icon as any}
-                                                size={16}
-                                                color={musicianType === option.value ? '#fff' : colors.text}
-                                            />
-                                            <Text style={[
-                                                styles.experienceButtonText,
-                                                { color: musicianType === option.value ? '#fff' : colors.text }
-                                            ]}>
-                                                {option.label}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    ))}
-                                </View>
-                            </View>
+                      )}
+                      {requiredInstruments.length > 0 && (
+                        <View style={{ marginBottom: 8 }}>
+                          <Text
+                            style={[
+                              styles.requirementSubLabel,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
+                            Equipments:
+                          </Text>
+                          <Text style={{ color: colors.text }}>
+                            {requiredInstruments.join(", ")}
+                          </Text>
                         </View>
-                    )}
-
-                    {step === 3 && (
+                      )}
+                      {experienceLevel && (
                         <View>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                                Review Details
-                            </Text>
-
-                            <View style={[styles.reviewContainer, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB' }]}>
-                                <View>
-                                    <Text style={styles.reviewLabel}>Gig Info</Text>
-                                    <Text style={[styles.reviewValue, { color: colors.text }]}>{gigName || 'No Name'}</Text>
-                                    <Text style={{ color: colors.textSecondary }}>{address || 'No Location'}</Text>
-                                    <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', marginTop: 4 }}>Budget: ₱{cost}</Text>
-                                </View>
-
-                                <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
-
-                                <View>
-                                    <Text style={styles.reviewLabel}>Description</Text>
-                                    <Text style={[styles.reviewDescription, { color: colors.text }]}>{description || 'No description provided.'}</Text>
-                                </View>
-
-                                {(requiredGenres.length > 0 || requiredInstruments.length > 0 || experienceLevel) && (
-                                    <>
-                                        <View style={[styles.divider, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]} />
-                                        <View>
-                                            <Text style={styles.reviewLabel}>Needs</Text>
-                                            {requiredGenres.length > 0 && (
-                                                <View style={{ marginBottom: 8 }}>
-                                                    <Text style={[styles.requirementSubLabel, { color: colors.textSecondary }]}>Genres:</Text>
-                                                    <Text style={{ color: colors.text }}>{requiredGenres.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                            {requiredInstruments.length > 0 && (
-                                                <View style={{ marginBottom: 8 }}>
-                                                    <Text style={[styles.requirementSubLabel, { color: colors.textSecondary }]}>Instruments:</Text>
-                                                    <Text style={{ color: colors.text }}>{requiredInstruments.join(', ')}</Text>
-                                                </View>
-                                            )}
-                                            {experienceLevel && (
-                                                <View>
-                                                    <Text style={[styles.requirementSubLabel, { color: colors.textSecondary }]}>Experience Level:</Text>
-                                                    <Text style={{ color: colors.text }}>{experienceLevel}</Text>
-                                                </View>
-                                            )}
-                                        </View>
-                                    </>
-                                )}
-                            </View>
-
-                            <Text style={styles.termsText}>
-                                By tapping Create Gig, you agree to our Terms and Conditions.
-                            </Text>
+                          <Text
+                            style={[
+                              styles.requirementSubLabel,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
+                            Experience Level:
+                          </Text>
+                          <Text style={{ color: colors.text }}>
+                            {experienceLevel}
+                          </Text>
                         </View>
-                    )}
-
-                    {/* Navigation Buttons */}
-                    <View style={styles.navigationButtons}>
-                        {step > 1 && (
-                            <TouchableOpacity
-                                onPress={handleBack}
-                                disabled={creating}
-                                activeOpacity={0.8}
-                                style={[styles.backBtn, { borderColor: isDark ? '#374151' : '#E5E7EB', opacity: creating ? 0.5 : 1 }]}
-                            >
-                                <Text style={[styles.backBtnText, { color: colors.text }]}>Back</Text>
-                            </TouchableOpacity>
-                        )}
-                        <TouchableOpacity
-                            onPress={handleNext}
-                            disabled={creating}
-                            activeOpacity={0.8}
-                            style={[styles.nextBtn, { backgroundColor: colors.primary, shadowColor: colors.primary, opacity: creating ? 0.7 : 1 }]}
-                        >
-                            {creating ? (
-                                <ActivityIndicator color="#fff" size="small" />
-                            ) : (
-                                <Text style={styles.nextBtnText}>
-                                    {step === 3 ? 'Create Gig' : 'Next'}
-                                </Text>
-                            )}
-                        </TouchableOpacity>
+                      )}
                     </View>
+                  </>
+                )}
+              </View>
 
-                </ScrollView>
-
-                <Navbar />
+              <Text style={styles.termsText}>
+                By tapping Create Gig, you agree to our Terms and Conditions.
+              </Text>
             </View>
+          )}
 
-            <Modal
-                visible={modalVisible}
-                title="Success!"
-                message={`Gig "${gigName}" has been successfully posted.`}
-                buttonText="Manage Gig"
-                onClose={handleSuccessRedirect}
-            />
+          {/* Navigation Buttons */}
+          <View style={styles.navigationButtons}>
+            {step > 1 && (
+              <TouchableOpacity
+                onPress={handleBack}
+                disabled={creating}
+                activeOpacity={0.8}
+                style={[
+                  styles.backBtn,
+                  {
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                    opacity: creating ? 0.5 : 1,
+                  },
+                ]}
+              >
+                <Text style={[styles.backBtnText, { color: colors.text }]}>
+                  Back
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={handleNext}
+              disabled={creating}
+              activeOpacity={0.8}
+              style={[
+                styles.nextBtn,
+                {
+                  backgroundColor: colors.primary,
+                  shadowColor: colors.primary,
+                  opacity: creating ? 0.7 : 1,
+                },
+              ]}
+            >
+              {creating ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.nextBtnText}>
+                  {step === 3 ? "Create Gig" : "Next"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
 
-            <LocationPicker
-                visible={locationPickerVisible}
-                onClose={() => setLocationPickerVisible(false)}
-                onSelect={(location) => {
-                    setAddress(location.address);
-                    setLatitude(location.lat);
-                    setLongitude(location.lng);
-                    setLocationPickerVisible(false);
-                }}
-            />
+        <Navbar />
+      </View>
 
-            <CustomAlert
-                visible={alertVisible}
-                type={alertConfig.type}
-                title={alertConfig.title}
-                message={alertConfig.message}
-                buttons={alertConfig.buttons}
-                onClose={() => setAlertVisible(false)}
-            />
-        </>
-    );
+      <Modal
+        visible={modalVisible}
+        title="Success!"
+        message={`Gig "${gigName}" has been successfully posted.`}
+        buttonText="Manage Gig"
+        onClose={handleSuccessRedirect}
+      />
+
+      <LocationPicker
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        onSelect={(location) => {
+          setAddress(location.address);
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationPickerVisible(false);
+        }}
+      />
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
+    </>
+  );
 }
 
 const styles = StyleSheet.create({
-    flex1: {
-        flex: 1,
-    },
-    centerContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    stepIndicatorContainer: {
-        paddingHorizontal: 24,
-        paddingTop: 24,
-        paddingBottom: 8,
-    },
-    stepIndicatorContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        position: 'relative',
-    },
-    progressLineBg: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        height: 4,
-        top: 20,
-        zIndex: 0,
-    },
-    activeProgressLine: {
-        position: 'absolute',
-        left: 0,
-        height: 4,
-        top: 20,
-        zIndex: 0,
-    },
-    stepItem: {
-        alignItems: 'center',
-        zIndex: 10,
-        width: 80,
-    },
-    stepCircle: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 4,
-    },
-    stepText: {
-        fontSize: 12,
-        marginTop: 8,
-        textAlign: 'center',
-    },
-    formContainer: {
-        flex: 1,
-        paddingHorizontal: 24,
-        marginTop: 16,
-    },
-    scrollContent: {
-        paddingBottom: 150,
-    },
-    sectionTitle: {
-        fontSize: 20,
-        marginBottom: 24,
-        textAlign: 'center',
-        fontFamily: 'Poppins_600SemiBold',
-    },
-    inputContainer: {
-        marginBottom: 16,
-    },
-    inputLabel: {
-        marginBottom: 8,
-        fontSize: 12,
-        textTransform: 'uppercase',
-        letterSpacing: 1,
-        fontFamily: 'Poppins_600SemiBold',
-    },
-    inputWrapper: {
-        borderRadius: 12,
-        borderWidth: 1,
-        overflow: 'hidden',
-    },
-    textInput: {
-        padding: 16,
-        fontFamily: 'Poppins_400Regular',
-    },
-    dashedBox: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 32,
-        borderWidth: 2,
-        borderStyle: 'dashed',
-        borderRadius: 16,
-        marginBottom: 24,
-    },
-    dashedBoxText: {
-        marginTop: 8,
-        fontSize: 14,
-        textAlign: 'center',
-        fontFamily: 'Poppins_400Regular',
-    },
-    reviewContainer: {
-        padding: 16,
-        borderRadius: 16,
-        gap: 16,
-        marginBottom: 16,
-    },
-    reviewLabel: {
-        fontSize: 12,
-        textTransform: 'uppercase',
-        color: '#9CA3AF',
-        fontWeight: 'bold',
-        marginBottom: 4,
-    },
-    reviewValue: {
-        fontSize: 18,
-        fontWeight: 'bold',
-    },
-    reviewDescription: {
-        fontSize: 13,
-        lineHeight: 20,
-    },
-    requirementSubLabel: {
-        fontSize: 11,
-        fontFamily: 'Poppins_600SemiBold',
-        textTransform: 'uppercase',
-        marginBottom: 2,
-    },
-    divider: {
-        height: 1,
-    },
-    addMemberRow: {
-        flexDirection: 'row',
-        gap: 8,
-        alignItems: 'center',
-    },
-    addBtn: {
-        width: 48,
-        height: 48,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    chipContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 8,
-        marginTop: 8,
-    },
-    chip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        paddingVertical: 6,
-        paddingLeft: 12,
-        paddingRight: 8,
-        borderRadius: 20,
-    },
-    chipText: {
-        fontSize: 13,
-        fontFamily: 'Poppins_400Regular',
-    },
-    experienceLevelContainer: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 8,
-    },
-    experienceButton: {
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        flex: 1,
-        minWidth: '45%',
-        alignItems: 'center',
-    },
-    experienceButtonText: {
-        fontSize: 13,
-        fontFamily: 'Poppins_500Medium',
-    },
-    termsText: {
-        textAlign: 'center',
-        fontSize: 12,
-        color: '#9CA3AF',
-        paddingHorizontal: 16,
-    },
-    navigationButtons: {
-        marginTop: 32,
-        flexDirection: 'row',
-        gap: 16,
-        marginBottom: 16,
-    },
-    backBtn: {
-        flex: 1,
-        paddingVertical: 16,
-        borderRadius: 12,
-        alignItems: 'center',
-        borderWidth: 1,
-    },
-    backBtnText: {
-        fontFamily: 'Poppins_600SemiBold',
-    },
-    nextBtn: {
-        flex: 1,
-        paddingVertical: 16,
-        borderRadius: 12,
-        alignItems: 'center',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 4,
-    },
-    nextBtnText: {
-        fontFamily: 'Poppins_600SemiBold',
-        color: '#fff',
-    },
-    inputSubLabel: {
-        fontSize: 12,
-        fontFamily: 'Poppins_400Regular',
-        marginBottom: 8,
-    },
-    uploadContractBtn: {
-        padding: 32,
-        borderWidth: 2,
-        borderStyle: 'dashed',
-        borderRadius: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-    },
-    uploadText: {
-        fontSize: 14,
-        fontFamily: 'Poppins_600SemiBold',
-        marginTop: 8,
-    },
-    uploadSubText: {
-        fontSize: 12,
-        fontFamily: 'Poppins_400Regular',
-    },
-    contractPreview: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        gap: 12,
-    },
-    pdfIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    contractFileName: {
-        fontSize: 14,
-        fontFamily: 'Poppins_600SemiBold',
-    },
-    contractFileSize: {
-        fontSize: 12,
-        fontFamily: 'Poppins_400Regular',
-        marginTop: 2,
-    },
-    removeContractBtn: {
-        padding: 8,
-    },
-    dayCard: {
-        borderRadius: 12,
-        borderWidth: 1,
-        padding: 16,
-    },
-    timeInput: {
-        paddingVertical: 10,
-        paddingHorizontal: 12,
-        borderRadius: 8,
-        borderWidth: 1,
-        fontSize: 14,
-        fontFamily: 'Poppins_500Medium',
-    },
-    ampmBtn: {
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderRadius: 8,
-        alignItems: 'center',
-        justifyContent: 'center',
-        minWidth: 60,
-    },
-    calendarContainer: {
-        borderRadius: 12,
-        borderWidth: 1,
-        padding: 12,
-        marginBottom: 8,
-    },
+  flex1: {
+    flex: 1,
+  },
+  centerContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepIndicatorContainer: {
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 8,
+  },
+  stepIndicatorContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    position: "relative",
+  },
+  progressLineBg: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 4,
+    top: 20,
+    zIndex: 0,
+  },
+  activeProgressLine: {
+    position: "absolute",
+    left: 0,
+    height: 4,
+    top: 20,
+    zIndex: 0,
+  },
+  stepItem: {
+    alignItems: "center",
+    zIndex: 10,
+    width: 80,
+  },
+  stepCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 4,
+  },
+  stepText: {
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: "center",
+  },
+  formContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    marginTop: 16,
+  },
+  scrollContent: {
+    paddingBottom: 150,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    marginBottom: 24,
+    textAlign: "center",
+    fontFamily: "Poppins_600SemiBold",
+  },
+  inputContainer: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    marginBottom: 8,
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  inputWrapper: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  textInput: {
+    padding: 16,
+    fontFamily: "Poppins_400Regular",
+  },
+  dashedBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 32,
+    borderWidth: 2,
+    borderStyle: "dashed",
+    borderRadius: 16,
+    marginBottom: 24,
+  },
+  dashedBoxText: {
+    marginTop: 8,
+    fontSize: 14,
+    textAlign: "center",
+    fontFamily: "Poppins_400Regular",
+  },
+  reviewContainer: {
+    padding: 16,
+    borderRadius: 16,
+    gap: 16,
+    marginBottom: 16,
+  },
+  reviewLabel: {
+    fontSize: 12,
+    textTransform: "uppercase",
+    color: "#9CA3AF",
+    fontWeight: "bold",
+    marginBottom: 4,
+  },
+  reviewValue: {
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  reviewDescription: {
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  requirementSubLabel: {
+    fontSize: 11,
+    fontFamily: "Poppins_600SemiBold",
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  divider: {
+    height: 1,
+  },
+  addMemberRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
+  addBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chipContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 6,
+    paddingLeft: 12,
+    paddingRight: 8,
+    borderRadius: 20,
+  },
+  chipText: {
+    fontSize: 13,
+    fontFamily: "Poppins_400Regular",
+  },
+  experienceLevelContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  experienceButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    flex: 1,
+    minWidth: "45%",
+    alignItems: "center",
+  },
+  experienceButtonText: {
+    fontSize: 13,
+    fontFamily: "Poppins_500Medium",
+  },
+  termsText: {
+    textAlign: "center",
+    fontSize: 12,
+    color: "#9CA3AF",
+    paddingHorizontal: 16,
+  },
+  navigationButtons: {
+    marginTop: 32,
+    flexDirection: "row",
+    gap: 16,
+    marginBottom: 16,
+  },
+  backBtn: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    borderWidth: 1,
+  },
+  backBtnText: {
+    fontFamily: "Poppins_600SemiBold",
+  },
+  nextBtn: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  nextBtnText: {
+    fontFamily: "Poppins_600SemiBold",
+    color: "#fff",
+  },
+  inputSubLabel: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+    marginBottom: 8,
+  },
+  uploadContractBtn: {
+    padding: 32,
+    borderWidth: 2,
+    borderStyle: "dashed",
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  uploadText: {
+    fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
+    marginTop: 8,
+  },
+  uploadSubText: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+  },
+  contractPreview: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 12,
+  },
+  pdfIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contractFileName: {
+    fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  contractFileSize: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+    marginTop: 2,
+  },
+  removeContractBtn: {
+    padding: 8,
+  },
+  dayCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+  },
+  timeInput: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 14,
+    fontFamily: "Poppins_500Medium",
+  },
+  ampmBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 60,
+  },
+  calendarContainer: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 8,
+  },
 });

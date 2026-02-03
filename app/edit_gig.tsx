@@ -1,38 +1,47 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Calendar } from 'react-native-calendars';
-import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import Header from '../src/components/header';
-import ImageUploader from '../src/components/ImageUploader';
-import LocationPicker from '../src/components/LocationPicker';
-import Navbar from '../src/components/navbar';
-import { useTheme } from '../src/context/ThemeContext';
+import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
+import {
+    ActivityIndicator,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { Calendar } from "react-native-calendars";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import Header from "../src/components/header";
+import ImageUploader from "../src/components/ImageUploader";
+import LocationPicker from "../src/components/LocationPicker";
+import Navbar from "../src/components/navbar";
+import { useTheme } from "../src/context/ThemeContext";
 
-import { useLocalSearchParams } from 'expo-router';
-import { supabase } from '../lib/supabase';
+import { useLocalSearchParams } from "expo-router";
+import { supabase } from "../lib/supabase";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
   // Remove all non-digit characters except colon
-  let cleaned = text.replace(/[^0-9:]/g, '');
+  let cleaned = text.replace(/[^0-9:]/g, "");
 
   // Limit to 5 characters (HH:MM)
   if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
 
   // Auto-add colon after 2 digits
-  if (cleaned.length === 2 && !cleaned.includes(':')) {
-    cleaned = cleaned + ':';
+  if (cleaned.length === 2 && !cleaned.includes(":")) {
+    cleaned = cleaned + ":";
   }
 
   // If user types more than 2 digits before colon, insert colon
-  if (cleaned.length > 2 && !cleaned.includes(':')) {
-    cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
+  if (cleaned.length > 2 && !cleaned.includes(":")) {
+    cleaned = cleaned.substring(0, 2) + ":" + cleaned.substring(2);
   }
 
   // Validate hour (01-12)
-  const parts = cleaned.split(':');
+  const parts = cleaned.split(":");
   if (parts[0] && parts[0].length === 2) {
     const hour = parseInt(parts[0]);
     if (hour < 1 || hour > 12) {
@@ -44,7 +53,7 @@ const formatTimeInput = (text: string): string => {
   if (parts[1] && parts[1].length === 2) {
     const minute = parseInt(parts[1]);
     if (minute > 59) {
-      return parts[0] + ':' + parts[1].substring(0, 1);
+      return parts[0] + ":" + parts[1].substring(0, 1);
     }
   }
 
@@ -54,16 +63,16 @@ const formatTimeInput = (text: string): string => {
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
   const { id } = useLocalSearchParams();
-  const [gigName, setGigName] = useState('');
-  const [description, setDescription] = useState('');
-  const [address, setAddress] = useState('');
+  const [gigName, setGigName] = useState("");
+  const [description, setDescription] = useState("");
+  const [address, setAddress] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-  const [cost, setCost] = useState('');
-  const [eventDate, setEventDate] = useState('');
-  const [eventStartTime, setEventStartTime] = useState('06:00 PM');
-  const [eventEndTime, setEventEndTime] = useState('11:00 PM');
+  const [cost, setCost] = useState("");
+  const [eventDate, setEventDate] = useState("");
+  const [eventStartTime, setEventStartTime] = useState("06:00 PM");
+  const [eventEndTime, setEventEndTime] = useState("11:00 PM");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [authorized, setAuthorized] = useState(false);
@@ -75,37 +84,47 @@ export default function EditGigScreen() {
     type: AlertType;
     title: string;
     message: string;
-    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+    buttons?: {
+      text: string;
+      onPress?: () => void;
+      style?: "default" | "cancel" | "destructive";
+    }[];
   }>({
-    type: 'info',
-    title: '',
-    message: '',
+    type: "info",
+    title: "",
+    message: "",
   });
 
   const showAlert = (
     type: AlertType,
     title: string,
     message: string,
-    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[]
+    buttons?: {
+      text: string;
+      onPress?: () => void;
+      style?: "default" | "cancel" | "destructive";
+    }[],
   ) => {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
   };
 
   // Mock Data
-  const [documents, setDocuments] = useState(['Contract.pdf', 'Rider_v2.pdf']);
+  const [documents, setDocuments] = useState(["Contract.pdf", "Rider_v2.pdf"]);
   const [images, setImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
-  const [musicianType, setMusicianType] = useState<'solo' | 'group' | 'both'>('both');
+  const [musicianType, setMusicianType] = useState<"solo" | "group" | "both">(
+    "both",
+  );
   const [requiredGenres, setRequiredGenres] = useState<string[]>([]);
-  const [newGenre, setNewGenre] = useState('');
+  const [newGenre, setNewGenre] = useState("");
   const [requiredInstruments, setRequiredInstruments] = useState<string[]>([]);
-  const [newInstrument, setNewInstrument] = useState('');
-  const [experienceLevel, setExperienceLevel] = useState('');
+  const [newInstrument, setNewInstrument] = useState("");
+  const [experienceLevel, setExperienceLevel] = useState("");
 
   // Contract state
-  const [contractUrl, setContractUrl] = useState<string>('');
-  const [contractFileName, setContractFileName] = useState<string>('');
+  const [contractUrl, setContractUrl] = useState<string>("");
+  const [contractFileName, setContractFileName] = useState<string>("");
   const [uploadingContract, setUploadingContract] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -116,26 +135,31 @@ export default function EditGigScreen() {
 
   const checkAuthorization = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
-        router.replace('/');
+        router.replace("/");
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke('manage-profile', {
-        body: { action: 'fetch', userId: user.id }
-      });
+      const { data: profile } = await supabase.functions.invoke(
+        "manage-profile",
+        {
+          body: { action: "fetch", userId: user.id },
+        },
+      );
 
-      if (profile?.role !== 'venue-owner') {
-        showAlert('error', 'Unauthorized', 'Only venue owners can edit gigs.');
-        router.replace('/home');
+      if (profile?.role !== "venue-owner") {
+        showAlert("error", "Unauthorized", "Only venue owners can edit gigs.");
+        router.replace("/home");
         return;
       }
 
       setAuthorized(true);
     } catch (e) {
-      console.error('Authorization check failed:', e);
-      router.replace('/home');
+      console.error("Authorization check failed:", e);
+      router.replace("/home");
     } finally {
       setCheckingAuth(false);
     }
@@ -149,30 +173,33 @@ export default function EditGigScreen() {
 
   const fetchGigDetails = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
-        router.replace('/');
+        router.replace("/");
         return;
       }
 
       // Ensure id is a string, not an array
       const gigId = Array.isArray(id) ? id[0] : id;
       if (!gigId) {
-        showAlert('error', 'Error', 'Invalid gig ID');
-        router.replace('/home');
+        showAlert("error", "Error", "Invalid gig ID");
+        router.replace("/home");
         return;
       }
 
-      console.log('📡 Calling edge function with params:', {
-        action: 'fetch_one',
-        type: 'gig',
-        id: gigId,
-        userId: user.id
-      });
-
-      const { data, error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'fetch_one', type: 'gig', id: gigId, userId: user.id }
-      });
+      const { data, error } = await supabase.functions.invoke(
+        "manage-listings",
+        {
+          body: {
+            action: "fetch_one",
+            type: "gig",
+            id: gigId,
+            userId: user.id,
+          },
+        },
+      );
 
       console.log('📥 ===== EDGE FUNCTION RESPONSE =====');
       console.log('📥 Error object:', error);
@@ -184,9 +211,12 @@ export default function EditGigScreen() {
 
       // If no data returned, user doesn't own this gig
       if (!data) {
-        console.error('❌ No data returned from edge function');
-        showAlert('error', 'Not Found', 'Gig not found or you do not have permission to edit it.');
-        router.replace('/home');
+        showAlert(
+          "error",
+          "Not Found",
+          "Gig not found or you do not have permission to edit it.",
+        );
+        router.replace("/home");
         return;
       }
 
@@ -221,43 +251,26 @@ export default function EditGigScreen() {
       
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
-      console.log('🔧 setLatitude/Longitude:', data.latitude, data.longitude);
-      
-      setCost(data.budget?.toString() || '');
-      console.log('🔧 setCost:', data.budget?.toString() || '');
-      
-      setEventDate(data.event_date || '');
-      console.log('🔧 setEventDate:', data.event_date || '');
-      
+      setCost(data.budget?.toString() || "");
+      setEventDate(data.event_date || "");
       // Read event times from requirements JSONB field
-      const startTime = data.requirements?.event_start_time || '06:00 PM';
-      const endTime = data.requirements?.event_end_time || '11:00 PM';
-      setEventStartTime(startTime);
-      setEventEndTime(endTime);
-      console.log('🔧 setEventStartTime:', startTime);
-      console.log('🔧 setEventEndTime:', endTime);
-      
-      const musicianTypeValue = data.requirements?.musician_type || 'both';
-      setMusicianType(musicianTypeValue);
-      console.log('🔧 setMusicianType:', musicianTypeValue);
-      
-      const genresValue = Array.isArray(data.requirements?.genres) ? data.requirements.genres : [];
-      setRequiredGenres(genresValue);
-      console.log('🔧 setRequiredGenres:', genresValue);
-      
-      const instrumentsValue = Array.isArray(data.requirements?.instruments) ? data.requirements.instruments : [];
-      setRequiredInstruments(instrumentsValue);
-      console.log('🔧 setRequiredInstruments:', instrumentsValue);
-      
-      const expLevel = data.requirements?.experience_level || '';
-      setExperienceLevel(expLevel);
-      console.log('🔧 setExperienceLevel:', expLevel);
-      
-      setContractUrl(data.contract_url || '');
-      console.log('🔧 setContractUrl:', data.contract_url || '');
-      
+      setEventStartTime(data.requirements?.event_start_time || "06:00 PM");
+      setEventEndTime(data.requirements?.event_end_time || "11:00 PM");
+      setMusicianType(data.requirements?.musician_type || "both");
+      setRequiredGenres(
+        Array.isArray(data.requirements?.genres)
+          ? data.requirements.genres
+          : [],
+      );
+      setRequiredInstruments(
+        Array.isArray(data.requirements?.instruments)
+          ? data.requirements.instruments
+          : [],
+      );
+      setExperienceLevel(data.requirements?.experience_level || "");
+      setContractUrl(data.contract_url || "");
       if (data.contract_url) {
-        const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
+        const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
         setContractFileName(decodeURIComponent(fileName));
         console.log('🔧 setContractFileName:', fileName);
       }
@@ -270,10 +283,9 @@ export default function EditGigScreen() {
       
       console.log('✅ ===== FETCH GIG DETAILS COMPLETED =====');
     } catch (e) {
-      console.error('❌ ===== FETCH GIG DETAILS FAILED =====');
-      console.error('❌ Error:', e);
-      showAlert('error', 'Error', 'Failed to load gig details.');
-      router.replace('/home');
+      console.log("Error fetching gig details:", e);
+      showAlert("error", "Error", "Failed to load gig details.");
+      router.replace("/home");
     } finally {
       setLoading(false);
     }
@@ -281,31 +293,47 @@ export default function EditGigScreen() {
 
   const validateForm = (): boolean => {
     if (!gigName.trim()) {
-      showAlert('error', 'Required Field', 'Please enter a gig name');
+      showAlert("error", "Required Field", "Please enter a gig name");
       return false;
     }
     if (!description.trim()) {
-      showAlert('error', 'Required Field', 'Please enter a description');
+      showAlert("error", "Required Field", "Please enter a description");
       return false;
     }
     if (!address || !latitude || !longitude) {
-      showAlert('error', 'Required Field', 'Please select a location on the map');
+      showAlert(
+        "error",
+        "Required Field",
+        "Please select a location on the map",
+      );
       return false;
     }
     if (!cost.trim() || parseFloat(cost) <= 0) {
-      showAlert('error', 'Required Field', 'Please enter a valid budget/fee');
+      showAlert(
+        "error",
+        "Required Field",
+        "Please enter a valid payout amount",
+      );
       return false;
     }
     if (images.length === 0) {
-      showAlert('error', 'Required Field', 'Please upload at least one event photo');
+      showAlert(
+        "error",
+        "Required Field",
+        "Please upload at least one event photo",
+      );
       return false;
     }
     if (!eventDate.trim()) {
-      showAlert('error', 'Required Field', 'Please select an event date');
+      showAlert("error", "Required Field", "Please select an event date");
       return false;
     }
     if (!eventStartTime || !eventEndTime) {
-      showAlert('error', 'Required Field', 'Please set event start and end times');
+      showAlert(
+        "error",
+        "Required Field",
+        "Please set event start and end times",
+      );
       return false;
     }
     return true;
@@ -316,7 +344,9 @@ export default function EditGigScreen() {
     setSaving(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
         setSaving(false);
         return;
@@ -325,7 +355,7 @@ export default function EditGigScreen() {
       // Ensure id is a string, not an array
       const gigId = Array.isArray(id) ? id[0] : id;
       if (!gigId) {
-        showAlert('error', 'Error', 'Invalid gig ID');
+        showAlert("error", "Error", "Invalid gig ID");
         setSaving(false);
         return;
       }
@@ -354,12 +384,29 @@ export default function EditGigScreen() {
         },
       };
 
-      console.log('🔵 ===== UPDATING GIG =====');
-      console.log('🔵 Payload being sent:', JSON.stringify(payload, null, 2));
-      console.log('🔵 Requirements being sent:', JSON.stringify(payload.requirements, null, 2));
+      console.log(
+        "🔵 Updating gig with payload:",
+        JSON.stringify(
+          {
+            action: "update",
+            type: "gig",
+            id: gigId,
+            userId: user.id,
+            payload,
+          },
+          null,
+          2,
+        ),
+      );
 
-      const response = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'gig', id: gigId, userId: user.id, payload }
+      const response = await supabase.functions.invoke("manage-listings", {
+        body: {
+          action: "update",
+          type: "gig",
+          id: gigId,
+          userId: user.id,
+          payload,
+        },
       });
 
       console.log('📥 Update response data:', JSON.stringify(response.data, null, 2));
@@ -370,23 +417,26 @@ export default function EditGigScreen() {
         throw response.error;
       }
 
-      console.log('✅ Gig Updated successfully');
-      console.log('✅ Returned data:', JSON.stringify(response.data, null, 2));
-      showAlert('success', 'Success', 'Gig updated successfully!', [
+      console.log("✅ Gig Updated successfully");
+      showAlert("success", "Success", "Gig updated successfully!", [
         {
-          text: 'OK',
+          text: "OK",
           onPress: () => {
             if (router.canGoBack()) {
               router.back();
             } else {
-              router.push('/manage_gig');
+              router.push("/manage_gig");
             }
-          }
-        }
+          },
+        },
       ]);
     } catch (e: any) {
-      console.error('❌ Error updating gig:', e);
-      showAlert('error', 'Error', `Failed to update gig: ${e?.message || 'Unknown error'}`);
+      console.error("❌ Error updating gig:", e);
+      showAlert(
+        "error",
+        "Error",
+        `Failed to update gig: ${e?.message || "Unknown error"}`,
+      );
     } finally {
       setSaving(false);
     }
@@ -397,14 +447,19 @@ export default function EditGigScreen() {
       return;
     }
 
-    showAlert('warning', 'Save Changes', 'Are you sure you want to update this gig profile?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Save & Update',
-        style: 'default',
-        onPress: () => performSave()
-      }
-    ]);
+    showAlert(
+      "warning",
+      "Save Changes",
+      "Are you sure you want to update this gig profile?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Save & Update",
+          style: "default",
+          onPress: () => performSave(),
+        },
+      ],
+    );
   };
 
   const renderSectionHeader = (title: string, icon: string) => (
@@ -414,24 +469,40 @@ export default function EditGigScreen() {
     </View>
   );
 
-  const renderInput = (label: string, value: string, setValue: (text: string) => void, multiline = false, numeric = false) => (
+  const renderInput = (
+    label: string,
+    value: string,
+    setValue: (text: string) => void,
+    multiline = false,
+    numeric = false,
+  ) => (
     <View style={styles.inputContainer}>
-      <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{label}</Text>
-      <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
+      <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+        {label}
+      </Text>
+      <View
+        style={[
+          styles.inputWrapper,
+          {
+            borderColor: isDark ? "#374151" : "#E5E7EB",
+            backgroundColor: colors.inputBackground,
+          },
+        ]}
+      >
         <TextInput
           value={value}
           onChangeText={setValue}
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
-          keyboardType={numeric ? 'numeric' : 'default'}
+          keyboardType={numeric ? "numeric" : "default"}
           style={[
             styles.input,
             {
-              fontFamily: 'Poppins_400Regular',
+              fontFamily: "Poppins_400Regular",
               color: colors.text,
-              height: multiline ? 120 : 'auto',
-              textAlignVertical: multiline ? 'top' : 'center'
-            }
+              height: multiline ? 120 : "auto",
+              textAlignVertical: multiline ? "top" : "center",
+            },
           ]}
         />
       </View>
@@ -442,7 +513,7 @@ export default function EditGigScreen() {
     try {
       setUploadingContract(true);
 
-      if (Platform.OS === 'web') {
+      if (Platform.OS === "web") {
         if (fileInputRef.current) {
           fileInputRef.current.click();
         }
@@ -451,9 +522,9 @@ export default function EditGigScreen() {
       }
 
       // Dynamic import for native platforms only
-      const DocumentPicker = await import('expo-document-picker');
+      const DocumentPicker = await import("expo-document-picker");
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/pdf',
+        type: "application/pdf",
         copyToCacheDirectory: true,
       });
 
@@ -466,9 +537,11 @@ export default function EditGigScreen() {
       const fileName = file.name;
       const fileUri = file.uri;
 
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
-        showAlert('error', 'Error', 'Session expired. Please log in again.');
+        showAlert("error", "Error", "Session expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -479,32 +552,36 @@ export default function EditGigScreen() {
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
-        .from('documents')
+        .from("documents")
         .upload(filePath, bytes, {
-          contentType: 'application/pdf',
+          contentType: "application/pdf",
           upsert: false,
         });
 
       if (error) throw error;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
 
       setContractUrl(publicUrl);
       setContractFileName(fileName);
-      showAlert('success', 'Success', 'Contract uploaded successfully!');
+      showAlert("success", "Success", "Contract uploaded successfully!");
     } catch (error) {
-      console.error('Error uploading contract:', error);
-      showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
+      console.error("Error uploading contract:", error);
+      showAlert(
+        "error",
+        "Error",
+        "Failed to upload contract. Please try again.",
+      );
     } finally {
       setUploadingContract(false);
     }
   };
 
   const removeContract = () => {
-    setContractUrl('');
-    setContractFileName('');
+    setContractUrl("");
+    setContractFileName("");
   };
 
   const handleWebFileSelect = async (event: any) => {
@@ -515,37 +592,43 @@ export default function EditGigScreen() {
       setUploadingContract(true);
       const fileName = file.name;
 
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
-        showAlert('error', 'Error', 'Session expired. Please log in again.');
+        showAlert("error", "Error", "Session expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
-        .from('documents')
+        .from("documents")
         .upload(filePath, file, {
-          contentType: 'application/pdf',
+          contentType: "application/pdf",
           upsert: false,
         });
 
       if (error) throw error;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
 
       setContractUrl(publicUrl);
       setContractFileName(fileName);
-      showAlert('success', 'Success', 'Contract uploaded successfully!');
+      showAlert("success", "Success", "Contract uploaded successfully!");
     } catch (error) {
-      console.error('Error uploading contract:', error);
-      showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
+      console.error("Error uploading contract:", error);
+      showAlert(
+        "error",
+        "Error",
+        "Failed to upload contract. Please try again.",
+      );
     } finally {
       setUploadingContract(false);
       if (event.target) {
-        event.target.value = '';
+        event.target.value = "";
       }
     }
   };
@@ -553,15 +636,26 @@ export default function EditGigScreen() {
   // Show loading while checking authorization
   if (checkingAuth) {
     return (
-      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+      <View
+        style={[
+          styles.flex1,
+          styles.centerContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+        <Text
+          style={{
+            marginTop: 16,
+            color: colors.textSecondary,
+            fontFamily: "Poppins_400Regular",
+          }}
+        >
           Checking permissions...
         </Text>
       </View>
     );
   }
-
 
   // Don't render if not authorized
   if (!authorized) {
@@ -571,9 +665,21 @@ export default function EditGigScreen() {
   // Show loading while fetching data
   if (loading) {
     return (
-      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+      <View
+        style={[
+          styles.flex1,
+          styles.centerContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+        <Text
+          style={{
+            marginTop: 16,
+            color: colors.textSecondary,
+            fontFamily: "Poppins_400Regular",
+          }}
+        >
           Loading gig details...
         </Text>
       </View>
@@ -582,87 +688,136 @@ export default function EditGigScreen() {
 
   return (
     <>
-      {Platform.OS === 'web' && (
+      {Platform.OS === "web" && (
         <input
           ref={fileInputRef as any}
           type="file"
           accept="application/pdf"
           onChange={handleWebFileSelect}
-          style={{ display: 'none' }}
+          style={{ display: "none" }}
         />
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Gig" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} style={styles.flex1}>
-
-          {renderSectionHeader('Basic Details', 'information-circle')}
-          {renderInput('Gig Title', gigName, setGigName)}
-          {renderInput('Description', description, setDescription, true)}
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          style={styles.flex1}
+        >
+          {renderSectionHeader("Basic Details", "information-circle")}
+          {renderInput("Gig Title", gigName, setGigName)}
+          {renderInput("Description", description, setDescription, true)}
 
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Location</Text>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Location
+            </Text>
             <TouchableOpacity
               onPress={() => setLocationPickerVisible(true)}
-              style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  padding: 16,
+                },
+              ]}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
-                <Text style={{
-                  flex: 1,
-                  color: address ? colors.text : colors.textSecondary,
-                  fontFamily: 'Poppins_400Regular'
-                }}>
-                  {address || 'Tap to select location on map'}
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Ionicons
+                  name="location-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <Text
+                  style={{
+                    flex: 1,
+                    color: address ? colors.text : colors.textSecondary,
+                    fontFamily: "Poppins_400Regular",
+                  }}
+                >
+                  {address || "Tap to select location on map"}
                 </Text>
               </View>
             </TouchableOpacity>
           </View>
-          {renderInput('Budget (₱)', cost, setCost, false, true)}
+          {renderInput("Payout (₱)", cost, setCost, false, true)}
 
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Event Date</Text>
-            <View style={[styles.calendarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: colors.border }]}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Event Date
+            </Text>
+            <View
+              style={[
+                styles.calendarContainer,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <Calendar
-                current={eventDate || new Date().toISOString().split('T')[0]}
-                minDate={new Date().toISOString().split('T')[0]}
+                current={eventDate || new Date().toISOString().split("T")[0]}
+                minDate={new Date().toISOString().split("T")[0]}
                 markedDates={{
                   [eventDate]: {
                     selected: true,
                     selectedColor: colors.primary,
-                    selectedTextColor: '#FFFFFF'
-                  }
+                    selectedTextColor: "#FFFFFF",
+                  },
                 }}
                 onDayPress={(day) => {
                   setEventDate(day.dateString);
                 }}
                 theme={{
-                  backgroundColor: 'transparent',
-                  calendarBackground: 'transparent',
+                  backgroundColor: "transparent",
+                  calendarBackground: "transparent",
                   textSectionTitleColor: colors.textSecondary,
                   selectedDayBackgroundColor: colors.primary,
-                  selectedDayTextColor: '#FFFFFF',
+                  selectedDayTextColor: "#FFFFFF",
                   todayTextColor: colors.primary,
                   dayTextColor: colors.text,
-                  textDisabledColor: isDark ? '#4B5563' : '#D1D5DB',
+                  textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
                   dotColor: colors.primary,
-                  selectedDotColor: '#FFFFFF',
+                  selectedDotColor: "#FFFFFF",
                   arrowColor: colors.primary,
                   monthTextColor: colors.text,
                   indicatorColor: colors.primary,
-                  textDayFontFamily: 'Poppins_500Medium',
-                  textMonthFontFamily: 'Poppins_600SemiBold',
-                  textDayHeaderFontFamily: 'Poppins_500Medium',
+                  textDayFontFamily: "Poppins_500Medium",
+                  textMonthFontFamily: "Poppins_600SemiBold",
+                  textDayHeaderFontFamily: "Poppins_500Medium",
                   textDayFontSize: 14,
                   textMonthFontSize: 16,
-                  textDayHeaderFontSize: 12
+                  textDayHeaderFontSize: 12,
                 }}
               />
               {eventDate && (
-                <View style={{ paddingHorizontal: 12, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingBottom: 12,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
                   <Ionicons name="calendar" size={16} color={colors.primary} />
-                  <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
-                    Selected: {new Date(eventDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontFamily: "Poppins_600SemiBold",
+                    }}
+                  >
+                    Selected:{" "}
+                    {new Date(eventDate).toLocaleDateString("en-US", {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
                   </Text>
                 </View>
               )}
@@ -670,62 +825,148 @@ export default function EditGigScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Event Time</Text>
-            <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, padding: 16 }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Event Time
+            </Text>
+            <View
+              style={[
+                styles.dayCard,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                  borderColor: colors.border,
+                  padding: 16,
+                },
+              ]}
+            >
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>START TIME</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                      marginBottom: 4,
+                      fontFamily: "Poppins_600SemiBold",
+                    }}
+                  >
+                    START TIME
+                  </Text>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
                     <TextInput
-                      value={eventStartTime.split(' ')[0]}
+                      value={eventStartTime.split(" ")[0]}
                       onChangeText={(text) => {
                         const formatted = formatTimeInput(text);
-                        const period = eventStartTime.split(' ')[1];
+                        const period = eventStartTime.split(" ")[1];
                         setEventStartTime(`${formatted} ${period}`);
                       }}
                       placeholder="06:00"
                       keyboardType="numeric"
                       maxLength={5}
-                      style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                      style={[
+                        styles.timeInput,
+                        {
+                          backgroundColor: isDark ? "#374151" : "white",
+                          borderColor: colors.border,
+                          color: colors.text,
+                          flex: 1,
+                        },
+                      ]}
                     />
                     <TouchableOpacity
                       onPress={() => {
-                        const [time, period] = eventStartTime.split(' ');
-                        setEventStartTime(`${time} ${period === 'AM' ? 'PM' : 'AM'}`);
+                        const [time, period] = eventStartTime.split(" ");
+                        setEventStartTime(
+                          `${time} ${period === "AM" ? "PM" : "AM"}`,
+                        );
                       }}
-                      style={[styles.ampmBtn, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}
+                      style={[
+                        styles.ampmBtn,
+                        { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                      ]}
                     >
-                      <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                        {eventStartTime.split(' ')[1]}
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontFamily: "Poppins_600SemiBold",
+                          color: colors.text,
+                        }}
+                      >
+                        {eventStartTime.split(" ")[1]}
                       </Text>
                     </TouchableOpacity>
                   </View>
                 </View>
-                <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} style={{ marginTop: 20 }} />
+                <Ionicons
+                  name="arrow-forward"
+                  size={20}
+                  color={colors.textSecondary}
+                  style={{ marginTop: 20 }}
+                />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>END TIME</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontSize: 11,
+                      marginBottom: 4,
+                      fontFamily: "Poppins_600SemiBold",
+                    }}
+                  >
+                    END TIME
+                  </Text>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
                     <TextInput
-                      value={eventEndTime.split(' ')[0]}
+                      value={eventEndTime.split(" ")[0]}
                       onChangeText={(text) => {
                         const formatted = formatTimeInput(text);
-                        const period = eventEndTime.split(' ')[1];
+                        const period = eventEndTime.split(" ")[1];
                         setEventEndTime(`${formatted} ${period}`);
                       }}
                       placeholder="11:00"
                       keyboardType="numeric"
                       maxLength={5}
-                      style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                      style={[
+                        styles.timeInput,
+                        {
+                          backgroundColor: isDark ? "#374151" : "white",
+                          borderColor: colors.border,
+                          color: colors.text,
+                          flex: 1,
+                        },
+                      ]}
                     />
                     <TouchableOpacity
                       onPress={() => {
-                        const [time, period] = eventEndTime.split(' ');
-                        setEventEndTime(`${time} ${period === 'AM' ? 'PM' : 'AM'}`);
+                        const [time, period] = eventEndTime.split(" ");
+                        setEventEndTime(
+                          `${time} ${period === "AM" ? "PM" : "AM"}`,
+                        );
                       }}
-                      style={[styles.ampmBtn, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}
+                      style={[
+                        styles.ampmBtn,
+                        { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                      ]}
                     >
-                      <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                        {eventEndTime.split(' ')[1]}
+                      <Text
+                        style={{
+                          fontSize: 12,
+                          fontFamily: "Poppins_600SemiBold",
+                          color: colors.text,
+                        }}
+                      >
+                        {eventEndTime.split(" ")[1]}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -734,41 +975,56 @@ export default function EditGigScreen() {
             </View>
           </View>
 
-          {renderSectionHeader('Looking For', 'people')}
+          {renderSectionHeader("Looking For", "people")}
           <View style={styles.inputContainer}>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
               {[
-                { value: 'solo', label: 'Solo Artists', icon: 'person' },
-                { value: 'group', label: 'Bands/Groups', icon: 'people' },
-                { value: 'both', label: 'Both', icon: 'people-circle' },
+                { value: "solo", label: "Solo Artists", icon: "person" },
+                { value: "group", label: "Bands/Groups", icon: "people" },
+                { value: "both", label: "Both", icon: "people-circle" },
               ].map((option) => (
                 <TouchableOpacity
                   key={option.value}
-                  onPress={() => setMusicianType(option.value as 'solo' | 'group' | 'both')}
+                  onPress={() =>
+                    setMusicianType(option.value as "solo" | "group" | "both")
+                  }
                   style={[
                     {
-                      flexDirection: 'row',
-                      alignItems: 'center',
+                      flexDirection: "row",
+                      alignItems: "center",
                       paddingHorizontal: 16,
                       paddingVertical: 12,
                       borderRadius: 12,
                       borderWidth: 1,
                       gap: 8,
-                      backgroundColor: musicianType === option.value ? colors.primary : (isDark ? '#1F2937' : '#F9FAFB'),
-                      borderColor: musicianType === option.value ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
-                    }
+                      backgroundColor:
+                        musicianType === option.value
+                          ? colors.primary
+                          : isDark
+                            ? "#1F2937"
+                            : "#F9FAFB",
+                      borderColor:
+                        musicianType === option.value
+                          ? colors.primary
+                          : isDark
+                            ? "#374151"
+                            : "#E5E7EB",
+                    },
                   ]}
                 >
                   <Ionicons
                     name={option.icon as any}
                     size={18}
-                    color={musicianType === option.value ? '#fff' : colors.text}
+                    color={musicianType === option.value ? "#fff" : colors.text}
                   />
-                  <Text style={{
-                    fontFamily: 'Poppins_500Medium',
-                    fontSize: 14,
-                    color: musicianType === option.value ? '#fff' : colors.text
-                  }}>
+                  <Text
+                    style={{
+                      fontFamily: "Poppins_500Medium",
+                      fontSize: 14,
+                      color:
+                        musicianType === option.value ? "#fff" : colors.text,
+                    }}
+                  >
                     {option.label}
                   </Text>
                 </TouchableOpacity>
@@ -776,11 +1032,22 @@ export default function EditGigScreen() {
             </View>
           </View>
 
-          {renderSectionHeader('Requirements', 'list')}
+          {renderSectionHeader("Requirements", "list")}
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Genres</Text>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Genres
+            </Text>
             <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
-              <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  styles.flex1,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
                 <TextInput
                   value={newGenre}
                   onChangeText={setNewGenre}
@@ -790,7 +1057,7 @@ export default function EditGigScreen() {
                   onSubmitEditing={() => {
                     if (newGenre.trim()) {
                       setRequiredGenres([...requiredGenres, newGenre.trim()]);
-                      setNewGenre('');
+                      setNewGenre("");
                     }
                   }}
                 />
@@ -799,7 +1066,7 @@ export default function EditGigScreen() {
                 onPress={() => {
                   if (newGenre.trim()) {
                     setRequiredGenres([...requiredGenres, newGenre.trim()]);
-                    setNewGenre('');
+                    setNewGenre("");
                   }
                 }}
                 style={[styles.addBtn, { backgroundColor: colors.primary }]}
@@ -810,10 +1077,28 @@ export default function EditGigScreen() {
             {requiredGenres.length > 0 && (
               <View style={styles.chipContainer}>
                 {requiredGenres.map((genre, index) => (
-                  <View key={index} style={[styles.chip, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                    <Text style={[styles.chipText, { color: colors.text }]}>{genre}</Text>
-                    <TouchableOpacity onPress={() => setRequiredGenres(requiredGenres.filter((_, i) => i !== index))}>
-                      <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                  <View
+                    key={index}
+                    style={[
+                      styles.chip,
+                      { backgroundColor: isDark ? "#1F2937" : "#F3F4F6" },
+                    ]}
+                  >
+                    <Text style={[styles.chipText, { color: colors.text }]}>
+                      {genre}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        setRequiredGenres(
+                          requiredGenres.filter((_, i) => i !== index),
+                        )
+                      }
+                    >
+                      <Ionicons
+                        name="close-circle"
+                        size={16}
+                        color={colors.textSecondary}
+                      />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -822,19 +1107,33 @@ export default function EditGigScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Instruments</Text>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Equipments
+            </Text>
             <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
-              <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  styles.flex1,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
                 <TextInput
                   value={newInstrument}
                   onChangeText={setNewInstrument}
-                  placeholder="Add instrument (e.g., Guitar, Drums)..."
+                  placeholder="Add equipment (e.g., Guitar, Drums)..."
                   placeholderTextColor={colors.textSecondary}
                   style={[styles.textInput, { color: colors.text }]}
                   onSubmitEditing={() => {
                     if (newInstrument.trim()) {
-                      setRequiredInstruments([...requiredInstruments, newInstrument.trim()]);
-                      setNewInstrument('');
+                      setRequiredInstruments([
+                        ...requiredInstruments,
+                        newInstrument.trim(),
+                      ]);
+                      setNewInstrument("");
                     }
                   }}
                 />
@@ -842,8 +1141,11 @@ export default function EditGigScreen() {
               <TouchableOpacity
                 onPress={() => {
                   if (newInstrument.trim()) {
-                    setRequiredInstruments([...requiredInstruments, newInstrument.trim()]);
-                    setNewInstrument('');
+                    setRequiredInstruments([
+                      ...requiredInstruments,
+                      newInstrument.trim(),
+                    ]);
+                    setNewInstrument("");
                   }
                 }}
                 style={[styles.addBtn, { backgroundColor: colors.primary }]}
@@ -854,10 +1156,28 @@ export default function EditGigScreen() {
             {requiredInstruments.length > 0 && (
               <View style={styles.chipContainer}>
                 {requiredInstruments.map((instrument, index) => (
-                  <View key={index} style={[styles.chip, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
-                    <Text style={[styles.chipText, { color: colors.text }]}>{instrument}</Text>
-                    <TouchableOpacity onPress={() => setRequiredInstruments(requiredInstruments.filter((_, i) => i !== index))}>
-                      <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                  <View
+                    key={index}
+                    style={[
+                      styles.chip,
+                      { backgroundColor: isDark ? "#1F2937" : "#F3F4F6" },
+                    ]}
+                  >
+                    <Text style={[styles.chipText, { color: colors.text }]}>
+                      {instrument}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        setRequiredInstruments(
+                          requiredInstruments.filter((_, i) => i !== index),
+                        )
+                      }
+                    >
+                      <Ionicons
+                        name="close-circle"
+                        size={16}
+                        color={colors.textSecondary}
+                      />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -866,32 +1186,51 @@ export default function EditGigScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Experience Level</Text>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Experience Level
+            </Text>
             <View style={styles.experienceLevelContainer}>
-              {['Beginner', 'Intermediate', 'Advanced', 'Professional'].map((level) => (
-                <TouchableOpacity
-                  key={level}
-                  onPress={() => setExperienceLevel(level)}
-                  style={[
-                    styles.experienceButton,
-                    {
-                      backgroundColor: experienceLevel === level ? colors.primary : (isDark ? '#1F2937' : '#F9FAFB'),
-                      borderColor: experienceLevel === level ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
-                    }
-                  ]}
-                >
-                  <Text style={[
-                    styles.experienceButtonText,
-                    { color: experienceLevel === level ? '#fff' : colors.text }
-                  ]}>
-                    {level}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {["Beginner", "Intermediate", "Advanced", "Professional"].map(
+                (level) => (
+                  <TouchableOpacity
+                    key={level}
+                    onPress={() => setExperienceLevel(level)}
+                    style={[
+                      styles.experienceButton,
+                      {
+                        backgroundColor:
+                          experienceLevel === level
+                            ? colors.primary
+                            : isDark
+                              ? "#1F2937"
+                              : "#F9FAFB",
+                        borderColor:
+                          experienceLevel === level
+                            ? colors.primary
+                            : isDark
+                              ? "#374151"
+                              : "#E5E7EB",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.experienceButtonText,
+                        {
+                          color:
+                            experienceLevel === level ? "#fff" : colors.text,
+                        },
+                      ]}
+                    >
+                      {level}
+                    </Text>
+                  </TouchableOpacity>
+                ),
+              )}
             </View>
           </View>
 
-          {renderSectionHeader('Visuals', 'image')}
+          {renderSectionHeader("Visuals", "image")}
           <ImageUploader
             images={images}
             onImagesChange={setImages}
@@ -903,27 +1242,60 @@ export default function EditGigScreen() {
             folder="gigs"
           />
 
-          {renderSectionHeader('Contract', 'document-text')}
+          {renderSectionHeader("Contract", "document-text")}
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
+            >
               Upload a PDF contract that musicians will see before applying
             </Text>
             {contractUrl ? (
-              <View style={[styles.contractPreview, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-                  <View style={[styles.pdfIcon, { backgroundColor: colors.primary }]}>
+              <View
+                style={[
+                  styles.contractPreview,
+                  {
+                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                    flex: 1,
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.pdfIcon,
+                      { backgroundColor: colors.primary },
+                    ]}
+                  >
                     <Ionicons name="document-text" size={24} color="#fff" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.contractFileName, { color: colors.text }]} numberOfLines={1}>
+                    <Text
+                      style={[styles.contractFileName, { color: colors.text }]}
+                      numberOfLines={1}
+                    >
                       {contractFileName}
                     </Text>
-                    <Text style={[styles.contractFileSize, { color: colors.textSecondary }]}>
+                    <Text
+                      style={[
+                        styles.contractFileSize,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
                       PDF Document
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity onPress={removeContract} style={styles.removeContractBtn}>
+                <TouchableOpacity
+                  onPress={removeContract}
+                  style={styles.removeContractBtn}
+                >
                   <Ionicons name="trash-outline" size={20} color="#EF4444" />
                 </TouchableOpacity>
               </View>
@@ -932,17 +1304,32 @@ export default function EditGigScreen() {
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
                 activeOpacity={0.8}
-                style={[styles.uploadContractBtn, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}
+                style={[
+                  styles.uploadContractBtn,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
               >
                 {uploadingContract ? (
                   <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
                   <>
-                    <Ionicons name="cloud-upload-outline" size={32} color={colors.textSecondary} />
+                    <Ionicons
+                      name="cloud-upload-outline"
+                      size={32}
+                      color={colors.textSecondary}
+                    />
                     <Text style={[styles.uploadText, { color: colors.text }]}>
                       Upload Contract (PDF)
                     </Text>
-                    <Text style={[styles.uploadSubText, { color: colors.textSecondary }]}>
+                    <Text
+                      style={[
+                        styles.uploadSubText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
                       Tap to browse files
                     </Text>
                   </>
@@ -953,7 +1340,15 @@ export default function EditGigScreen() {
 
           <View style={styles.footerActions}>
             <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: saving ? colors.textSecondary : colors.primary, shadowColor: colors.primary }]}
+              style={[
+                styles.saveButton,
+                {
+                  backgroundColor: saving
+                    ? colors.textSecondary
+                    : colors.primary,
+                  shadowColor: colors.primary,
+                },
+              ]}
               onPress={handleSave}
               disabled={saving}
               activeOpacity={0.8}
@@ -969,10 +1364,16 @@ export default function EditGigScreen() {
               style={[styles.cancelButton, { borderColor: colors.border }]}
               onPress={() => router.back()}
             >
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Cancel</Text>
+              <Text
+                style={{
+                  fontFamily: "Poppins_600SemiBold",
+                  color: colors.text,
+                }}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
           </View>
-
         </ScrollView>
 
         <Navbar />
@@ -996,7 +1397,9 @@ export default function EditGigScreen() {
           setLongitude(location.lng);
           setLocationPickerVisible(false);
         }}
-        initialLocation={latitude && longitude ? { lat: latitude, lng: longitude } : undefined}
+        initialLocation={
+          latitude && longitude ? { lat: latitude, lng: longitude } : undefined
+        }
       />
     </>
   );
@@ -1007,22 +1410,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   centerContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   scrollContent: {
     paddingBottom: 160,
     paddingHorizontal: 24,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     marginBottom: 16,
     marginTop: 24,
   },
   sectionTitle: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
   },
   inputContainer: {
@@ -1031,45 +1434,45 @@ const styles = StyleSheet.create({
   inputLabel: {
     marginBottom: 8,
     fontSize: 12,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
     letterSpacing: 1,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
   inputWrapper: {
     borderRadius: 12,
     borderWidth: 1,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   input: {
     padding: 16,
-    textAlignVertical: 'center',
+    textAlignVertical: "center",
   },
   documentItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: 16,
     marginBottom: 12,
     borderRadius: 12,
     borderWidth: 1,
   },
   documentInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   uploadButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderStyle: 'dashed',
+    borderStyle: "dashed",
   },
   uploadButtonText: {
     marginLeft: 8,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
   footerActions: {
     marginTop: 32,
@@ -1077,8 +1480,8 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 16,
     marginBottom: 16,
     shadowOpacity: 0.3,
@@ -1088,42 +1491,42 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     fontSize: 16,
-    color: 'white',
-    fontFamily: 'Poppins_600SemiBold',
+    color: "white",
+    fontFamily: "Poppins_600SemiBold",
   },
   cancelButton: {
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 16,
     borderWidth: 1,
   },
   inputSubLabel: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
     marginBottom: 8,
   },
   uploadContractBtn: {
     padding: 32,
     borderWidth: 2,
-    borderStyle: 'dashed',
+    borderStyle: "dashed",
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
   },
   uploadText: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
     marginTop: 8,
   },
   uploadSubText: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
   },
   contractPreview: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
@@ -1133,16 +1536,16 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   contractFileName: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
   contractFileSize: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
     marginTop: 2,
   },
   removeContractBtn: {
@@ -1159,14 +1562,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: "Poppins_500Medium",
   },
   ampmBtn: {
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     minWidth: 60,
   },
   calendarContainer: {
@@ -1176,26 +1579,26 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   addMemberRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
-    alignItems: 'center',
+    alignItems: "center",
   },
   addBtn: {
     width: 48,
     height: 48,
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   chipContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     marginTop: 8,
   },
   chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     paddingVertical: 6,
     paddingLeft: 12,
@@ -1204,11 +1607,11 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
   },
   experienceLevelContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   experienceButton: {
@@ -1217,16 +1620,15 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     flex: 1,
-    minWidth: '45%',
-    alignItems: 'center',
+    minWidth: "45%",
+    alignItems: "center",
   },
   experienceButtonText: {
     fontSize: 13,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: "Poppins_500Medium",
   },
   textInput: {
     padding: 16,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
   },
 });
-
