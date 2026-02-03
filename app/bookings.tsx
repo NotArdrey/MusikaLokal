@@ -5,18 +5,18 @@ import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    Alert,
-    AppState,
-    Dimensions,
-    Image,
-    Linking,
-    Modal as RNModal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
+  Alert,
+  AppState,
+  Dimensions,
+  Image,
+  Linking,
+  Modal as RNModal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { supabase } from "../lib/supabase";
@@ -56,7 +56,10 @@ type Tab =
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
-  const params = useLocalSearchParams<{ tab?: string; retry_payment?: string }>();
+  const params = useLocalSearchParams<{
+    tab?: string;
+    retry_payment?: string;
+  }>();
   const [activeTab, setActiveTab] = useState<Tab>("Pending");
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
@@ -75,7 +78,9 @@ export default function BookingsScreen() {
   // Payment Option State
   const [showPaymentOptionModal, setShowPaymentOptionModal] = useState(false);
   const [paymentItem, setPaymentItem] = useState<any>(null);
-  const [selectedPaymentType, setSelectedPaymentType] = useState<'full' | 'downpayment'>('full');
+  const [selectedPaymentType, setSelectedPaymentType] = useState<
+    "full" | "downpayment"
+  >("full");
 
   // QR Check-in State
   const [showQRModal, setShowQRModal] = useState(false);
@@ -111,23 +116,30 @@ export default function BookingsScreen() {
   // Handle route params (from payment result screen)
   useEffect(() => {
     if (params.tab) {
-      const validTabs: Tab[] = ['Applicants', 'Active Musicians', 'Pending', 'Upcoming', 'Ongoing', 'Review'];
+      const validTabs: Tab[] = [
+        "Applicants",
+        "Active Musicians",
+        "Pending",
+        "Upcoming",
+        "Ongoing",
+        "Review",
+      ];
       if (validTabs.includes(params.tab as Tab)) {
         setActiveTab(params.tab as Tab);
       }
     }
-    
+
     // If coming from payment result with retry_payment, trigger payment for that booking
     if (params.retry_payment && userId) {
       const bookingId = params.retry_payment;
       // Find the booking and trigger payment
       setTimeout(async () => {
         const { data: booking } = await supabase
-          .from('studio_bookings')
-          .select('*')
-          .eq('id', bookingId)
+          .from("studio_bookings")
+          .select("*")
+          .eq("id", bookingId)
           .single();
-          
+
         if (booking) {
           handlePayNow(booking);
         }
@@ -137,69 +149,80 @@ export default function BookingsScreen() {
 
   // Auto-refresh when returning from payment browser
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', async (nextAppState) => {
-      // User returned to app from background (payment browser)
-      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        console.log('📱 App returned to foreground');
-        
-        // If we were in payment flow, check status and refresh
-        if (paymentInProgressRef.current && userId) {
-          console.log('💳 Checking payment status after return...');
-          const bookingId = pendingPaymentBookingId.current;
-          paymentInProgressRef.current = false;
-          pendingPaymentBookingId.current = null;
-          
-          // Poll for payment status with retries (webhook might be processing)
-          let paymentConfirmed = false;
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            console.log(`💳 Payment status check attempt ${attempt}/3...`);
-            await new Promise(resolve => setTimeout(resolve, 1500 * attempt)); // Increasing delay
-            
-            // Check the specific booking if we have an ID
-            if (bookingId) {
-              const { data: booking } = await supabase
-                .from('studio_bookings')
-                .select('id, status, payment_status')
-                .eq('id', bookingId)
-                .single();
-              
-              if (booking?.payment_status === 'paid') {
-                paymentConfirmed = true;
-                console.log('✅ Payment confirmed for booking:', bookingId);
-                break;
-              }
-            } else {
-              // Check if any recent booking moved to paid
-              const { data: recentPaid } = await supabase
-                .from('studio_bookings')
-                .select('id, status, payment_status')
-                .eq('user_id', userId)
-                .eq('payment_status', 'paid')
-                .order('paid_at', { ascending: false })
-                .limit(1);
-              
-              if (recentPaid && recentPaid.length > 0) {
-                paymentConfirmed = true;
-                console.log('✅ Found recently paid booking');
-                break;
+    const subscription = AppState.addEventListener(
+      "change",
+      async (nextAppState) => {
+        // User returned to app from background (payment browser)
+        if (
+          appState.current.match(/inactive|background/) &&
+          nextAppState === "active"
+        ) {
+          console.log("📱 App returned to foreground");
+
+          // If we were in payment flow, check status and refresh
+          if (paymentInProgressRef.current && userId) {
+            console.log("💳 Checking payment status after return...");
+            const bookingId = pendingPaymentBookingId.current;
+            paymentInProgressRef.current = false;
+            pendingPaymentBookingId.current = null;
+
+            // Poll for payment status with retries (webhook might be processing)
+            let paymentConfirmed = false;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              console.log(`💳 Payment status check attempt ${attempt}/3...`);
+              await new Promise((resolve) =>
+                setTimeout(resolve, 1500 * attempt),
+              ); // Increasing delay
+
+              // Check the specific booking if we have an ID
+              if (bookingId) {
+                const { data: booking } = await supabase
+                  .from("studio_bookings")
+                  .select("id, status, payment_status")
+                  .eq("id", bookingId)
+                  .single();
+
+                if (booking?.payment_status === "paid") {
+                  paymentConfirmed = true;
+                  console.log("✅ Payment confirmed for booking:", bookingId);
+                  break;
+                }
+              } else {
+                // Check if any recent booking moved to paid
+                const { data: recentPaid } = await supabase
+                  .from("studio_bookings")
+                  .select("id, status, payment_status")
+                  .eq("user_id", userId)
+                  .eq("payment_status", "paid")
+                  .order("paid_at", { ascending: false })
+                  .limit(1);
+
+                if (recentPaid && recentPaid.length > 0) {
+                  paymentConfirmed = true;
+                  console.log("✅ Found recently paid booking");
+                  break;
+                }
               }
             }
+
+            // Refresh bookings
+            await fetchBookings(userId);
+
+            if (paymentConfirmed) {
+              setActiveTab("Upcoming");
+              Alert.alert(
+                "Payment Successful! 🎉",
+                "Your booking has been confirmed and moved to Upcoming.",
+              );
+            }
+          } else if (userId) {
+            // Even if not in payment flow, refresh when returning to app
+            fetchBookings(userId);
           }
-          
-          // Refresh bookings
-          await fetchBookings(userId);
-          
-          if (paymentConfirmed) {
-            setActiveTab('Upcoming');
-            Alert.alert('Payment Successful! 🎉', 'Your booking has been confirmed and moved to Upcoming.');
-          }
-        } else if (userId) {
-          // Even if not in payment flow, refresh when returning to app
-          fetchBookings(userId);
         }
-      }
-      appState.current = nextAppState;
-    });
+        appState.current = nextAppState;
+      },
+    );
 
     return () => {
       subscription.remove();
@@ -530,57 +553,76 @@ export default function BookingsScreen() {
   // Show payment option modal before paying
   const showPaymentOptions = (item: any) => {
     setPaymentItem(item);
-    setSelectedPaymentType('full'); // Reset to full payment as default
+    setSelectedPaymentType("full"); // Reset to full payment as default
     setShowPaymentOptionModal(true);
   };
 
   // PayMongo Payment Handler
-  const handlePayNow = async (item: any, paymentType: 'full' | 'downpayment' = 'full') => {
+  const handlePayNow = async (
+    item: any,
+    paymentType: "full" | "downpayment" = "full",
+  ) => {
     if (!item || !userId) return;
 
     try {
       setLoading(true);
       const totalAmount = item.payment_amount || item.total_cost;
-      const payAmount = paymentType === 'downpayment' ? Math.round(totalAmount / 2) : totalAmount;
-      const remainingBalance = paymentType === 'downpayment' ? Math.round(totalAmount / 2) : 0;
-      
-      console.log('💳 Initiating payment for booking:', item.id, 'Type:', paymentType, 'Amount:', payAmount);
+      const payAmount =
+        paymentType === "downpayment"
+          ? Math.round(totalAmount / 2)
+          : totalAmount;
+      const remainingBalance =
+        paymentType === "downpayment" ? Math.round(totalAmount / 2) : 0;
+
+      console.log(
+        "💳 Initiating payment for booking:",
+        item.id,
+        "Type:",
+        paymentType,
+        "Amount:",
+        payAmount,
+      );
 
       // Generate environment-aware redirect URL (works with Expo Go and production)
-      const redirectUrl = ExpoLinking.createURL('payment-result', { 
-        queryParams: { status: 'success', booking_id: item.id } 
+      const redirectUrl = ExpoLinking.createURL("payment-result", {
+        queryParams: { status: "success", booking_id: item.id },
       });
-      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', { 
-        queryParams: { status: 'cancelled', booking_id: item.id } 
+      const cancelRedirectUrl = ExpoLinking.createURL("payment-result", {
+        queryParams: { status: "cancelled", booking_id: item.id },
       });
 
-      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('paymongo', {
-        body: {
-          action: 'create_checkout',
-          booking_id: item.id,
-          user_id: userId,
-          amount: payAmount,
-          total_amount: totalAmount,
-          payment_type: paymentType,
-          remaining_balance: remainingBalance,
-          studio_name: item.name,
-          booking_date: item.raw_date,
-          description: paymentType === 'downpayment' 
-            ? `Downpayment (50%) for studio booking at ${item.name}` 
-            : `Studio booking at ${item.name}`,
-          redirect_url: redirectUrl,
-          cancel_redirect_url: cancelRedirectUrl
-        }
-      });
+      const { data: paymentData, error: paymentError } =
+        await supabase.functions.invoke("paymongo", {
+          body: {
+            action: "create_checkout",
+            booking_id: item.id,
+            user_id: userId,
+            amount: payAmount,
+            total_amount: totalAmount,
+            payment_type: paymentType,
+            remaining_balance: remainingBalance,
+            studio_name: item.name,
+            booking_date: item.raw_date,
+            description:
+              paymentType === "downpayment"
+                ? `Downpayment (50%) for studio booking at ${item.name}`
+                : `Studio booking at ${item.name}`,
+            redirect_url: redirectUrl,
+            cancel_redirect_url: cancelRedirectUrl,
+          },
+        });
 
       if (paymentError) {
-        console.error('Payment error:', paymentError);
-        Alert.alert('Error', 'Failed to create payment session. Please try again.');
+        console.error("Payment error:", paymentError);
+        Alert.alert(
+          "Error",
+          "Failed to create payment session. Please try again.",
+        );
         return;
       }
 
       if (paymentData?.checkout_url) {
-        console.log('✅ Opening checkout URL:', paymentData.checkout_url);
+        console.log("✅ Opening checkout URL:", paymentData.checkout_url);
         const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
         if (canOpen) {
           // Set flag to track payment in progress and store the booking ID
@@ -588,14 +630,20 @@ export default function BookingsScreen() {
           pendingPaymentBookingId.current = item.id;
           await Linking.openURL(paymentData.checkout_url);
         } else {
-          Alert.alert('Error', 'Unable to open payment page. Please try again.');
+          Alert.alert(
+            "Error",
+            "Unable to open payment page. Please try again.",
+          );
         }
       } else {
-        Alert.alert('Error', 'Failed to get payment URL. Please try again.');
+        Alert.alert("Error", "Failed to get payment URL. Please try again.");
       }
     } catch (e: any) {
-      console.error('Pay now error:', e);
-      Alert.alert('Error', e?.message || 'Failed to initiate payment. Please try again.');
+      console.error("Pay now error:", e);
+      Alert.alert(
+        "Error",
+        e?.message || "Failed to initiate payment. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -607,55 +655,70 @@ export default function BookingsScreen() {
 
     try {
       setLoading(true);
-      console.log('💳 Paying remaining balance for booking:', item.id, 'Amount:', item.remaining_balance);
+      console.log(
+        "💳 Paying remaining balance for booking:",
+        item.id,
+        "Amount:",
+        item.remaining_balance,
+      );
 
       // Generate environment-aware redirect URL (works with Expo Go and production)
-      const redirectUrl = ExpoLinking.createURL('payment-result', { 
-        queryParams: { status: 'success', booking_id: item.id } 
+      const redirectUrl = ExpoLinking.createURL("payment-result", {
+        queryParams: { status: "success", booking_id: item.id },
       });
-      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', { 
-        queryParams: { status: 'cancelled', booking_id: item.id } 
+      const cancelRedirectUrl = ExpoLinking.createURL("payment-result", {
+        queryParams: { status: "cancelled", booking_id: item.id },
       });
 
-      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('paymongo', {
-        body: {
-          action: 'create_checkout',
-          booking_id: item.id,
-          user_id: userId,
-          amount: item.remaining_balance,
-          total_amount: item.total_cost,
-          payment_type: 'balance',
-          remaining_balance: 0, // After this payment, balance will be 0
-          studio_name: item.name,
-          booking_date: item.raw_date,
-          description: `Remaining balance payment for studio booking at ${item.name}`,
-          redirect_url: redirectUrl,
-          cancel_redirect_url: cancelRedirectUrl
-        }
-      });
+      const { data: paymentData, error: paymentError } =
+        await supabase.functions.invoke("paymongo", {
+          body: {
+            action: "create_checkout",
+            booking_id: item.id,
+            user_id: userId,
+            amount: item.remaining_balance,
+            total_amount: item.total_cost,
+            payment_type: "balance",
+            remaining_balance: 0, // After this payment, balance will be 0
+            studio_name: item.name,
+            booking_date: item.raw_date,
+            description: `Remaining balance payment for studio booking at ${item.name}`,
+            redirect_url: redirectUrl,
+            cancel_redirect_url: cancelRedirectUrl,
+          },
+        });
 
       if (paymentError) {
-        console.error('Payment error:', paymentError);
-        Alert.alert('Error', 'Failed to create payment session. Please try again.');
+        console.error("Payment error:", paymentError);
+        Alert.alert(
+          "Error",
+          "Failed to create payment session. Please try again.",
+        );
         return;
       }
 
       if (paymentData?.checkout_url) {
-        console.log('✅ Opening checkout URL:', paymentData.checkout_url);
+        console.log("✅ Opening checkout URL:", paymentData.checkout_url);
         const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
           pendingPaymentBookingId.current = item.id;
           await Linking.openURL(paymentData.checkout_url);
         } else {
-          Alert.alert('Error', 'Unable to open payment page. Please try again.');
+          Alert.alert(
+            "Error",
+            "Unable to open payment page. Please try again.",
+          );
         }
       } else {
-        Alert.alert('Error', 'Failed to get payment URL. Please try again.');
+        Alert.alert("Error", "Failed to get payment URL. Please try again.");
       }
     } catch (e: any) {
-      console.error('Pay balance error:', e);
-      Alert.alert('Error', e?.message || 'Failed to initiate payment. Please try again.');
+      console.error("Pay balance error:", e);
+      Alert.alert(
+        "Error",
+        e?.message || "Failed to initiate payment. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -664,27 +727,30 @@ export default function BookingsScreen() {
   // Check payment status (for returning from payment)
   const checkPaymentStatus = async (bookingId: string) => {
     try {
-      const { data, error } = await supabase.functions.invoke('paymongo', {
+      const { data, error } = await supabase.functions.invoke("paymongo", {
         body: {
-          action: 'check_payment',
-          booking_id: bookingId
-        }
+          action: "check_payment",
+          booking_id: bookingId,
+        },
       });
 
-      if (data?.payment_status === 'paid') {
-        Alert.alert('Success', 'Payment confirmed! Your booking is now in Upcoming.');
+      if (data?.payment_status === "paid") {
+        Alert.alert(
+          "Success",
+          "Payment confirmed! Your booking is now in Upcoming.",
+        );
         if (userId) fetchBookings(userId);
       }
     } catch (e) {
-      console.error('Check payment error:', e);
+      console.error("Check payment error:", e);
     }
   };
 
   // Request Refund Handler
   const handleRequestRefund = (item: any) => {
     setSelectedItem(item);
-    setCancellationReason('');
-    setModalMode('refund');
+    setCancellationReason("");
+    setModalMode("refund");
     setModalVisible(true);
   };
 
@@ -693,37 +759,49 @@ export default function BookingsScreen() {
 
     try {
       setLoading(true);
-      console.log('💸 Processing refund for booking:', selectedItem.id);
+      console.log("💸 Processing refund for booking:", selectedItem.id);
 
-      const { data: refundData, error: refundError } = await supabase.functions.invoke('paymongo', {
-        body: {
-          action: 'request_refund',
-          booking_id: selectedItem.id,
-          user_id: userId,
-          reason: cancellationReason || 'Customer requested cancellation'
-        }
-      });
+      const { data: refundData, error: refundError } =
+        await supabase.functions.invoke("paymongo", {
+          body: {
+            action: "request_refund",
+            booking_id: selectedItem.id,
+            user_id: userId,
+            reason: cancellationReason || "Customer requested cancellation",
+          },
+        });
 
       if (refundError) {
-        console.error('Refund error:', refundError);
-        Alert.alert('Error', 'Failed to process refund. Please try again.');
+        console.error("Refund error:", refundError);
+        Alert.alert("Error", "Failed to process refund. Please try again.");
         return;
       }
 
       if (refundData?.success) {
         Alert.alert(
-          'Refund Processed', 
-          refundData.message || `Your refund of ₱${refundData.refund_amount?.toLocaleString()} has been processed.`,
-          [{ text: 'OK', onPress: () => { if (userId) fetchBookings(userId); } }]
+          "Refund Processed",
+          refundData.message ||
+            `Your refund of ₱${refundData.refund_amount?.toLocaleString()} has been processed.`,
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                if (userId) fetchBookings(userId);
+              },
+            },
+          ],
         );
       } else {
-        Alert.alert('Error', refundData?.error || 'Failed to process refund.');
+        Alert.alert("Error", refundData?.error || "Failed to process refund.");
       }
 
       setModalVisible(false);
     } catch (e: any) {
-      console.error('Refund error:', e);
-      Alert.alert('Error', e?.message || 'Failed to process refund. Please try again.');
+      console.error("Refund error:", e);
+      Alert.alert(
+        "Error",
+        e?.message || "Failed to process refund. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -731,36 +809,38 @@ export default function BookingsScreen() {
 
   // Calculate refund amount for display
   const getRefundInfo = (item: any) => {
-    if (!item?.raw_date || !item?.payment_amount) return { percentage: 0, amount: 0, message: '' };
-    
+    if (!item?.raw_date || !item?.payment_amount)
+      return { percentage: 0, amount: 0, message: "" };
+
     const bookingDate = new Date(item.raw_date);
     const now = new Date();
     const diffTime = bookingDate.getTime() - now.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     if (diffDays > 7) {
-      return { 
-        percentage: 80, 
+      return {
+        percentage: 80,
         amount: Math.round(item.payment_amount * 0.8),
-        message: 'You will receive an 80% refund (cancelled >7 days before).'
+        message: "You will receive an 80% refund (cancelled >7 days before).",
       };
     } else if (diffDays >= 3) {
-      return { 
-        percentage: 70, 
+      return {
+        percentage: 70,
         amount: Math.round(item.payment_amount * 0.7),
-        message: 'You will receive a 70% refund (cancelled 3-7 days before).'
+        message: "You will receive a 70% refund (cancelled 3-7 days before).",
       };
     } else if (diffDays >= 0) {
-      return { 
-        percentage: 0, 
+      return {
+        percentage: 0,
         amount: 0,
-        message: 'No refund available (cancelled <3 days before booking).'
+        message: "No refund available (cancelled <3 days before booking).",
       };
     } else {
-      return { 
-        percentage: 100, 
+      return {
+        percentage: 100,
         amount: item.payment_amount,
-        message: 'Full refund available (booking date passed without check-in).'
+        message:
+          "Full refund available (booking date passed without check-in).",
       };
     }
   };
@@ -1954,14 +2034,30 @@ export default function BookingsScreen() {
                         </Text>
 
                         {/* Downpayment Badge */}
-                        {item.payment_type === 'downpayment' && item.remaining_balance > 0 && (
-                          <View style={[styles.downpaymentBadge, { backgroundColor: '#F59E0B20' }]}>
-                            <Ionicons name="warning" size={12} color="#F59E0B" />
-                            <Text style={[styles.downpaymentText, { color: '#F59E0B' }]}>
-                              Balance: ₱{item.remaining_balance?.toLocaleString()}
-                            </Text>
-                          </View>
-                        )}
+                        {item.payment_type === "downpayment" &&
+                          item.remaining_balance > 0 && (
+                            <View
+                              style={[
+                                styles.downpaymentBadge,
+                                { backgroundColor: "#F59E0B20" },
+                              ]}
+                            >
+                              <Ionicons
+                                name="warning"
+                                size={12}
+                                color="#F59E0B"
+                              />
+                              <Text
+                                style={[
+                                  styles.downpaymentText,
+                                  { color: "#F59E0B" },
+                                ]}
+                              >
+                                Balance: ₱
+                                {item.remaining_balance?.toLocaleString()}
+                              </Text>
+                            </View>
+                          )}
                       </View>
 
                       <View
@@ -2334,7 +2430,7 @@ export default function BookingsScreen() {
                   ? "Complete & Review"
                   : modalMode === "renew"
                     ? "Send Renewal Offer"
-                    : modalMode === 'refund'
+                    : modalMode === "refund"
                       ? `Request Refund (₱${getRefundInfo(selectedItem).amount.toLocaleString()})`
                       : "Yes, Cancel Booking"
         }
@@ -2434,107 +2530,221 @@ export default function BookingsScreen() {
       />
 
       {/* Payment Option Modal */}
-      <RNModal 
-        visible={showPaymentOptionModal} 
-        transparent 
-        animationType="fade" 
+      <RNModal
+        visible={showPaymentOptionModal}
+        transparent
+        animationType="fade"
         onRequestClose={() => setShowPaymentOptionModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.paymentOptionContainer, { backgroundColor: colors.card }]}>
-            <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>Choose Payment Option</Text>
-            <Text style={[styles.paymentOptionSubtitle, { color: colors.textSecondary }]}>
-              Total Amount: ₱{(paymentItem?.payment_amount || paymentItem?.total_cost || 0).toLocaleString()}
+          <View
+            style={[
+              styles.paymentOptionContainer,
+              { backgroundColor: colors.card },
+            ]}
+          >
+            <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>
+              Choose Payment Option
             </Text>
-            
-            {/* Full Payment Option */}
-            <TouchableOpacity 
-              onPress={() => setSelectedPaymentType('full')}
+            <Text
               style={[
-                styles.paymentOptionCard, 
-                { 
-                  backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
-                  borderColor: selectedPaymentType === 'full' ? colors.primary : colors.border,
-                  borderWidth: selectedPaymentType === 'full' ? 2 : 1,
-                }
+                styles.paymentOptionSubtitle,
+                { color: colors.textSecondary },
+              ]}
+            >
+              Total Amount: ₱
+              {(
+                paymentItem?.payment_amount ||
+                paymentItem?.total_cost ||
+                0
+              ).toLocaleString()}
+            </Text>
+
+            {/* Full Payment Option */}
+            <TouchableOpacity
+              onPress={() => setSelectedPaymentType("full")}
+              style={[
+                styles.paymentOptionCard,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                  borderColor:
+                    selectedPaymentType === "full"
+                      ? colors.primary
+                      : colors.border,
+                  borderWidth: selectedPaymentType === "full" ? 2 : 1,
+                },
               ]}
             >
               <View style={styles.paymentOptionRow}>
-                <View style={[
-                  styles.paymentOptionRadio,
-                  { 
-                    borderColor: selectedPaymentType === 'full' ? colors.primary : colors.border,
-                    backgroundColor: selectedPaymentType === 'full' ? colors.primary : 'transparent',
-                  }
-                ]}>
-                  {selectedPaymentType === 'full' && <View style={styles.paymentOptionRadioInner} />}
+                <View
+                  style={[
+                    styles.paymentOptionRadio,
+                    {
+                      borderColor:
+                        selectedPaymentType === "full"
+                          ? colors.primary
+                          : colors.border,
+                      backgroundColor:
+                        selectedPaymentType === "full"
+                          ? colors.primary
+                          : "transparent",
+                    },
+                  ]}
+                >
+                  {selectedPaymentType === "full" && (
+                    <View style={styles.paymentOptionRadioInner} />
+                  )}
                 </View>
                 <View style={styles.paymentOptionInfo}>
-                  <Text style={[styles.paymentOptionLabel, { color: colors.text }]}>Full Payment</Text>
-                  <Text style={[styles.paymentOptionAmount, { color: colors.primary }]}>
-                    ₱{(paymentItem?.payment_amount || paymentItem?.total_cost || 0).toLocaleString()}
+                  <Text
+                    style={[styles.paymentOptionLabel, { color: colors.text }]}
+                  >
+                    Full Payment
+                  </Text>
+                  <Text
+                    style={[
+                      styles.paymentOptionAmount,
+                      { color: colors.primary },
+                    ]}
+                  >
+                    ₱
+                    {(
+                      paymentItem?.payment_amount ||
+                      paymentItem?.total_cost ||
+                      0
+                    ).toLocaleString()}
                   </Text>
                 </View>
               </View>
-              <Text style={[styles.paymentOptionDesc, { color: colors.textSecondary }]}>
+              <Text
+                style={[
+                  styles.paymentOptionDesc,
+                  { color: colors.textSecondary },
+                ]}
+              >
                 Pay the full amount now and complete your booking
               </Text>
             </TouchableOpacity>
 
             {/* Downpayment Option */}
-            <TouchableOpacity 
-              onPress={() => setSelectedPaymentType('downpayment')}
+            <TouchableOpacity
+              onPress={() => setSelectedPaymentType("downpayment")}
               style={[
-                styles.paymentOptionCard, 
-                { 
-                  backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
-                  borderColor: selectedPaymentType === 'downpayment' ? colors.primary : colors.border,
-                  borderWidth: selectedPaymentType === 'downpayment' ? 2 : 1,
-                }
+                styles.paymentOptionCard,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                  borderColor:
+                    selectedPaymentType === "downpayment"
+                      ? colors.primary
+                      : colors.border,
+                  borderWidth: selectedPaymentType === "downpayment" ? 2 : 1,
+                },
               ]}
             >
               <View style={styles.paymentOptionRow}>
-                <View style={[
-                  styles.paymentOptionRadio,
-                  { 
-                    borderColor: selectedPaymentType === 'downpayment' ? colors.primary : colors.border,
-                    backgroundColor: selectedPaymentType === 'downpayment' ? colors.primary : 'transparent',
-                  }
-                ]}>
-                  {selectedPaymentType === 'downpayment' && <View style={styles.paymentOptionRadioInner} />}
+                <View
+                  style={[
+                    styles.paymentOptionRadio,
+                    {
+                      borderColor:
+                        selectedPaymentType === "downpayment"
+                          ? colors.primary
+                          : colors.border,
+                      backgroundColor:
+                        selectedPaymentType === "downpayment"
+                          ? colors.primary
+                          : "transparent",
+                    },
+                  ]}
+                >
+                  {selectedPaymentType === "downpayment" && (
+                    <View style={styles.paymentOptionRadioInner} />
+                  )}
                 </View>
                 <View style={styles.paymentOptionInfo}>
-                  <Text style={[styles.paymentOptionLabel, { color: colors.text }]}>Downpayment (50%)</Text>
-                  <Text style={[styles.paymentOptionAmount, { color: colors.primary }]}>
-                    ₱{Math.round((paymentItem?.payment_amount || paymentItem?.total_cost || 0) / 2).toLocaleString()}
+                  <Text
+                    style={[styles.paymentOptionLabel, { color: colors.text }]}
+                  >
+                    Downpayment (50%)
+                  </Text>
+                  <Text
+                    style={[
+                      styles.paymentOptionAmount,
+                      { color: colors.primary },
+                    ]}
+                  >
+                    ₱
+                    {Math.round(
+                      (paymentItem?.payment_amount ||
+                        paymentItem?.total_cost ||
+                        0) / 2,
+                    ).toLocaleString()}
                   </Text>
                 </View>
               </View>
-              <Text style={[styles.paymentOptionDesc, { color: colors.textSecondary }]}>
-                Pay half now, remaining ₱{Math.round((paymentItem?.payment_amount || paymentItem?.total_cost || 0) / 2).toLocaleString()} due before session
+              <Text
+                style={[
+                  styles.paymentOptionDesc,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Pay half now, remaining ₱
+                {Math.round(
+                  (paymentItem?.payment_amount ||
+                    paymentItem?.total_cost ||
+                    0) / 2,
+                ).toLocaleString()}{" "}
+                due before session
               </Text>
             </TouchableOpacity>
 
             {/* Action Buttons */}
             <View style={styles.paymentOptionButtons}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => setShowPaymentOptionModal(false)}
-                style={[styles.paymentOptionCancelBtn, { borderColor: colors.border }]}
+                style={[
+                  styles.paymentOptionCancelBtn,
+                  { borderColor: colors.border },
+                ]}
               >
-                <Text style={[styles.paymentOptionCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+                <Text
+                  style={[
+                    styles.paymentOptionCancelText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Cancel
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => {
                   setShowPaymentOptionModal(false);
                   handlePayNow(paymentItem, selectedPaymentType);
                 }}
-                style={[styles.paymentOptionConfirmBtn, { backgroundColor: colors.primary }]}
+                style={[
+                  styles.paymentOptionConfirmBtn,
+                  { backgroundColor: colors.primary },
+                ]}
               >
-                <Ionicons name="card-outline" size={18} color="white" style={{ marginRight: 6 }} />
+                <Ionicons
+                  name="card-outline"
+                  size={18}
+                  color="white"
+                  style={{ marginRight: 6 }}
+                />
                 <Text style={styles.paymentOptionConfirmText}>
-                  Pay ₱{selectedPaymentType === 'downpayment' 
-                    ? Math.round((paymentItem?.payment_amount || paymentItem?.total_cost || 0) / 2).toLocaleString()
-                    : (paymentItem?.payment_amount || paymentItem?.total_cost || 0).toLocaleString()}
+                  Pay ₱
+                  {selectedPaymentType === "downpayment"
+                    ? Math.round(
+                        (paymentItem?.payment_amount ||
+                          paymentItem?.total_cost ||
+                          0) / 2,
+                      ).toLocaleString()
+                    : (
+                        paymentItem?.payment_amount ||
+                        paymentItem?.total_cost ||
+                        0
+                      ).toLocaleString()}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -2895,8 +3105,8 @@ const styles = StyleSheet.create({
   },
   // Downpayment Badge Styles
   downpaymentBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -2905,11 +3115,11 @@ const styles = StyleSheet.create({
   },
   downpaymentText: {
     fontSize: 11,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
   // Payment Option Modal Styles
   paymentOptionContainer: {
-    width: '90%',
+    width: "90%",
     borderRadius: 20,
     padding: 24,
     shadowColor: "#000",
@@ -2920,14 +3130,14 @@ const styles = StyleSheet.create({
   },
   paymentOptionTitle: {
     fontSize: 20,
-    fontFamily: 'Poppins_600SemiBold',
-    textAlign: 'center',
+    fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
     marginBottom: 8,
   },
   paymentOptionSubtitle: {
     fontSize: 14,
-    fontFamily: 'Poppins_400Regular',
-    textAlign: 'center',
+    fontFamily: "Poppins_400Regular",
+    textAlign: "center",
     marginBottom: 20,
   },
   paymentOptionCard: {
@@ -2936,8 +3146,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   paymentOptionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 8,
   },
   paymentOptionRadio: {
@@ -2945,37 +3155,37 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginRight: 12,
   },
   paymentOptionRadioInner: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: 'white',
+    backgroundColor: "white",
   },
   paymentOptionInfo: {
     flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   paymentOptionLabel: {
     fontSize: 16,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
   paymentOptionAmount: {
     fontSize: 18,
-    fontFamily: 'Poppins_700Bold',
+    fontFamily: "Poppins_700Bold",
   },
   paymentOptionDesc: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
     marginLeft: 34,
   },
   paymentOptionButtons: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
     marginTop: 8,
   },
@@ -2984,24 +3194,24 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   paymentOptionCancelText: {
     fontSize: 14,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: "Poppins_500Medium",
   },
   paymentOptionConfirmBtn: {
     flex: 2,
     paddingVertical: 14,
     borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
   },
   paymentOptionConfirmText: {
-    color: 'white',
+    color: "white",
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
 });
