@@ -121,10 +121,31 @@ serve(async (req: Request) => {
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
 
-        // Get raw body for webhook signature verification
-        const rawBody = await req.text();
-        const body = JSON.parse(rawBody);
-        const { action, ...params } = body;
+        // Handle GET requests (redirects from PayMongo) vs POST requests
+        let action: string | null = null;
+        let params: Record<string, any> = {};
+        let rawBody = '';
+
+        if (req.method === 'GET') {
+            // GET request - parse action and params from URL query string
+            const url = new URL(req.url);
+            action = url.searchParams.get('action');
+            // Convert URLSearchParams to object
+            url.searchParams.forEach((value, key) => {
+                if (key !== 'action') {
+                    params[key] = value;
+                }
+            });
+        } else {
+            // POST request - parse from body
+            rawBody = await req.text();
+            if (rawBody) {
+                const body = JSON.parse(rawBody);
+                action = body.action;
+                const { action: _, ...restParams } = body;
+                params = restParams;
+            }
+        }
 
         // For webhooks, verify signature first
         if (action === 'webhook') {
@@ -481,76 +502,16 @@ serve(async (req: Request) => {
             // Use client-provided redirect URL if available, otherwise fallback to hardcoded scheme
             // This allows the redirect to work with Expo Go (exp://) during development
             const appDeepLink = clientRedirectUrl || `musikalokal://payment-result?status=success&booking_id=${bookingId}`;
-            const webFallback = `https://aefldxegsvzecshlayza.supabase.co/functions/v1/login-redirect?redirect=bookings`;
-
-            // Return HTML page that attempts to open the app
-            const html = `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payment Successful - MusikaLokal</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            text-align: center;
-            padding: 20px;
-        }
-        .container {
-            background: rgba(255,255,255,0.1);
-            border-radius: 20px;
-            padding: 40px;
-            backdrop-filter: blur(10px);
-            max-width: 400px;
-        }
-        .success-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-        }
-        h1 { margin: 0 0 10px 0; font-size: 24px; }
-        p { margin: 0 0 20px 0; opacity: 0.9; }
-        .btn {
-            display: inline-block;
-            background: white;
-            color: #667eea;
-            padding: 15px 30px;
-            border-radius: 10px;
-            text-decoration: none;
-            font-weight: 600;
-            margin-top: 10px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="success-icon">✅</div>
-        <h1>Payment Successful!</h1>
-        <p>Your studio booking has been confirmed and moved to your Upcoming bookings.</p>
-        <a href="${appDeepLink}" class="btn">Open MusikaLokal App</a>
-        <p style="margin-top: 20px; font-size: 14px; opacity: 0.7;">
-            If the app doesn't open automatically, please open the MusikaLokal app manually.
-        </p>
-    </div>
-    <script>
-        // Try to open the app
-        setTimeout(function() {
-            window.location.href = "${appDeepLink}";
-        }, 1000);
-    </script>
-</body>
-</html>`;
-
-            return new Response(html, {
-                headers: { 'Content-Type': 'text/html' },
-                status: 200,
+            
+            console.log('🔀 Redirecting directly to:', appDeepLink);
+            
+            // Use HTTP 302 redirect directly to the app deep link
+            return new Response(null, {
+                status: 302,
+                headers: {
+                    'Location': appDeepLink,
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                },
             });
         }
 
@@ -565,80 +526,30 @@ serve(async (req: Request) => {
 
             console.log('❌ Payment cancelled for booking:', bookingId, 'redirect_url:', clientRedirectUrl);
 
-            // Update booking payment status
+            // Reset payment status back to unpaid so user can try again
+            // (Do NOT set to 'failed' as that hides the Pay Now button)
             if (bookingId) {
                 await supabaseAdmin
                     .from('studio_bookings')
-                    .update({ payment_status: 'failed' })
+                    .update({ 
+                        payment_status: 'unpaid',
+                        checkout_session_id: null // Clear the old session so a new one can be created
+                    })
                     .eq('id', bookingId);
             }
 
             // Use client-provided redirect URL if available, otherwise fallback to hardcoded scheme
             const appDeepLink = clientRedirectUrl || `musikalokal://payment-result?status=cancelled&booking_id=${bookingId}`;
-
-            const html = `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payment Cancelled - MusikaLokal</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            color: white;
-            text-align: center;
-            padding: 20px;
-        }
-        .container {
-            background: rgba(255,255,255,0.1);
-            border-radius: 20px;
-            padding: 40px;
-            backdrop-filter: blur(10px);
-            max-width: 400px;
-        }
-        .cancel-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-        }
-        h1 { margin: 0 0 10px 0; font-size: 24px; }
-        p { margin: 0 0 20px 0; opacity: 0.9; }
-        .btn {
-            display: inline-block;
-            background: white;
-            color: #f5576c;
-            padding: 15px 30px;
-            border-radius: 10px;
-            text-decoration: none;
-            font-weight: 600;
-            margin-top: 10px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="cancel-icon">❌</div>
-        <h1>Payment Cancelled</h1>
-        <p>Your payment was cancelled. Your booking is still pending - you can try again from the app.</p>
-        <a href="${appDeepLink}" class="btn">Return to App</a>
-    </div>
-    <script>
-        setTimeout(function() {
-            window.location.href = "${appDeepLink}";
-        }, 1000);
-    </script>
-</body>
-</html>`;
-
-            return new Response(html, {
-                headers: { 'Content-Type': 'text/html' },
-                status: 200,
+            
+            console.log('🔀 Redirecting directly to:', appDeepLink);
+            
+            // Use HTTP 302 redirect directly to the app deep link
+            return new Response(null, {
+                status: 302,
+                headers: {
+                    'Location': appDeepLink,
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                },
             });
         }
 
