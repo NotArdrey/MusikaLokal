@@ -15,6 +15,7 @@ import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
 import { useLocalSearchParams } from "expo-router";

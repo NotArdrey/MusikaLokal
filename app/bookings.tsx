@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
-import { router } from "expo-router";
-import React, { useState } from "react";
+import * as ExpoLinking from "expo-linking";
+import { router, useLocalSearchParams } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import {
     Alert,
+    AppState,
     Dimensions,
     Image,
     Linking,
@@ -54,6 +56,7 @@ type Tab =
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+  const params = useLocalSearchParams<{ tab?: string; retry_payment?: string }>();
   const [activeTab, setActiveTab] = useState<Tab>("Pending");
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
@@ -62,7 +65,7 @@ export default function BookingsScreen() {
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const { width } = useWindowDimensions();
   const [modalMode, setModalMode] = useState<
-    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew"
+    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "refund"
   >("confirm");
 
   // Renew Contract State
