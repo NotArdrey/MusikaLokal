@@ -9,10 +9,12 @@ import ImageUploader from '../src/components/ImageUploader';
 import LocationPicker from '../src/components/LocationPicker';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function AddGroupScreen() {
   const { colors, isDark } = useTheme();
+  const { isSystemLocked, showLockAlert } = useAuth();
   const [step, setStep] = useState(1);
   const [groupName, setGroupName] = useState('');
   const [address, setAddress] = useState('');
@@ -257,6 +259,12 @@ export default function AddGroupScreen() {
     if (step < 3) {
       setStep(step + 1);
     } else {
+      // System lock check
+      if (isSystemLocked) {
+        showLockAlert();
+        return;
+      }
+
       // Confirmation before creating - use native Alert for reliability
       Alert.alert(
         'Confirm Group Creation',
@@ -287,6 +295,10 @@ export default function AddGroupScreen() {
         return;
       }
 
+      const orderedImages = images.length > 0 && images[thumbnailIndex]
+        ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
+        : images;
+
       const payload = {
         name: groupName,
         location: address,
@@ -294,7 +306,7 @@ export default function AddGroupScreen() {
         description,
         members,
         rate: parseFloat(hourlyRate) || 0,
-        images: images,
+        images: orderedImages,
         latitude,
         longitude,
         group_type: groupType, // 'duo' or 'band'
@@ -342,13 +354,6 @@ export default function AddGroupScreen() {
   if (!authorized) {
     return null;
   }
-
-  const addMember = () => {
-    if (newMember.trim()) {
-      setMembers([...members, newMember.trim()]);
-      setNewMember('');
-    }
-  };
 
   const removeMember = (index: number) => {
     // Prevent removing yourself (first member)

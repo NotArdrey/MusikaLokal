@@ -21,6 +21,7 @@ import { useLocalSearchParams } from "expo-router";
 
 export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
+  const { isSystemLocked, showLockAlert } = useAuth();
   const { id } = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState("About");
   const [modalVisible, setModalVisible] = useState(false);

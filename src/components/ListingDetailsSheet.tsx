@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ExpoLinking from 'expo-linking';
 import { router } from 'expo-router';
 import React, { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -9,6 +10,7 @@ import {
     BackHandler,
     Dimensions,
     Image,
+    Linking,
     ScrollView,
     StyleSheet,
     Text,
@@ -60,7 +62,7 @@ const formatTime12 = (time24: string) => {
 
 const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProps>(({ listingId }, ref) => {
     const { colors, isDark } = useTheme();
-    const { userId } = useAuth();
+    const { userId, isSystemLocked, showLockAlert } = useAuth();
     const { isProfileComplete } = useProfileCompletion();
     const [loading, setLoading] = useState(false);
     const [group, setGroup] = useState<any>(null);
@@ -189,6 +191,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
     const handleConfirm = (action: () => void, title: string, message: string) => {
         console.log('🔵 handleConfirm called');
+
+        // System Lock Check - Block if user has unpaid balance
+        if (isSystemLocked) {
+            showLockAlert();
+            return;
+        }
 
         // Profile Check Gate
         // Profile Check Gate
@@ -331,18 +339,20 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         }
     };
 
-    // Check if user has an existing booking for this studio
+    // Check if user has an unpaid booking for this studio (blocks new bookings until paid)
     const checkExistingStudioBooking = async () => {
         if (!userId || !listingId || !group || (group.type !== 'Studio' && group.type !== 'Venue')) return;
 
         try {
-            // Check for any recent booking (pending, confirmed, or cancelled)
+            // Only check for confirmed bookings with unpaid/pending payment (need to pay before booking again)
+            // Pending bookings (awaiting owner response) no longer block new bookings
             const { data, error } = await supabase
                 .from('studio_bookings')
-                .select('id, status, booking_date')
+                .select('id, status, booking_date, payment_status, payment_amount, remaining_balance')
                 .eq('user_id', userId)
                 .eq('studio_id', listingId)
-                .in('status', ['pending', 'confirmed', 'cancelled'])
+                .eq('status', 'confirmed')
+                .in('payment_status', ['unpaid', 'pending', 'failed'])
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
@@ -353,9 +363,9 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             }
 
             if (data) {
-                console.log('📋 User has an existing booking for this studio:', data);
+                console.log('📋 User has an unpaid booking for this studio:', data);
                 setHasExistingStudioBooking(true);
-                setExistingStudioBookingStatus(data.status);
+                setExistingStudioBookingStatus('unpaid');
             } else {
                 setHasExistingStudioBooking(false);
                 setExistingStudioBookingStatus(null);
@@ -431,15 +441,33 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             return;
         }
 
-        // Check if user already applied
-        if (hasExistingApplication) {
-            setAlertConfig({
-                type: 'warning',
-                title: 'Already Applied',
-                message: `You have already submitted an application for this gig. Status: ${existingApplicationStatus || 'pending'}.`
-            });
-            setAlertVisible(true);
-            return;
+        // 24-hour advance booking check for gig applications
+        if (group.event_date) {
+            const eventDate = new Date(group.event_date);
+            // If event has start time, use it; otherwise assume start of day
+            const eventStartTime = group.requirements?.event_start_time;
+            if (eventStartTime) {
+                // Parse time like "06:00 PM"
+                const [time, period] = eventStartTime.split(' ');
+                const [hours, minutes] = time.split(':').map(Number);
+                let hour24 = hours;
+                if (period === 'PM' && hours !== 12) hour24 += 12;
+                if (period === 'AM' && hours === 12) hour24 = 0;
+                eventDate.setHours(hour24, minutes, 0, 0);
+            }
+
+            const now = new Date();
+            const hoursUntilEvent = (eventDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+            if (hoursUntilEvent < 24) {
+                setAlertConfig({
+                    type: 'error',
+                    title: 'Application Deadline Passed',
+                    message: 'Applications must be submitted at least 24 hours before the event. This gig is no longer accepting applications.'
+                });
+                setAlertVisible(true);
+                return;
+            }
         }
 
         // Check if group already applied (by another member)
@@ -826,7 +854,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         .select('*')
                         .eq('studio_id', data.id)
                         .order('slot_order', { ascending: true });
-                    
+
                     // Also fetch date overrides (specific dates)
                     console.log('📅 Fetching studio date overrides...');
                     const { data: dateOverrides, error: overridesError } = await supabase
@@ -858,13 +886,13 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             console.log('📅 Using availability from JSONB column:', data.availability);
                         }
                     }
-                    
+
                     // Store date overrides for use in availability processing
                     if (!overridesError && dateOverrides && dateOverrides.length > 0) {
                         console.log('📅 Date overrides fetched:', dateOverrides);
                         normalizedData.dateOverrides = dateOverrides;
                     }
-                    
+
                     // Fetch studio settings (booking rules, pricing multipliers)
                     console.log('⚙️ Fetching studio settings...');
                     const { data: studioSettings, error: settingsError } = await supabase
@@ -872,7 +900,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         .select('*')
                         .eq('studio_id', data.id)
                         .single();
-                    
+
                     if (!settingsError && studioSettings) {
                         console.log('⚙️ Studio settings fetched:', studioSettings);
                         normalizedData.settings = studioSettings;
@@ -919,11 +947,16 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     };
 
 
-    const processAvailability = (availability: any[], bookings: any[], dateOverrides?: any[]) => {
-        console.log('📅 processAvailability called with:', { availability, bookingsCount: bookings.length, dateOverridesCount: dateOverrides?.length || 0 });
+    const processAvailability = (availability: any[], dbBookings: any[], dateOverrides?: any[], cartBookings?: any[]) => {
+        console.log('📅 processAvailability called with:', { availability, dbBookingsCount: dbBookings.length, dateOverridesCount: dateOverrides?.length || 0, cartBookingsCount: cartBookings?.length || 0 });
         const marked: any = {};
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+
+        // Get lead time for filtering slots that are too soon
+        const leadTimeHours = group?.settings?.lead_time_hours || 0;
+        const minBookingTime = new Date();
+        minBookingTime.setHours(minBookingTime.getHours() + leadTimeHours);
 
         // Map availability for easier lookup (weekly schedule)
         const availabilityMap: { [key: number]: any } = {};
@@ -934,7 +967,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 console.log(`📅 Mapped ${daySchedule.day} (index ${dayIndex}) with ${daySchedule.slots?.length || 0} slots`);
             }
         });
-        
+
         // Map date overrides for easier lookup (specific dates override weekly schedule)
         const dateOverrideMap: { [key: string]: any } = {};
         if (dateOverrides && Array.isArray(dateOverrides)) {
@@ -952,13 +985,14 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         for (let i = 0; i < 90; i++) {
             const date = new Date(today);
             date.setDate(today.getDate() + i);
-            const dateStr = date.toISOString().split('T')[0];
+            // Use local date string to avoid timezone issues
+            const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
             const dayIndex = date.getDay();
-            
+
             // Check if there's a specific date override for this date (priority over weekly schedule)
             const dateOverride = dateOverrideMap[dateStr];
             let daySchedule: any = null;
-            
+
             if (dateOverride) {
                 // Use date override instead of weekly schedule
                 if (dateOverride.is_open && dateOverride.open_time && dateOverride.close_time) {
@@ -980,46 +1014,89 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             // Check if Open
             if (daySchedule && daySchedule.slots && daySchedule.slots.length > 0) {
                 // Calculate if Fully Booked
-                // 1. Generate all potential slots for this day
+                // 1. Generate all potential slots for this day (considering lead time)
                 const potentialSlots: string[] = [];
                 daySchedule.slots.forEach((slot: any) => {
                     const start = new Date(`${dateStr}T${slot.start}`);
                     const end = new Date(`${dateStr}T${slot.end}`);
                     const current = new Date(start);
                     while (current < end) {
-                        potentialSlots.push(current.toTimeString().slice(0, 5));
+                        // Only count slot if it passes lead time check
+                        if (current >= minBookingTime) {
+                            potentialSlots.push(current.toTimeString().slice(0, 5));
+                        }
                         current.setHours(current.getHours() + 1);
                     }
                 });
 
-                // 2. Check bookings for this day (Confirmed OR Pending should block)
-                const dayBookings = bookings.filter((b: any) => {
-                    if (b.status === 'cancelled') return false;
-                    const startDate = new Date(b.start_time);
-                    if (isNaN(startDate.getTime())) return false;
-                    return startDate.toISOString().split('T')[0] === dateStr;
+                // If no potential slots available after lead time check, mark as unavailable
+                if (potentialSlots.length === 0) {
+                    marked[dateStr] = {
+                        disabled: true,
+                        disableTouchEvent: true,
+                        textColor: isDark ? '#4B5563' : '#D1D5DB',
+                    };
+                    continue;
+                }
+
+                // 2. Check database bookings for this day (Confirmed OR Pending should block)
+                // Studio bookings have separate booking_date (DATE), start_time (TIME), end_time (TIME) columns
+                const dayDbBookings = dbBookings.filter((b: any) => {
+                    if (b.status === 'cancelled' || b.status === 'rejected') return false;
+                    // Match booking_date directly with the selected date string
+                    return b.booking_date === dateStr;
                 });
 
                 // 3. Mark slots as taken
-                // Simple logic: If booking starts at X, that slot is taken.
-                // NOTE: This assumes 1-hour alignment. For robust check, we need range overlap.
-                const bookedSlots = dayBookings.map((b: any) =>
-                    new Date(b.start_time).toTimeString().slice(0, 5)
-                );
-
-                // If duration > 1, we might need to block multiple slots, but stored bookings have start_time.
-                // Robustness: A booking usually blocks its entire duration.
-                // Let's refine: For each booking, block all slots covered by it.
                 const blockedTimes = new Set<string>();
-                dayBookings.forEach((b: any) => {
-                    const bStart = new Date(b.start_time);
-                    const bEnd = new Date(b.end_time);
+
+                // Block times from database bookings
+                dayDbBookings.forEach((b: any) => {
+                    // Combine booking_date with start_time and end_time to create proper Date objects
+                    const bStart = new Date(`${b.booking_date}T${b.start_time}`);
+                    const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
+
+                    if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
+                        console.log('⚠️ Invalid booking times in processAvailability:', b);
+                        return;
+                    }
+
                     const current = new Date(bStart);
                     while (current < bEnd) {
                         blockedTimes.add(current.toTimeString().slice(0, 5));
                         current.setHours(current.getHours() + 1);
                     }
                 });
+
+                // Also block times from cart bookings (same date)
+                if (cartBookings && cartBookings.length > 0) {
+                    const cartBookingsForDate = cartBookings.filter(b => {
+                        const cartDateStr = b.date.toISOString().split('T')[0];
+                        return cartDateStr === dateStr;
+                    });
+
+                    cartBookingsForDate.forEach((b) => {
+                        // If booking has timeSlots array, use that (multi-slot booking)
+                        if (b.timeSlots && b.timeSlots.length > 0) {
+                            b.timeSlots.forEach((slot: any) => {
+                                const slotStart = new Date(`${dateStr}T${slot.start}`);
+                                const slotEnd = new Date(`${dateStr}T${slot.end}`);
+                                const current = new Date(slotStart);
+                                while (current < slotEnd) {
+                                    blockedTimes.add(current.toTimeString().slice(0, 5));
+                                    current.setHours(current.getHours() + 1);
+                                }
+                            });
+                        } else if (b.startTime && b.endTime) {
+                            // Single slot booking - use startTime and endTime
+                            const current = new Date(b.startTime);
+                            while (current < b.endTime) {
+                                blockedTimes.add(current.toTimeString().slice(0, 5));
+                                current.setHours(current.getHours() + 1);
+                            }
+                        }
+                    });
+                }
 
                 const availableCount = potentialSlots.filter(s => !blockedTimes.has(s)).length;
 
@@ -1064,10 +1141,10 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         const selectedDate = new Date(dateStr);
         const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][selectedDate.getDay()];
         console.log('🕐 Looking for day:', dayName);
-        
+
         // Check if there's a specific date override for this date
         let daySchedule: any = null;
-        
+
         if (group.dateOverrides && Array.isArray(group.dateOverrides)) {
             const dateOverride = group.dateOverrides.find((o: any) => o.override_date === dateStr);
             if (dateOverride) {
@@ -1086,12 +1163,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 }
             }
         }
-        
+
         // Fall back to weekly schedule if no override
         if (!daySchedule) {
             daySchedule = group.availability.find((a: any) => a.day.toLowerCase() === dayName);
         }
-        
+
         console.log('🕐 Found day schedule:', daySchedule);
 
         if (!daySchedule || !daySchedule.slots) {
@@ -1105,18 +1182,29 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         const slotsSet = new Set<string>();
 
         // Identify blocked times from existing bookings (Confirmed OR Pending)
+        // Studio bookings have separate booking_date (DATE), start_time (TIME), end_time (TIME) columns
         const dayBookings = existingBookings.filter((b: any) => {
-            if (b.status === 'cancelled') return false;
-            const startDate = new Date(b.start_time);
-            if (isNaN(startDate.getTime())) return false;
-            return startDate.toISOString().split('T')[0] === dateStr;
+            if (b.status === 'cancelled' || b.status === 'rejected') return false;
+            // Match booking_date directly with the selected date string
+            const bookingDateStr = b.booking_date;
+            return bookingDateStr === dateStr;
         });
-        console.log('🕐 Day bookings:', dayBookings.length);
+        console.log('🕐 Day bookings:', dayBookings.length, dayBookings.map((b: any) => ({ date: b.booking_date, start: b.start_time, end: b.end_time, status: b.status })));
 
         const blockedTimes = new Set<string>();
+
+        // Block times from existing database bookings
         dayBookings.forEach((b: any) => {
-            const bStart = new Date(b.start_time);
-            const bEnd = new Date(b.end_time);
+            // start_time and end_time are TIME columns (e.g., "09:00:00" or "09:00")
+            // Combine with booking_date to create proper Date objects
+            const bStart = new Date(`${b.booking_date}T${b.start_time}`);
+            const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
+
+            if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
+                console.log('⚠️ Invalid booking times:', b);
+                return;
+            }
+
             const current = new Date(bStart);
             while (current < bEnd) {
                 blockedTimes.add(current.toTimeString().slice(0, 5));
@@ -1124,11 +1212,52 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             }
         });
 
+        // Also block times from bookings already added to cart (same date)
+        const cartBookingsForDate = bookings.filter(b => {
+            const cartDateStr = b.date.toISOString().split('T')[0];
+            return cartDateStr === dateStr;
+        });
+
+        cartBookingsForDate.forEach((b) => {
+            // If booking has timeSlots array, use that (multi-slot booking)
+            if (b.timeSlots && b.timeSlots.length > 0) {
+                b.timeSlots.forEach((slot) => {
+                    const slotStart = new Date(`${dateStr}T${slot.start}`);
+                    const slotEnd = new Date(`${dateStr}T${slot.end}`);
+                    const current = new Date(slotStart);
+                    while (current < slotEnd) {
+                        blockedTimes.add(current.toTimeString().slice(0, 5));
+                        current.setHours(current.getHours() + 1);
+                    }
+                });
+            } else {
+                // Single slot booking - use startTime and endTime
+                const current = new Date(b.startTime);
+                while (current < b.endTime) {
+                    blockedTimes.add(current.toTimeString().slice(0, 5));
+                    current.setHours(current.getHours() + 1);
+                }
+            }
+        });
+
+        // Also block times from currently selected time slots (for multi-slot selection on same day)
+        selectedTimeSlots.forEach((slot) => {
+            const slotStart = new Date(`${dateStr}T${slot.start}`);
+            const slotEnd = new Date(`${dateStr}T${slot.end}`);
+            const current = new Date(slotStart);
+            while (current < slotEnd) {
+                blockedTimes.add(current.toTimeString().slice(0, 5));
+                current.setHours(current.getHours() + 1);
+            }
+        });
+
+        console.log('🕐 Blocked times (including cart):', Array.from(blockedTimes));
+
         daySchedule.slots.forEach((slot: any) => {
             console.log('🕐 Processing slot:', slot);
             const start = new Date(`${dateStr}T${slot.start}`);
             const end = new Date(`${dateStr}T${slot.end}`);
-            
+
             // Get lead time for filtering slots that are too soon
             const leadTimeHours = group?.settings?.lead_time_hours || 0;
             const minBookingTime = new Date();
@@ -1138,11 +1267,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             const current = new Date(start);
             while (current < end) {
                 const timeStr = current.toTimeString().slice(0, 5); // HH:MM
-                
+
                 // Check if this slot is past the lead time requirement
                 const slotDateTime = new Date(`${dateStr}T${timeStr}`);
                 const passesLeadTime = slotDateTime >= minBookingTime;
-                
+
                 // Only add if not blocked AND passes lead time check
                 if (!blockedTimes.has(timeStr) && passesLeadTime) {
                     slotsSet.add(timeStr);
@@ -1155,6 +1284,19 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         console.log('🕐 Generated slots:', uniqueSlots);
         setAvailableSlots(uniqueSlots);
     };
+
+    // Refresh available slots and calendar when bookings cart changes (to block already-selected times)
+    useEffect(() => {
+        if (group?.availability) {
+            // Re-process calendar marked dates to reflect cart changes
+            processAvailability(group.availability, existingBookings, group.dateOverrides, bookings);
+
+            // Also refresh available slots if a date is selected
+            if (selectedDate) {
+                fetchAvailableSlots(selectedDate);
+            }
+        }
+    }, [bookings.length, selectedTimeSlots.length]);
 
     const toggleFavorite = async () => {
         const nextState = !isFavorited;
@@ -1313,12 +1455,12 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
     };
 
     const labels = group ? getTypeLabels(group.type) : getTypeLabels('Group');
-    
+
     // Handle dual pricing for studios
     const rehearsalRate = group?.rehearsal_rate ? parseInt(group.rehearsal_rate).toLocaleString() : null;
     const recordingRate = group?.recording_rate ? parseInt(group.recording_rate).toLocaleString() : null;
     const hasDualPricing = group?.type === 'Studio' && rehearsalRate && recordingRate && rehearsalRate !== '0' && recordingRate !== '0';
-    const displayRate = group?.rate ? parseInt(group.rate).toLocaleString() : 
+    const displayRate = group?.rate ? parseInt(group.rate).toLocaleString() :
         (rehearsalRate || recordingRate || group?.hourly_rate ? parseInt(group?.hourly_rate || '0').toLocaleString() : '0');
     const showTabs = labels.tabs.length > 0;
 
@@ -1358,11 +1500,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
             {/* Show lead time notice if applicable */}
             {group?.settings?.lead_time_hours && group.settings.lead_time_hours > 0 && (
-                <View style={{ 
-                    backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7', 
-                    paddingHorizontal: 12, 
-                    paddingVertical: 8, 
-                    borderRadius: 8, 
+                <View style={{
+                    backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : '#FEF3C7',
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 8,
                     marginBottom: 12,
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -1407,6 +1549,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     setSelectedDate(day.dateString);
                     setSelectedSlot(null);
                     setValidEndTimes([]);
+                    setEndTime(null as any);  // Reset endTime to prevent stale booking state
                     fetchAvailableSlots(day.dateString);
                     // Update date state
                     const selectedDateObj = new Date(day.dateString);
@@ -1848,36 +1991,79 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
         return (
             <View style={styles.tabContent}>
-                {/* Status display for existing booking */}
-                {hasExistingStudioBooking && (
-                    <View style={[
-                        styles.infoBox,
-                        {
-                            backgroundColor: existingStudioBookingStatus === 'cancelled' ? '#EF444420' :
-                                existingStudioBookingStatus === 'confirmed' ? '#10B98120' :
-                                    colors.primary + '20',
-                            borderColor: existingStudioBookingStatus === 'cancelled' ? '#EF4444' :
-                                existingStudioBookingStatus === 'confirmed' ? '#10B981' :
-                                    colors.primary,
-                            marginBottom: 16
-                        }
-                    ]}>
-                        <Ionicons
-                            name={existingStudioBookingStatus === 'cancelled' ? 'close-circle' :
-                                existingStudioBookingStatus === 'confirmed' ? 'checkmark-circle' :
-                                    'information-circle'}
-                            size={20}
-                            color={existingStudioBookingStatus === 'cancelled' ? '#EF4444' :
-                                existingStudioBookingStatus === 'confirmed' ? '#10B981' :
-                                    colors.primary}
-                        />
-                        <Text style={[styles.infoText, { color: colors.text }]}>
-                            {existingStudioBookingStatus === 'cancelled'
-                                ? 'Your booking request was declined by the studio owner.'
-                                : existingStudioBookingStatus === 'confirmed'
-                                    ? 'Your booking has been confirmed! Check your bookings page for details.'
-                                    : 'You already have a pending booking for this studio. Please wait for the owner to respond before creating another booking.'}
-                        </Text>
+                {/* Unpaid Booking Warning - blocks new bookings until paid */}
+                {hasExistingStudioBooking && existingStudioBookingStatus === 'unpaid' && (
+                    <View style={{
+                        backgroundColor: isDark ? '#1F2937' : '#FFF7ED', // Very subtle orange tint in light mode
+                        borderLeftWidth: 4,
+                        borderLeftColor: '#F59700',
+                        borderRadius: 8, // Slightly sharper corners for "card" feel
+                        marginBottom: 20,
+                        padding: 16,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 16,
+                        // elevate slightly
+                        shadowColor: "#000",
+                        shadowOffset: {
+                            width: 0,
+                            height: 1,
+                        },
+                        shadowOpacity: 0.05,
+                        shadowRadius: 2,
+                        elevation: 2,
+                    }}>
+                        <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                                <Ionicons name="alert-circle" size={16} color="#F59700" style={{ marginRight: 6 }} />
+                                <Text style={{
+                                    fontFamily: 'Poppins_600SemiBold',
+                                    fontSize: 14,
+                                    color: isDark ? '#F59700' : '#D97706'
+                                }}>
+                                    Payment Pending
+                                </Text>
+                            </View>
+                            <Text style={{
+                                fontFamily: 'Poppins_400Regular',
+                                fontSize: 12,
+                                color: colors.textSecondary,
+                                lineHeight: 18
+                            }}>
+                                Complete payment for your existing booking to unlock new sessions.
+                            </Text>
+                        </View>
+
+                        <TouchableOpacity
+                            style={{
+                                backgroundColor: '#F59700',
+                                paddingVertical: 10,
+                                paddingHorizontal: 16,
+                                borderRadius: 100, // Pill shape
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 6,
+                                shadowColor: "#F59700",
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.2,
+                                shadowRadius: 3,
+                                elevation: 3
+                            }}
+                            onPress={() => {
+                                (ref as any)?.current?.dismiss();
+                                router.push('/bookings' as any);
+                            }}
+                        >
+                            <Text style={{
+                                color: '#FFFFFF',
+                                fontFamily: 'Poppins_600SemiBold',
+                                fontSize: 12
+                            }}>
+                                Pay Now
+                            </Text>
+                            <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
+                        </TouchableOpacity>
                     </View>
                 )}
 
@@ -1943,14 +2129,19 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     </View>
                 )}
 
-                {/* Add Booking Section */}
-                {!hasExistingStudioBooking && (showAddBooking || bookings.length === 0) ? (
+                {/* Add Booking Section - Hidden if user has unpaid booking */}
+                {!(hasExistingStudioBooking && existingStudioBookingStatus === 'unpaid') && (showAddBooking || bookings.length === 0) ? (
                     <>
                         {renderBookingControls()}
 
                         <TouchableOpacity
-                            style={[styles.secondaryBtn, { borderColor: colors.primary, backgroundColor: 'transparent', marginBottom: 16, opacity: isCheckingAvailability ? 0.6 : 1 }]}
-                            disabled={!date || !endTime || isCheckingAvailability}
+                            style={[styles.secondaryBtn, {
+                                borderColor: (!selectedSlot || !endTime) ? colors.border : colors.primary,
+                                backgroundColor: 'transparent',
+                                marginBottom: 16,
+                                opacity: (!selectedSlot || !endTime || isCheckingAvailability) ? 0.5 : 1
+                            }]}
+                            disabled={!selectedSlot || !endTime || isCheckingAvailability}
                             activeOpacity={0.8}
                             onPress={async () => {
                                 if (date && endTime) {
@@ -2072,7 +2263,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                             )}
                         </TouchableOpacity>
                     </>
-                ) : !hasExistingStudioBooking ? (
+                ) : !(hasExistingStudioBooking && existingStudioBookingStatus === 'unpaid') ? (
                     <TouchableOpacity
                         style={[styles.secondaryBtn, { borderColor: colors.primary, backgroundColor: 'transparent', marginBottom: 16 }]}
                         onPress={() => setShowAddBooking(true)}
@@ -2099,7 +2290,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 </View>
 
                 {/* Payment Summary */}
-                {bookings.length > 0 && !hasExistingStudioBooking && (
+                {bookings.length > 0 && !(hasExistingStudioBooking && existingStudioBookingStatus === 'unpaid') && (
                     <View style={[styles.paymentSummary, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB' }]}>
                         <View style={styles.summaryRow}>
                             <Text style={{ color: colors.textSecondary }}>Rate</Text>
@@ -2117,7 +2308,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     </View>
                 )}
 
-                {!hasExistingStudioBooking && (
+                {!(hasExistingStudioBooking && existingStudioBookingStatus === 'unpaid') && (
                     <TouchableOpacity
                         style={[styles.primaryBtn, { backgroundColor: bookings.length > 0 ? colors.primary : colors.border, opacity: loading ? 0.6 : 1 }]}
                         disabled={bookings.length === 0 || loading}
@@ -2238,8 +2429,71 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         setModalVisible(false);
                                         (ref as any)?.current?.dismiss();
                                     } else {
-                                        // All success
-                                        alert(`Successfully created ${results.length} booking(s)! The studio owner will review your request.`);
+                                        // All success - now initiate payment via PayMongo
+                                        console.log('✅ All bookings created, initiating payment...');
+
+                                        // For now, we process payment for the first booking
+                                        // In future, we can batch payments or handle multiple bookings
+                                        const firstBooking = results[0];
+
+                                        if (firstBooking?.requires_payment && firstBooking?.id) {
+                                            try {
+                                                console.log('💳 Creating PayMongo checkout session...');
+
+                                                // Generate environment-aware redirect URLs (works with Expo Go and production)
+                                                const redirectUrl = ExpoLinking.createURL('payment-result', {
+                                                    queryParams: { status: 'success', booking_id: firstBooking.id }
+                                                });
+                                                const cancelRedirectUrl = ExpoLinking.createURL('payment-result', {
+                                                    queryParams: { status: 'cancelled', booking_id: firstBooking.id }
+                                                });
+
+                                                const { data: paymentData, error: paymentError } = await supabase.functions.invoke('paymongo', {
+                                                    body: {
+                                                        action: 'create_checkout',
+                                                        booking_id: firstBooking.id,
+                                                        user_id: userId,
+                                                        amount: firstBooking.payment_amount || firstBooking.final_price,
+                                                        studio_name: group.name,
+                                                        booking_date: firstBooking.booking_date,
+                                                        description: `Studio booking at ${group.name}`,
+                                                        redirect_url: redirectUrl,
+                                                        cancel_redirect_url: cancelRedirectUrl
+                                                    }
+                                                });
+
+                                                if (paymentError) {
+                                                    console.error('❌ Payment error:', paymentError);
+                                                    alert('Booking created! However, payment setup failed. Please go to Pending bookings to complete payment.');
+                                                } else if (paymentData?.checkout_url) {
+                                                    console.log('✅ Checkout URL:', paymentData.checkout_url);
+
+                                                    // Clear form
+                                                    setBookings([]);
+                                                    setSelectedTimeSlots([]);
+                                                    setBookingNotes('');
+                                                    setModalVisible(false);
+                                                    (ref as any)?.current?.dismiss();
+
+                                                    // Open PayMongo checkout in browser
+                                                    const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
+                                                    if (canOpen) {
+                                                        await Linking.openURL(paymentData.checkout_url);
+                                                    } else {
+                                                        alert('Booking created! Please complete payment from your Pending bookings.');
+                                                    }
+                                                    return;
+                                                } else {
+                                                    alert('Booking created! Please complete payment from your Pending bookings.');
+                                                }
+                                            } catch (payErr: any) {
+                                                console.error('❌ Payment initiation error:', payErr);
+                                                alert('Booking created! Please complete payment from your Pending bookings to confirm.');
+                                            }
+                                        } else {
+                                            alert(`Successfully created ${results.length} booking(s)! Please complete payment to confirm.`);
+                                        }
+
                                         // Clear form and close
                                         setBookings([]);
                                         setSelectedTimeSlots([]);
@@ -2363,8 +2617,61 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         console.log('🎨 renderGigApply called');
         console.log('Current state:', { pitchMessage, videoUrl, isSubmittingApplication, userId, listingId });
 
+        // Calculate application deadline (24hrs before event)
+        const getApplicationDeadline = () => {
+            if (!group.event_date) return null;
+            const eventDate = new Date(group.event_date);
+            const eventStartTime = group.requirements?.event_start_time;
+            if (eventStartTime) {
+                const [time, period] = eventStartTime.split(' ');
+                const [hours, minutes] = time.split(':').map(Number);
+                let hour24 = hours;
+                if (period === 'PM' && hours !== 12) hour24 += 12;
+                if (period === 'AM' && hours === 12) hour24 = 0;
+                eventDate.setHours(hour24, minutes, 0, 0);
+            }
+            const deadline = new Date(eventDate.getTime() - 24 * 60 * 60 * 1000);
+            return deadline;
+        };
+
+        const deadline = getApplicationDeadline();
+        const now = new Date();
+        const isDeadlinePassed = deadline && now >= deadline;
+        const hoursUntilDeadline = deadline ? Math.max(0, (deadline.getTime() - now.getTime()) / (1000 * 60 * 60)) : null;
+
         return (
             <View style={styles.tabContent}>
+                {/* Application Deadline Notice */}
+                {deadline && (
+                    <View style={[styles.infoBox, {
+                        backgroundColor: isDeadlinePassed ? '#EF444420' : (hoursUntilDeadline && hoursUntilDeadline < 48 ? '#F59E0B20' : '#10B98120'),
+                        borderColor: isDeadlinePassed ? '#EF4444' : (hoursUntilDeadline && hoursUntilDeadline < 48 ? '#F59E0B' : '#10B981'),
+                        marginBottom: 16
+                    }]}>
+                        <Ionicons
+                            name={isDeadlinePassed ? "close-circle" : "time"}
+                            size={20}
+                            color={isDeadlinePassed ? '#EF4444' : (hoursUntilDeadline && hoursUntilDeadline < 48 ? '#F59E0B' : '#10B981')}
+                        />
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.infoText, { color: colors.text, fontFamily: 'Poppins_600SemiBold' }]}>
+                                {isDeadlinePassed ? 'Application Deadline Passed' : 'Application Deadline'}
+                            </Text>
+                            <Text style={[styles.infoText, { color: colors.text }]}>
+                                {isDeadlinePassed
+                                    ? 'This gig is no longer accepting applications.'
+                                    : `Apply by ${deadline.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} at ${deadline.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
+                                }
+                            </Text>
+                            {!isDeadlinePassed && hoursUntilDeadline && hoursUntilDeadline < 48 && (
+                                <Text style={[styles.infoText, { color: '#F59E0B', fontFamily: 'Poppins_600SemiBold', marginTop: 4 }]}>
+                                    ⏰ Only {Math.floor(hoursUntilDeadline)} hours left!
+                                </Text>
+                            )}
+                        </View>
+                    </View>
+                )}
+
                 {/* SPAM BLOCK WARNING */}
                 {isBlocked && (
                     <View style={[styles.infoBox, { backgroundColor: '#EF444420', borderColor: '#EF4444', marginBottom: 32 }]}>
@@ -2533,42 +2840,6 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     <Text style={{ color: colors.primary, marginLeft: 8, textDecorationLine: 'underline' }}>Review Terms & Conditions</Text>
                 </View>
 
-                {hasExistingApplication && (
-                    <View style={[
-                        styles.infoBox,
-                        {
-                            backgroundColor: existingApplicationStatus === 'rejected' ? '#EF444420' :
-                                existingApplicationStatus === 'accepted' ? '#10B98120' :
-                                    colors.primary + '20',
-                            borderColor: existingApplicationStatus === 'rejected' ? '#EF4444' :
-                                existingApplicationStatus === 'accepted' ? '#10B981' :
-                                    colors.primary,
-                            marginBottom: 24
-                        }
-                    ]}>
-                        <Ionicons
-                            name={existingApplicationStatus === 'rejected' ? 'close-circle' :
-                                existingApplicationStatus === 'accepted' ? 'checkmark-circle' :
-                                    'information-circle'}
-                            size={20}
-                            color={existingApplicationStatus === 'rejected' ? '#EF4444' :
-                                existingApplicationStatus === 'accepted' ? '#10B981' :
-                                    colors.primary}
-                        />
-                        <Text style={[styles.infoText, { color: colors.text }]}>
-                            {existingApplicationStatus === 'rejected'
-                                ? 'Your application was declined. You cannot re-apply to this gig.'
-                                : existingApplicationStatus === 'accepted'
-                                    ? 'Your application has been accepted! 🎉'
-                                    : `You have already applied to this gig. Status: `}
-                            {existingApplicationStatus !== 'rejected' && existingApplicationStatus !== 'accepted' && (
-                                <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{existingApplicationStatus}</Text>
-                            )}
-                        </Text>
-                    </View>
-                )
-                }
-
                 {/* Warning: Group Already Applied by Another Member */}
                 {groupAlreadyApplied && selectedGroupId && (
                     <View style={[styles.infoBox, { backgroundColor: '#F59E0B20', borderColor: '#F59E0B', marginBottom: 16 }]}>
@@ -2583,8 +2854,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 <TouchableOpacity
                     style={[
                         styles.primaryBtn,
-                        { backgroundColor: colors.primary, marginTop: hasExistingApplication ? 16 : 0 },
-                        (isSubmittingApplication || !pitchMessage.trim() || hasExistingApplication || groupAlreadyApplied || (group.requirements?.musician_type === 'group' && !selectedGroupId)) && { opacity: 0.5 }
+                        { backgroundColor: colors.primary },
+                        (isSubmittingApplication || !pitchMessage.trim() || groupAlreadyApplied || (group.requirements?.musician_type === 'group' && !selectedGroupId)) && { opacity: 0.5 }
                     ]}
                     onPress={() => {
                         console.log('🟡 SUBMIT APPLICATION BUTTON PRESSED');
@@ -2596,16 +2867,6 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                         console.log('selectedGroupId:', selectedGroupId);
                         console.log('userId:', userId);
                         console.log('listingId:', listingId);
-
-                        if (hasExistingApplication) {
-                            setAlertConfig({
-                                type: 'warning',
-                                title: 'Already Applied',
-                                message: `You have already submitted an application for this gig. Status: ${existingApplicationStatus || 'pending'}.`
-                            });
-                            setAlertVisible(true);
-                            return;
-                        }
 
                         if (groupAlreadyApplied) {
                             setAlertConfig({
@@ -2779,8 +3040,8 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                 const memberInstrument = typeof member === 'string' ? member : member.instrument;
                                 return (
                                     <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: isDark ? '#1F2937' : '#F9FAFB', padding: 12, borderRadius: 12 }}>
-                                        <View style={{ 
-                                            width: 44, height: 44, borderRadius: 22, 
+                                        <View style={{
+                                            width: 44, height: 44, borderRadius: 22,
                                             backgroundColor: isLeader ? colors.primary : '#E0E7FF',
                                             alignItems: 'center', justifyContent: 'center'
                                         }}>
@@ -3221,7 +3482,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                                         {group.type === 'Studio' && group.studio_type && (
                                                             <View style={[styles.statCard, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                                                                 <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Type</Text>
-                                                                <Text style={[styles.statValue, { color: colors.text }]}>{group.studio_type}</Text>
+                                                                <Text style={[styles.statValue, { color: colors.text }]}>{group.studio_type === 'Both' ? 'Rehearsal & Recording' : group.studio_type}</Text>
                                                             </View>
                                                         )}
                                                         {group.type === 'Studio' && group.pax && (

@@ -131,13 +131,7 @@ export default function EditStudioScreen() {
   // Calendar-based availability state
   const [selectedDates, setSelectedDates] = useState<{ [date: string]: { selected: boolean; slots: { start: string; end: string }[] } }>({});
 
-  // Booking Settings State
-  const [leadTimeHours, setLeadTimeHours] = useState('24');
-  const [weekendMultiplier, setWeekendMultiplier] = useState('1.0');
-  const [peakSeasonMultiplier, setPeakSeasonMultiplier] = useState('1.0');
-  const [peakSeasonDates, setPeakSeasonDates] = useState<{ start: string; end: string }[]>([]);
-  const [offPeakMultiplier, setOffPeakMultiplier] = useState('1.0');
-  const [offPeakDates, setOffPeakDates] = useState<{ start: string; end: string }[]>([]);
+
 
   // Conflict Resolution State
   const [conflictModalVisible, setConflictModalVisible] = useState(false);
@@ -212,69 +206,227 @@ export default function EditStudioScreen() {
   }, [id, authorized]);
 
   const fetchStudioDetails = async () => {
+    console.log('🔄 ===== FETCH STUDIO DETAILS STARTED =====');
+    console.log('🔄 Timestamp:', new Date().toISOString());
+    console.log('🔄 Studio ID (raw):', id);
+    console.log('🔄 Studio ID type:', typeof id);
+    console.log('🔄 Is Array?:', Array.isArray(id));
+    
     try {
+      setLoading(true);
+      console.log('🔄 Loading state set to true');
+      
       const { data: { user } } = await supabase.auth.getUser();
+      console.log('👤 User fetched:', user?.id);
+      
       if (!user) {
+        console.error('❌ No user found, redirecting to login');
         router.replace('/');
         return;
       }
 
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
+      console.log('🎯 Studio ID (processed):', studioId);
+      console.log('🎯 Studio ID type after processing:', typeof studioId);
+      
       if (!studioId) {
+        console.error('❌ Invalid studio ID after processing');
         showAlert('error', 'Error', 'Invalid studio ID');
         router.replace('/home');
         return;
       }
 
+      console.log('📡 Calling edge function with params:', {
+        action: 'fetch_one',
+        type: 'studio',
+        id: studioId,
+        userId: user.id
+      });
+
       const { data, error } = await supabase.functions.invoke('manage-listings', {
         body: { action: 'fetch_one', type: 'studio', id: studioId, userId: user.id }
       });
 
-      if (error) throw error;
+      console.log('� ===== EDGE FUNCTION RESPONSE =====');
+      console.log('📥 Response timestamp:', new Date().toISOString());
+      console.log('📥 Error object:', error);
+      console.log('📥 Data object:', data);
+      console.log('📥 Data type:', typeof data);
+      console.log('📥 Data is null?:', data === null);
+      console.log('📥 Data is undefined?:', data === undefined);
+      console.log('📥 Data is array?:', Array.isArray(data));
+      console.log('📥 Data keys:', data ? Object.keys(data) : 'NO DATA');
+      console.log('📥 Data stringified:', JSON.stringify(data, null, 2));
+
+      if (error) {
+        console.error('❌ Edge function returned error:', error);
+        throw error;
+      }
 
       // If no data returned, user doesn't own this studio
       if (!data) {
+        console.error('❌ No data returned from edge function');
         showAlert('error', 'Not Found', 'Studio not found or you do not have permission to edit it.');
         router.replace('/home');
         return;
       }
 
+      console.log('✅ ===== DATA VALIDATION PASSED =====');
+      console.log('📦 Full studio data received:', JSON.stringify(data, null, 2));
+      console.log('📦 Data field count:', Object.keys(data).length);
+      
+      // Log each critical field
+      console.log('📦 Field Analysis:');
+      console.log('  - name:', data.name, '(type:', typeof data.name, ')');
+      console.log('  - description:', data.description?.substring(0, 50) + '...', '(length:', data.description?.length, ')');
+      console.log('  - address:', data.address);
+      console.log('  - latitude:', data.latitude, '(type:', typeof data.latitude, ')');
+      console.log('  - longitude:', data.longitude, '(type:', typeof data.longitude, ')');
+      console.log('  - rehearsal_rate:', data.rehearsal_rate, '(type:', typeof data.rehearsal_rate, ')');
+      console.log('  - recording_rate:', data.recording_rate, '(type:', typeof data.recording_rate, ')');
+      console.log('  - hourly_rate (fallback):', data.hourly_rate, '(type:', typeof data.hourly_rate, ')');
+      console.log('  - type:', data.type, '(type:', typeof data.type, ')');
+      console.log('  - pax:', data.pax, '(type:', typeof data.pax, ')');
+      console.log('  - amenities:', data.amenities, '(is array:', Array.isArray(data.amenities), ', length:', data.amenities?.length, ')');
+      console.log('  - instruments:', data.instruments, '(is array:', Array.isArray(data.instruments), ', length:', data.instruments?.length, ')');
+      console.log('  - images:', data.images, '(is array:', Array.isArray(data.images), ', length:', data.images?.length, ')');
+      console.log('  - contract_url:', data.contract_url);
+      console.log('  - availability:', data.availability, '(is array:', Array.isArray(data.availability), ', length:', data.availability?.length, ')');
+      console.log('  - calendar_availability:', data.calendar_availability, '(is array:', Array.isArray(data.calendar_availability), ')');
+      console.log('  - lead_time_hours:', data.lead_time_hours, '(type:', typeof data.lead_time_hours, ')');
+      console.log('  - weekend_multiplier:', data.weekend_multiplier, '(type:', typeof data.weekend_multiplier, ')');
+      console.log('  - peak_season_multiplier:', data.peak_season_multiplier);
+      console.log('  - peak_season_dates:', data.peak_season_dates);
+      console.log('  - off_peak_multiplier:', data.off_peak_multiplier);
+      console.log('  - off_peak_dates:', data.off_peak_dates);
+
+      console.log('🔧 ===== SETTING STATE VALUES =====');
+      
+      console.log('🔧 Setting studioName to:', data.name);
       setStudioName(data.name);
+      
+      console.log('🔧 Setting description to:', data.description?.substring(0, 50));
       setDescription(data.description);
+      
+      console.log('🔧 Setting address to:', data.address);
       setAddress(data.address);
+      
+      console.log('🔧 Setting latitude to:', data.latitude || null);
       setLatitude(data.latitude || null);
+      
+      console.log('🔧 Setting longitude to:', data.longitude || null);
       setLongitude(data.longitude || null);
+      
       // Load dynamic pricing
-      setRehearsalRate(data.rehearsal_rate?.toString() || data.hourly_rate?.toString() || '');
-      setRecordingRate(data.recording_rate?.toString() || '');
-      setStudioType(data.type || 'Both');
-      setPax(data.pax?.toString() || '');
+      const rehearsalValue = data.rehearsal_rate?.toString() || data.hourly_rate?.toString() || '';
+      console.log('🔧 Setting rehearsalRate to:', rehearsalValue, '(from rehearsal_rate:', data.rehearsal_rate, 'or hourly_rate:', data.hourly_rate, ')');
+      setRehearsalRate(rehearsalValue);
+      
+      const recordingValue = data.recording_rate?.toString() || '';
+      console.log('🔧 Setting recordingRate to:', recordingValue);
+      setRecordingRate(recordingValue);
+      
+      const typeValue = data.type || 'Both';
+      console.log('🔧 Setting studioType to:', typeValue);
+      setStudioType(typeValue);
+      
+      const paxValue = data.pax?.toString() || '';
+      console.log('🔧 Setting pax to:', paxValue, '(original value:', data.pax, ', type:', typeof data.pax, ')');
+      setPax(paxValue);
+      console.log('✅ setPax STATE UPDATE completed');
+      
+      console.log('🔧 Setting amenities to:', data.amenities || []);
       setAmenities(data.amenities || []);
+      
+      console.log('🔧 Setting contractUrl to:', data.contract_url || '');
       setContractUrl(data.contract_url || '');
       if (data.contract_url) {
         const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
+        console.log('🔧 Setting contractFileName to:', fileName);
         setContractFileName(decodeURIComponent(fileName));
       }
 
       // Load equipment/instruments from instruments JSONB
+      console.log('🎸 ===== PARSING INSTRUMENTS =====');
+      console.log('🎸 Raw data.instruments:', data.instruments);
+      console.log('🎸 Type of data.instruments:', typeof data.instruments);
+      console.log('🎸 Is Array?:', Array.isArray(data.instruments));
+      
       const instrumentsData = Array.isArray(data.instruments) ? data.instruments : [];
+      console.log('🎸 Processed instrumentsData:', JSON.stringify(instrumentsData, null, 2));
+      console.log('🎸 instrumentsData array length:', instrumentsData.length);
+      console.log('🎸 instrumentsData items:');
+      instrumentsData.forEach((item: any, index: number) => {
+        console.log(`  [${index}]:`, {
+          name: item?.name,
+          image: item?.image,
+          quantity: item?.quantity,
+          description: item?.description,
+          hasQuantity: 'quantity' in (item || {}),
+          hasDescription: 'description' in (item || {}),
+          keys: item ? Object.keys(item) : 'null'
+        });
+      });
+      
+      // Equipment items have quantity OR description properties (custom equipment)
+      console.log('🎸 ===== FILTERING EQUIPMENT ITEMS =====');
       const equipmentItems = instrumentsData
-        .filter((item: any) => item && typeof item === 'object' && (item.quantity !== undefined || item.description !== undefined))
-        .map((eq: any, index: number) => ({
-          id: eq.id || `eq-${index}`,
-          name: eq.name || '',
-          quantity: eq.quantity || 1,
-          description: eq.description || '',
-          image: eq.image || ''
-        }));
+        .filter((item: any) => {
+          if (!item || typeof item !== 'object') {
+            console.log('🎸 Skipping invalid item:', item);
+            return false;
+          }
+          // Check if 'quantity' or 'description' key exists in the object
+          const hasQuantity = 'quantity' in item;
+          const hasDescription = 'description' in item;
+          console.log(`🎸 Evaluating item "${item.name}": hasQuantity=${hasQuantity}, hasDescription=${hasDescription}, willInclude=${hasQuantity || hasDescription}`);
+          return hasQuantity || hasDescription;
+        })
+        .map((eq: any, index: number) => {
+          const mapped = {
+            id: eq.id || `eq-${index}`,
+            name: eq.name || '',
+            quantity: typeof eq.quantity === 'number' ? eq.quantity : 1,
+            description: eq.description || '',
+            image: eq.image || ''
+          };
+          console.log(`🎸 Mapped equipment [${index}]:`, mapped);
+          return mapped;
+        });
+      console.log('🎸 Final filtered equipment items count:', equipmentItems.length);
+      console.log('🎸 Final filtered equipment items:', JSON.stringify(equipmentItems, null, 2));
+      
+      // Preset items do NOT have quantity or description (predefined instruments)
+      console.log('🎸 ===== FILTERING PRESET ITEMS =====');
       const presetItems = instrumentsData
-        .filter((item: any) => item && typeof item === 'object' && item.name && item.image && item.quantity === undefined && item.description === undefined)
-        .map((item: any) => ({ name: item.name, image: item.image }));
+        .filter((item: any) => {
+          if (!item || typeof item !== 'object') {
+            console.log('🎸 Preset: Skipping invalid item:', item);
+            return false;
+          }
+          if (!item.name || !item.image) {
+            console.log('🎸 Preset: Skipping item without name/image:', item);
+            return false;
+          }
+          const hasQuantity = 'quantity' in item;
+          const hasDescription = 'description' in item;
+          const willInclude = !hasQuantity && !hasDescription;
+          console.log(`🎸 Preset: Evaluating "${item.name}": hasQuantity=${hasQuantity}, hasDescription=${hasDescription}, willInclude=${willInclude}`);
+          return willInclude;
+        })
+        .map((item: any) => {
+          const mapped = { name: item.name, image: item.image };
+          console.log('🎸 Preset: Mapped item:', mapped);
+          return mapped;
+        });
+      console.log('🎸 Final filtered preset items count:', presetItems.length);
+      console.log('🎸 Final filtered preset items:', JSON.stringify(presetItems, null, 2));
 
-      if (equipmentItems.length > 0) {
-        setEquipment(equipmentItems);
-      }
+      // Always set equipment even if length is 0 to clear old data
+      console.log('🔧 Setting equipment state with', equipmentItems.length, 'items');
+      setEquipment(equipmentItems);
+      console.log('✅ setEquipment STATE UPDATE completed with', equipmentItems.length, 'items');
 
       // Load calendar availability from date overrides table
       const { data: dateOverrides, error: overridesError } = await supabase
@@ -354,37 +506,35 @@ export default function EditStudioScreen() {
       }
 
       // Load preset instruments
+      console.log('🔧 Checking preset items for selectedInstruments update');
       if (presetItems.length > 0) {
+        console.log('🔧 Setting selectedInstruments with', presetItems.length, 'items:', presetItems);
         setSelectedInstruments(presetItems);
+        console.log('✅ setSelectedInstruments STATE UPDATE completed with', presetItems.length, 'items');
+      } else {
+        console.log('⚠️ No preset items to set, selectedInstruments will remain empty');
       }
 
-      // Load studio settings (booking settings)
-      const { data: studioSettings, error: settingsError } = await supabase
-        .from('studio_settings')
-        .select('*')
-        .eq('studio_id', studioId)
-        .single();
-
-      if (!settingsError && studioSettings) {
-        setLeadTimeHours(studioSettings.lead_time_hours?.toString() || '24');
-        setWeekendMultiplier(studioSettings.weekend_multiplier?.toString() || '1.0');
-        setPeakSeasonMultiplier(studioSettings.peak_season_multiplier?.toString() || '1.0');
-        setOffPeakMultiplier(studioSettings.off_peak_multiplier?.toString() || '1.0');
-        if (studioSettings.peak_season_dates && Array.isArray(studioSettings.peak_season_dates)) {
-          setPeakSeasonDates(studioSettings.peak_season_dates);
-        }
-        if (studioSettings.off_peak_dates && Array.isArray(studioSettings.off_peak_dates)) {
-          setOffPeakDates(studioSettings.off_peak_dates);
-        }
-        console.log('⚙️ Loaded studio settings:', studioSettings);
-      }
-
+      console.log('🔧 Setting images - raw data.images:', data.images);
+      console.log('🔧 Images array length:', data.images?.length || 0);
       setSelectedImages(data.images || []);
+      console.log('✅ setSelectedImages STATE UPDATE completed with', (data.images || []).length, 'images');
+      
       if (data.images && data.images.length > 0) {
+        console.log('🔧 Setting thumbnailIndex to 0');
         setThumbnailIndex(0);
+        console.log('✅ setThumbnailIndex STATE UPDATE completed');
+      } else {
+        console.log('⚠️ No images available, thumbnailIndex not updated');
       }
+      console.log('✅ ===== FETCH STUDIO DETAILS COMPLETED SUCCESSFULLY =====');
+      console.log('✅ Timestamp:', new Date().toISOString());
     } catch (e) {
-      console.log('Error fetching studio details:', e);
+      console.error('❌ ===== FETCH STUDIO DETAILS FAILED =====');
+      console.error('❌ Error timestamp:', new Date().toISOString());
+      console.error('❌ Error object:', e);
+      console.error('❌ Error message:', (e as any)?.message);
+      console.error('❌ Error stack:', (e as any)?.stack);
       showAlert('error', 'Error', 'Failed to load studio details.');
       router.replace('/home');
     } finally {
@@ -862,6 +1012,10 @@ export default function EditStudioScreen() {
         .map(preset => ({ name: preset.name, image: preset.image }));
       const instrumentsPayload = [...equipmentPayload, ...presetPayload];
 
+      const orderedImages = selectedImages.length > 0 && selectedImages[thumbnailIndex]
+        ? [selectedImages[thumbnailIndex], ...selectedImages.filter((_, i) => i !== thumbnailIndex)]
+        : selectedImages;
+
       const payload = {
         name: studioName,
         type: studioType,
@@ -876,7 +1030,7 @@ export default function EditStudioScreen() {
         instruments: instrumentsPayload,
         latitude,
         longitude,
-        images: selectedImages,
+        images: orderedImages,
         contract_url: contractUrl || null,
         availability: availability
           .filter(day => day.slots.length > 0)
@@ -888,14 +1042,14 @@ export default function EditStudioScreen() {
             }))
           })),
         calendar_availability: calendarAvailability,
-        // Booking settings
+        // Booking settings - default 24hr advance booking
         booking_settings: {
-          lead_time_hours: parseInt(leadTimeHours) || 24,
-          weekend_multiplier: parseFloat(weekendMultiplier) || 1.0,
-          peak_season_multiplier: parseFloat(peakSeasonMultiplier) || 1.0,
-          peak_season_dates: peakSeasonDates,
-          off_peak_multiplier: parseFloat(offPeakMultiplier) || 1.0,
-          off_peak_dates: offPeakDates,
+          lead_time_hours: 24,
+          weekend_multiplier: 1.0,
+          peak_season_multiplier: 1.0,
+          peak_season_dates: [],
+          off_peak_multiplier: 1.0,
+          off_peak_dates: [],
         }
       };
 
@@ -1972,166 +2126,6 @@ export default function EditStudioScreen() {
               )}
             </View>
           ))}
-
-          {/* Booking Settings Section */}
-          <View style={{ marginTop: 24 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <Ionicons name="settings" size={16} color={colors.primary} />
-              <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Booking Settings</Text>
-            </View>
-
-            {/* Lead Time (Day Before Rule) */}
-            <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.dayLabel, { color: colors.text }]}>Advance Booking Required</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
-                    How many hours before can clients book?
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <TextInput
-                    value={leadTimeHours}
-                    onChangeText={(text) => setLeadTimeHours(text.replace(/[^0-9]/g, ''))}
-                    keyboardType="numeric"
-                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
-                  />
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>hours</Text>
-                </View>
-              </View>
-              <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>
-                💡 Set to 24 for "Day Before" booking rule
-              </Text>
-            </View>
-
-            {/* Weekend Pricing Multiplier */}
-            <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.dayLabel, { color: colors.text }]}>Weekend Rate</Text>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
-                    Price multiplier for Sat-Sun
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <TextInput
-                    value={weekendMultiplier}
-                    onChangeText={(text) => setWeekendMultiplier(text.replace(/[^0-9.]/g, ''))}
-                    keyboardType="decimal-pad"
-                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
-                  />
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>×</Text>
-                </View>
-              </View>
-              <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>
-                💡 1.0 = no change, 1.2 = 20% higher
-              </Text>
-            </View>
-
-            {/* Peak Season Pricing */}
-            <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Ionicons name="trending-up" size={14} color="#EF4444" />
-                    <Text style={[styles.dayLabel, { color: colors.text }]}>Peak Season Rate</Text>
-                  </View>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
-                    Higher prices for busy periods (holidays, events)
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <TextInput
-                    value={peakSeasonMultiplier}
-                    onChangeText={(text) => setPeakSeasonMultiplier(text.replace(/[^0-9.]/g, ''))}
-                    keyboardType="decimal-pad"
-                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
-                  />
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>×</Text>
-                </View>
-              </View>
-
-              {peakSeasonDates.map((range, idx) => (
-                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: isDark ? '#374151' : '#FEE2E2', borderRadius: 8 }}>
-                  <Text style={{ color: '#EF4444', fontSize: 12, fontFamily: 'Poppins_500Medium', flex: 1 }}>
-                    {new Date(range.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(range.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                  </Text>
-                  <TouchableOpacity onPress={() => setPeakSeasonDates(peakSeasonDates.filter((_, i) => i !== idx))}>
-                    <Ionicons name="close-circle" size={18} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-
-              <TouchableOpacity
-                onPress={() => {
-                  const start = new Date();
-                  start.setMonth(start.getMonth() + 1, 1);
-                  const end = new Date(start);
-                  end.setDate(end.getDate() + 6);
-                  setPeakSeasonDates([...peakSeasonDates, {
-                    start: start.toISOString().split('T')[0],
-                    end: end.toISOString().split('T')[0]
-                  }]);
-                }}
-                style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-              >
-                <Ionicons name="add-circle-outline" size={16} color="#EF4444" />
-                <Text style={{ color: '#EF4444', fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Peak Season Period</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Off-Peak Pricing */}
-            <View style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Ionicons name="trending-down" size={14} color="#10B981" />
-                    <Text style={[styles.dayLabel, { color: colors.text }]}>Off-Peak Rate</Text>
-                  </View>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular' }}>
-                    Discounted prices for slower periods
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <TextInput
-                    value={offPeakMultiplier}
-                    onChangeText={(text) => setOffPeakMultiplier(text.replace(/[^0-9.]/g, ''))}
-                    keyboardType="decimal-pad"
-                    style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, width: 60, textAlign: 'center' }]}
-                  />
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>×</Text>
-                </View>
-              </View>
-
-              {offPeakDates.map((range, idx) => (
-                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: isDark ? '#374151' : '#D1FAE5', borderRadius: 8 }}>
-                  <Text style={{ color: '#10B981', fontSize: 12, fontFamily: 'Poppins_500Medium', flex: 1 }}>
-                    {new Date(range.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(range.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                  </Text>
-                  <TouchableOpacity onPress={() => setOffPeakDates(offPeakDates.filter((_, i) => i !== idx))}>
-                    <Ionicons name="close-circle" size={18} color="#10B981" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-
-              <TouchableOpacity
-                onPress={() => {
-                  const start = new Date();
-                  start.setMonth(start.getMonth() + 2, 1);
-                  const end = new Date(start);
-                  end.setDate(end.getDate() + 6);
-                  setOffPeakDates([...offPeakDates, {
-                    start: start.toISOString().split('T')[0],
-                    end: end.toISOString().split('T')[0]
-                  }]);
-                }}
-                style={{ marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-              >
-                <Ionicons name="add-circle-outline" size={16} color="#10B981" />
-                <Text style={{ color: '#10B981', fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Off-Peak Period</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
 
           {renderSectionHeader('Visuals', 'image')}
           <ImageUploader

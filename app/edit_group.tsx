@@ -309,6 +309,10 @@ export default function EditGroupScreen() {
         return;
       }
 
+      const orderedImages = images.length > 0 && images[thumbnailIndex]
+        ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
+        : images;
+
       const payload = {
         name: groupName,
         genre,
@@ -317,7 +321,7 @@ export default function EditGroupScreen() {
         latitude,
         longitude,
         members,
-        images: images,
+        images: orderedImages,
         rate: parseFloat(rate) || 0,
         group_type: groupType, // 'duo' or 'band'
       };
@@ -1490,6 +1494,13 @@ const styles = StyleSheet.create({
   memberText: {
     marginRight: 8,
     fontFamily: "Poppins_500Medium",
+  },
+  avatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   footerActions: {
     marginTop: 32,

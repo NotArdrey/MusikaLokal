@@ -201,6 +201,12 @@ export default function EditGigScreen() {
         },
       );
 
+      console.log('📥 ===== EDGE FUNCTION RESPONSE =====');
+      console.log('📥 Error object:', error);
+      console.log('📥 Data object:', data);
+      console.log('📥 Data type:', typeof data);
+      console.log('📥 Data stringified:', JSON.stringify(data, null, 2));
+
       if (error) throw error;
 
       // If no data returned, user doesn't own this gig
@@ -214,9 +220,35 @@ export default function EditGigScreen() {
         return;
       }
 
+      console.log('📦 ===== GIG DATA ANALYSIS =====');
+      console.log('📦 name:', data.name);
+      console.log('📦 description:', data.description?.substring(0, 50));
+      console.log('📦 location:', data.location);
+      console.log('📦 budget:', data.budget, '(type:', typeof data.budget, ')');
+      console.log('📦 event_date:', data.event_date);
+      console.log('📦 requirements:', data.requirements);
+      console.log('📦 requirements type:', typeof data.requirements);
+      console.log('📦 requirements stringified:', JSON.stringify(data.requirements, null, 2));
+      console.log('📦 requirements?.genres:', data.requirements?.genres);
+      console.log('📦 requirements?.instruments:', data.requirements?.instruments);
+      console.log('📦 requirements?.experience_level:', data.requirements?.experience_level);
+      console.log('📦 requirements?.event_start_time:', data.requirements?.event_start_time);
+      console.log('📦 requirements?.event_end_time:', data.requirements?.event_end_time);
+      console.log('📦 requirements?.musician_type:', data.requirements?.musician_type);
+      console.log('📦 contract_url:', data.contract_url);
+      console.log('📦 images:', data.images);
+
+      console.log('🔧 ===== SETTING STATE VALUES =====');
+      
       setGigName(data.name);
+      console.log('🔧 setGigName:', data.name);
+      
       setDescription(data.description);
+      console.log('🔧 setDescription:', data.description?.substring(0, 50));
+      
       setAddress(data.location);
+      console.log('🔧 setAddress:', data.location);
+      
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
       setCost(data.budget?.toString() || "");
@@ -240,11 +272,16 @@ export default function EditGigScreen() {
       if (data.contract_url) {
         const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
         setContractFileName(decodeURIComponent(fileName));
+        console.log('🔧 setContractFileName:', fileName);
       }
       setImages(data.images || []);
+      console.log('🔧 setImages:', data.images || []);
+      
       if (data.images && data.images.length > 0) {
         setThumbnailIndex(0);
       }
+      
+      console.log('✅ ===== FETCH GIG DETAILS COMPLETED =====');
     } catch (e) {
       console.log("Error fetching gig details:", e);
       showAlert("error", "Error", "Failed to load gig details.");
@@ -323,12 +360,16 @@ export default function EditGigScreen() {
         return;
       }
 
+      const orderedImages = images.length > 0 && images[thumbnailIndex]
+        ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
+        : images;
+
       const payload = {
         name: gigName,
         description,
         location: address,
         budget: parseFloat(cost) || 0,
-        images: images,
+        images: orderedImages,
         contract_url: contractUrl || null,
         latitude,
         longitude,
@@ -368,7 +409,11 @@ export default function EditGigScreen() {
         },
       });
 
+      console.log('📥 Update response data:', JSON.stringify(response.data, null, 2));
+      console.log('📥 Update response error:', response.error);
+
       if (response.error) {
+        console.error('❌ Update failed with error:', response.error);
         throw response.error;
       }
 
