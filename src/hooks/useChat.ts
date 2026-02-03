@@ -2,6 +2,19 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 
+export interface MessageReaction {
+    id: string;
+    message_id: string;
+    user_id: string;
+    emoji: string;
+    created_at: string;
+    user?: {
+        id: string;
+        full_name: string;
+        avatar_url: string | null;
+    };
+}
+
 export interface Message {
     id: string;
     conversation_id: string;
@@ -16,6 +29,7 @@ export interface Message {
         full_name: string;
         avatar_url: string | null;
     };
+    reactions?: MessageReaction[];
 }
 
 export interface ConversationParticipant {
@@ -376,7 +390,14 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     .from('messages')
                     .select(`
                         *,
-                        sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)
+                        sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url),
+                        reactions:message_reactions(
+                            id,
+                            user_id,
+                            emoji,
+                            created_at,
+                            user:profiles!message_reactions_user_id_fkey(id, full_name, avatar_url)
+                        )
                     `)
                     .eq('conversation_id', conversationId)
                     .order('created_at', { ascending: true });
@@ -482,7 +503,89 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             .is('read_at', null);
     }, [conversationId, currentUserId]);
 
-    return { messages, loading, sending, error, sendMessage, markAsRead };
+    // Add or update reaction to a message
+    const addReaction = useCallback(async (messageId: string, emoji: string) => {
+        if (!currentUserId) return { error: 'Not authenticated' };
+
+        try {
+            // Upsert - insert or update if exists
+            const { error: upsertError } = await supabase
+                .from('message_reactions')
+                .upsert({
+                    message_id: messageId,
+                    user_id: currentUserId,
+                    emoji,
+                }, {
+                    onConflict: 'message_id,user_id'
+                });
+
+            if (upsertError) throw upsertError;
+
+            // Update local state
+            setMessages(prev => prev.map(msg => {
+                if (msg.id === messageId) {
+                    const existingReactions = msg.reactions || [];
+                    const existingIndex = existingReactions.findIndex(r => r.user_id === currentUserId);
+                    let newReactions: MessageReaction[];
+                    
+                    if (existingIndex >= 0) {
+                        // Update existing reaction
+                        newReactions = [...existingReactions];
+                        newReactions[existingIndex] = { ...newReactions[existingIndex], emoji };
+                    } else {
+                        // Add new reaction
+                        newReactions = [...existingReactions, {
+                            id: 'temp-' + Date.now(),
+                            message_id: messageId,
+                            user_id: currentUserId,
+                            emoji,
+                            created_at: new Date().toISOString(),
+                        }];
+                    }
+                    return { ...msg, reactions: newReactions };
+                }
+                return msg;
+            }));
+
+            return { error: null };
+        } catch (err: any) {
+            console.error('Error adding reaction:', err);
+            return { error: err.message };
+        }
+    }, [currentUserId]);
+
+    // Remove reaction from a message
+    const removeReaction = useCallback(async (messageId: string) => {
+        if (!currentUserId) return { error: 'Not authenticated' };
+
+        try {
+            const { error: deleteError } = await supabase
+                .from('message_reactions')
+                .delete()
+                .eq('message_id', messageId)
+                .eq('user_id', currentUserId);
+
+            if (deleteError) throw deleteError;
+
+            // Update local state
+            setMessages(prev => prev.map(msg => {
+                if (msg.id === messageId) {
+                    return {
+                        ...msg,
+                        reactions: (msg.reactions || []).filter(r => r.user_id !== currentUserId)
+                    };
+                }
+                return msg;
+            }));
+
+            return { error: null };
+        } catch (err: any) {
+            console.error('Error removing reaction:', err);
+            return { error: err.message };
+        }
+    }, [currentUserId]);
+
+    return { messages, loading, sending, error, sendMessage, markAsRead, addReaction, removeReaction };
 }
 
 // Helper to get total unread count (includes both 1-on-1 and group chats)

@@ -75,12 +75,13 @@ const SORT_OPTIONS = [
 interface SearchBottomSheetProps {
   onClose?: () => void;
   onItemPress?: (listingId: string) => void;
+  onChat?: (item: any) => void;
 }
 
 const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
-  function SearchBottomSheet({ onClose, onItemPress }, ref) {
+  function SearchBottomSheet({ onClose, onItemPress, onChat }, ref) {
     const { colors, isDark } = useTheme();
-    const { userRole } = useAuth();
+    const { userRole, userId } = useAuth();
     const snapPoints = useMemo(() => ["94%"], []);
 
     // Filter Chips - safely handle null userRole
@@ -340,16 +341,31 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     const clearSearch = () => setSearchQuery("");
 
+    const handleChatPress = useCallback(
+      (item: any) => {
+        // Dismiss the modal first, then trigger chat
+        // @ts-ignore
+        ref?.current?.dismiss();
+        onClose?.();
+        // Small delay to let modal close
+        setTimeout(() => {
+          onChat?.(item);
+        }, 100);
+      },
+      [onChat, onClose, ref],
+    );
+
     const renderItem = useCallback(
       ({ item }: { item: any }) => (
         <ListingCard
           item={item}
           onPress={handleItemPress}
+          onChat={onChat ? handleChatPress : undefined}
           variant="vertical"
           style={{ width: "100%" }}
         />
       ),
-      [handleItemPress],
+      [handleItemPress, handleChatPress, onChat],
     );
 
     const keyExtractor = useCallback((item: any) => item.id.toString(), []);
@@ -801,6 +817,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     <ListingCard
                       item={item}
                       onPress={handleItemPress}
+                      onChat={onChat ? handleChatPress : undefined}
                       variant="vertical"
                       style={{ width: "100%" }}
                     />

@@ -4,6 +4,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import ChatScreen from '../src/components/ChatScreen';
 import ConversationsList from '../src/components/ConversationsList';
+import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { Conversation, useConversation, useGroupConversation } from '../src/hooks/useChat';
@@ -190,11 +191,14 @@ export default function ChatPage() {
     // Otherwise, show the conversations list
     if (userId) {
         return (
-            <ConversationsList
-                currentUserId={userId}
-                onSelectConversation={handleSelectConversation}
-                onBack={() => router.back()}
-            />
+            <View style={{ flex: 1, backgroundColor: colors.background }}>
+                <ConversationsList
+                    currentUserId={userId}
+                    onSelectConversation={handleSelectConversation}
+                    onNewConversation={() => router.push('/home')}
+                />
+                <Navbar />
+            </View>
         );
     }
 

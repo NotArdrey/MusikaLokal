@@ -196,7 +196,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         };
 
         // Check active session
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        supabase.auth.getSession().then(({ data: { session }, error }) => {
+            // Handle refresh token errors by clearing the session
+            if (error) {
+                console.log('Session error (expected on first launch):', error.message);
+                // Clear stale session data
+                supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+                setSession(null);
+                setLoading(false);
+                return;
+            }
             const secureSession = filterSession(session);
             setSession(secureSession);
             if (secureSession) {
@@ -207,7 +216,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         // Listen for changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            // Handle token refresh errors
+            if (event === 'TOKEN_REFRESHED' && !session) {
+                console.log('Token refresh failed, clearing session');
+                supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+                setSession(null);
+                setLoading(false);
+                return;
+            }
+            
             const secureSession = filterSession(session);
             setSession(secureSession);
             if (secureSession) {

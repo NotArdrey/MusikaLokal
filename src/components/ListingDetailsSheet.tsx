@@ -528,7 +528,14 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             const { data, error } = await supabase.functions.invoke('manage-listings', {
                 body: { action: 'check_eligibility', userId, gigId: targetGigId }
             });
-            if (error) throw error;
+
+            // Handle error gracefully - don't block user on eligibility check failure
+            if (error) {
+                console.warn('Eligibility check failed, allowing access:', error.message);
+                setIsBlocked(false);
+                setBlockReason(null);
+                return;
+            }
 
             if (data && data.blocked) {
                 setIsBlocked(true);
@@ -537,8 +544,11 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 setIsBlocked(false);
                 setBlockReason(null);
             }
-        } catch (err) {
-            console.error('Error checking eligibility:', err);
+        } catch (err: any) {
+            // Fail-open: Allow user to proceed if eligibility check fails
+            console.warn('Eligibility check error, allowing access:', err?.message || err);
+            setIsBlocked(false);
+            setBlockReason(null);
         }
     };
 
@@ -781,6 +791,20 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                     }
                 } catch (notifyErr) {
                     console.error('Failed to notify group members:', notifyErr);
+                }
+            }
+
+            // AI LEARNING: Strong signal from applying to a gig
+            if (group && group.embedding) {
+                try {
+                    await supabase.rpc('update_user_interest', {
+                        p_user_id: userId,
+                        p_item_vector: group.embedding,
+                        p_weight: 0.4 // Strong learning signal for applying
+                    });
+                    console.log('🤖 AI learned from gig application:', group.name);
+                } catch (e) {
+                    console.log('Error updating AI interest from application:', e);
                 }
             }
 
@@ -1466,19 +1490,31 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         }
     };
 
-    // Track View History (AI Signal)
+    // Track View History (AI Signal) - Learn from views with weak weight
     useEffect(() => {
         const trackView = async () => {
             if (group && group.embedding) {
                 try {
+                    // Save to local storage for history
                     await AsyncStorage.setItem('last_viewed_item', JSON.stringify({
                         id: listingId,
                         embedding: group.embedding,
                         type: group.type,
                         timestamp: Date.now()
                     }));
+
+                    // AI LEARNING: Update user interest from view (weak signal)
+                    const { data: { user } } = await supabase.auth.getUser();
+                    if (user) {
+                        await supabase.rpc('update_user_interest', {
+                            p_user_id: user.id,
+                            p_item_vector: group.embedding,
+                            p_weight: 0.05 // Weak learning signal for just viewing
+                        });
+                        console.log('🤖 AI learned from view:', group.name);
+                    }
                 } catch (e) {
-                    console.log('Error saving history:', e);
+                    console.log('Error tracking view:', e);
                 }
             }
         };
@@ -2575,6 +2611,20 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                                         setModalVisible(false);
                                         (ref as any)?.current?.dismiss();
                                     } else {
+                                        // All success - AI LEARNING: Strong signal from booking
+                                        if (group && group.embedding && userId) {
+                                            try {
+                                                await supabase.rpc('update_user_interest', {
+                                                    p_user_id: userId,
+                                                    p_item_vector: group.embedding,
+                                                    p_weight: 0.5 // Strongest learning signal for booking
+                                                });
+                                                console.log('🤖 AI learned from studio booking:', group.name);
+                                            } catch (e) {
+                                                console.log('Error updating AI interest from booking:', e);
+                                            }
+                                        }
+
                                         // All success - show payment option modal before PayMongo
                                         console.log('✅ All bookings created, showing payment options...');
 

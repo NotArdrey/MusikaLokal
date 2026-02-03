@@ -64,6 +64,8 @@ export default function Navbar() {
 
     if (pathname.includes('home')) {
         activeTab = 'home';
+    } else if (pathname.includes('chat')) {
+        activeTab = 'chat';
     } else if (pathname.includes('bookings')) {
         activeTab = 'activity';
     } else if (
@@ -80,6 +82,7 @@ export default function Navbar() {
 
     const navItems = [
         { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+        { id: 'chat', icon: 'chatbubbles', label: 'Chat', route: '/chat' },
         { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
         { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
         { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }

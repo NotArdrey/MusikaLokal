@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import { router } from 'expo-router';
+import React, { useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -12,21 +13,36 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 import { Conversation, useConversations } from '../hooks/useChat';
+import UserSearchModal from './UserSearchModal';
 
 interface ConversationsListProps {
     currentUserId: string;
     onSelectConversation: (conversation: Conversation) => void;
-    onBack?: () => void;
+    onNewConversation?: () => void;
 }
 
 const ConversationsList: React.FC<ConversationsListProps> = ({
     currentUserId,
     onSelectConversation,
-    onBack,
+    onNewConversation,
 }) => {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
     const { conversations, loading, refetch } = useConversations(currentUserId);
+    const [showNewMessageModal, setShowNewMessageModal] = useState(false);
+
+    const handleSelectUserForNewMessage = (user: { id: string; full_name: string; avatar_url: string | null }) => {
+        setShowNewMessageModal(false);
+        // Navigate to chat with this user
+        router.push({
+            pathname: '/chat',
+            params: {
+                recipientId: user.id,
+                recipientName: user.full_name,
+                recipientAvatar: user.avatar_url || '',
+            },
+        });
+    };
 
     const formatTime = (dateString: string) => {
         const date = new Date(dateString);
@@ -97,14 +113,16 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                             )}
                         </View>
                     ) : (
-                        <Image
-                            source={
-                                displayAvatar
-                                    ? { uri: displayAvatar }
-                                    : require('../../assets/images/avatar-placeholder.png')
-                            }
-                            style={styles.avatar}
-                        />
+                        displayAvatar ? (
+                            <Image
+                                source={{ uri: displayAvatar }}
+                                style={styles.avatar}
+                            />
+                        ) : (
+                            <View style={[styles.avatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
+                                <Ionicons name="person" size={24} color="#FFF" />
+                            </View>
+                        )
                     )}
                     {hasUnread && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
                 </View>
@@ -173,17 +191,12 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     {
                         backgroundColor: colors.background,
                         borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                        paddingTop: insets.top || 16,
+                        paddingTop: (insets.top || 16) + 12,
                     },
                 ]}
             >
-                {onBack && (
-                    <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                        <Ionicons name="arrow-back" size={24} color={colors.text} />
-                    </TouchableOpacity>
-                )}
                 <Text style={[styles.headerTitle, { color: colors.text }]}>Messages</Text>
-                <TouchableOpacity style={styles.headerAction}>
+                <TouchableOpacity style={styles.headerAction} onPress={() => setShowNewMessageModal(true)}>
                     <Ionicons name="create-outline" size={24} color={colors.primary} />
                 </TouchableOpacity>
             </View>
@@ -202,13 +215,20 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
                         Start a conversation by messaging someone from their profile
                     </Text>
+                    <TouchableOpacity
+                        style={[styles.newMessageButton, { backgroundColor: colors.primary }]}
+                        onPress={() => setShowNewMessageModal(true)}
+                    >
+                        <Ionicons name="create" size={20} color="#FFF" />
+                        <Text style={styles.newMessageButtonText}>New Message</Text>
+                    </TouchableOpacity>
                 </View>
             ) : (
                 <FlatList
                     data={conversations}
                     keyExtractor={(item) => item.id}
                     renderItem={renderConversation}
-                    contentContainerStyle={styles.list}
+                    contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 24) + 80 }]}
                     refreshing={loading}
                     onRefresh={refetch}
                     ItemSeparatorComponent={() => (
@@ -216,6 +236,14 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     )}
                 />
             )}
+
+            {/* New Message Modal */}
+            <UserSearchModal
+                visible={showNewMessageModal}
+                onClose={() => setShowNewMessageModal(false)}
+                onSelectUser={handleSelectUserForNewMessage}
+                currentUserId={currentUserId}
+            />
         </View>
     );
 };
@@ -280,6 +308,10 @@ const styles = StyleSheet.create({
         width: 52,
         height: 52,
         borderRadius: 26,
+    },
+    avatarPlaceholder: {
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     groupAvatar: {
         width: 52,
@@ -350,6 +382,20 @@ const styles = StyleSheet.create({
     separator: {
         height: 1,
         marginLeft: 80,
+    },
+    newMessageButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderRadius: 24,
+        marginTop: 20,
+        gap: 8,
+    },
+    newMessageButtonText: {
+        color: '#FFF',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });
 

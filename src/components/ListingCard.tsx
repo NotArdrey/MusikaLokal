@@ -165,7 +165,7 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, onCh
 
     // 1. IMMERSIVE HORIZONTAL CARD (For Home Screen)
     if (variant === 'horizontal') {
-        const cardWidth = Math.min(width * 0.8, 300);
+        const cardWidth = 280;
         const cardHeight = 320; // Taller for immersive feel
 
         return (

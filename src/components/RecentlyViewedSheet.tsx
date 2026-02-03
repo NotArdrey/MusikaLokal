@@ -28,9 +28,10 @@ const moderateScale = (size: number, factor = 0.3) => {
 interface RecentlyViewedSheetProps {
     onClose?: () => void;
     onItemPress?: (listingId: string) => void;
+    onChat?: (item: any) => void;
 }
 
-const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress }, ref) => {
+const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onChat }, ref) => {
     const { colors, isDark } = useTheme();
     const snapPoints = useMemo(() => ['94%'], []);
 
@@ -62,12 +63,13 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
         }
     };
 
-    // Fetch recently viewed items
+    // Fetch recently viewed items - uses full objects stored by home.tsx
     useEffect(() => {
         const fetchRecentlyViewed = async () => {
             setLoading(true);
             try {
-                const historyJson = await AsyncStorage.getItem('recently_viewed');
+                // Use the same key as home.tsx: 'recently_viewed_items'
+                const historyJson = await AsyncStorage.getItem('recently_viewed_items');
                 if (!historyJson) {
                     setData([]);
                     setLoading(false);
@@ -75,13 +77,30 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                 }
 
                 const history = JSON.parse(historyJson);
-                const recentIds = history.slice(0, 50); // Get up to 50 recent items
-
-                if (recentIds.length === 0) {
+                
+                // home.tsx stores full item objects, not just IDs
+                // Check if it's an array of objects or IDs
+                if (history.length === 0) {
                     setData([]);
                     setLoading(false);
                     return;
                 }
+
+                // If first item is an object with 'id' and 'type', use directly
+                if (typeof history[0] === 'object' && history[0].id) {
+                    // Normalize the data format for ListingCard
+                    const normalizedData = history.map((item: any) => ({
+                        ...item,
+                        image: item.image || item.images?.[0] || 'https://via.placeholder.com/300x200?text=Item',
+                        rating: item.rating || 0,
+                    }));
+                    setData(normalizedData);
+                    setLoading(false);
+                    return;
+                }
+
+                // Legacy fallback: if stored as IDs, fetch from database
+                const recentIds = history.slice(0, 50);
 
                 // Fetch from all tables
                 const [studiosRes, groupsRes, gigsRes] = await Promise.all([
@@ -96,9 +115,9 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                     studiosRes.data.forEach((s: any) => {
                         combined.push({
                             ...s,
-                            type: 'studio',
+                            type: 'Studio',
                             image: s.images?.[0] || 'https://via.placeholder.com/300x200?text=Studio',
-                            rating: s.rating || 4.5
+                            rating: s.rating || 0
                         });
                     });
                 }
@@ -107,9 +126,9 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                     groupsRes.data.forEach((g: any) => {
                         combined.push({
                             ...g,
-                            type: 'group',
+                            type: 'Group',
                             image: g.images?.[0] || 'https://via.placeholder.com/300x200?text=Group',
-                            rating: g.average_rating || 4.5
+                            rating: g.average_rating || 0
                         });
                     });
                 }
@@ -118,9 +137,9 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                     gigsRes.data.forEach((gig: any) => {
                         combined.push({
                             ...gig,
-                            type: 'gig',
+                            type: 'Gig',
                             image: gig.images?.[0] || 'https://via.placeholder.com/300x200?text=Gig',
-                            rating: gig.rating || 4.5,
+                            rating: gig.rating || 0,
                             location: gig.venues?.location || gig.location
                         });
                     });
@@ -134,13 +153,6 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                 });
 
                 setData(sortedData);
-
-                // Clean up AsyncStorage - remove IDs that no longer exist
-                const existingIds = combined.map((item: any) => item.id);
-                const validIds = recentIds.filter((id: string) => existingIds.includes(id));
-                if (validIds.length !== recentIds.length) {
-                    await AsyncStorage.setItem('recently_viewed', JSON.stringify(validIds));
-                }
             } catch (error) {
                 console.error('Error fetching recently viewed:', error);
                 setData([]);
@@ -152,11 +164,20 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
         fetchRecentlyViewed();
     }, []);
 
+    const handleChatPress = useCallback((item: any) => {
+        // Dismiss the modal first, then trigger chat
+        handleDismiss();
+        // Small delay to let modal close
+        setTimeout(() => {
+            onChat?.(item);
+        }, 100);
+    }, [onChat]);
+
     const renderItem = useCallback(({ item }: { item: any }) => (
         <View style={{ paddingHorizontal: scale(24), marginBottom: moderateScale(16) }}>
-            <ListingCard item={item} onPress={() => handleCardPress(item)} />
+            <ListingCard item={item} onPress={() => handleCardPress(item)} onChat={onChat ? handleChatPress : undefined} />
         </View>
-    ), []);
+    ), [onChat, handleChatPress]);
 
     const renderEmpty = () => (
         <View style={styles.emptyContainer}>
