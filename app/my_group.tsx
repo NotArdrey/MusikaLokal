@@ -121,6 +121,19 @@ export default function MyGroupScreen() {
                                             </TouchableOpacity>
 
                                             <TouchableOpacity
+                                                onPress={() => router.push({ 
+                                                    pathname: '/chat', 
+                                                    params: { 
+                                                        isGroupChat: 'true', 
+                                                        groupChatId: group.id 
+                                                    } 
+                                                })}
+                                                style={[styles.editBtn, { borderColor: colors.border }]}
+                                            >
+                                                <Ionicons name="chatbubbles-outline" size={20} color={colors.text} />
+                                            </TouchableOpacity>
+
+                                            <TouchableOpacity
                                                 onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
                                                 style={[styles.editBtn, { borderColor: colors.border }]}
                                             >

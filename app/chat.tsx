@@ -6,7 +6,7 @@ import ChatScreen from '../src/components/ChatScreen';
 import ConversationsList from '../src/components/ConversationsList';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
-import { Conversation, useConversation } from '../src/hooks/useChat';
+import { Conversation, useConversation, useGroupConversation } from '../src/hooks/useChat';
 
 export default function ChatPage() {
     const { colors } = useTheme();
@@ -22,10 +22,14 @@ export default function ChatPage() {
         studioId?: string;
         studioBookingId?: string;
         gigApplicationId?: string;
+        // Group chat params
+        isGroupChat?: string;
+        groupChatId?: string;
     }>();
 
     const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
     const [otherUser, setOtherUser] = useState<{ id: string; full_name: string; avatar_url: string | null } | null>(null);
+    const [isGroupChat, setIsGroupChat] = useState(false);
     const [loading, setLoading] = useState(true);
 
     const { getOrCreateConversation } = useConversation(
@@ -33,12 +37,26 @@ export default function ChatPage() {
         userId || null
     );
 
+    const { getOrCreateGroupConversation } = useGroupConversation(
+        params.groupChatId || null,
+        userId || null
+    );
+
     useEffect(() => {
         const initializeChat = async () => {
             setLoading(true);
 
-            // If we have a recipientId, get or create conversation
-            if (params.recipientId && userId) {
+            // If opening a group chat
+            if (params.isGroupChat === 'true' && params.groupChatId && userId) {
+                const conversation = await getOrCreateGroupConversation();
+                
+                if (conversation) {
+                    setSelectedConversation(conversation);
+                    setIsGroupChat(true);
+                }
+            }
+            // If we have a recipientId, get or create 1-on-1 conversation
+            else if (params.recipientId && userId) {
                 const conversation = await getOrCreateConversation({
                     gigId: params.gigId,
                     groupId: params.groupId,
@@ -49,6 +67,7 @@ export default function ChatPage() {
 
                 if (conversation) {
                     setSelectedConversation(conversation);
+                    setIsGroupChat(false);
 
                     // Set other user info
                     if (params.recipientName) {
@@ -81,20 +100,25 @@ export default function ChatPage() {
 
                 if (conversation) {
                     setSelectedConversation(conversation);
+                    setIsGroupChat(conversation.is_group || false);
 
-                    // Get other user
-                    const otherParticipantId = conversation.participant_1 === userId
-                        ? conversation.participant_2
-                        : conversation.participant_1;
+                    // For 1-on-1 chats, get other user
+                    if (!conversation.is_group) {
+                        const otherParticipantId = conversation.participant_1 === userId
+                            ? conversation.participant_2
+                            : conversation.participant_1;
 
-                    const { data } = await supabase
-                        .from('profiles')
-                        .select('id, full_name, avatar_url')
-                        .eq('id', otherParticipantId)
-                        .single();
+                        if (otherParticipantId) {
+                            const { data } = await supabase
+                                .from('profiles')
+                                .select('id, full_name, avatar_url')
+                                .eq('id', otherParticipantId)
+                                .single();
 
-                    if (data) {
-                        setOtherUser(data);
+                            if (data) {
+                                setOtherUser(data);
+                            }
+                        }
                     }
                 }
             }
@@ -103,18 +127,22 @@ export default function ChatPage() {
         };
 
         initializeChat();
-    }, [params.recipientId, params.conversationId, userId]);
+    }, [params.recipientId, params.conversationId, params.groupChatId, params.isGroupChat, userId]);
 
     const handleSelectConversation = async (conversation: Conversation) => {
         setSelectedConversation(conversation);
-        setOtherUser(conversation.other_participant || null);
+        setIsGroupChat(conversation.is_group || false);
+        if (!conversation.is_group) {
+            setOtherUser(conversation.other_participant || null);
+        }
     };
 
     const handleBack = () => {
-        if (selectedConversation && !params.recipientId && !params.conversationId) {
+        if (selectedConversation && !params.recipientId && !params.conversationId && !params.groupChatId) {
             // Go back to conversations list
             setSelectedConversation(null);
             setOtherUser(null);
+            setIsGroupChat(false);
         } else {
             // Go back to previous screen
             router.back();
@@ -130,15 +158,33 @@ export default function ChatPage() {
     }
 
     // If we have a selected conversation, show the chat
-    if (selectedConversation && otherUser && userId) {
-        return (
-            <ChatScreen
-                conversationId={selectedConversation.id}
-                currentUserId={userId}
-                otherUser={otherUser}
-                onBack={handleBack}
-            />
-        );
+    if (selectedConversation && userId) {
+        // For group chats
+        if (isGroupChat || selectedConversation.is_group) {
+            return (
+                <ChatScreen
+                    conversationId={selectedConversation.id}
+                    currentUserId={userId}
+                    isGroupChat={true}
+                    groupName={selectedConversation.group_name || 'Group Chat'}
+                    groupAvatar={selectedConversation.group_avatar_url}
+                    onBack={handleBack}
+                />
+            );
+        }
+        
+        // For 1-on-1 chats
+        if (otherUser) {
+            return (
+                <ChatScreen
+                    conversationId={selectedConversation.id}
+                    currentUserId={userId}
+                    otherUser={otherUser}
+                    isGroupChat={false}
+                    onBack={handleBack}
+                />
+            );
+        }
     }
 
     // Otherwise, show the conversations list

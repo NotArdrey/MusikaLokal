@@ -46,9 +46,34 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
     };
 
     const renderConversation = ({ item }: { item: Conversation }) => {
+        const isGroup = item.is_group;
         const otherUser = item.other_participant;
         const lastMessage = item.last_message;
         const hasUnread = (item.unread_count || 0) > 0;
+
+        // Determine display info based on chat type
+        const displayName = isGroup 
+            ? item.group_name 
+            : otherUser?.full_name;
+        const displayAvatar = isGroup 
+            ? item.group_avatar_url 
+            : otherUser?.avatar_url;
+        
+        // For group chats, show sender name in preview
+        const getPreviewText = () => {
+            if (!lastMessage) return 'No messages yet';
+            
+            if (lastMessage.sender_id === currentUserId) {
+                return `You: ${lastMessage.content}`;
+            }
+            
+            if (isGroup && lastMessage.sender) {
+                const firstName = lastMessage.sender.full_name?.split(' ')[0] || 'Someone';
+                return `${firstName}: ${lastMessage.content}`;
+            }
+            
+            return lastMessage.content;
+        };
 
         return (
             <TouchableOpacity
@@ -63,27 +88,47 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                 onPress={() => onSelectConversation(item)}
             >
                 <View style={styles.avatarContainer}>
-                    <Image
-                        source={
-                            otherUser?.avatar_url
-                                ? { uri: otherUser.avatar_url }
-                                : require('../../assets/images/avatar-placeholder.png')
-                        }
-                        style={styles.avatar}
-                    />
+                    {isGroup ? (
+                        <View style={[styles.groupAvatar, { backgroundColor: colors.primary }]}>
+                            {displayAvatar ? (
+                                <Image source={{ uri: displayAvatar }} style={styles.avatar} />
+                            ) : (
+                                <Ionicons name="people" size={24} color="#FFF" />
+                            )}
+                        </View>
+                    ) : (
+                        <Image
+                            source={
+                                displayAvatar
+                                    ? { uri: displayAvatar }
+                                    : require('../../assets/images/avatar-placeholder.png')
+                            }
+                            style={styles.avatar}
+                        />
+                    )}
                     {hasUnread && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
                 </View>
                 <View style={styles.conversationContent}>
                     <View style={styles.conversationHeader}>
-                        <Text
-                            style={[
-                                styles.conversationName,
-                                { color: colors.text, fontWeight: hasUnread ? '700' : '600' },
-                            ]}
-                            numberOfLines={1}
-                        >
-                            {otherUser?.full_name || 'User'}
-                        </Text>
+                        <View style={styles.nameContainer}>
+                            {isGroup && (
+                                <Ionicons 
+                                    name="people" 
+                                    size={14} 
+                                    color={colors.textSecondary} 
+                                    style={{ marginRight: 4 }}
+                                />
+                            )}
+                            <Text
+                                style={[
+                                    styles.conversationName,
+                                    { color: colors.text, fontWeight: hasUnread ? '700' : '600' },
+                                ]}
+                                numberOfLines={1}
+                            >
+                                {displayName || 'Chat'}
+                            </Text>
+                        </View>
                         <Text style={[styles.conversationTime, { color: colors.textSecondary }]}>
                             {lastMessage ? formatTime(lastMessage.created_at) : ''}
                         </Text>
@@ -99,11 +144,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                             ]}
                             numberOfLines={1}
                         >
-                            {lastMessage
-                                ? lastMessage.sender_id === currentUserId
-                                    ? `You: ${lastMessage.content}`
-                                    : lastMessage.content
-                                : 'No messages yet'}
+                            {getPreviewText()}
                         </Text>
                         {hasUnread && (
                             <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
@@ -113,6 +154,11 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                             </View>
                         )}
                     </View>
+                    {isGroup && (
+                        <Text style={[styles.memberCount, { color: colors.textSecondary }]}>
+                            {item.participant_count || 0} members
+                        </Text>
+                    )}
                 </View>
             </TouchableOpacity>
         );
@@ -235,6 +281,13 @@ const styles = StyleSheet.create({
         height: 52,
         borderRadius: 26,
     },
+    groupAvatar: {
+        width: 52,
+        height: 52,
+        borderRadius: 26,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     unreadDot: {
         position: 'absolute',
         bottom: 2,
@@ -254,10 +307,15 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
     },
+    nameContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: 8,
+    },
     conversationName: {
         fontSize: 16,
         flex: 1,
-        marginRight: 8,
     },
     conversationTime: {
         fontSize: 12,
@@ -271,6 +329,10 @@ const styles = StyleSheet.create({
         fontSize: 14,
         flex: 1,
         marginRight: 8,
+    },
+    memberCount: {
+        fontSize: 11,
+        marginTop: 2,
     },
     unreadBadge: {
         minWidth: 20,

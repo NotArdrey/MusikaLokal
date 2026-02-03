@@ -14,16 +14,21 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
-import { Message, useChat } from '../hooks/useChat';
+import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
 
 interface ChatScreenProps {
     conversationId: string;
     currentUserId: string;
-    otherUser: {
+    // For 1-on-1 chats
+    otherUser?: {
         id: string;
         full_name: string;
         avatar_url: string | null;
     };
+    // For group chats
+    isGroupChat?: boolean;
+    groupName?: string;
+    groupAvatar?: string | null;
     onBack?: () => void;
 }
 
@@ -31,13 +36,28 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     conversationId,
     currentUserId,
     otherUser,
+    isGroupChat = false,
+    groupName,
+    groupAvatar,
     onBack,
 }) => {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
     const { messages, loading, sending, sendMessage, markAsRead } = useChat(conversationId, currentUserId);
+    const { participants } = useGroupParticipants(isGroupChat ? conversationId : null);
     const [text, setText] = useState('');
     const flatListRef = useRef<FlatList>(null);
+
+    // Create a map of user IDs to their profile info for quick lookup in group chats
+    const participantMap = React.useMemo(() => {
+        const map = new Map<string, ConversationParticipant['profile']>();
+        participants.forEach(p => {
+            if (p.profile) {
+                map.set(p.user_id, p.profile);
+            }
+        });
+        return map;
+    }, [participants]);
 
     // Mark messages as read when viewing
     useEffect(() => {
@@ -84,6 +104,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         const isMe = item.sender_id === currentUserId;
         const showDate = index === 0 ||
             formatDate(messages[index - 1].created_at) !== formatDate(item.created_at);
+        
+        // For group chats, check if we should show sender name
+        const prevMessage = index > 0 ? messages[index - 1] : null;
+        const showSenderName = isGroupChat && !isMe && (
+            index === 0 || 
+            prevMessage?.sender_id !== item.sender_id ||
+            showDate
+        );
+
+        // Get sender info from message or participant map
+        const senderProfile = item.sender || participantMap.get(item.sender_id);
 
         return (
             <>
@@ -101,46 +132,60 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     {!isMe && (
                         <Image
                             source={
-                                item.sender?.avatar_url
-                                    ? { uri: item.sender.avatar_url }
+                                senderProfile?.avatar_url
+                                    ? { uri: senderProfile.avatar_url }
                                     : require('../../assets/images/avatar-placeholder.png')
                             }
                             style={styles.avatar}
                         />
                     )}
-                    <View style={[
-                        styles.messageBubble,
-                        isMe
-                            ? [styles.myMessage, { backgroundColor: colors.primary }]
-                            : [styles.theirMessage, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }],
-                    ]}>
-                        <Text style={[
-                            styles.messageText,
-                            { color: isMe ? '#FFF' : colors.text },
-                        ]}>
-                            {item.content}
-                        </Text>
-                        <View style={styles.messageFooter}>
-                            <Text style={[
-                                styles.messageTime,
-                                { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textSecondary },
-                            ]}>
-                                {formatTime(item.created_at)}
+                    <View style={styles.messageContent}>
+                        {showSenderName && senderProfile && (
+                            <Text style={[styles.senderName, { color: colors.primary }]}>
+                                {senderProfile.full_name}
                             </Text>
-                            {isMe && item.read_at && (
-                                <Ionicons
-                                    name="checkmark-done"
-                                    size={14}
-                                    color="rgba(255,255,255,0.7)"
-                                    style={{ marginLeft: 4 }}
-                                />
-                            )}
+                        )}
+                        <View style={[
+                            styles.messageBubble,
+                            isMe
+                                ? [styles.myMessage, { backgroundColor: colors.primary }]
+                                : [styles.theirMessage, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }],
+                        ]}>
+                            <Text style={[
+                                styles.messageText,
+                                { color: isMe ? '#FFF' : colors.text },
+                            ]}>
+                                {item.content}
+                            </Text>
+                            <View style={styles.messageFooter}>
+                                <Text style={[
+                                    styles.messageTime,
+                                    { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textSecondary },
+                                ]}>
+                                    {formatTime(item.created_at)}
+                                </Text>
+                                {isMe && item.read_at && (
+                                    <Ionicons
+                                        name="checkmark-done"
+                                        size={14}
+                                        color="rgba(255,255,255,0.7)"
+                                        style={{ marginLeft: 4 }}
+                                    />
+                                )}
+                            </View>
                         </View>
                     </View>
                 </View>
             </>
         );
     };
+
+    // Get display info based on chat type
+    const displayName = isGroupChat ? groupName : otherUser?.full_name;
+    const displayAvatar = isGroupChat ? groupAvatar : otherUser?.avatar_url;
+    const displaySubtitle = isGroupChat 
+        ? `${participants.length} members` 
+        : 'Online';
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -158,20 +203,30 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         <Ionicons name="arrow-back" size={24} color={colors.text} />
                     </TouchableOpacity>
                 )}
-                <Image
-                    source={
-                        otherUser.avatar_url
-                            ? { uri: otherUser.avatar_url }
-                            : require('../../assets/images/avatar-placeholder.png')
-                    }
-                    style={styles.headerAvatar}
-                />
+                {isGroupChat ? (
+                    <View style={[styles.groupAvatarContainer, { backgroundColor: colors.primary }]}>
+                        {displayAvatar ? (
+                            <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
+                        ) : (
+                            <Ionicons name="people" size={24} color="#FFF" />
+                        )}
+                    </View>
+                ) : (
+                    <Image
+                        source={
+                            displayAvatar
+                                ? { uri: displayAvatar }
+                                : require('../../assets/images/avatar-placeholder.png')
+                        }
+                        style={styles.headerAvatar}
+                    />
+                )}
                 <View style={styles.headerInfo}>
                     <Text style={[styles.headerName, { color: colors.text }]}>
-                        {otherUser.full_name || 'User'}
+                        {displayName || 'Chat'}
                     </Text>
                     <Text style={[styles.headerStatus, { color: colors.textSecondary }]}>
-                        Online
+                        {displaySubtitle}
                     </Text>
                 </View>
                 <TouchableOpacity style={styles.headerAction}>
@@ -279,6 +334,13 @@ const styles = StyleSheet.create({
         height: 40,
         borderRadius: 20,
     },
+    groupAvatarContainer: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
     headerInfo: {
         flex: 1,
         marginLeft: 12,
@@ -345,6 +407,15 @@ const styles = StyleSheet.create({
         height: 28,
         borderRadius: 14,
         marginRight: 8,
+    },
+    messageContent: {
+        flexShrink: 1,
+    },
+    senderName: {
+        fontSize: 12,
+        fontWeight: '600',
+        marginBottom: 2,
+        marginLeft: 4,
     },
     messageBubble: {
         paddingHorizontal: 14,

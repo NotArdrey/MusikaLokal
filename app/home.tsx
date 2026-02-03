@@ -420,47 +420,44 @@ export default function HomeScreen() {
       console.log("openDetailsSheet called");
     }, 100);
 
-        // Save to recently viewed
-        await saveToRecentlyViewed(item);
-    };
-
-    // Handle chat action - navigate to chat screen with recipient
-    const handleChat = (item: any) => {
-        if (!userId) {
-            setAlertConfig({
-                type: 'info',
-                title: 'Login Required',
-                message: 'Please login or sign up to chat with this user.',
-                buttons: [
-                    { text: 'Cancel', style: 'cancel', onPress: () => setAlertVisible(false) },
-                    { text: 'Login', onPress: () => router.push('/') }
-                ]
-            });
-            setAlertVisible(true);
-            return;
-        }
-
-        // Determine the owner/organizer ID based on item type
-        const recipientId = item.owner_id || item.organizer_id;
-        if (!recipientId) {
-            console.log('No owner/organizer found for item:', item);
-            return;
-        }
-
-        // Navigate to chat with context
-        router.push({
-            pathname: '/chat',
-            params: {
-                recipientId,
-                recipientName: item.name,
-                ...(item.type === 'group' && { groupId: item.id }),
-                ...(item.type === 'studio' && { studioId: item.id }),
-                ...(item.type === 'gig' && { gigId: item.id }),
-            }
-        });
-    };
     // Save to recently viewed
     await saveToRecentlyViewed(item);
+  };
+
+  // Handle chat action - navigate to chat screen with recipient
+  const handleChat = (item: any) => {
+    if (!userId) {
+      setAlertConfig({
+        type: 'info',
+        title: 'Login Required',
+        message: 'Please login or sign up to chat with this user.',
+        buttons: [
+          { text: 'Cancel', style: 'cancel', onPress: () => setAlertVisible(false) },
+          { text: 'Login', onPress: () => router.push('/') }
+        ]
+      });
+      setAlertVisible(true);
+      return;
+    }
+
+    // Determine the owner/organizer ID based on item type
+    const recipientId = item.owner_id || item.organizer_id;
+    if (!recipientId) {
+      console.log('No owner/organizer found for item:', item);
+      return;
+    }
+
+    // Navigate to chat with context
+    router.push({
+      pathname: '/chat',
+      params: {
+        recipientId,
+        recipientName: item.name,
+        ...(item.type === 'group' && { groupId: item.id }),
+        ...(item.type === 'studio' && { studioId: item.id }),
+        ...(item.type === 'gig' && { gigId: item.id }),
+      }
+    });
   };
 
   const saveToRecentlyViewed = async (item: any) => {
@@ -847,7 +844,6 @@ export default function HomeScreen() {
   };
 
   // Handle invite action - opens the details sheet for booking/connecting
-  // Handle invite action - opens the details sheet for booking/connecting
   const handleInvite = (item: any) => {
     if (!userId) {
       setAlertConfig({
@@ -874,20 +870,6 @@ export default function HomeScreen() {
     // allowing venue/studio owners to send booking requests
   };
 
-    // Unified Card Renderer
-    const renderUnifiedCard = (item: any) => {
-        return (
-            <ListingCard
-                key={item.id}
-                item={item}
-                onPress={handleCardPress}
-                onInvite={handleInvite}
-                onChat={handleChat}
-                variant="horizontal"
-                hasGroups={hasGroups}
-            />
-        );
-    };
   // Unified Card Renderer
   const renderUnifiedCard = (item: any) => {
     return (
@@ -896,6 +878,7 @@ export default function HomeScreen() {
         item={item}
         onPress={handleCardPress}
         onInvite={handleInvite}
+        onChat={handleChat}
         variant="horizontal"
         hasGroups={hasGroups}
       />
@@ -1478,7 +1461,6 @@ export default function HomeScreen() {
       <SearchBottomSheet
         ref={searchSheetRef}
         onClose={() => {}}
-        hasGroups={hasGroups}
         onItemPress={(id) => {
           console.log("=== SearchBottomSheet onItemPress ===");
           console.log("Item ID from search:", id);

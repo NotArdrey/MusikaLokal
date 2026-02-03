@@ -18,10 +18,24 @@ export interface Message {
     };
 }
 
+export interface ConversationParticipant {
+    id: string;
+    user_id: string;
+    role: 'owner' | 'admin' | 'member';
+    joined_at: string;
+    last_read_at: string | null;
+    is_muted: boolean;
+    profile?: {
+        id: string;
+        full_name: string;
+        avatar_url: string | null;
+    };
+}
+
 export interface Conversation {
     id: string;
-    participant_1: string;
-    participant_2: string;
+    participant_1: string | null;
+    participant_2: string | null;
     created_at: string;
     updated_at: string;
     studio_booking_id: string | null;
@@ -29,16 +43,24 @@ export interface Conversation {
     gig_id: string | null;
     group_id: string | null;
     studio_id: string | null;
+    // Group chat fields
+    is_group: boolean;
+    group_name: string | null;
+    group_avatar_url: string | null;
+    // For 1-on-1 chats
     other_participant?: {
         id: string;
         full_name: string;
         avatar_url: string | null;
     };
+    // For group chats
+    participants?: ConversationParticipant[];
+    participant_count?: number;
     last_message?: Message | null;
     unread_count?: number;
 }
 
-// Hook to get or create a conversation
+// Hook to get or create a conversation (1-on-1)
 export function useConversation(otherUserId: string | null, currentUserId: string | null) {
     const [conversation, setConversation] = useState<Conversation | null>(null);
     const [loading, setLoading] = useState(true);
@@ -65,10 +87,11 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
             // Sort participant IDs to ensure consistency
             const [p1, p2] = [currentUserId, otherUserId].sort();
 
-            // Try to find existing conversation
+            // Try to find existing 1-on-1 conversation (not a group chat)
             const { data: existing, error: fetchError } = await supabase
                 .from('conversations')
                 .select('*')
+                .eq('is_group', false)
                 .or(`and(participant_1.eq.${p1},participant_2.eq.${p2}),and(participant_1.eq.${p2},participant_2.eq.${p1})`)
                 .maybeSingle();
 
@@ -81,12 +104,13 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                 return existing;
             }
 
-            // Create new conversation
+            // Create new 1-on-1 conversation
             const { data: newConversation, error: createError } = await supabase
                 .from('conversations')
                 .insert({
                     participant_1: p1,
                     participant_2: p2,
+                    is_group: false,
                     studio_booking_id: options?.studioBookingId || null,
                     gig_application_id: options?.gigApplicationId || null,
                     gig_id: options?.gigId || null,
@@ -112,7 +136,72 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
     return { conversation, loading, error, getOrCreateConversation };
 }
 
-// Hook to get all conversations for current user
+// Hook to get or create a GROUP conversation (all members can chat)
+export function useGroupConversation(groupId: string | null, currentUserId: string | null) {
+    const [conversation, setConversation] = useState<Conversation | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const getOrCreateGroupConversation = useCallback(async () => {
+        if (!groupId || !currentUserId) {
+            setLoading(false);
+            return null;
+        }
+
+        try {
+            setLoading(true);
+            setError(null);
+
+            // Try to find existing group conversation
+            const { data: existing, error: fetchError } = await supabase
+                .from('conversations')
+                .select('*')
+                .eq('group_id', groupId)
+                .eq('is_group', true)
+                .maybeSingle();
+
+            if (fetchError && fetchError.code !== 'PGRST116') {
+                throw fetchError;
+            }
+
+            if (existing) {
+                setConversation(existing);
+                return existing;
+            }
+
+            // Create group conversation using the database function
+            const { data: result, error: rpcError } = await supabase
+                .rpc('create_group_conversation', {
+                    p_group_id: groupId,
+                    p_creator_id: currentUserId,
+                });
+
+            if (rpcError) throw rpcError;
+
+            // Fetch the created conversation
+            const { data: newConversation, error: getError } = await supabase
+                .from('conversations')
+                .select('*')
+                .eq('id', result)
+                .single();
+
+            if (getError) throw getError;
+
+            setConversation(newConversation);
+            return newConversation;
+        } catch (err: any) {
+            console.error('Error getting/creating group conversation:', err);
+            setError(err.message);
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    }, [groupId, currentUserId]);
+
+    return { conversation, loading, error, getOrCreateGroupConversation };
+}
+
+// Hook to get all conversations for current user (both 1-on-1 and group)
 export function useConversations(currentUserId: string | null) {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [loading, setLoading] = useState(true);
@@ -128,21 +217,46 @@ export function useConversations(currentUserId: string | null) {
             setLoading(true);
             setError(null);
 
-            const { data, error: fetchError } = await supabase
+            // Fetch 1-on-1 conversations
+            const { data: directConversations, error: directError } = await supabase
                 .from('conversations')
                 .select(`
                     *,
                     participant_1_profile:profiles!conversations_participant_1_fkey(id, full_name, avatar_url),
                     participant_2_profile:profiles!conversations_participant_2_fkey(id, full_name, avatar_url)
                 `)
+                .eq('is_group', false)
                 .or(`participant_1.eq.${currentUserId},participant_2.eq.${currentUserId}`)
                 .order('updated_at', { ascending: false });
 
-            if (fetchError) throw fetchError;
+            if (directError) throw directError;
 
-            // Process to add other_participant and fetch last message
-            const processedConversations = await Promise.all(
-                (data || []).map(async (conv: any) => {
+            // Fetch group conversations where user is a participant
+            const { data: participations, error: partError } = await supabase
+                .from('conversation_participants')
+                .select('conversation_id')
+                .eq('user_id', currentUserId);
+
+            if (partError) throw partError;
+
+            const groupConversationIds = participations?.map(p => p.conversation_id) || [];
+
+            let groupConversations: any[] = [];
+            if (groupConversationIds.length > 0) {
+                const { data: groups, error: groupError } = await supabase
+                    .from('conversations')
+                    .select('*')
+                    .eq('is_group', true)
+                    .in('id', groupConversationIds)
+                    .order('updated_at', { ascending: false });
+
+                if (groupError) throw groupError;
+                groupConversations = groups || [];
+            }
+
+            // Process 1-on-1 conversations
+            const processedDirectConversations = await Promise.all(
+                (directConversations || []).map(async (conv: any) => {
                     const otherParticipant = conv.participant_1 === currentUserId
                         ? conv.participant_2_profile
                         : conv.participant_1_profile;
@@ -166,6 +280,7 @@ export function useConversations(currentUserId: string | null) {
 
                     return {
                         ...conv,
+                        is_group: false,
                         other_participant: otherParticipant,
                         last_message: lastMessage,
                         unread_count: unreadCount || 0,
@@ -173,7 +288,58 @@ export function useConversations(currentUserId: string | null) {
                 })
             );
 
-            setConversations(processedConversations);
+            // Process group conversations
+            const processedGroupConversations = await Promise.all(
+                groupConversations.map(async (conv: any) => {
+                    // Get participants with profiles
+                    const { data: participants } = await supabase
+                        .from('conversation_participants')
+                        .select(`
+                            *,
+                            profile:profiles!conversation_participants_user_id_fkey(id, full_name, avatar_url)
+                        `)
+                        .eq('conversation_id', conv.id);
+
+                    // Get last message
+                    const { data: lastMessage } = await supabase
+                        .from('messages')
+                        .select(`
+                            *,
+                            sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)
+                        `)
+                        .eq('conversation_id', conv.id)
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+
+                    // Get unread count
+                    const { count: unreadCount } = await supabase
+                        .from('messages')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('conversation_id', conv.id)
+                        .neq('sender_id', currentUserId)
+                        .is('read_at', null);
+
+                    return {
+                        ...conv,
+                        is_group: true,
+                        participants: participants || [],
+                        participant_count: participants?.length || 0,
+                        last_message: lastMessage,
+                        unread_count: unreadCount || 0,
+                    };
+                })
+            );
+
+            // Combine and sort by updated_at
+            const allConversations = [
+                ...processedDirectConversations,
+                ...processedGroupConversations,
+            ].sort((a, b) => 
+                new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+            );
+
+            setConversations(allConversations);
         } catch (err: any) {
             console.error('Error fetching conversations:', err);
             setError(err.message);
@@ -319,24 +485,33 @@ export function useChat(conversationId: string | null, currentUserId: string | n
     return { messages, loading, sending, error, sendMessage, markAsRead };
 }
 
-// Helper to get total unread count
+// Helper to get total unread count (includes both 1-on-1 and group chats)
 export async function getUnreadMessageCount(userId: string): Promise<number> {
     try {
-        // Get all conversations for user
-        const { data: conversations } = await supabase
+        // Get all 1-on-1 conversations for user
+        const { data: directConversations } = await supabase
             .from('conversations')
             .select('id')
+            .eq('is_group', false)
             .or(`participant_1.eq.${userId},participant_2.eq.${userId}`);
 
-        if (!conversations || conversations.length === 0) return 0;
+        // Get all group conversations for user
+        const { data: participations } = await supabase
+            .from('conversation_participants')
+            .select('conversation_id')
+            .eq('user_id', userId);
 
-        const conversationIds = conversations.map(c => c.id);
+        const directIds = directConversations?.map(c => c.id) || [];
+        const groupIds = participations?.map(p => p.conversation_id) || [];
+        const allConversationIds = [...new Set([...directIds, ...groupIds])];
+
+        if (allConversationIds.length === 0) return 0;
 
         // Count unread messages
         const { count } = await supabase
             .from('messages')
             .select('*', { count: 'exact', head: true })
-            .in('conversation_id', conversationIds)
+            .in('conversation_id', allConversationIds)
             .neq('sender_id', userId)
             .is('read_at', null);
 
@@ -345,4 +520,44 @@ export async function getUnreadMessageCount(userId: string): Promise<number> {
         console.error('Error getting unread count:', error);
         return 0;
     }
+}
+
+// Hook to get participants of a group conversation
+export function useGroupParticipants(conversationId: string | null) {
+    const [participants, setParticipants] = useState<ConversationParticipant[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!conversationId) {
+            setLoading(false);
+            return;
+        }
+
+        const fetchParticipants = async () => {
+            try {
+                setLoading(true);
+                const { data, error: fetchError } = await supabase
+                    .from('conversation_participants')
+                    .select(`
+                        *,
+                        profile:profiles!conversation_participants_user_id_fkey(id, full_name, avatar_url)
+                    `)
+                    .eq('conversation_id', conversationId)
+                    .order('role', { ascending: true });
+
+                if (fetchError) throw fetchError;
+                setParticipants(data || []);
+            } catch (err: any) {
+                console.error('Error fetching participants:', err);
+                setError(err.message);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchParticipants();
+    }, [conversationId]);
+
+    return { participants, loading, error };
 }
