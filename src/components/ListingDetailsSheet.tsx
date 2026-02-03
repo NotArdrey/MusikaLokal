@@ -179,10 +179,34 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
 
     // BackHandler Logic
     const [sheetIndex, setSheetIndex] = useState(-1);
+    const previousSheetIndex = useRef(-1);
 
-    const handleSheetChanges = useCallback((index: number) => {
+    const handleSheetChanges = useCallback(async (index: number) => {
+        const wasHidden = previousSheetIndex.current < 0;
+        const isNowVisible = index >= 0;
+        previousSheetIndex.current = index;
         setSheetIndex(index);
-    }, []);
+
+        // Refresh studio bookings when sheet becomes visible (reopened or returned from payment)
+        // This ensures calendar availability is up-to-date with newly created bookings
+        if (wasHidden && isNowVisible && listingId && group && (group.type === 'Studio' || group.type === 'Venue')) {
+            console.log('📅 Sheet opened - refreshing studio bookings for availability...');
+            try {
+                const { data: bookingData } = await supabase.functions.invoke('manage-listings', {
+                    body: { action: 'fetch_studio_bookings', studioId: listingId }
+                });
+                const fetchedBookings = bookingData || [];
+                setExistingBookings(fetchedBookings);
+
+                // Re-process availability with fresh booking data
+                if (group.availability) {
+                    processAvailability(group.availability, fetchedBookings, group.dateOverrides, bookings);
+                }
+            } catch (e) {
+                console.error('Error refreshing studio bookings:', e);
+            }
+        }
+    }, [listingId, group, bookings]);
 
     useEffect(() => {
         const backAction = () => {
@@ -275,14 +299,14 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
                 setIsProcessingPayment(false);
                 setShowPaymentOptionModal(false);
                 alert('Booking created! However, payment setup failed. Please go to Pending bookings to complete payment.');
-                
+
                 // Clear form and close
                 setBookings([]);
                 setSelectedTimeSlots([]);
                 setBookingNotes('');
                 setModalVisible(false);
                 (ref as any)?.current?.dismiss();
-                
+
                 setTimeout(() => {
                     router.push('/bookings' as any);
                 }, 100);
@@ -314,14 +338,14 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             } else {
                 setShowPaymentOptionModal(false);
                 alert('Booking created! Please complete payment from your Pending bookings.');
-                
+
                 // Clear form and close
                 setBookings([]);
                 setSelectedTimeSlots([]);
                 setBookingNotes('');
                 setModalVisible(false);
                 (ref as any)?.current?.dismiss();
-                
+
                 setTimeout(() => {
                     router.push('/bookings' as any);
                 }, 100);
@@ -329,7 +353,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
         } catch (payErr: any) {
             console.error('❌ Payment initiation error:', payErr);
             alert('Booking created! Please complete payment from your Pending bookings to confirm.');
-            
+
             // Clear form and close
             setBookings([]);
             setSelectedTimeSlots([]);
@@ -337,7 +361,7 @@ const ListingDetailsSheet = forwardRef<BottomSheetModal, ListingDetailsSheetProp
             setModalVisible(false);
             setShowPaymentOptionModal(false);
             (ref as any)?.current?.dismiss();
-            
+
             setTimeout(() => {
                 router.push('/bookings' as any);
             }, 100);
@@ -4500,7 +4524,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 24,
+        paddingHorizontal: 20,
     },
     paymentLoadingContainer: {
         borderRadius: 20,
@@ -4525,18 +4549,23 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         padding: 24,
         width: '100%',
-        maxWidth: 400,
+        maxWidth: 380,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+        elevation: 10,
     },
     paymentOptionTitle: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 20,
-        marginBottom: 4,
+        fontSize: 22,
+        marginBottom: 6,
         textAlign: 'center',
     },
     paymentOptionSubtitle: {
         fontFamily: 'Poppins_400Regular',
         fontSize: 14,
-        marginBottom: 20,
+        marginBottom: 24,
         textAlign: 'center',
     },
     paymentOptionCard: {
@@ -4572,41 +4601,47 @@ const styles = StyleSheet.create({
     },
     paymentOptionLabel: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 15,
+        fontSize: 16,
     },
     paymentOptionAmount: {
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 16,
+        fontFamily: 'Poppins_700Bold',
+        fontSize: 18,
     },
     paymentOptionDesc: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 12,
+        fontSize: 13,
+        lineHeight: 18,
         marginLeft: 34,
     },
     paymentOptionButtons: {
         flexDirection: 'row',
         gap: 12,
-        marginTop: 16,
+        marginTop: 20,
     },
     paymentOptionCancelBtn: {
         flex: 1,
-        paddingVertical: 14,
+        paddingVertical: 16,
         borderRadius: 12,
-        borderWidth: 1,
+        borderWidth: 1.5,
         alignItems: 'center',
         justifyContent: 'center',
     },
     paymentOptionCancelText: {
-        fontFamily: 'Poppins_500Medium',
+        fontFamily: 'Poppins_600SemiBold',
         fontSize: 14,
     },
     paymentOptionConfirmBtn: {
-        flex: 1.5,
-        paddingVertical: 14,
+        flex: 2,
+        paddingVertical: 16,
         borderRadius: 12,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 4,
     },
     paymentOptionConfirmText: {
         fontFamily: 'Poppins_600SemiBold',

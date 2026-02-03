@@ -88,6 +88,7 @@ export default function BookingsScreen() {
 
   // Track if user went to payment page (to auto-refresh on return)
   const paymentInProgressRef = useRef(false);
+  const pendingPaymentBookingId = useRef<string | null>(null);
   const appState = useRef(AppState.currentState);
 
   // Handle route params (from payment result screen)
@@ -127,27 +128,57 @@ export default function BookingsScreen() {
         // If we were in payment flow, check status and refresh
         if (paymentInProgressRef.current && userId) {
           console.log('💳 Checking payment status after return...');
+          const bookingId = pendingPaymentBookingId.current;
           paymentInProgressRef.current = false;
+          pendingPaymentBookingId.current = null;
           
-          // Small delay to let payment webhook process
-          setTimeout(async () => {
-            await fetchBookings(userId);
+          // Poll for payment status with retries (webhook might be processing)
+          let paymentConfirmed = false;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            console.log(`💳 Payment status check attempt ${attempt}/3...`);
+            await new Promise(resolve => setTimeout(resolve, 1500 * attempt)); // Increasing delay
             
-            // Check if any booking moved to Upcoming (payment success)
-            const { data: upcomingBookings } = await supabase
-              .from('studio_bookings')
-              .select('id, status, payment_status')
-              .eq('user_id', userId)
-              .eq('payment_status', 'paid')
-              .order('created_at', { ascending: false })
-              .limit(1);
-            
-            if (upcomingBookings && upcomingBookings.length > 0) {
-              // Payment was successful, switch to Upcoming tab
-              setActiveTab('Upcoming');
-              Alert.alert('Payment Successful! 🎉', 'Your booking has been confirmed and moved to Upcoming.');
+            // Check the specific booking if we have an ID
+            if (bookingId) {
+              const { data: booking } = await supabase
+                .from('studio_bookings')
+                .select('id, status, payment_status')
+                .eq('id', bookingId)
+                .single();
+              
+              if (booking?.payment_status === 'paid') {
+                paymentConfirmed = true;
+                console.log('✅ Payment confirmed for booking:', bookingId);
+                break;
+              }
+            } else {
+              // Check if any recent booking moved to paid
+              const { data: recentPaid } = await supabase
+                .from('studio_bookings')
+                .select('id, status, payment_status')
+                .eq('user_id', userId)
+                .eq('payment_status', 'paid')
+                .order('paid_at', { ascending: false })
+                .limit(1);
+              
+              if (recentPaid && recentPaid.length > 0) {
+                paymentConfirmed = true;
+                console.log('✅ Found recently paid booking');
+                break;
+              }
             }
-          }, 1500); // Wait for webhook to process
+          }
+          
+          // Refresh bookings
+          await fetchBookings(userId);
+          
+          if (paymentConfirmed) {
+            setActiveTab('Upcoming');
+            Alert.alert('Payment Successful! 🎉', 'Your booking has been confirmed and moved to Upcoming.');
+          }
+        } else if (userId) {
+          // Even if not in payment flow, refresh when returning to app
+          fetchBookings(userId);
         }
       }
       appState.current = nextAppState;
@@ -485,8 +516,9 @@ export default function BookingsScreen() {
         console.log('✅ Opening checkout URL:', paymentData.checkout_url);
         const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
         if (canOpen) {
-          // Set flag to track payment in progress
+          // Set flag to track payment in progress and store the booking ID
           paymentInProgressRef.current = true;
+          pendingPaymentBookingId.current = item.id;
           await Linking.openURL(paymentData.checkout_url);
         } else {
           Alert.alert('Error', 'Unable to open payment page. Please try again.');
@@ -546,6 +578,7 @@ export default function BookingsScreen() {
         const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
+          pendingPaymentBookingId.current = item.id;
           await Linking.openURL(paymentData.checkout_url);
         } else {
           Alert.alert('Error', 'Unable to open payment page. Please try again.');
