@@ -3,19 +3,43 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function PaymentResultScreen() {
   const { colors } = useTheme();
-  const params = useLocalSearchParams<{ status?: string; booking_id?: string }>();
+  const { checkSubscription } = useAuth();
+  const params = useLocalSearchParams<{ status?: string; booking_id?: string; type?: string; plan_id?: string }>();
   const [loading, setLoading] = useState(true);
   const [bookingDetails, setBookingDetails] = useState<any>(null);
+  const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
 
   const isSuccess = params.status === 'success';
+  const isSubscription = params.type === 'subscription';
 
   useEffect(() => {
-    const fetchBookingDetails = async () => {
-      if (params.booking_id) {
+    const fetchDetails = async () => {
+      if (isSubscription && params.plan_id) {
+        // Fetch subscription plan details
+        try {
+          const { data, error } = await supabase
+            .from('subscription_plans')
+            .select('*')
+            .eq('id', params.plan_id)
+            .single();
+
+          if (data && !error) {
+            setSubscriptionDetails(data);
+          }
+
+          // If subscription payment was successful, refresh subscription status
+          if (isSuccess && checkSubscription) {
+            await checkSubscription();
+          }
+        } catch (e) {
+          console.error('Error fetching subscription plan:', e);
+        }
+      } else if (params.booking_id) {
         try {
           const { data, error } = await supabase
             .from('studio_bookings')
@@ -40,8 +64,8 @@ export default function PaymentResultScreen() {
       setLoading(false);
     };
 
-    fetchBookingDetails();
-  }, [params.booking_id]);
+    fetchDetails();
+  }, [params.booking_id, params.plan_id, isSubscription]);
 
   const handleGoToBookings = () => {
     router.replace({
@@ -52,6 +76,10 @@ export default function PaymentResultScreen() {
         booking_id: params.booking_id
       }
     });
+  };
+
+  const handleGoToWallet = () => {
+    router.replace('/wallet');
   };
 
   const handleRetryPayment = async () => {
@@ -94,18 +122,69 @@ export default function PaymentResultScreen() {
 
         {/* Status Title */}
         <Text style={[styles.title, { color: colors.text }]}>
-          {isSuccess ? 'Payment Successful!' : 'Payment Cancelled'}
+          {isSuccess 
+            ? (isSubscription ? 'Subscription Activated!' : 'Payment Successful!') 
+            : (isSubscription ? 'Subscription Cancelled' : 'Payment Cancelled')}
         </Text>
 
         {/* Status Description */}
         <Text style={[styles.description, { color: colors.textSecondary }]}>
           {isSuccess
-            ? 'Your studio booking has been confirmed and moved to Upcoming bookings.'
-            : 'Your payment was cancelled. The booking is still in Pending - you can try again anytime.'}
+            ? (isSubscription 
+                ? `Your ${subscriptionDetails?.name || 'subscription'} is now active! Enjoy all the premium features.`
+                : 'Your studio booking has been confirmed and moved to Upcoming bookings.')
+            : (isSubscription
+                ? 'Your subscription was cancelled. You can subscribe anytime from your Wallet & Subscription page.'
+                : 'Your payment was cancelled. The booking is still in Pending - you can try again anytime.')}
         </Text>
 
+        {/* Subscription Details */}
+        {isSubscription && subscriptionDetails && (
+          <View style={[styles.detailsContainer, { backgroundColor: colors.background }]}>
+            <Text style={[styles.detailsTitle, { color: colors.text }]}>
+              Subscription Details
+            </Text>
+            
+            <View style={styles.detailRow}>
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Plan</Text>
+              <Text style={[styles.detailValue, { color: colors.text }]}>
+                {subscriptionDetails.name}
+              </Text>
+            </View>
+
+            <View style={styles.detailRow}>
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Price</Text>
+              <Text style={[styles.detailValue, { color: colors.text }]}>
+                ₱{subscriptionDetails.price?.toLocaleString() || '0'}/month
+              </Text>
+            </View>
+
+            <View style={styles.detailRow}>
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Duration</Text>
+              <Text style={[styles.detailValue, { color: colors.text }]}>
+                {subscriptionDetails.duration_days} days
+              </Text>
+            </View>
+
+            <View style={styles.detailRow}>
+              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Status</Text>
+              <View style={[
+                styles.statusBadge,
+                { backgroundColor: isSuccess ? '#10B98120' : '#EF444420' }
+              ]}>
+                <Text style={[
+                  styles.statusText,
+                  { color: isSuccess ? '#10B981' : '#EF4444' }
+                ]}>
+                  {isSuccess ? 'Active' : 'Cancelled'}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Booking Details */}
-        {bookingDetails && (
+        {!isSubscription && bookingDetails && (
           <View style={[styles.detailsContainer, { backgroundColor: colors.background }]}>
             <Text style={[styles.detailsTitle, { color: colors.text }]}>
               Booking Details
@@ -151,26 +230,52 @@ export default function PaymentResultScreen() {
 
         {/* Action Buttons */}
         <View style={styles.buttonsContainer}>
-          <TouchableOpacity
-            style={[styles.primaryButton, { backgroundColor: colors.primary }]}
-            onPress={handleGoToBookings}
-          >
-            <Ionicons name="calendar" size={20} color="white" />
-            <Text style={styles.primaryButtonText}>
-              {isSuccess ? 'View Upcoming Bookings' : 'View Pending Bookings'}
-            </Text>
-          </TouchableOpacity>
+          {isSubscription ? (
+            <>
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                onPress={handleGoToWallet}
+              >
+                <Ionicons name="wallet" size={20} color="white" />
+                <Text style={styles.primaryButtonText}>
+                  View Wallet & Subscription
+                </Text>
+              </TouchableOpacity>
 
-          {!isSuccess && (
-            <TouchableOpacity
-              style={[styles.secondaryButton, { borderColor: colors.primary }]}
-              onPress={handleRetryPayment}
-            >
-              <Ionicons name="refresh" size={20} color={colors.primary} />
-              <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>
-                Retry Payment
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.secondaryButton, { borderColor: colors.primary }]}
+                onPress={() => router.replace('/home')}
+              >
+                <Ionicons name="home" size={20} color={colors.primary} />
+                <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>
+                  Go to Home
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                onPress={handleGoToBookings}
+              >
+                <Ionicons name="calendar" size={20} color="white" />
+                <Text style={styles.primaryButtonText}>
+                  {isSuccess ? 'View Upcoming Bookings' : 'View Pending Bookings'}
+                </Text>
+              </TouchableOpacity>
+
+              {!isSuccess && (
+                <TouchableOpacity
+                  style={[styles.secondaryButton, { borderColor: colors.primary }]}
+                  onPress={handleRetryPayment}
+                >
+                  <Ionicons name="refresh" size={20} color={colors.primary} />
+                  <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>
+                    Retry Payment
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </View>
       </View>

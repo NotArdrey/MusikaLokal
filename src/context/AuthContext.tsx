@@ -24,6 +24,10 @@ type AuthContextType = {
     unpaidBookings: UnpaidBooking[];
     checkSystemLock: () => Promise<void>;
     showLockAlert: () => void;
+    // Subscription status
+    subscriptionStatus: string | null;
+    subscriptionRequired: boolean;
+    checkSubscription: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -37,6 +41,9 @@ const AuthContext = createContext<AuthContextType>({
     unpaidBookings: [],
     checkSystemLock: async () => {},
     showLockAlert: () => {},
+    subscriptionStatus: null,
+    subscriptionRequired: false,
+    checkSubscription: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -65,6 +72,64 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [isSystemLocked, setIsSystemLocked] = useState(false);
     const [unpaidBalance, setUnpaidBalance] = useState(0);
     const [unpaidBookings, setUnpaidBookings] = useState<UnpaidBooking[]>([]);
+
+    // Subscription state
+    const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
+    const [subscriptionRequired, setSubscriptionRequired] = useState(false);
+
+    // Check subscription status for owners
+    const checkSubscription = useCallback(async () => {
+        if (!session?.user?.id) {
+            setSubscriptionStatus(null);
+            setSubscriptionRequired(false);
+            return;
+        }
+
+        try {
+            const { data: profile, error } = await supabase
+                .from('profiles')
+                .select('role, subscription_status, subscription_expires_at')
+                .eq('id', session.user.id)
+                .single();
+
+            if (error) {
+                console.log('Error checking subscription:', error);
+                return;
+            }
+
+            // Only studio-owner and venue-owner need subscription
+            const needsSubscription = profile?.role === 'studio-owner' || profile?.role === 'venue-owner';
+            
+            if (needsSubscription) {
+                const status = profile?.subscription_status;
+                const expiresAt = profile?.subscription_expires_at;
+                
+                // Check if subscription is active and not expired
+                let isActive = status === 'active';
+                if (isActive && expiresAt) {
+                    const expiryDate = new Date(expiresAt);
+                    isActive = expiryDate > new Date();
+                }
+
+                setSubscriptionStatus(isActive ? 'active' : status);
+                setSubscriptionRequired(!isActive);
+                
+                console.log('📋 Subscription check:', { 
+                    role: profile?.role, 
+                    status, 
+                    expiresAt, 
+                    isActive,
+                    required: !isActive 
+                });
+            } else {
+                // Musicians don't need subscription
+                setSubscriptionStatus(null);
+                setSubscriptionRequired(false);
+            }
+        } catch (e) {
+            console.log('Error in checkSubscription:', e);
+        }
+    }, [session?.user?.id]);
 
     // Check for unpaid balances
     const checkSystemLock = useCallback(async () => {
@@ -154,6 +219,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 setIsSystemLocked(false);
                 setUnpaidBalance(0);
                 setUnpaidBookings([]);
+                setSubscriptionStatus(null);
+                setSubscriptionRequired(false);
             }
             setLoading(false);
         });
@@ -167,6 +234,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             checkSystemLock();
         }
     }, [session?.user?.id, checkSystemLock]);
+
+    // Check subscription when session or role changes
+    useEffect(() => {
+        if (session?.user?.id && userRole) {
+            checkSubscription();
+        }
+    }, [session?.user?.id, userRole, checkSubscription]);
 
     const checkAdmin = async (userId: string) => {
         // Optional: If you have an 'admin' role in your profiles table or metadata
@@ -212,7 +286,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             unpaidBalance,
             unpaidBookings,
             checkSystemLock,
-            showLockAlert
+            showLockAlert,
+            subscriptionStatus,
+            subscriptionRequired,
+            checkSubscription
         }}>
             {children}
         </AuthContext.Provider>

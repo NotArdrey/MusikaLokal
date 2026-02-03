@@ -46,10 +46,27 @@ export default function RootLayout() {
 
 function RootContent() {
   const { colors } = useTheme();
-  const { session, loading, userId } = useAuth();
+  const { session, loading, userId, userRole, subscriptionRequired } = useAuth();
   const segments = useSegments();
   const pathname = segments.join('/');
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
+
+  // Handle subscription gate for owners
+  useEffect(() => {
+    if (loading) return;
+    
+    // If user is logged in and subscription is required
+    if (session && subscriptionRequired) {
+      // Allow access to certain screens even without subscription
+      const allowedScreens = ['subscription_required', 'payment-result', 'settings', 'help_support', 'privacy_policy', 'terms_and_conditions'];
+      const currentScreen = segments[0] || '';
+      
+      if (!allowedScreens.includes(currentScreen)) {
+        console.log('🔒 Subscription required, redirecting to subscription page');
+        router.replace('/subscription_required');
+      }
+    }
+  }, [session, subscriptionRequired, loading, segments]);
 
   // Handle deep links for payment redirects
   useEffect(() => {

@@ -300,6 +300,104 @@ serve(async (req: Request) => {
         }
 
         // ====================================================================
+        // 1B. CREATE SUBSCRIPTION CHECKOUT SESSION
+        // ====================================================================
+        if (action === 'create_subscription_checkout') {
+            const { user_id, plan_id, amount, plan_name, description, redirect_url, cancel_redirect_url } = params;
+
+            console.log('📤 Creating subscription checkout:', { user_id, plan_id, amount, plan_name });
+
+            if (!user_id || !plan_id || !amount) {
+                return new Response(JSON.stringify({ error: 'Missing required fields: user_id, plan_id, amount' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            // Get user profile for billing
+            const { data: profile } = await supabaseAdmin
+                .from('profiles')
+                .select('email, full_name, role')
+                .eq('id', user_id)
+                .single();
+
+            // Only studio-owner and venue-owner can subscribe
+            if (!profile || (profile.role !== 'studio-owner' && profile.role !== 'venue-owner')) {
+                return new Response(JSON.stringify({ error: 'Only studio owners and venue owners can subscribe' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            // Get plan details
+            const { data: plan } = await supabaseAdmin
+                .from('subscription_plans')
+                .select('*')
+                .eq('id', plan_id)
+                .single();
+
+            if (!plan) {
+                return new Response(JSON.stringify({ error: 'Subscription plan not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            // Amount in centavos
+            const amountInCentavos = Math.round(plan.price * 100);
+            const subscriptionDescription = description || `${plan.name} Plan - Monthly Subscription`;
+
+            // Base URL for redirects
+            const baseUrl = Deno.env.get('APP_URL') || 'https://aefldxegsvzecshlayza.supabase.co';
+
+            // Create PayMongo Checkout Session for subscription
+            const checkoutData = await paymongoRequest('/checkout_sessions', 'POST', {
+                data: {
+                    attributes: {
+                        billing: profile ? {
+                            name: profile.full_name || 'Customer',
+                            email: profile.email,
+                        } : undefined,
+                        send_email_receipt: true,
+                        show_description: true,
+                        show_line_items: true,
+                        description: subscriptionDescription,
+                        line_items: [
+                            {
+                                currency: 'PHP',
+                                amount: amountInCentavos,
+                                name: `${plan.name} Plan`,
+                                description: subscriptionDescription,
+                                quantity: 1,
+                            }
+                        ],
+                        payment_method_types: ['gcash', 'card', 'paymaya', 'grab_pay'],
+                        success_url: `${baseUrl}/functions/v1/paymongo?action=subscription_success&user_id=${user_id}&plan_id=${plan_id}${redirect_url ? '&redirect_url=' + encodeURIComponent(redirect_url) : ''}`,
+                        cancel_url: `${baseUrl}/functions/v1/paymongo?action=subscription_cancelled&user_id=${user_id}${cancel_redirect_url ? '&redirect_url=' + encodeURIComponent(cancel_redirect_url) : ''}`,
+                        reference_number: `sub_${user_id}_${Date.now()}`,
+                        metadata: {
+                            type: 'subscription',
+                            user_id: user_id,
+                            plan_id: plan_id,
+                            plan_name: plan.name,
+                        }
+                    }
+                }
+            });
+
+            console.log('✅ Subscription checkout session created:', checkoutData.data.id);
+
+            return new Response(JSON.stringify({
+                success: true,
+                checkout_url: checkoutData.data.attributes.checkout_url,
+                checkout_session_id: checkoutData.data.id,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
+        // ====================================================================
         // 2. CHECK PAYMENT STATUS
         // ====================================================================
         if (action === 'check_payment') {
@@ -554,6 +652,144 @@ serve(async (req: Request) => {
         }
 
         // ====================================================================
+        // 4B. SUBSCRIPTION SUCCESS REDIRECT
+        // ====================================================================
+        if (action === 'subscription_success') {
+            const url = new URL(req.url);
+            const userId = url.searchParams.get('user_id') || params.user_id;
+            const planId = url.searchParams.get('plan_id') || params.plan_id;
+            const clientRedirectUrl = url.searchParams.get('redirect_url');
+
+            console.log('✅ Subscription payment success:', { userId, planId });
+
+            if (userId && planId) {
+                try {
+                    // Get plan details
+                    const { data: plan } = await supabaseAdmin
+                        .from('subscription_plans')
+                        .select('*')
+                        .eq('id', planId)
+                        .single();
+
+                    if (plan) {
+                        const now = new Date();
+                        const periodEnd = new Date(now);
+                        periodEnd.setDate(periodEnd.getDate() + (plan.duration_days || 30));
+
+                        // Check if user already has a subscription
+                        const { data: existingSub } = await supabaseAdmin
+                            .from('subscriptions')
+                            .select('id')
+                            .eq('user_id', userId)
+                            .single();
+
+                        if (existingSub) {
+                            // Update existing subscription
+                            await supabaseAdmin
+                                .from('subscriptions')
+                                .update({
+                                    plan_id: planId,
+                                    status: 'active',
+                                    current_period_start: now.toISOString(),
+                                    current_period_end: periodEnd.toISOString(),
+                                    cancelled_at: null,
+                                    cancel_at_period_end: false,
+                                    last_payment_date: now.toISOString(),
+                                    last_payment_amount: plan.price,
+                                    updated_at: now.toISOString(),
+                                })
+                                .eq('id', existingSub.id);
+                        } else {
+                            // Create new subscription
+                            await supabaseAdmin
+                                .from('subscriptions')
+                                .insert({
+                                    user_id: userId,
+                                    plan_id: planId,
+                                    status: 'active',
+                                    current_period_start: now.toISOString(),
+                                    current_period_end: periodEnd.toISOString(),
+                                    last_payment_date: now.toISOString(),
+                                    last_payment_amount: plan.price,
+                                });
+                        }
+
+                        // Update profile subscription status
+                        await supabaseAdmin
+                            .from('profiles')
+                            .update({
+                                subscription_status: 'active',
+                                subscription_expires_at: periodEnd.toISOString(),
+                            })
+                            .eq('id', userId);
+
+                        // Record payment in subscription_payments
+                        const { data: sub } = await supabaseAdmin
+                            .from('subscriptions')
+                            .select('id')
+                            .eq('user_id', userId)
+                            .single();
+
+                        if (sub) {
+                            await supabaseAdmin
+                                .from('subscription_payments')
+                                .insert({
+                                    subscription_id: sub.id,
+                                    user_id: userId,
+                                    amount: plan.price,
+                                    status: 'paid',
+                                    billing_period_start: now.toISOString(),
+                                    billing_period_end: periodEnd.toISOString(),
+                                    paid_at: now.toISOString(),
+                                });
+                        }
+
+                        // Send notification
+                        await supabaseAdmin.from('notifications').insert({
+                            user_id: userId,
+                            type: 'success',
+                            title: 'Subscription Activated! 🎉',
+                            message: `Welcome to the ${plan.name} plan! Your subscription is now active.`,
+                            meta: { plan_id: planId, plan_name: plan.name },
+                        });
+                    }
+                } catch (e) {
+                    console.error('Error creating subscription:', e);
+                }
+            }
+
+            const appDeepLink = clientRedirectUrl || `musikalokal://payment-result?status=success&type=subscription&plan_id=${planId}`;
+            
+            return new Response(null, {
+                status: 302,
+                headers: {
+                    'Location': appDeepLink,
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                },
+            });
+        }
+
+        // ====================================================================
+        // 4C. SUBSCRIPTION CANCELLED REDIRECT
+        // ====================================================================
+        if (action === 'subscription_cancelled') {
+            const url = new URL(req.url);
+            const clientRedirectUrl = url.searchParams.get('redirect_url');
+
+            console.log('❌ Subscription checkout cancelled');
+
+            const appDeepLink = clientRedirectUrl || `musikalokal://payment-result?status=cancelled&type=subscription`;
+            
+            return new Response(null, {
+                status: 302,
+                headers: {
+                    'Location': appDeepLink,
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                },
+            });
+        }
+
+        // ====================================================================
         // 5. WEBHOOK HANDLER (For PayMongo webhooks)
         // ====================================================================
         if (action === 'webhook') {
@@ -620,11 +856,88 @@ serve(async (req: Request) => {
             // Handle: checkout_session.payment.paid
             if (event.type === 'checkout_session.payment.paid') {
                 const sessionId = event.data?.id;
-                const bookingId = event.data?.attributes?.metadata?.booking_id;
+                const metadata = event.data?.attributes?.metadata || {};
+                const bookingId = metadata?.booking_id;
                 const paymentMethod = event.data?.attributes?.payments?.[0]?.attributes?.source?.type;
 
-                console.log('💰 Checkout session payment paid:', { sessionId, bookingId, paymentMethod });
-                await processSuccessfulPayment(bookingId, paymentMethod);
+                // Check if this is a subscription payment
+                if (metadata?.type === 'subscription') {
+                    const userId = metadata?.user_id;
+                    const planId = metadata?.plan_id;
+                    console.log('💰 Subscription payment via webhook:', { userId, planId, paymentMethod });
+                    
+                    // Process subscription (similar to subscription_success handler)
+                    if (userId && planId) {
+                        const { data: plan } = await supabaseAdmin
+                            .from('subscription_plans')
+                            .select('*')
+                            .eq('id', planId)
+                            .single();
+
+                        if (plan) {
+                            const now = new Date();
+                            const periodEnd = new Date(now);
+                            periodEnd.setDate(periodEnd.getDate() + (plan.duration_days || 30));
+
+                            const { data: existingSub } = await supabaseAdmin
+                                .from('subscriptions')
+                                .select('id')
+                                .eq('user_id', userId)
+                                .single();
+
+                            if (existingSub) {
+                                await supabaseAdmin
+                                    .from('subscriptions')
+                                    .update({
+                                        plan_id: planId,
+                                        status: 'active',
+                                        current_period_start: now.toISOString(),
+                                        current_period_end: periodEnd.toISOString(),
+                                        cancelled_at: null,
+                                        cancel_at_period_end: false,
+                                        last_payment_date: now.toISOString(),
+                                        last_payment_amount: plan.price,
+                                        payment_method: paymentMethod,
+                                        updated_at: now.toISOString(),
+                                    })
+                                    .eq('id', existingSub.id);
+                            } else {
+                                await supabaseAdmin
+                                    .from('subscriptions')
+                                    .insert({
+                                        user_id: userId,
+                                        plan_id: planId,
+                                        status: 'active',
+                                        current_period_start: now.toISOString(),
+                                        current_period_end: periodEnd.toISOString(),
+                                        last_payment_date: now.toISOString(),
+                                        last_payment_amount: plan.price,
+                                        payment_method: paymentMethod,
+                                    });
+                            }
+
+                            await supabaseAdmin
+                                .from('profiles')
+                                .update({
+                                    subscription_status: 'active',
+                                    subscription_expires_at: periodEnd.toISOString(),
+                                })
+                                .eq('id', userId);
+
+                            await supabaseAdmin.from('notifications').insert({
+                                user_id: userId,
+                                type: 'success',
+                                title: 'Subscription Activated! 🎉',
+                                message: `Your ${plan.name} plan subscription is now active.`,
+                                meta: { plan_id: planId, plan_name: plan.name },
+                            });
+                        }
+                    }
+                } else {
+                    // Regular booking payment
+                    console.log('💰 Checkout session payment paid:', { sessionId, bookingId, paymentMethod });
+                    await processSuccessfulPayment(bookingId, paymentMethod);
+                }
             }
 
             // Handle: link.payment.paid

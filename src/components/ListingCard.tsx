@@ -15,14 +15,15 @@ interface ListingCardProps {
     item: any;
     onPress: (item: any) => void;
     onInvite?: (item: any) => void;
+    onChat?: (item: any) => void;
     variant?: 'horizontal' | 'vertical';
     style?: any;
     hasGroups?: boolean;
 }
 
-const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, variant = 'horizontal', style, hasGroups }) => {
+const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, onChat, variant = 'horizontal', style, hasGroups }) => {
     const { colors, isDark } = useTheme();
-    const { userRole } = useAuth(); // To avoid showing warning to owners
+    const { userRole, userId } = useAuth(); // To avoid showing warning to owners
     const { width } = useWindowDimensions();
     const [isLiked, setIsLiked] = useState(false);
     const [pageIndex, setPageIndex] = useState(0);
@@ -136,6 +137,14 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
         e.stopPropagation();
         onInvite?.(item);
     };
+
+    const handleChatAction = (e: any) => {
+        e.stopPropagation();
+        onChat?.(item);
+    };
+
+    // Determine if chat button should be shown (not for own items)
+    const canChat = onChat && item.owner_id !== userId && item.organizer_id !== userId;
 
     // Robust Image Logic
     const getImages = () => {
@@ -273,6 +282,13 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                         {canInvite && (
                             <TouchableOpacity style={[styles.glassIconBtn, { marginRight: 8, backgroundColor: colors.primary }]} onPress={handleInviteAction}>
                                 <Ionicons name="mail" size={18} color="#FFF" />
+                            </TouchableOpacity>
+                        )}
+
+                        {/* Chat Button Glass */}
+                        {canChat && (
+                            <TouchableOpacity style={[styles.glassIconBtn, { marginRight: 8 }]} onPress={handleChatAction}>
+                                <Ionicons name="chatbubble-ellipses" size={18} color="#FFF" />
                             </TouchableOpacity>
                         )}
 
@@ -510,6 +526,12 @@ const ListingCard: React.FC<ListingCardProps> = ({ item, onPress, onInvite, vari
                             {canInvite && (
                                 <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.primary }]} onPress={handleInviteAction}>
                                     <Ionicons name="mail" size={20} color="#FFF" />
+                                </TouchableOpacity>
+                            )}
+                            {/* Chat Button Vertical */}
+                            {canChat && (
+                                <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.primary }]} onPress={handleChatAction}>
+                                    <Ionicons name="chatbubble-ellipses" size={18} color="#FFF" />
                                 </TouchableOpacity>
                             )}
                             <TouchableOpacity style={styles.iconBtn} onPress={toggleLike}>
