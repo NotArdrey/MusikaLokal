@@ -22,11 +22,45 @@ import { useTheme } from "../src/context/ThemeContext";
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
 
+const GENRES = [
+  "Rock",
+  "Pop",
+  "Jazz",
+  "Blues",
+  "Hip Hop",
+  "R&B",
+  "Country",
+  "Electronic",
+  "Classical",
+  "Reggae",
+  "Metal",
+  "Punk",
+  "Folk",
+  "Soul",
+  "Funk",
+  "Disco",
+  "Indie",
+  "Alternative",
+  "Latin",
+  "World Music",
+  "Gospel",
+  "EDM",
+  "House",
+  "Techno",
+  "Dubstep",
+  "Acoustic",
+  "Instrumental",
+  "Ambient",
+  "Lo-Fi",
+  "OPM",
+];
+
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
   const { id } = useLocalSearchParams();
   const [groupName, setGroupName] = useState("");
-  const [genre, setGenre] = useState("");
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [showAllGenres, setShowAllGenres] = useState(false);
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
@@ -185,7 +219,14 @@ export default function EditGroupScreen() {
       }
 
       setGroupName(data.name);
-      setGenre(data.genre);
+      // Parse genre string into array
+      if (data.genre) {
+        const genreArray = data.genre
+          .split(",")
+          .map((g: string) => g.trim())
+          .filter((g: string) => g);
+        setSelectedGenres(genreArray);
+      }
       setDescription(data.description);
       setAddress(data.location || "");
       setLatitude(data.latitude || null);
@@ -227,8 +268,8 @@ export default function EditGroupScreen() {
       showAlert("error", "Required Field", "Please enter a group name");
       return false;
     }
-    if (!genre.trim()) {
-      showAlert("error", "Required Field", "Please enter a genre");
+    if (selectedGenres.length === 0) {
+      showAlert("error", "Required Field", "Please select at least one genre");
       return false;
     }
     if (!description.trim()) {
@@ -315,7 +356,7 @@ export default function EditGroupScreen() {
 
       const payload = {
         name: groupName,
-        genre,
+        genre: selectedGenres.join(", "),
         description,
         location: address,
         latitude,
@@ -841,7 +882,66 @@ export default function EditGroupScreen() {
             </TouchableOpacity>
           </View>
 
-          {renderInput("Genre", genre, setGenre)}
+          {/* Genre Multi-Select */}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Genre
+            </Text>
+            <View style={styles.genreChipsContainer}>
+              {(showAllGenres ? GENRES : GENRES.slice(0, 8)).map((genre) => {
+                const selected = selectedGenres.includes(genre);
+                return (
+                  <TouchableOpacity
+                    key={genre}
+                    onPress={() => {
+                      setSelectedGenres((prev) =>
+                        selected
+                          ? prev.filter((g) => g !== genre)
+                          : [...prev, genre],
+                      );
+                    }}
+                    style={[
+                      styles.genreChip,
+                      {
+                        backgroundColor: selected
+                          ? colors.primary
+                          : isDark
+                            ? "#374151"
+                            : "#F3F4F6",
+                        borderColor: selected ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.genreChipText,
+                        {
+                          color: selected ? "#FFFFFF" : colors.text,
+                        },
+                      ]}
+                    >
+                      {genre}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowAllGenres(!showAllGenres)}
+              style={styles.showMoreButton}
+            >
+              <Text style={[styles.showMoreText, { color: colors.primary }]}>
+                {showAllGenres
+                  ? "Show Less"
+                  : `Show More (${GENRES.length - 8} more)`}
+              </Text>
+              <Ionicons
+                name={showAllGenres ? "chevron-up" : "chevron-down"}
+                size={16}
+                color={colors.primary}
+              />
+            </TouchableOpacity>
+          </View>
 
           {renderInput("Description", description, setDescription, true)}
 
@@ -1460,6 +1560,32 @@ const styles = StyleSheet.create({
   },
   genreText: {
     fontFamily: "Poppins_400Regular",
+  },
+  genreChipsContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  genreChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  genreChipText: {
+    fontSize: 13,
+    fontFamily: "Poppins_500Medium",
+  },
+  showMoreButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    gap: 4,
+  },
+  showMoreText: {
+    fontSize: 13,
+    fontFamily: "Poppins_500Medium",
   },
   addMemberContainer: {
     flexDirection: "row",

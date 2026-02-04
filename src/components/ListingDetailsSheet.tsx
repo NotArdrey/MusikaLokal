@@ -1852,13 +1852,13 @@ const ListingDetailsSheet = forwardRef<
       case "Artist":
         return {
           aboutTitle: "About this artist",
-          tabs: ["About", "Connect", "Review"],
+          tabs: ["About", "Timeline", "Review"],
           unit: "event",
         };
       default: // Group
         return {
           aboutTitle: "About this artist",
-          tabs: ["About", "Setup", "Connect", "Review"],
+          tabs: ["About", "Timeline", "Review"],
           unit: "night",
         };
     }
@@ -4106,28 +4106,63 @@ const ListingDetailsSheet = forwardRef<
           maxSizeMB={50}
         />
 
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            marginBottom: 24,
-          }}
-        >
-          <Ionicons
-            name="document-text-outline"
-            size={18}
-            color={colors.primary}
-          />
-          <Text
+        {group?.contract_url ? (
+          <TouchableOpacity
+            onPress={() => Linking.openURL(group.contract_url)}
             style={{
-              color: colors.primary,
-              marginLeft: 8,
-              textDecorationLine: "underline",
+              flexDirection: "row",
+              alignItems: "center",
+              marginBottom: 24,
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="document-text-outline"
+              size={18}
+              color={colors.primary}
+            />
+            <Text
+              style={{
+                color: colors.primary,
+                marginLeft: 8,
+                textDecorationLine: "underline",
+                fontFamily: "Poppins_500Medium",
+              }}
+            >
+              Review Terms & Conditions
+            </Text>
+            <Ionicons
+              name="open-outline"
+              size={14}
+              color={colors.primary}
+              style={{ marginLeft: 6 }}
+            />
+          </TouchableOpacity>
+        ) : (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginBottom: 24,
+              opacity: 0.5,
             }}
           >
-            Review Terms & Conditions
-          </Text>
-        </View>
+            <Ionicons
+              name="document-text-outline"
+              size={18}
+              color={colors.textSecondary}
+            />
+            <Text
+              style={{
+                color: colors.textSecondary,
+                marginLeft: 8,
+                fontFamily: "Poppins_400Regular",
+              }}
+            >
+              No Terms & Conditions uploaded
+            </Text>
+          </View>
+        )}
 
         {/* Warning: Group Already Applied by Another Member */}
         {groupAlreadyApplied && selectedGroupId && (
@@ -4556,9 +4591,88 @@ const ListingDetailsSheet = forwardRef<
     );
   };
 
-  // ... (rest of the render methods) ...
+  // Group: Timeline Tab - Shows pictures like Instagram
+  const renderGroupTimeline = () => {
+    const mediaItems = group.images || [];
 
-  // Group: Setup Tab
+    // Show all images except the first one (cover photo)
+    const timelineItems = mediaItems.slice(1);
+
+    return (
+      <View style={styles.tabContent}>
+        {/* Photos Grid */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+            Posts
+          </Text>
+
+          {timelineItems.length > 0 ? (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+              {timelineItems.map((url: string, idx: number) => (
+                <View
+                  key={idx}
+                  style={{
+                    width: (width - 56) / 3,
+                    aspectRatio: 1,
+                    borderRadius: 8,
+                    overflow: "hidden",
+                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                  }}
+                >
+                  <Image
+                    source={{ uri: url }}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode="cover"
+                  />
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View
+              style={{
+                padding: 40,
+                alignItems: "center",
+                backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderStyle: "dashed",
+              }}
+            >
+              <Ionicons
+                name="images-outline"
+                size={48}
+                color={colors.textSecondary}
+              />
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  marginTop: 12,
+                  fontFamily: "Poppins_500Medium",
+                  fontSize: 14,
+                }}
+              >
+                No posts yet
+              </Text>
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  marginTop: 4,
+                  fontFamily: "Poppins_400Regular",
+                  fontSize: 12,
+                  textAlign: "center",
+                }}
+              >
+                This artist hasn't shared any photos
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  // Group: Setup Tab (legacy - keeping for reference)
   const renderGroupSetup = () => (
     <View style={styles.tabContent}>
       {/* Stage Plot Placeholder */}
@@ -5018,8 +5132,7 @@ const ListingDetailsSheet = forwardRef<
                 !group.type) && (
                 <>
                   {(activeTab === "About" || !showTabs) && renderGroupAbout()}
-                  {activeTab === "Setup" && renderGroupSetup()}
-                  {activeTab === "Connect" && renderGroupConnect()}
+                  {activeTab === "Timeline" && renderGroupTimeline()}
                   {activeTab === "Review" && renderReviews()}
                 </>
               )}

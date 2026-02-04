@@ -2,13 +2,13 @@ import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -158,7 +158,7 @@ export default function ForgetPasswordScreen() {
         visible={successModalVisible}
         onClose={handleSuccessClose}
         title="Email Sent!"
-        message="Check your inbox for a password reset link. If you don't see it, check your spam folder."
+        message="Check your inbox for a password reset link. When you tap the link, it should open directly in Expo Go. If you don't see the email, check your spam folder."
         buttonText="Back to Login"
         onConfirm={handleSuccessClose}
       />
