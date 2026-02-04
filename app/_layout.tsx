@@ -1,14 +1,21 @@
-import { Poppins_300Light, Poppins_400Regular, Poppins_500Medium, Poppins_600SemiBold, Poppins_700Bold, useFonts } from '@expo-google-fonts/poppins';
-import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import * as Linking from 'expo-linking';
-import { router, Stack, useSegments } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useRef } from 'react';
-import { View } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import '../global.css';
-import { AuthProvider, useAuth } from '../src/context/AuthContext';
-import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
+import {
+    Poppins_300Light,
+    Poppins_400Regular,
+    Poppins_500Medium,
+    Poppins_600SemiBold,
+    Poppins_700Bold,
+    useFonts,
+} from "@expo-google-fonts/poppins";
+import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
+import * as Linking from "expo-linking";
+import { router, Stack, useSegments } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { useEffect, useRef } from "react";
+import { View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import "../global.css";
+import { AuthProvider, useAuth } from "../src/context/AuthContext";
+import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -46,24 +53,34 @@ export default function RootLayout() {
 
 function RootContent() {
   const { colors } = useTheme();
-  const { session, loading, userId, userRole, subscriptionRequired } = useAuth();
+  const { session, loading, userId, userRole, subscriptionRequired } =
+    useAuth();
   const segments = useSegments();
-  const pathname = segments.join('/');
+  const pathname = segments.join("/");
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
 
   // Handle subscription gate for owners
   useEffect(() => {
     if (loading) return;
-    
+
     // If user is logged in and subscription is required
     if (session && subscriptionRequired) {
       // Allow access to certain screens even without subscription
-      const allowedScreens = ['subscription_required', 'payment-result', 'settings', 'help_support', 'privacy_policy', 'terms_and_conditions'];
-      const currentScreen = segments[0] || '';
-      
+      const allowedScreens = [
+        "subscription_required",
+        "payment-result",
+        "settings",
+        "help_support",
+        "privacy_policy",
+        "terms_and_conditions",
+      ];
+      const currentScreen = segments[0] || "";
+
       if (!allowedScreens.includes(currentScreen)) {
-        console.log('🔒 Subscription required, redirecting to subscription page');
-        router.replace('/subscription_required');
+        console.log(
+          "🔒 Subscription required, redirecting to subscription page",
+        );
+        router.replace("/subscription_required");
       }
     }
   }, [session, subscriptionRequired, loading, segments]);
@@ -81,7 +98,7 @@ function RootContent() {
     handleInitialDeepLink();
 
     // Handle deep links while app is running
-    const subscription = Linking.addEventListener('url', (event) => {
+    const subscription = Linking.addEventListener("url", (event) => {
       handleDeepLink(event.url);
     });
 
@@ -91,16 +108,16 @@ function RootContent() {
   }, []);
 
   const handleDeepLink = (url: string) => {
-    console.log('📱 Deep link received:', url);
-    
+    console.log("📱 Deep link received:", url);
+
     try {
       const { hostname, path, queryParams } = Linking.parse(url);
-      console.log('📱 Parsed deep link:', { hostname, path, queryParams });
+      console.log("📱 Parsed deep link:", { hostname, path, queryParams });
 
       // Create a unique key for this deep link to prevent double processing
-      const linkKey = `${path}-${queryParams?.booking_id}-${queryParams?.status}`;
+      const linkKey = `${path}-${queryParams?.booking_id}-${queryParams?.status}-${queryParams?.type}`;
       if (processedDeepLinksRef.current.has(linkKey)) {
-        console.log('📱 Deep link already processed, skipping');
+        console.log("📱 Deep link already processed, skipping");
         return;
       }
       processedDeepLinksRef.current.add(linkKey);
@@ -110,21 +127,35 @@ function RootContent() {
         processedDeepLinksRef.current.delete(linkKey);
       }, 5000);
 
+      // Handle password recovery deep links (from Supabase email)
+      if (queryParams?.type === "recovery" || path === "change_password") {
+        console.log("🔑 Password recovery deep link detected");
+        router.replace({
+          pathname: "/change_password",
+          params: {
+            type: "recovery",
+            access_token: queryParams?.access_token as string,
+            refresh_token: queryParams?.refresh_token as string,
+          },
+        });
+        return;
+      }
+
       // Handle payment result deep links
-      if (hostname === 'payment-result' || path === 'payment-result') {
+      if (hostname === "payment-result" || path === "payment-result") {
         const status = queryParams?.status as string;
         const bookingId = queryParams?.booking_id as string;
 
-        console.log('💳 Payment result deep link:', { status, bookingId });
+        console.log("💳 Payment result deep link:", { status, bookingId });
 
         // Navigate to payment result screen
         router.replace({
-          pathname: '/payment-result',
-          params: { status, booking_id: bookingId }
+          pathname: "/payment-result",
+          params: { status, booking_id: bookingId },
         });
       }
     } catch (e) {
-      console.error('Error parsing deep link:', e);
+      console.error("Error parsing deep link:", e);
     }
   };
 
@@ -137,7 +168,7 @@ function RootContent() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.background }, // Also ensure stack content has background
-          animation: 'fade', // Smooth fade transition for tab switching
+          animation: "fade", // Smooth fade transition for tab switching
         }}
       />
     </View>
