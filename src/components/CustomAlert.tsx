@@ -206,6 +206,7 @@ const styles = StyleSheet.create({
     buttonContainer: {
         flexDirection: 'row',
         width: '100%',
+        justifyContent: 'center',
     },
     button: {
         paddingVertical: 14,

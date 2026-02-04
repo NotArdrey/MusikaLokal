@@ -164,14 +164,14 @@ export default function WalletScreen() {
 
       // 4. Get Subscription Plans (for studio/venue owners)
       if (profile?.role === 'studio-owner' || profile?.role === 'venue-owner') {
-        const { data: plans } = await supabase
+        const { data: plan } = await supabase
           .from('subscription_plans')
           .select('*')
           .eq('is_active', true)
-          .order('price', { ascending: true });
+          .single();
 
-        if (plans) {
-          setSubscriptionPlans(plans);
+        if (plan) {
+          setSubscriptionPlans([plan]);
         }
 
         // 5. Get User's Active Subscription
@@ -844,7 +844,7 @@ export default function WalletScreen() {
                       onPress={() => setSubscriptionModalVisible(true)}
                       style={styles.manageSubBtn}
                     >
-                      <Text style={[styles.manageSubText, { color: colors.primary }]}>Upgrade Plan</Text>
+                      <Text style={[styles.manageSubText, { color: colors.primary }]}>View Plan</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -864,7 +864,7 @@ export default function WalletScreen() {
                       style={[styles.subscribeBtn, { backgroundColor: colors.primary }]}
                     >
                       <Ionicons name="star" size={18} color="white" />
-                      <Text style={styles.subscribeBtnText}>View Plans</Text>
+                      <Text style={styles.subscribeBtnText}>Subscribe</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1413,8 +1413,8 @@ export default function WalletScreen() {
           <View style={[styles.plansModal, { backgroundColor: colors.background, paddingBottom: Platform.OS === 'ios' ? 40 : 20 }]}>
             <View style={styles.plansModalHeader}>
               <View>
-                <Text style={[styles.plansModalTitle, { color: colors.text }]}>Choose a Plan</Text>
-                <Text style={[styles.plansModalSubtitle, { color: colors.textSecondary }]}>Select the plan that fits your needs</Text>
+                <Text style={[styles.plansModalTitle, { color: colors.text }]}>Subscribe</Text>
+                <Text style={[styles.plansModalSubtitle, { color: colors.textSecondary }]}>Get full access to MusikaLokal</Text>
               </View>
               <TouchableOpacity
                 onPress={() => setSubscriptionModalVisible(false)}
@@ -1429,16 +1429,10 @@ export default function WalletScreen() {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 20 }}
             >
-              {subscriptionPlans.map((plan, index) => {
+              {subscriptionPlans.length > 0 && (() => {
+                const plan = subscriptionPlans[0];
                 const isCurrentPlan = subscription?.plan_id === plan.id;
-                const isPopular = plan.name.toLowerCase().includes('pro') || plan.name.toLowerCase().includes('premium');
-                const isBasic = plan.name.toLowerCase().includes('basic');
-
-                // Color theme based on plan
-                let planColor = colors.primary;
-                if (isBasic) planColor = '#3B82F6'; // Blue
-                else if (isPopular) planColor = '#8B5CF6'; // Violet
-                else planColor = '#F59E0B'; // Amber
+                const planColor = colors.primary;
 
                 return (
                   <View
@@ -1447,22 +1441,15 @@ export default function WalletScreen() {
                       styles.planCard,
                       {
                         backgroundColor: colors.card,
-                        borderColor: isPopular ? planColor : colors.border,
-                        borderWidth: isPopular ? 2 : 1,
-                        transform: [{ scale: isPopular ? 1.02 : 1 }]
+                        borderColor: planColor,
+                        borderWidth: 2,
                       }
                     ]}
                   >
-                    {isPopular && (
-                      <View style={[styles.popularBadge, { backgroundColor: planColor }]}>
-                        <Text style={styles.popularBadgeText}>MOST POPULAR</Text>
-                      </View>
-                    )}
-
                     <View style={styles.planCardHeader}>
                       <View style={[styles.planIcon, { backgroundColor: `${planColor}20` }]}>
                         <Ionicons
-                          name={isBasic ? 'rocket-outline' : isPopular ? 'star-outline' : 'diamond-outline'}
+                          name="diamond-outline"
                           size={24}
                           color={planColor}
                         />
@@ -1475,7 +1462,7 @@ export default function WalletScreen() {
 
                     <View style={styles.planPriceInfo}>
                       <Text style={[styles.planPrice, { color: colors.text }]}>₱{plan.price.toLocaleString()}</Text>
-                      <Text style={[styles.planPeriod, { color: colors.textSecondary }]}> / {plan.duration_days} days</Text>
+                      <Text style={[styles.planPeriod, { color: colors.textSecondary }]}> /month</Text>
                     </View>
 
                     <View style={styles.separator} />
@@ -1504,13 +1491,13 @@ export default function WalletScreen() {
                         <ActivityIndicator size="small" color="white" />
                       ) : (
                         <Text style={[styles.selectPlanBtnText, { color: isCurrentPlan ? colors.textSecondary : 'white' }]}>
-                          {isCurrentPlan ? 'Current Plan' : 'Select Plan'}
+                          {isCurrentPlan ? 'Current Plan' : 'Subscribe Now'}
                         </Text>
                       )}
                     </TouchableOpacity>
                   </View>
                 );
-              })}
+              })()}
             </ScrollView>
           </View>
         </View>

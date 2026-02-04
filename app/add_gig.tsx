@@ -1,16 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import * as Linking from "expo-linking";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -62,6 +63,7 @@ const formatTimeInput = (text: string): string => {
 
 export default function AddGigScreen() {
   const { colors, isDark } = useTheme();
+  const params = useLocalSearchParams();
   const [step, setStep] = useState(1);
   const [gigName, setGigName] = useState("");
   const [description, setDescription] = useState("");
@@ -76,6 +78,14 @@ export default function AddGigScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Address Verification State
+  const [addressVerificationModalVisible, setAddressVerificationModalVisible] = useState(false);
+  const [addressVerificationUrl, setAddressVerificationUrl] = useState<string | null>(null);
+  const [addressVerificationLoading, setAddressVerificationLoading] = useState(false);
+  const [addressVerificationStatus, setAddressVerificationStatus] = useState<'pending' | 'verified' | 'failed' | null>(null);
+  const [addressVerified, setAddressVerified] = useState(false);
+  const [verificationSessionId, setVerificationSessionId] = useState<string | null>(null);
 
   // Custom Alert State
   const [alertVisible, setAlertVisible] = useState(false);
@@ -177,11 +187,11 @@ export default function AddGigScreen() {
         showAlert("error", "Required Field", "Please enter a description");
         return false;
       }
-      if (!address || !latitude || !longitude) {
+      if (!address.trim()) {
         showAlert(
           "error",
           "Required Field",
-          "Please select a location on the map",
+          "Please enter a venue address",
         );
         return false;
       }
@@ -355,11 +365,195 @@ export default function AddGigScreen() {
 
   const handleSuccessRedirect = () => {
     setModalVisible(false);
+    // Initiate address verification after successful gig creation
     if (newGigId) {
-      router.replace({ pathname: "/manage_gig", params: { id: newGigId } });
+      router.push({ pathname: "/manage_gig", params: { id: newGigId } });
     } else {
       router.back();
     }
+  };
+
+  // Start address verification (before gig creation)
+  const startAddressVerification = async () => {
+    setAddressVerificationLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        showAlert("error", "Error", "Session expired. Please log in again.");
+        return;
+      }
+
+      // Create the redirect URL for after verification
+      const redirectUrl = Linking.createURL('address-verified', {
+        queryParams: {
+          entity_type: 'gig',
+          mode: 'pre_creation'
+        }
+      });
+
+      // Create address verification session (pre-creation mode)
+      const { data, error } = await supabase.functions.invoke('create-address-verification', {
+        body: {
+          action: 'create',
+          userId: session.user.id,
+          entityType: 'gig',
+          mode: 'pre_creation', // No entity ID yet - just verifying address
+          redirect_url: redirectUrl
+        }
+      });
+
+      console.log('Address verification response:', { data, error });
+
+      // For Supabase functions, the error body is sometimes returned in data even when there's an error
+      if (error || (data && data.error)) {
+        let errorMessage = "Could not start address verification. Please try again.";
+        
+        // First check if data contains the error response (Supabase sometimes does this)
+        if (data && data.error) {
+          errorMessage = data.error;
+          if (data.message) {
+            errorMessage += `: ${data.message}`;
+          }
+          console.log('Error from data:', errorMessage);
+        } else if (error) {
+          console.log('Error object:', error);
+          console.log('Error name:', error.name);
+          console.log('Error message:', error.message);
+          
+          // Try to get the response body from FunctionsHttpError
+          try {
+            // FunctionsHttpError has a context with the Response object
+            if (error.context && typeof error.context.json === 'function') {
+              const errorBody = await error.context.json();
+              console.log('Error body from context.json():', errorBody);
+              if (errorBody?.error) {
+                errorMessage = errorBody.error;
+                if (errorBody.message) {
+                  errorMessage += `: ${errorBody.message}`;
+                }
+              }
+            }
+          } catch (parseErr) {
+            console.error('Error parsing error response:', parseErr);
+          }
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      if (data?.verificationUrl) {
+        setVerificationSessionId(data.sessionId);
+        setAddressVerificationUrl(data.verificationUrl);
+        setAddressVerificationModalVisible(true);
+      } else {
+        throw new Error('No verification URL returned');
+      }
+    } catch (e: any) {
+      console.error('Address verification error:', e);
+      showAlert(
+        "error",
+        "Verification Error",
+        e.message || "Could not start address verification. Please try again."
+      );
+    } finally {
+      setAddressVerificationLoading(false);
+    }
+  };
+
+  // Called after user completes address verification (before gig creation)
+  const handleAddressVerificationComplete = async () => {
+    setAddressVerificationModalVisible(false);
+    setAddressVerificationUrl(null);
+
+    // Fetch the verified address from the session
+    if (verificationSessionId) {
+      try {
+        const { data, error } = await supabase.functions.invoke('create-address-verification', {
+          body: {
+            action: 'get_session',
+            session_id: verificationSessionId
+          }
+        });
+
+        if (data?.extracted_address) {
+          setAddress(data.extracted_address);
+          setAddressVerified(true);
+          setAddressVerificationStatus('verified');
+          showAlert(
+            "success",
+            "Address Verified!",
+            `Your venue address has been verified:\n\n${data.extracted_address}`
+          );
+        } else {
+          // Verification may still be processing
+          showAlert(
+            "info",
+            "Processing",
+            "Your verification is being processed. The address will be updated once approved."
+          );
+          setAddressVerificationStatus('pending');
+        }
+      } catch (e) {
+        console.error('Error fetching verification result:', e);
+        showAlert(
+          "info",
+          "Verification Submitted",
+          "Your verification has been submitted. You may need to refresh to see the verified address."
+        );
+      }
+    }
+  };
+
+  // Legacy function for post-creation verification
+  const initiateAddressVerification = async () => {
+    if (!newGigId) return;
+
+    try {
+      setAddressVerificationLoading(true);
+      setAddressVerificationModalVisible(true);
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error("User not authenticated");
+      }
+
+      // Call the address verification edge function
+      const { data, error } = await supabase.functions.invoke('create-address-verification', {
+        body: {
+          action: 'create',
+          userId: user.id,
+          entityType: 'gig',
+          entityId: newGigId,
+          address: address,
+        }
+      });
+
+      if (error) throw error;
+
+      if (data?.session_url) {
+        setAddressVerificationUrl(data.session_url);
+      } else {
+        throw new Error("No verification URL received");
+      }
+    } catch (e: any) {
+      console.error("Address verification error:", e);
+      showAlert(
+        "error",
+        "Verification Error",
+        "Could not start address verification. You can verify your venue address later from settings."
+      );
+      setAddressVerificationModalVisible(false);
+      // Navigate to manage gig anyway
+      router.replace({ pathname: "/manage_gig", params: { id: newGigId! } });
+    } finally {
+      setAddressVerificationLoading(false);
+    }
+  };
+
+  const skipAddressVerification = () => {
+    setAddressVerificationModalVisible(false);
+    setAddressVerificationUrl(null);
+    // Just close the modal - user can continue filling form
   };
 
   // Show loading while checking authorization
@@ -680,11 +874,12 @@ export default function AddGigScreen() {
                 />
               </View>
 
+              {/* Venue Location - Pin on Map */}
               <View style={styles.inputContainer}>
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
-                  Venue / Location
+                  Venue Address
                 </Text>
                 <TouchableOpacity
                   onPress={() => setLocationPickerVisible(true)}
@@ -693,7 +888,9 @@ export default function AddGigScreen() {
                     {
                       backgroundColor: colors.inputBackground,
                       borderColor: isDark ? "#374151" : "#E5E7EB",
-                      padding: 16,
+                      height: 56,
+                      justifyContent: "center",
+                      paddingHorizontal: 16,
                     },
                   ]}
                 >
@@ -714,13 +911,101 @@ export default function AddGigScreen() {
                         flex: 1,
                         color: address ? colors.text : colors.textSecondary,
                         fontFamily: "Poppins_400Regular",
+                        textAlignVertical: "center",
                       }}
                     >
-                      {address || "Tap to select location on map"}
+                      {address || "Tap to select venue location on map"}
                     </Text>
                   </View>
                 </TouchableOpacity>
               </View>
+
+              {/* OLD Address Verification Section - Commented Out
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Venue Address
+                </Text>
+                <Text
+                  style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 12 }]}
+                >
+                  Verify your venue address using a utility bill (Meralco, Maynilad, etc.)
+                </Text>
+                
+                {addressVerified && address ? (
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      {
+                        backgroundColor: colors.primary + '10',
+                        borderColor: colors.primary,
+                        padding: 16,
+                      },
+                    ]}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                      <View style={{
+                        backgroundColor: colors.primary,
+                        borderRadius: 20,
+                        padding: 6,
+                      }}>
+                        <Ionicons name="checkmark" size={16} color="#fff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+                          Verified Address
+                        </Text>
+                        <Text style={{ color: colors.text, fontFamily: "Poppins_400Regular", fontSize: 14, marginTop: 2 }}>
+                          {address}
+                        </Text>
+                      </View>
+                      <Ionicons name="lock-closed" size={18} color={colors.primary} />
+                    </View>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={startAddressVerification}
+                    disabled={addressVerificationLoading}
+                    style={[
+                      styles.inputWrapper,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        borderStyle: 'dashed',
+                        padding: 20,
+                      },
+                    ]}
+                  >
+                    <View style={{ alignItems: "center", gap: 12 }}>
+                      {addressVerificationLoading ? (
+                        <ActivityIndicator size="small" color={colors.primary} />
+                      ) : (
+                        <>
+                          <View style={{
+                            backgroundColor: colors.primary + '15',
+                            borderRadius: 30,
+                            padding: 12,
+                          }}>
+                            <Ionicons name="document-text-outline" size={28} color={colors.primary} />
+                          </View>
+                          <View style={{ alignItems: 'center' }}>
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 14 }}>
+                              Verify Your Venue Address
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                              Upload a recent utility bill to verify and auto-fill your venue address
+                            </Text>
+                          </View>
+                        </>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+              </View>
+              */}
+
+
 
               {renderInput(
                 "Payout (PHP)",
@@ -1538,10 +1823,97 @@ export default function AddGigScreen() {
       <Modal
         visible={modalVisible}
         title="Success!"
-        message={`Gig "${gigName}" has been successfully posted.`}
-        buttonText="Manage Gig"
+        message={`Gig "${gigName}" has been successfully posted!`}
+        buttonText="Go to Gig"
         onClose={handleSuccessRedirect}
       />
+
+      {/* Address Verification Modal - Commented Out
+      {addressVerificationModalVisible && (
+        <View style={styles.verificationModalOverlay}>
+          <View style={[styles.verificationModalContainer, { backgroundColor: colors.background }]}>
+            <View style={styles.verificationModalHeader}>
+              <Text style={[styles.verificationModalTitle, { color: colors.text }]}>
+                Verify Venue Address
+              </Text>
+              <TouchableOpacity onPress={skipAddressVerification} style={styles.skipButton}>
+                <Text style={[styles.skipButtonText, { color: colors.textSecondary }]}>Skip for now</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={[styles.verificationInfoBanner, { backgroundColor: colors.primary + '15' }]}>
+              <Ionicons name="information-circle" size={20} color={colors.primary} />
+              <Text style={[styles.verificationInfoText, { color: colors.text }]}>
+                Upload a recent utility bill (Meralco, Maynilad, etc.) to verify your venue address. The name on the bill should match your verified identity.
+              </Text>
+            </View>
+            {addressVerificationUrl ? (
+              <View style={styles.webviewContainer}>
+                {Platform.OS === 'web' ? (
+                  <iframe
+                    src={addressVerificationUrl}
+                    style={{ width: '100%', height: '100%', border: 'none', borderRadius: 12 }}
+                    allow="camera; microphone; fullscreen"
+                  />
+                ) : (
+                  <WebView
+                    source={{ uri: addressVerificationUrl }}
+                    style={styles.webview}
+                    onNavigationStateChange={(navState) => {
+                      if (navState.url.includes('address-verified') || 
+                          navState.url.includes('verification-complete') ||
+                          navState.url.includes('status=approved') ||
+                          navState.url.includes('smile-webhook') ||
+                          navState.url.includes('callback=') ||
+                          navState.url.includes('/link/success')) {
+                        handleAddressVerificationComplete();
+                      }
+                    }}
+                    onMessage={(event) => {
+                      try {
+                        const data = JSON.parse(event.nativeEvent.data);
+                        console.log('Smile Wink Widget message:', data);
+                        if (data.eventName === 'UPLOADS_CREATED' || 
+                            data.eventName === 'LINK_CLOSED' ||
+                            data.type === 'close' ||
+                            data.type === 'success') {
+                          handleAddressVerificationComplete();
+                        }
+                      } catch (e) {}
+                    }}
+                    javaScriptEnabled
+                    domStorageEnabled
+                    startInLoadingState
+                    renderLoading={() => (
+                      <View style={styles.webviewLoading}>
+                        <ActivityIndicator size="large" color={colors.primary} />
+                        <Text style={{ color: colors.textSecondary, marginTop: 12 }}>
+                          Loading verification...
+                        </Text>
+                      </View>
+                    )}
+                  />
+                )}
+              </View>
+            ) : (
+              <View style={styles.webviewLoading}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={{ color: colors.textSecondary, marginTop: 12 }}>
+                  Preparing verification...
+                </Text>
+              </View>
+            )}
+            <View style={styles.verificationModalFooter}>
+              <TouchableOpacity
+                onPress={handleAddressVerificationComplete}
+                style={[styles.verificationCompleteBtn, { backgroundColor: colors.primary }]}
+              >
+                <Text style={styles.verificationCompleteBtnText}>I've Completed Verification</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+      */}
 
       <LocationPicker
         visible={locationPickerVisible}
@@ -1857,5 +2229,92 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 12,
     marginBottom: 8,
+  },
+  // Address Verification Modal Styles
+  verificationModalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  verificationModalContainer: {
+    width: '95%',
+    height: '90%',
+    borderRadius: 16,
+    overflow: 'hidden',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  verificationModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  verificationModalTitle: {
+    fontSize: 18,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  skipButton: {
+    padding: 8,
+  },
+  skipButtonText: {
+    fontSize: 14,
+    fontFamily: 'Poppins_500Medium',
+  },
+  verificationInfoBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 12,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 8,
+    gap: 10,
+  },
+  verificationInfoText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: 'Poppins_400Regular',
+    lineHeight: 18,
+  },
+  webviewContainer: {
+    flex: 1,
+    margin: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f5f5f5',
+  },
+  webview: {
+    flex: 1,
+  },
+  webviewLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  verificationModalFooter: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  verificationCompleteBtn: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  verificationCompleteBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
   },
 });
