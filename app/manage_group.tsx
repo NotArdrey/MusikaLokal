@@ -2,14 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -296,27 +296,6 @@ export default function GroupDetailsScreen() {
                         { color: colors.textSecondary },
                       ]}
                     >
-                      Rate
-                    </Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}>
-                      ₱{(group?.rate || 0).toLocaleString()}/hr
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={{ flexDirection: "row", gap: 16 }}>
-                  <View
-                    style={[
-                      styles.infoCard,
-                      { backgroundColor: colors.surface },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.infoLabel,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
                       Genre
                     </Text>
                     <Text
@@ -329,6 +308,9 @@ export default function GroupDetailsScreen() {
                       {group?.genre || "N/A"}
                     </Text>
                   </View>
+                </View>
+
+                <View style={{ flexDirection: "row", gap: 16 }}>
                   <View
                     style={[
                       styles.infoCard,

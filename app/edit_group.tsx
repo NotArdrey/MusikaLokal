@@ -86,9 +86,6 @@ export default function EditGroupScreen() {
   // Group type: duo (exactly 2 members) or band (3+ members)
   const [groupType, setGroupType] = useState<"duo" | "band">("band");
 
-  // Rate
-  const [rate, setRate] = useState("");
-
   // Leadership Transfer State
   const [transferModalVisible, setTransferModalVisible] = useState(false);
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
@@ -213,7 +210,6 @@ export default function EditGroupScreen() {
       );
       setMembers(parsedMembers);
       setImages(data.images || []);
-      setRate(data.rate?.toString() || "");
       if (data.images && data.images.length > 0) {
         setThumbnailIndex(0);
       }
@@ -309,9 +305,13 @@ export default function EditGroupScreen() {
         return;
       }
 
-      const orderedImages = images.length > 0 && images[thumbnailIndex]
-        ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
-        : images;
+      const orderedImages =
+        images.length > 0 && images[thumbnailIndex]
+          ? [
+              images[thumbnailIndex],
+              ...images.filter((_, i) => i !== thumbnailIndex),
+            ]
+          : images;
 
       const payload = {
         name: groupName,
@@ -322,7 +322,6 @@ export default function EditGroupScreen() {
         longitude,
         members,
         images: orderedImages,
-        rate: parseFloat(rate) || 0,
         group_type: groupType, // 'duo' or 'band'
       };
 
@@ -1499,8 +1498,8 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   footerActions: {
     marginTop: 32,

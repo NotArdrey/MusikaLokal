@@ -1,40 +1,53 @@
-import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Calendar } from 'react-native-calendars';
-import ConflictResolutionModal, { ConflictingBooking, ConflictResolution } from '../src/components/ConflictResolutionModal';
-import CustomAlert, { AlertType } from '../src/components/CustomAlert';
-import Header from '../src/components/header';
-import ImageUploader from '../src/components/ImageUploader';
-import LocationPicker from '../src/components/LocationPicker';
-import Navbar from '../src/components/navbar';
-import { useTheme } from '../src/context/ThemeContext';
+import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import { router } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
+import {
+    ActivityIndicator,
+    Image,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { Calendar } from "react-native-calendars";
+import ConflictResolutionModal, {
+    ConflictingBooking,
+    ConflictResolution,
+} from "../src/components/ConflictResolutionModal";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import Header from "../src/components/header";
+import ImageUploader from "../src/components/ImageUploader";
+import LocationPicker from "../src/components/LocationPicker";
+import Navbar from "../src/components/navbar";
+import { useTheme } from "../src/context/ThemeContext";
 
-import { useLocalSearchParams } from 'expo-router';
-import { supabase } from '../lib/supabase';
+import { useLocalSearchParams } from "expo-router";
+import { supabase } from "../lib/supabase";
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
   // Remove all non-digit characters except colon
-  let cleaned = text.replace(/[^0-9:]/g, '');
+  let cleaned = text.replace(/[^0-9:]/g, "");
 
   // Limit to 5 characters (HH:MM)
   if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
 
   // Auto-add colon after 2 digits
-  if (cleaned.length === 2 && !cleaned.includes(':')) {
-    cleaned = cleaned + ':';
+  if (cleaned.length === 2 && !cleaned.includes(":")) {
+    cleaned = cleaned + ":";
   }
 
   // If user types more than 2 digits before colon, insert colon
-  if (cleaned.length > 2 && !cleaned.includes(':')) {
-    cleaned = cleaned.substring(0, 2) + ':' + cleaned.substring(2);
+  if (cleaned.length > 2 && !cleaned.includes(":")) {
+    cleaned = cleaned.substring(0, 2) + ":" + cleaned.substring(2);
   }
 
   // Validate hour (01-12)
-  const parts = cleaned.split(':');
+  const parts = cleaned.split(":");
   if (parts[0] && parts[0].length === 2) {
     const hour = parseInt(parts[0]);
     if (hour < 1 || hour > 12) {
@@ -46,7 +59,7 @@ const formatTimeInput = (text: string): string => {
   if (parts[1] && parts[1].length === 2) {
     const minute = parseInt(parts[1]);
     if (minute > 59) {
-      return parts[0] + ':' + parts[1].substring(0, 1);
+      return parts[0] + ":" + parts[1].substring(0, 1);
     }
   }
 
@@ -56,17 +69,19 @@ const formatTimeInput = (text: string): string => {
 export default function EditStudioScreen() {
   const { colors, isDark } = useTheme();
   const { id } = useLocalSearchParams();
-  const [studioName, setStudioName] = useState('');
-  const [description, setDescription] = useState('');
-  const [address, setAddress] = useState('');
+  const [studioName, setStudioName] = useState("");
+  const [description, setDescription] = useState("");
+  const [address, setAddress] = useState("");
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   // Dynamic pricing per studio type
-  const [rehearsalRate, setRehearsalRate] = useState('');
-  const [recordingRate, setRecordingRate] = useState('');
-  const [studioType, setStudioType] = useState<'Rehearsal' | 'Recording' | 'Both'>('Both');
-  const [pax, setPax] = useState('');
+  const [rehearsalRate, setRehearsalRate] = useState("");
+  const [recordingRate, setRecordingRate] = useState("");
+  const [studioType, setStudioType] = useState<
+    "Rehearsal" | "Recording" | "Both"
+  >("Both");
+  const [pax, setPax] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [authorized, setAuthorized] = useState(false);
@@ -78,42 +93,60 @@ export default function EditStudioScreen() {
     type: AlertType;
     title: string;
     message: string;
-    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+    buttons?: {
+      text: string;
+      onPress?: () => void;
+      style?: "default" | "cancel" | "destructive";
+    }[];
   }>({
-    type: 'info',
-    title: '',
-    message: '',
+    type: "info",
+    title: "",
+    message: "",
   });
 
   const showAlert = (
     type: AlertType,
     title: string,
     message: string,
-    buttons?: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[]
+    buttons?: {
+      text: string;
+      onPress?: () => void;
+      style?: "default" | "cancel" | "destructive";
+    }[],
   ) => {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
   };
 
   const [amenities, setAmenities] = useState<string[]>([]);
-  const [newAmenity, setNewAmenity] = useState('');
+  const [newAmenity, setNewAmenity] = useState("");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
 
   // Contract state
-  const [contractUrl, setContractUrl] = useState<string>('');
-  const [contractFileName, setContractFileName] = useState<string>('');
+  const [contractUrl, setContractUrl] = useState<string>("");
+  const [contractFileName, setContractFileName] = useState<string>("");
   const [uploadingContract, setUploadingContract] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Availability state
-  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  const [availability, setAvailability] = useState<{ day: string; slots: { start: string; end: string }[] }[]>(
-    daysOfWeek.map(day => ({ day, slots: [] }))
-  );
+  const daysOfWeek = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+  ];
+  const [availability, setAvailability] = useState<
+    { day: string; slots: { start: string; end: string }[] }[]
+  >(daysOfWeek.map((day) => ({ day, slots: [] })));
 
   // Instruments state
-  const [selectedInstruments, setSelectedInstruments] = useState<{ name: string, image: string }[]>([]);
+  const [selectedInstruments, setSelectedInstruments] = useState<
+    { name: string; image: string }[]
+  >([]);
 
   // Studio Equipment state (full details with name, quantity, description, image)
   interface EquipmentItem {
@@ -125,40 +158,103 @@ export default function EditStudioScreen() {
   }
   const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
   const [showEquipmentModal, setShowEquipmentModal] = useState(false);
-  const [editingEquipment, setEditingEquipment] = useState<EquipmentItem | null>(null);
-  const [equipmentForm, setEquipmentForm] = useState({ name: '', quantity: '1', description: '', image: '' });
+  const [editingEquipment, setEditingEquipment] =
+    useState<EquipmentItem | null>(null);
+  const [equipmentForm, setEquipmentForm] = useState({
+    name: "",
+    quantity: "1",
+    description: "",
+    image: "",
+  });
 
   // Calendar-based availability state
-  const [selectedDates, setSelectedDates] = useState<{ [date: string]: { selected: boolean; slots: { start: string; end: string }[] } }>({});
-
-
+  const [selectedDates, setSelectedDates] = useState<{
+    [date: string]: {
+      selected: boolean;
+      slots: { start: string; end: string }[];
+    };
+  }>({});
 
   // Conflict Resolution State
   const [conflictModalVisible, setConflictModalVisible] = useState(false);
-  const [conflictingBookings, setConflictingBookings] = useState<ConflictingBooking[]>([]);
+  const [conflictingBookings, setConflictingBookings] = useState<
+    ConflictingBooking[]
+  >([]);
   const [pendingSavePayload, setPendingSavePayload] = useState<any>(null);
 
   // Predefined instruments with images
   const INSTRUMENT_OPTIONS = [
-    { name: 'Drum Kit', image: 'https://images.unsplash.com/photo-1519892300165-cb5542fb47c7?w=200&h=200&fit=crop' },
-    { name: 'Piano', image: 'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=200&h=200&fit=crop' },
-    { name: 'Guitar Amp', image: 'https://images.unsplash.com/photo-1535587566541-97121a128dc5?w=200&h=200&fit=crop' },
-    { name: 'Bass Amp', image: 'https://images.unsplash.com/photo-1516924962500-2b4b3b99ea02?w=200&h=200&fit=crop' },
-    { name: 'Microphones', image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop' },
-    { name: 'Keyboard', image: 'https://images.unsplash.com/photo-1552422535-c45813c61732?w=200&h=200&fit=crop' },
-    { name: 'Electric Guitar', image: 'https://images.unsplash.com/photo-1550985616-10810253b84d?w=200&h=200&fit=crop' },
-    { name: 'Bass Guitar', image: 'https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=200&h=200&fit=crop' },
-    { name: 'DJ Equipment', image: 'https://images.unsplash.com/photo-1571327073757-71d13c24de30?w=200&h=200&fit=crop' },
-    { name: 'Synthesizer', image: 'https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=200&h=200&fit=crop' },
-    { name: 'PA System', image: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=200&h=200&fit=crop' },
-    { name: 'Mixing Console', image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop' },
+    {
+      name: "Drum Kit",
+      image:
+        "https://images.unsplash.com/photo-1519892300165-cb5542fb47c7?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Piano",
+      image:
+        "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Guitar Amp",
+      image:
+        "https://images.unsplash.com/photo-1535587566541-97121a128dc5?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Bass Amp",
+      image:
+        "https://images.unsplash.com/photo-1516924962500-2b4b3b99ea02?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Microphones",
+      image:
+        "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Keyboard",
+      image:
+        "https://images.unsplash.com/photo-1552422535-c45813c61732?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Electric Guitar",
+      image:
+        "https://images.unsplash.com/photo-1550985616-10810253b84d?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Bass Guitar",
+      image:
+        "https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=200&h=200&fit=crop",
+    },
+    {
+      name: "DJ Equipment",
+      image:
+        "https://images.unsplash.com/photo-1571327073757-71d13c24de30?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Synthesizer",
+      image:
+        "https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=200&h=200&fit=crop",
+    },
+    {
+      name: "PA System",
+      image:
+        "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Mixing Console",
+      image:
+        "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop",
+    },
   ];
 
   // Toggle instrument selection
-  const toggleInstrument = (instrument: { name: string, image: string }) => {
-    const isSelected = selectedInstruments.some(i => i.name === instrument.name);
+  const toggleInstrument = (instrument: { name: string; image: string }) => {
+    const isSelected = selectedInstruments.some(
+      (i) => i.name === instrument.name,
+    );
     if (isSelected) {
-      setSelectedInstruments(selectedInstruments.filter(i => i.name !== instrument.name));
+      setSelectedInstruments(
+        selectedInstruments.filter((i) => i.name !== instrument.name),
+      );
     } else {
       setSelectedInstruments([...selectedInstruments, instrument]);
     }
@@ -171,19 +267,28 @@ export default function EditStudioScreen() {
 
   const checkAuthorization = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
-        router.replace('/');
+        router.replace("/");
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke('manage-profile', {
-        body: { action: 'fetch', userId: user.id }
-      });
+      const { data: profile } = await supabase.functions.invoke(
+        "manage-profile",
+        {
+          body: { action: "fetch", userId: user.id },
+        },
+      );
 
-      if (profile?.role !== 'studio-owner') {
-        showAlert('error', 'Unauthorized', 'Only studio owners can edit studios.');
-        router.replace('/home');
+      if (profile?.role !== "studio-owner") {
+        showAlert(
+          "error",
+          "Unauthorized",
+          "Only studio owners can edit studios.",
+        );
+        router.replace("/home");
         return;
       }
 
@@ -191,8 +296,8 @@ export default function EditStudioScreen() {
       // Now fetch the studio details
       // fetchStudioDetails(); // This will be called by the other useEffect now
     } catch (e) {
-      console.error('Authorization check failed:', e);
-      router.replace('/home');
+      console.error("Authorization check failed:", e);
+      router.replace("/home");
     } finally {
       setCheckingAuth(false);
     }
@@ -206,268 +311,432 @@ export default function EditStudioScreen() {
   }, [id, authorized]);
 
   const fetchStudioDetails = async () => {
-    console.log('🔄 ===== FETCH STUDIO DETAILS STARTED =====');
-    console.log('🔄 Timestamp:', new Date().toISOString());
-    console.log('🔄 Studio ID (raw):', id);
-    console.log('🔄 Studio ID type:', typeof id);
-    console.log('🔄 Is Array?:', Array.isArray(id));
-    
+    console.log("🔄 ===== FETCH STUDIO DETAILS STARTED =====");
+    console.log("🔄 Timestamp:", new Date().toISOString());
+    console.log("🔄 Studio ID (raw):", id);
+    console.log("🔄 Studio ID type:", typeof id);
+    console.log("🔄 Is Array?:", Array.isArray(id));
+
     try {
       setLoading(true);
-      console.log('🔄 Loading state set to true');
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      console.log('👤 User fetched:', user?.id);
-      
+      console.log("🔄 Loading state set to true");
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      console.log("👤 User fetched:", user?.id);
+
       if (!user) {
-        console.error('❌ No user found, redirecting to login');
-        router.replace('/');
+        console.error("❌ No user found, redirecting to login");
+        router.replace("/");
         return;
       }
 
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
-      console.log('🎯 Studio ID (processed):', studioId);
-      console.log('🎯 Studio ID type after processing:', typeof studioId);
-      
+      console.log("🎯 Studio ID (processed):", studioId);
+      console.log("🎯 Studio ID type after processing:", typeof studioId);
+
       if (!studioId) {
-        console.error('❌ Invalid studio ID after processing');
-        showAlert('error', 'Error', 'Invalid studio ID');
-        router.replace('/home');
+        console.error("❌ Invalid studio ID after processing");
+        showAlert("error", "Error", "Invalid studio ID");
+        router.replace("/home");
         return;
       }
 
-      console.log('📡 Calling edge function with params:', {
-        action: 'fetch_one',
-        type: 'studio',
+      console.log("📡 Calling edge function with params:", {
+        action: "fetch_one",
+        type: "studio",
         id: studioId,
-        userId: user.id
+        userId: user.id,
       });
 
-      const { data, error } = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'fetch_one', type: 'studio', id: studioId, userId: user.id }
-      });
+      const { data, error } = await supabase.functions.invoke(
+        "manage-listings",
+        {
+          body: {
+            action: "fetch_one",
+            type: "studio",
+            id: studioId,
+            userId: user.id,
+          },
+        },
+      );
 
-      console.log('� ===== EDGE FUNCTION RESPONSE =====');
-      console.log('📥 Response timestamp:', new Date().toISOString());
-      console.log('📥 Error object:', error);
-      console.log('📥 Data object:', data);
-      console.log('📥 Data type:', typeof data);
-      console.log('📥 Data is null?:', data === null);
-      console.log('📥 Data is undefined?:', data === undefined);
-      console.log('📥 Data is array?:', Array.isArray(data));
-      console.log('📥 Data keys:', data ? Object.keys(data) : 'NO DATA');
-      console.log('📥 Data stringified:', JSON.stringify(data, null, 2));
+      console.log("� ===== EDGE FUNCTION RESPONSE =====");
+      console.log("📥 Response timestamp:", new Date().toISOString());
+      console.log("📥 Error object:", error);
+      console.log("📥 Data object:", data);
+      console.log("📥 Data type:", typeof data);
+      console.log("📥 Data is null?:", data === null);
+      console.log("📥 Data is undefined?:", data === undefined);
+      console.log("📥 Data is array?:", Array.isArray(data));
+      console.log("📥 Data keys:", data ? Object.keys(data) : "NO DATA");
+      console.log("📥 Data stringified:", JSON.stringify(data, null, 2));
 
       if (error) {
-        console.error('❌ Edge function returned error:', error);
+        console.error("❌ Edge function returned error:", error);
         throw error;
       }
 
       // If no data returned, user doesn't own this studio
       if (!data) {
-        console.error('❌ No data returned from edge function');
-        showAlert('error', 'Not Found', 'Studio not found or you do not have permission to edit it.');
-        router.replace('/home');
+        console.error("❌ No data returned from edge function");
+        showAlert(
+          "error",
+          "Not Found",
+          "Studio not found or you do not have permission to edit it.",
+        );
+        router.replace("/home");
         return;
       }
 
-      console.log('✅ ===== DATA VALIDATION PASSED =====');
-      console.log('📦 Full studio data received:', JSON.stringify(data, null, 2));
-      console.log('📦 Data field count:', Object.keys(data).length);
-      
-      // Log each critical field
-      console.log('📦 Field Analysis:');
-      console.log('  - name:', data.name, '(type:', typeof data.name, ')');
-      console.log('  - description:', data.description?.substring(0, 50) + '...', '(length:', data.description?.length, ')');
-      console.log('  - address:', data.address);
-      console.log('  - latitude:', data.latitude, '(type:', typeof data.latitude, ')');
-      console.log('  - longitude:', data.longitude, '(type:', typeof data.longitude, ')');
-      console.log('  - rehearsal_rate:', data.rehearsal_rate, '(type:', typeof data.rehearsal_rate, ')');
-      console.log('  - recording_rate:', data.recording_rate, '(type:', typeof data.recording_rate, ')');
-      console.log('  - hourly_rate (fallback):', data.hourly_rate, '(type:', typeof data.hourly_rate, ')');
-      console.log('  - type:', data.type, '(type:', typeof data.type, ')');
-      console.log('  - pax:', data.pax, '(type:', typeof data.pax, ')');
-      console.log('  - amenities:', data.amenities, '(is array:', Array.isArray(data.amenities), ', length:', data.amenities?.length, ')');
-      console.log('  - instruments:', data.instruments, '(is array:', Array.isArray(data.instruments), ', length:', data.instruments?.length, ')');
-      console.log('  - images:', data.images, '(is array:', Array.isArray(data.images), ', length:', data.images?.length, ')');
-      console.log('  - contract_url:', data.contract_url);
-      console.log('  - availability:', data.availability, '(is array:', Array.isArray(data.availability), ', length:', data.availability?.length, ')');
-      console.log('  - calendar_availability:', data.calendar_availability, '(is array:', Array.isArray(data.calendar_availability), ')');
-      console.log('  - lead_time_hours:', data.lead_time_hours, '(type:', typeof data.lead_time_hours, ')');
-      console.log('  - weekend_multiplier:', data.weekend_multiplier, '(type:', typeof data.weekend_multiplier, ')');
-      console.log('  - peak_season_multiplier:', data.peak_season_multiplier);
-      console.log('  - peak_season_dates:', data.peak_season_dates);
-      console.log('  - off_peak_multiplier:', data.off_peak_multiplier);
-      console.log('  - off_peak_dates:', data.off_peak_dates);
+      console.log("✅ ===== DATA VALIDATION PASSED =====");
+      console.log(
+        "📦 Full studio data received:",
+        JSON.stringify(data, null, 2),
+      );
+      console.log("📦 Data field count:", Object.keys(data).length);
 
-      console.log('🔧 ===== SETTING STATE VALUES =====');
-      
-      console.log('🔧 Setting studioName to:', data.name);
+      // Log each critical field
+      console.log("📦 Field Analysis:");
+      console.log("  - name:", data.name, "(type:", typeof data.name, ")");
+      console.log(
+        "  - description:",
+        data.description?.substring(0, 50) + "...",
+        "(length:",
+        data.description?.length,
+        ")",
+      );
+      console.log("  - address:", data.address);
+      console.log(
+        "  - latitude:",
+        data.latitude,
+        "(type:",
+        typeof data.latitude,
+        ")",
+      );
+      console.log(
+        "  - longitude:",
+        data.longitude,
+        "(type:",
+        typeof data.longitude,
+        ")",
+      );
+      console.log(
+        "  - rehearsal_rate:",
+        data.rehearsal_rate,
+        "(type:",
+        typeof data.rehearsal_rate,
+        ")",
+      );
+      console.log(
+        "  - recording_rate:",
+        data.recording_rate,
+        "(type:",
+        typeof data.recording_rate,
+        ")",
+      );
+      console.log(
+        "  - hourly_rate (fallback):",
+        data.hourly_rate,
+        "(type:",
+        typeof data.hourly_rate,
+        ")",
+      );
+      console.log("  - type:", data.type, "(type:", typeof data.type, ")");
+      console.log("  - pax:", data.pax, "(type:", typeof data.pax, ")");
+      console.log(
+        "  - amenities:",
+        data.amenities,
+        "(is array:",
+        Array.isArray(data.amenities),
+        ", length:",
+        data.amenities?.length,
+        ")",
+      );
+      console.log(
+        "  - instruments:",
+        data.instruments,
+        "(is array:",
+        Array.isArray(data.instruments),
+        ", length:",
+        data.instruments?.length,
+        ")",
+      );
+      console.log(
+        "  - images:",
+        data.images,
+        "(is array:",
+        Array.isArray(data.images),
+        ", length:",
+        data.images?.length,
+        ")",
+      );
+      console.log("  - contract_url:", data.contract_url);
+      console.log(
+        "  - availability:",
+        data.availability,
+        "(is array:",
+        Array.isArray(data.availability),
+        ", length:",
+        data.availability?.length,
+        ")",
+      );
+      console.log(
+        "  - calendar_availability:",
+        data.calendar_availability,
+        "(is array:",
+        Array.isArray(data.calendar_availability),
+        ")",
+      );
+      console.log(
+        "  - lead_time_hours:",
+        data.lead_time_hours,
+        "(type:",
+        typeof data.lead_time_hours,
+        ")",
+      );
+      console.log(
+        "  - weekend_multiplier:",
+        data.weekend_multiplier,
+        "(type:",
+        typeof data.weekend_multiplier,
+        ")",
+      );
+      console.log("  - peak_season_multiplier:", data.peak_season_multiplier);
+      console.log("  - peak_season_dates:", data.peak_season_dates);
+      console.log("  - off_peak_multiplier:", data.off_peak_multiplier);
+      console.log("  - off_peak_dates:", data.off_peak_dates);
+
+      console.log("🔧 ===== SETTING STATE VALUES =====");
+
+      console.log("🔧 Setting studioName to:", data.name);
       setStudioName(data.name);
-      
-      console.log('🔧 Setting description to:', data.description?.substring(0, 50));
+
+      console.log(
+        "🔧 Setting description to:",
+        data.description?.substring(0, 50),
+      );
       setDescription(data.description);
-      
-      console.log('🔧 Setting address to:', data.address);
+
+      console.log("🔧 Setting address to:", data.address);
       setAddress(data.address);
-      
-      console.log('🔧 Setting latitude to:', data.latitude || null);
+
+      console.log("🔧 Setting latitude to:", data.latitude || null);
       setLatitude(data.latitude || null);
-      
-      console.log('🔧 Setting longitude to:', data.longitude || null);
+
+      console.log("🔧 Setting longitude to:", data.longitude || null);
       setLongitude(data.longitude || null);
-      
+
       // Load dynamic pricing
-      const rehearsalValue = data.rehearsal_rate?.toString() || data.hourly_rate?.toString() || '';
-      console.log('🔧 Setting rehearsalRate to:', rehearsalValue, '(from rehearsal_rate:', data.rehearsal_rate, 'or hourly_rate:', data.hourly_rate, ')');
+      const rehearsalValue =
+        data.rehearsal_rate?.toString() || data.hourly_rate?.toString() || "";
+      console.log(
+        "🔧 Setting rehearsalRate to:",
+        rehearsalValue,
+        "(from rehearsal_rate:",
+        data.rehearsal_rate,
+        "or hourly_rate:",
+        data.hourly_rate,
+        ")",
+      );
       setRehearsalRate(rehearsalValue);
-      
-      const recordingValue = data.recording_rate?.toString() || '';
-      console.log('🔧 Setting recordingRate to:', recordingValue);
+
+      const recordingValue = data.recording_rate?.toString() || "";
+      console.log("🔧 Setting recordingRate to:", recordingValue);
       setRecordingRate(recordingValue);
-      
-      const typeValue = data.type || 'Both';
-      console.log('🔧 Setting studioType to:', typeValue);
+
+      const typeValue = data.type || "Both";
+      console.log("🔧 Setting studioType to:", typeValue);
       setStudioType(typeValue);
-      
-      const paxValue = data.pax?.toString() || '';
-      console.log('🔧 Setting pax to:', paxValue, '(original value:', data.pax, ', type:', typeof data.pax, ')');
+
+      const paxValue = data.pax?.toString() || "";
+      console.log(
+        "🔧 Setting pax to:",
+        paxValue,
+        "(original value:",
+        data.pax,
+        ", type:",
+        typeof data.pax,
+        ")",
+      );
       setPax(paxValue);
-      console.log('✅ setPax STATE UPDATE completed');
-      
-      console.log('🔧 Setting amenities to:', data.amenities || []);
+      console.log("✅ setPax STATE UPDATE completed");
+
+      console.log("🔧 Setting amenities to:", data.amenities || []);
       setAmenities(data.amenities || []);
-      
-      console.log('🔧 Setting contractUrl to:', data.contract_url || '');
-      setContractUrl(data.contract_url || '');
+
+      console.log("🔧 Setting contractUrl to:", data.contract_url || "");
+      setContractUrl(data.contract_url || "");
       if (data.contract_url) {
-        const fileName = data.contract_url.split('/').pop() || 'Contract.pdf';
-        console.log('🔧 Setting contractFileName to:', fileName);
+        const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
+        console.log("🔧 Setting contractFileName to:", fileName);
         setContractFileName(decodeURIComponent(fileName));
       }
 
       // Load equipment/instruments from instruments JSONB
-      console.log('🎸 ===== PARSING INSTRUMENTS =====');
-      console.log('🎸 Raw data.instruments:', data.instruments);
-      console.log('🎸 Type of data.instruments:', typeof data.instruments);
-      console.log('🎸 Is Array?:', Array.isArray(data.instruments));
-      
-      const instrumentsData = Array.isArray(data.instruments) ? data.instruments : [];
-      console.log('🎸 Processed instrumentsData:', JSON.stringify(instrumentsData, null, 2));
-      console.log('🎸 instrumentsData array length:', instrumentsData.length);
-      console.log('🎸 instrumentsData items:');
+      console.log("🎸 ===== PARSING INSTRUMENTS =====");
+      console.log("🎸 Raw data.instruments:", data.instruments);
+      console.log("🎸 Type of data.instruments:", typeof data.instruments);
+      console.log("🎸 Is Array?:", Array.isArray(data.instruments));
+
+      const instrumentsData = Array.isArray(data.instruments)
+        ? data.instruments
+        : [];
+      console.log(
+        "🎸 Processed instrumentsData:",
+        JSON.stringify(instrumentsData, null, 2),
+      );
+      console.log("🎸 instrumentsData array length:", instrumentsData.length);
+      console.log("🎸 instrumentsData items:");
       instrumentsData.forEach((item: any, index: number) => {
         console.log(`  [${index}]:`, {
           name: item?.name,
           image: item?.image,
           quantity: item?.quantity,
           description: item?.description,
-          hasQuantity: 'quantity' in (item || {}),
-          hasDescription: 'description' in (item || {}),
-          keys: item ? Object.keys(item) : 'null'
+          hasQuantity: "quantity" in (item || {}),
+          hasDescription: "description" in (item || {}),
+          keys: item ? Object.keys(item) : "null",
         });
       });
-      
+
       // Equipment items have quantity OR description properties (custom equipment)
-      console.log('🎸 ===== FILTERING EQUIPMENT ITEMS =====');
+      console.log("🎸 ===== FILTERING EQUIPMENT ITEMS =====");
       const equipmentItems = instrumentsData
         .filter((item: any) => {
-          if (!item || typeof item !== 'object') {
-            console.log('🎸 Skipping invalid item:', item);
+          if (!item || typeof item !== "object") {
+            console.log("🎸 Skipping invalid item:", item);
             return false;
           }
           // Check if 'quantity' or 'description' key exists in the object
-          const hasQuantity = 'quantity' in item;
-          const hasDescription = 'description' in item;
-          console.log(`🎸 Evaluating item "${item.name}": hasQuantity=${hasQuantity}, hasDescription=${hasDescription}, willInclude=${hasQuantity || hasDescription}`);
+          const hasQuantity = "quantity" in item;
+          const hasDescription = "description" in item;
+          console.log(
+            `🎸 Evaluating item "${item.name}": hasQuantity=${hasQuantity}, hasDescription=${hasDescription}, willInclude=${hasQuantity || hasDescription}`,
+          );
           return hasQuantity || hasDescription;
         })
         .map((eq: any, index: number) => {
           const mapped = {
             id: eq.id || `eq-${index}`,
-            name: eq.name || '',
-            quantity: typeof eq.quantity === 'number' ? eq.quantity : 1,
-            description: eq.description || '',
-            image: eq.image || ''
+            name: eq.name || "",
+            quantity: typeof eq.quantity === "number" ? eq.quantity : 1,
+            description: eq.description || "",
+            image: eq.image || "",
           };
           console.log(`🎸 Mapped equipment [${index}]:`, mapped);
           return mapped;
         });
-      console.log('🎸 Final filtered equipment items count:', equipmentItems.length);
-      console.log('🎸 Final filtered equipment items:', JSON.stringify(equipmentItems, null, 2));
-      
+      console.log(
+        "🎸 Final filtered equipment items count:",
+        equipmentItems.length,
+      );
+      console.log(
+        "🎸 Final filtered equipment items:",
+        JSON.stringify(equipmentItems, null, 2),
+      );
+
       // Preset items do NOT have quantity or description (predefined instruments)
-      console.log('🎸 ===== FILTERING PRESET ITEMS =====');
+      console.log("🎸 ===== FILTERING PRESET ITEMS =====");
       const presetItems = instrumentsData
         .filter((item: any) => {
-          if (!item || typeof item !== 'object') {
-            console.log('🎸 Preset: Skipping invalid item:', item);
+          if (!item || typeof item !== "object") {
+            console.log("🎸 Preset: Skipping invalid item:", item);
             return false;
           }
           if (!item.name || !item.image) {
-            console.log('🎸 Preset: Skipping item without name/image:', item);
+            console.log("🎸 Preset: Skipping item without name/image:", item);
             return false;
           }
-          const hasQuantity = 'quantity' in item;
-          const hasDescription = 'description' in item;
+          const hasQuantity = "quantity" in item;
+          const hasDescription = "description" in item;
           const willInclude = !hasQuantity && !hasDescription;
-          console.log(`🎸 Preset: Evaluating "${item.name}": hasQuantity=${hasQuantity}, hasDescription=${hasDescription}, willInclude=${willInclude}`);
+          console.log(
+            `🎸 Preset: Evaluating "${item.name}": hasQuantity=${hasQuantity}, hasDescription=${hasDescription}, willInclude=${willInclude}`,
+          );
           return willInclude;
         })
         .map((item: any) => {
           const mapped = { name: item.name, image: item.image };
-          console.log('🎸 Preset: Mapped item:', mapped);
+          console.log("🎸 Preset: Mapped item:", mapped);
           return mapped;
         });
-      console.log('🎸 Final filtered preset items count:', presetItems.length);
-      console.log('🎸 Final filtered preset items:', JSON.stringify(presetItems, null, 2));
+      console.log("🎸 Final filtered preset items count:", presetItems.length);
+      console.log(
+        "🎸 Final filtered preset items:",
+        JSON.stringify(presetItems, null, 2),
+      );
 
       // Always set equipment even if length is 0 to clear old data
-      console.log('🔧 Setting equipment state with', equipmentItems.length, 'items');
+      console.log(
+        "🔧 Setting equipment state with",
+        equipmentItems.length,
+        "items",
+      );
       setEquipment(equipmentItems);
-      console.log('✅ setEquipment STATE UPDATE completed with', equipmentItems.length, 'items');
+      console.log(
+        "✅ setEquipment STATE UPDATE completed with",
+        equipmentItems.length,
+        "items",
+      );
 
       // Load calendar availability from date overrides table
       const { data: dateOverrides, error: overridesError } = await supabase
-        .from('studio_date_overrides')
-        .select('*')
-        .eq('studio_id', studioId)
-        .gte('override_date', new Date().toISOString().split('T')[0]); // Only future dates
+        .from("studio_date_overrides")
+        .select("*")
+        .eq("studio_id", studioId)
+        .gte("override_date", new Date().toISOString().split("T")[0]); // Only future dates
 
       if (!overridesError && dateOverrides && dateOverrides.length > 0) {
         // Helper function to convert 24-hour to 12-hour format
         const convertTo12Hour = (time24: string) => {
-          if (!time24 || !time24.includes(':')) return '09:00 AM';
-          const [hours, minutes] = time24.split(':');
+          if (!time24 || !time24.includes(":")) return "09:00 AM";
+          const [hours, minutes] = time24.split(":");
           const hour = parseInt(hours, 10);
-          const period = hour >= 12 ? 'PM' : 'AM';
+          const period = hour >= 12 ? "PM" : "AM";
           const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-          return `${String(hour12).padStart(2, '0')}:${minutes} ${period}`;
+          return `${String(hour12).padStart(2, "0")}:${minutes} ${period}`;
         };
 
-        const calendarDates: { [date: string]: { selected: boolean; slots: { start: string; end: string }[] } } = {};
+        const calendarDates: {
+          [date: string]: {
+            selected: boolean;
+            slots: { start: string; end: string }[];
+          };
+        } = {};
         dateOverrides.forEach((override: any) => {
           if (override.override_date && override.is_open) {
             calendarDates[override.override_date] = {
               selected: true,
-              slots: [{
-                start: convertTo12Hour(override.open_time),
-                end: convertTo12Hour(override.close_time)
-              }]
+              slots: [
+                {
+                  start: convertTo12Hour(override.open_time),
+                  end: convertTo12Hour(override.close_time),
+                },
+              ],
             };
           }
         });
         setSelectedDates(calendarDates);
-        console.log('📅 Loaded date overrides:', calendarDates);
-      } else if (data.calendar_availability && Array.isArray(data.calendar_availability)) {
+        console.log("📅 Loaded date overrides:", calendarDates);
+      } else if (
+        data.calendar_availability &&
+        Array.isArray(data.calendar_availability)
+      ) {
         // Fallback: Load from legacy calendar_availability field
-        const calendarDates: { [date: string]: { selected: boolean; slots: { start: string; end: string }[] } } = {};
+        const calendarDates: {
+          [date: string]: {
+            selected: boolean;
+            slots: { start: string; end: string }[];
+          };
+        } = {};
         data.calendar_availability.forEach((item: any) => {
           if (item.date) {
             calendarDates[item.date] = {
               selected: true,
-              slots: item.slots || [{ start: '09:00 AM', end: '05:00 PM' }]
+              slots: item.slots || [{ start: "09:00 AM", end: "05:00 PM" }],
             };
           }
         });
@@ -475,68 +744,85 @@ export default function EditStudioScreen() {
       }
 
       // Load availability
-      console.log('📅 Loading availability from data:', data.availability);
+      console.log("📅 Loading availability from data:", data.availability);
       if (data.availability && Array.isArray(data.availability)) {
         // Helper function to convert 24-hour to 12-hour format
         const convertTo12Hour = (time24: string) => {
-          if (!time24 || !time24.includes(':')) return '09:00 AM';
-          const [hours, minutes] = time24.split(':');
+          if (!time24 || !time24.includes(":")) return "09:00 AM";
+          const [hours, minutes] = time24.split(":");
           const hour = parseInt(hours, 10);
-          const period = hour >= 12 ? 'PM' : 'AM';
+          const period = hour >= 12 ? "PM" : "AM";
           const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-          return `${String(hour12).padStart(2, '0')}:${minutes} ${period}`;
+          return `${String(hour12).padStart(2, "0")}:${minutes} ${period}`;
         };
 
-        const loadedAvailability = daysOfWeek.map(day => {
+        const loadedAvailability = daysOfWeek.map((day) => {
           const dayData = data.availability.find((a: any) => a.day === day);
           return {
             day,
-            slots: dayData?.slots ? dayData.slots.map((slot: any) => ({
-              start: convertTo12Hour(slot.start),
-              end: convertTo12Hour(slot.end)
-            })) : []
+            slots: dayData?.slots
+              ? dayData.slots.map((slot: any) => ({
+                  start: convertTo12Hour(slot.start),
+                  end: convertTo12Hour(slot.end),
+                }))
+              : [],
           };
         });
-        console.log('📅 Loaded availability:', loadedAvailability);
+        console.log("📅 Loaded availability:", loadedAvailability);
         setAvailability(loadedAvailability);
       } else {
-        console.log('📅 No availability data, using default empty schedule');
+        console.log("📅 No availability data, using default empty schedule");
         // Initialize with empty schedule if no availability data
-        setAvailability(daysOfWeek.map(day => ({ day, slots: [] })));
+        setAvailability(daysOfWeek.map((day) => ({ day, slots: [] })));
       }
 
       // Load preset instruments
-      console.log('🔧 Checking preset items for selectedInstruments update');
+      console.log("🔧 Checking preset items for selectedInstruments update");
       if (presetItems.length > 0) {
-        console.log('🔧 Setting selectedInstruments with', presetItems.length, 'items:', presetItems);
+        console.log(
+          "🔧 Setting selectedInstruments with",
+          presetItems.length,
+          "items:",
+          presetItems,
+        );
         setSelectedInstruments(presetItems);
-        console.log('✅ setSelectedInstruments STATE UPDATE completed with', presetItems.length, 'items');
+        console.log(
+          "✅ setSelectedInstruments STATE UPDATE completed with",
+          presetItems.length,
+          "items",
+        );
       } else {
-        console.log('⚠️ No preset items to set, selectedInstruments will remain empty');
+        console.log(
+          "⚠️ No preset items to set, selectedInstruments will remain empty",
+        );
       }
 
-      console.log('🔧 Setting images - raw data.images:', data.images);
-      console.log('🔧 Images array length:', data.images?.length || 0);
+      console.log("🔧 Setting images - raw data.images:", data.images);
+      console.log("🔧 Images array length:", data.images?.length || 0);
       setSelectedImages(data.images || []);
-      console.log('✅ setSelectedImages STATE UPDATE completed with', (data.images || []).length, 'images');
-      
+      console.log(
+        "✅ setSelectedImages STATE UPDATE completed with",
+        (data.images || []).length,
+        "images",
+      );
+
       if (data.images && data.images.length > 0) {
-        console.log('🔧 Setting thumbnailIndex to 0');
+        console.log("🔧 Setting thumbnailIndex to 0");
         setThumbnailIndex(0);
-        console.log('✅ setThumbnailIndex STATE UPDATE completed');
+        console.log("✅ setThumbnailIndex STATE UPDATE completed");
       } else {
-        console.log('⚠️ No images available, thumbnailIndex not updated');
+        console.log("⚠️ No images available, thumbnailIndex not updated");
       }
-      console.log('✅ ===== FETCH STUDIO DETAILS COMPLETED SUCCESSFULLY =====');
-      console.log('✅ Timestamp:', new Date().toISOString());
+      console.log("✅ ===== FETCH STUDIO DETAILS COMPLETED SUCCESSFULLY =====");
+      console.log("✅ Timestamp:", new Date().toISOString());
     } catch (e) {
-      console.error('❌ ===== FETCH STUDIO DETAILS FAILED =====');
-      console.error('❌ Error timestamp:', new Date().toISOString());
-      console.error('❌ Error object:', e);
-      console.error('❌ Error message:', (e as any)?.message);
-      console.error('❌ Error stack:', (e as any)?.stack);
-      showAlert('error', 'Error', 'Failed to load studio details.');
-      router.replace('/home');
+      console.error("❌ ===== FETCH STUDIO DETAILS FAILED =====");
+      console.error("❌ Error timestamp:", new Date().toISOString());
+      console.error("❌ Error object:", e);
+      console.error("❌ Error message:", (e as any)?.message);
+      console.error("❌ Error stack:", (e as any)?.stack);
+      showAlert("error", "Error", "Failed to load studio details.");
+      router.replace("/home");
     } finally {
       setLoading(false);
     }
@@ -544,40 +830,64 @@ export default function EditStudioScreen() {
 
   const validateForm = (): boolean => {
     if (!studioName.trim()) {
-      showAlert('error', 'Required Field', 'Please enter a studio name');
+      showAlert("error", "Required Field", "Please enter a studio name");
       return false;
     }
     if (!description.trim()) {
-      showAlert('error', 'Required Field', 'Please enter a description');
+      showAlert("error", "Required Field", "Please enter a description");
       return false;
     }
     if (!address || !latitude || !longitude) {
-      showAlert('error', 'Required Field', 'Please select a location on the map');
+      showAlert(
+        "error",
+        "Required Field",
+        "Please select a location on the map",
+      );
       return false;
     }
     // Validate pricing based on studio type
-    if (studioType === 'Both') {
+    if (studioType === "Both") {
       if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
-        showAlert('error', 'Required Field', 'Please enter a valid rehearsal rate');
+        showAlert(
+          "error",
+          "Required Field",
+          "Please enter a valid rehearsal rate",
+        );
         return false;
       }
       if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
-        showAlert('error', 'Required Field', 'Please enter a valid recording rate');
+        showAlert(
+          "error",
+          "Required Field",
+          "Please enter a valid recording rate",
+        );
         return false;
       }
-    } else if (studioType === 'Rehearsal') {
+    } else if (studioType === "Rehearsal") {
       if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
-        showAlert('error', 'Required Field', 'Please enter a valid rehearsal rate');
+        showAlert(
+          "error",
+          "Required Field",
+          "Please enter a valid rehearsal rate",
+        );
         return false;
       }
     } else {
       if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
-        showAlert('error', 'Required Field', 'Please enter a valid recording rate');
+        showAlert(
+          "error",
+          "Required Field",
+          "Please enter a valid recording rate",
+        );
         return false;
       }
     }
     if (selectedImages.length === 0) {
-      showAlert('error', 'Required Field', 'Please upload at least one studio photo');
+      showAlert(
+        "error",
+        "Required Field",
+        "Please upload at least one studio photo",
+      );
       return false;
     }
     return true;
@@ -588,7 +898,9 @@ export default function EditStudioScreen() {
     setSaving(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
         setSaving(false);
         return;
@@ -597,23 +909,23 @@ export default function EditStudioScreen() {
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
       if (!studioId) {
-        showAlert('error', 'Error', 'Invalid studio ID');
+        showAlert("error", "Error", "Invalid studio ID");
         setSaving(false);
         return;
       }
 
       // Helper function to convert 12-hour to 24-hour format for comparison
       const convertTo24Hour = (time12: string): string => {
-        const [time, modifier] = time12.split(' ');
+        const [time, modifier] = time12.split(" ");
         if (!modifier) return time; // Already 24h or invalid
-        let [hours, minutes] = time.split(':');
-        if (hours === '12') {
-          hours = '00';
+        let [hours, minutes] = time.split(":");
+        if (hours === "12") {
+          hours = "00";
         }
-        if (modifier === 'PM') {
+        if (modifier === "PM") {
           hours = String(parseInt(hours, 10) + 12);
         }
-        return `${hours.padStart(2, '0')}:${minutes}`;
+        return `${hours.padStart(2, "0")}:${minutes}`;
       };
 
       // Helper to check if times overlap
@@ -621,11 +933,11 @@ export default function EditStudioScreen() {
         bookingStart: string,
         bookingEnd: string,
         slotStart: string,
-        slotEnd: string
+        slotEnd: string,
       ): boolean => {
         // Convert all to minutes for easier comparison
         const toMinutes = (time: string) => {
-          const [h, m] = time.split(':').map(Number);
+          const [h, m] = time.split(":").map(Number);
           return h * 60 + m;
         };
         const bStart = toMinutes(bookingStart);
@@ -637,10 +949,11 @@ export default function EditStudioScreen() {
       };
 
       // Check for booking conflicts before saving
-      console.log('🔍 Checking for booking conflicts...');
+      console.log("🔍 Checking for booking conflicts...");
       const { data: existingBookings, error: bookingsError } = await supabase
-        .from('studio_bookings')
-        .select(`
+        .from("studio_bookings")
+        .select(
+          `
           id, 
           booking_date, 
           start_time, 
@@ -651,31 +964,42 @@ export default function EditStudioScreen() {
             full_name,
             email
           )
-        `)
-        .eq('studio_id', studioId)
-        .in('status', ['pending', 'confirmed'])
-        .gte('booking_date', new Date().toISOString().split('T')[0]);
+        `,
+        )
+        .eq("studio_id", studioId)
+        .in("status", ["pending", "confirmed"])
+        .gte("booking_date", new Date().toISOString().split("T")[0]);
 
       if (!bookingsError && existingBookings && existingBookings.length > 0) {
-        console.log('📅 Found existing bookings:', existingBookings.length);
+        console.log("📅 Found existing bookings:", existingBookings.length);
 
         // Build new availability map (combining weekly schedule and date overrides)
-        const newAvailabilityMap: { [date: string]: { start: string; end: string }[] } = {};
+        const newAvailabilityMap: {
+          [date: string]: { start: string; end: string }[];
+        } = {};
 
         // Add date-specific overrides
         Object.entries(selectedDates)
           .filter(([_, data]) => data.selected && data.slots.length > 0)
           .forEach(([dateStr, data]) => {
-            newAvailabilityMap[dateStr] = data.slots.map(slot => ({
+            newAvailabilityMap[dateStr] = data.slots.map((slot) => ({
               start: convertTo24Hour(slot.start),
-              end: convertTo24Hour(slot.end)
+              end: convertTo24Hour(slot.end),
             }));
           });
 
         // For dates that aren't overridden, check weekly schedule
         const getDayOfWeek = (dateStr: string): string => {
           const date = new Date(dateStr);
-          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const days = [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+          ];
           return days[date.getDay()];
         };
 
@@ -695,18 +1019,18 @@ export default function EditStudioScreen() {
           } else {
             // Check weekly schedule
             const dayName = getDayOfWeek(bookingDate);
-            const daySchedule = availability.find(a => a.day === dayName);
+            const daySchedule = availability.find((a) => a.day === dayName);
             if (daySchedule && daySchedule.slots.length > 0) {
-              availableSlots = daySchedule.slots.map(slot => ({
+              availableSlots = daySchedule.slots.map((slot) => ({
                 start: convertTo24Hour(slot.start),
-                end: convertTo24Hour(slot.end)
+                end: convertTo24Hour(slot.end),
               }));
             }
           }
 
           // Check if booking fits within any available slot
-          const bookingFits = availableSlots.some(slot =>
-            timesOverlap(bookingStart, bookingEnd, slot.start, slot.end)
+          const bookingFits = availableSlots.some((slot) =>
+            timesOverlap(bookingStart, bookingEnd, slot.start, slot.end),
           );
 
           if (!bookingFits) {
@@ -719,10 +1043,11 @@ export default function EditStudioScreen() {
               end_time: booking.end_time,
               status: booking.status,
               user_id: booking.user_id,
-              user_name: profile?.full_name || 'Unknown',
-              user_email: profile?.email || '',
-              conflictType: availableSlots.length === 0 ? 'date_removed' : 'time_overlap',
-              newAvailableSlot: null // Will be calculated
+              user_name: profile?.full_name || "Unknown",
+              user_email: profile?.email || "",
+              conflictType:
+                availableSlots.length === 0 ? "date_removed" : "time_overlap",
+              newAvailableSlot: null, // Will be calculated
             };
 
             // Find next available slot for this booking
@@ -730,7 +1055,7 @@ export default function EditStudioScreen() {
               studioId,
               bookingDate,
               bookingStart,
-              bookingEnd
+              bookingEnd,
             );
             conflict.newAvailableSlot = nextSlot;
 
@@ -739,7 +1064,7 @@ export default function EditStudioScreen() {
         }
 
         if (conflicts.length > 0) {
-          console.log('⚠️ Found conflicts:', conflicts.length);
+          console.log("⚠️ Found conflicts:", conflicts.length);
           // Store conflicts and show the resolution modal
           setConflictingBookings(conflicts);
           setConflictModalVisible(true);
@@ -750,8 +1075,12 @@ export default function EditStudioScreen() {
 
       await executeSave();
     } catch (e: any) {
-      console.error('❌ Error checking bookings:', e);
-      showAlert('error', 'Error', `Failed to save: ${e?.message || 'Unknown error'}`);
+      console.error("❌ Error checking bookings:", e);
+      showAlert(
+        "error",
+        "Error",
+        `Failed to save: ${e?.message || "Unknown error"}`,
+      );
       setSaving(false);
     }
   };
@@ -761,27 +1090,35 @@ export default function EditStudioScreen() {
     studioId: string,
     currentDate: string,
     bookingStart: string,
-    bookingEnd: string
+    bookingEnd: string,
   ): Promise<{ date: string; start_time: string; end_time: string } | null> => {
     const bookingDuration = (() => {
-      const [sH, sM] = bookingStart.split(':').map(Number);
-      const [eH, eM] = bookingEnd.split(':').map(Number);
-      return (eH * 60 + eM) - (sH * 60 + sM);
+      const [sH, sM] = bookingStart.split(":").map(Number);
+      const [eH, eM] = bookingEnd.split(":").map(Number);
+      return eH * 60 + eM - (sH * 60 + sM);
     })();
 
     // Helper function to convert 12-hour to 24-hour format
     const convertTo24Hour = (time12: string): string => {
-      const [time, modifier] = time12.split(' ');
+      const [time, modifier] = time12.split(" ");
       if (!modifier) return time;
-      let [hours, minutes] = time.split(':');
-      if (hours === '12') hours = '00';
-      if (modifier === 'PM') hours = String(parseInt(hours, 10) + 12);
-      return `${hours.padStart(2, '0')}:${minutes}`;
+      let [hours, minutes] = time.split(":");
+      if (hours === "12") hours = "00";
+      if (modifier === "PM") hours = String(parseInt(hours, 10) + 12);
+      return `${hours.padStart(2, "0")}:${minutes}`;
     };
 
     const getDayOfWeek = (dateStr: string): string => {
       const date = new Date(dateStr);
-      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const days = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ];
       return days[date.getDay()];
     };
 
@@ -792,25 +1129,28 @@ export default function EditStudioScreen() {
     for (let i = 0; i < 30; i++) {
       const checkDate = new Date(startDate);
       checkDate.setDate(checkDate.getDate() + i);
-      const dateStr = checkDate.toISOString().split('T')[0];
+      const dateStr = checkDate.toISOString().split("T")[0];
 
       // Get available slots for this date
       let availableSlots: { start: string; end: string }[] = [];
 
       // Check date overrides first
-      if (selectedDates[dateStr]?.selected && selectedDates[dateStr]?.slots.length > 0) {
-        availableSlots = selectedDates[dateStr].slots.map(slot => ({
+      if (
+        selectedDates[dateStr]?.selected &&
+        selectedDates[dateStr]?.slots.length > 0
+      ) {
+        availableSlots = selectedDates[dateStr].slots.map((slot) => ({
           start: convertTo24Hour(slot.start),
-          end: convertTo24Hour(slot.end)
+          end: convertTo24Hour(slot.end),
         }));
       } else {
         // Check weekly schedule
         const dayName = getDayOfWeek(dateStr);
-        const daySchedule = availability.find(a => a.day === dayName);
+        const daySchedule = availability.find((a) => a.day === dayName);
         if (daySchedule && daySchedule.slots.length > 0) {
-          availableSlots = daySchedule.slots.map(slot => ({
+          availableSlots = daySchedule.slots.map((slot) => ({
             start: convertTo24Hour(slot.start),
-            end: convertTo24Hour(slot.end)
+            end: convertTo24Hour(slot.end),
           }));
         }
       }
@@ -819,11 +1159,11 @@ export default function EditStudioScreen() {
 
       // Check existing bookings on this date
       const { data: existingOnDate } = await supabase
-        .from('studio_bookings')
-        .select('start_time, end_time')
-        .eq('studio_id', studioId)
-        .eq('booking_date', dateStr)
-        .in('status', ['pending', 'confirmed']);
+        .from("studio_bookings")
+        .select("start_time, end_time")
+        .eq("studio_id", studioId)
+        .eq("booking_date", dateStr)
+        .in("status", ["pending", "confirmed"]);
 
       // Find a slot that can fit the booking
       for (const slot of availableSlots) {
@@ -831,16 +1171,16 @@ export default function EditStudioScreen() {
         const slotEnd = slot.end;
 
         // Calculate slot duration in minutes
-        const [ssH, ssM] = slotStart.split(':').map(Number);
-        const [seH, seM] = slotEnd.split(':').map(Number);
-        const slotDuration = (seH * 60 + seM) - (ssH * 60 + ssM);
+        const [ssH, ssM] = slotStart.split(":").map(Number);
+        const [seH, seM] = slotEnd.split(":").map(Number);
+        const slotDuration = seH * 60 + seM - (ssH * 60 + ssM);
 
         if (slotDuration < bookingDuration) continue;
 
         // Check if there's room considering existing bookings
         const bookedTimes = (existingOnDate || []).map((b: any) => ({
           start: b.start_time.substring(0, 5),
-          end: b.end_time.substring(0, 5)
+          end: b.end_time.substring(0, 5),
         }));
 
         // Try to find a free window within the slot
@@ -848,24 +1188,27 @@ export default function EditStudioScreen() {
         const slotEndMinutes = seH * 60 + seM;
 
         while (currentTime + bookingDuration <= slotEndMinutes) {
-          const proposedStart = `${String(Math.floor(currentTime / 60)).padStart(2, '0')}:${String(currentTime % 60).padStart(2, '0')}`;
-          const proposedEnd = `${String(Math.floor((currentTime + bookingDuration) / 60)).padStart(2, '0')}:${String((currentTime + bookingDuration) % 60).padStart(2, '0')}`;
+          const proposedStart = `${String(Math.floor(currentTime / 60)).padStart(2, "0")}:${String(currentTime % 60).padStart(2, "0")}`;
+          const proposedEnd = `${String(Math.floor((currentTime + bookingDuration) / 60)).padStart(2, "0")}:${String((currentTime + bookingDuration) % 60).padStart(2, "0")}`;
 
           // Check if this time conflicts with existing bookings
           const hasConflict = bookedTimes.some((bt: any) => {
-            const btStart = bt.start.split(':').map(Number);
-            const btEnd = bt.end.split(':').map(Number);
+            const btStart = bt.start.split(":").map(Number);
+            const btEnd = bt.end.split(":").map(Number);
             const btStartMin = btStart[0] * 60 + btStart[1];
             const btEndMin = btEnd[0] * 60 + btEnd[1];
             // Check overlap
-            return !(currentTime + bookingDuration <= btStartMin || currentTime >= btEndMin);
+            return !(
+              currentTime + bookingDuration <= btStartMin ||
+              currentTime >= btEndMin
+            );
           });
 
           if (!hasConflict) {
             return {
               date: dateStr,
               start_time: proposedStart,
-              end_time: proposedEnd
+              end_time: proposedEnd,
             };
           }
 
@@ -879,10 +1222,14 @@ export default function EditStudioScreen() {
   };
 
   // Handle conflict resolution
-  const handleConflictResolution = async (resolutions: ConflictResolution[]) => {
+  const handleConflictResolution = async (
+    resolutions: ConflictResolution[],
+  ) => {
     setSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
         setSaving(false);
         return;
@@ -891,57 +1238,62 @@ export default function EditStudioScreen() {
       const studioId = Array.isArray(id) ? id[0] : id;
 
       for (const resolution of resolutions) {
-        if (resolution.action === 'cancel') {
+        if (resolution.action === "cancel") {
           // Cancel the booking
           const { error } = await supabase
-            .from('studio_bookings')
+            .from("studio_bookings")
             .update({
-              status: 'cancelled',
-              cancellation_reason: 'Studio schedule was updated by owner. Booking no longer fits available times.'
+              status: "cancelled",
+              cancellation_reason:
+                "Studio schedule was updated by owner. Booking no longer fits available times.",
             })
-            .eq('id', resolution.bookingId);
+            .eq("id", resolution.bookingId);
 
           if (error) {
-            console.error('Error cancelling booking:', error);
+            console.error("Error cancelling booking:", error);
             throw error;
           }
 
           // Create notification for the user
-          const conflict = conflictingBookings.find(c => c.id === resolution.bookingId);
+          const conflict = conflictingBookings.find(
+            (c) => c.id === resolution.bookingId,
+          );
           if (conflict) {
-            await supabase.from('notifications').insert({
+            await supabase.from("notifications").insert({
               user_id: conflict.user_id,
-              type: 'warning',
-              title: 'Booking Cancelled',
+              type: "warning",
+              title: "Booking Cancelled",
               message: `Your booking at ${studioName} on ${new Date(conflict.booking_date).toLocaleDateString()} has been cancelled due to schedule changes. You will receive a refund.`,
-              meta: { bookingId: resolution.bookingId, studioId }
+              meta: { bookingId: resolution.bookingId, studioId },
             });
           }
-        } else if (resolution.action === 'move' && resolution.newSlot) {
+        } else if (resolution.action === "move" && resolution.newSlot) {
           // Move the booking to the new slot
           const { error } = await supabase
-            .from('studio_bookings')
+            .from("studio_bookings")
             .update({
               booking_date: resolution.newSlot.date,
               start_time: resolution.newSlot.start_time,
-              end_time: resolution.newSlot.end_time
+              end_time: resolution.newSlot.end_time,
             })
-            .eq('id', resolution.bookingId);
+            .eq("id", resolution.bookingId);
 
           if (error) {
-            console.error('Error moving booking:', error);
+            console.error("Error moving booking:", error);
             throw error;
           }
 
           // Create notification for the user
-          const conflict = conflictingBookings.find(c => c.id === resolution.bookingId);
+          const conflict = conflictingBookings.find(
+            (c) => c.id === resolution.bookingId,
+          );
           if (conflict) {
-            await supabase.from('notifications').insert({
+            await supabase.from("notifications").insert({
               user_id: conflict.user_id,
-              type: 'info',
-              title: 'Booking Rescheduled',
+              type: "info",
+              title: "Booking Rescheduled",
               message: `Your booking at ${studioName} has been moved to ${new Date(resolution.newSlot.date).toLocaleDateString()} at ${resolution.newSlot.start_time} due to schedule changes.`,
-              meta: { bookingId: resolution.bookingId, studioId }
+              meta: { bookingId: resolution.bookingId, studioId },
             });
           }
         }
@@ -954,15 +1306,21 @@ export default function EditStudioScreen() {
       // Now save the studio changes
       await executeSave();
     } catch (e: any) {
-      console.error('Error resolving conflicts:', e);
-      showAlert('error', 'Error', `Failed to resolve conflicts: ${e?.message || 'Unknown error'}`);
+      console.error("Error resolving conflicts:", e);
+      showAlert(
+        "error",
+        "Error",
+        `Failed to resolve conflicts: ${e?.message || "Unknown error"}`,
+      );
       setSaving(false);
     }
   };
 
   const executeSave = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
         setSaving(false);
         return;
@@ -971,20 +1329,20 @@ export default function EditStudioScreen() {
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
       if (!studioId) {
-        showAlert('error', 'Error', 'Invalid studio ID');
+        showAlert("error", "Error", "Invalid studio ID");
         setSaving(false);
         return;
       }
 
       // Helper function to convert 12-hour to 24-hour format
       const convertTo24Hour = (time12: string): string => {
-        const [time, modifier] = time12.split(' ');
+        const [time, modifier] = time12.split(" ");
         if (!modifier) return time; // Already 24h or invalid
-        let [hours, minutes] = time.split(':');
-        if (hours === '12') {
-          hours = '00';
+        let [hours, minutes] = time.split(":");
+        if (hours === "12") {
+          hours = "00";
         }
-        if (modifier === 'PM') {
+        if (modifier === "PM") {
           hours = String(parseInt(hours, 10) + 12);
         }
         return `${hours}:${minutes}`;
@@ -995,26 +1353,30 @@ export default function EditStudioScreen() {
         .filter(([_, data]) => data.selected && data.slots.length > 0)
         .map(([date, data]) => ({
           date,
-          slots: data.slots.map(slot => ({
+          slots: data.slots.map((slot) => ({
             start: convertTo24Hour(slot.start),
-            end: convertTo24Hour(slot.end)
-          }))
+            end: convertTo24Hour(slot.end),
+          })),
         }));
 
-      const equipmentPayload = equipment.map(e => ({
+      const equipmentPayload = equipment.map((e) => ({
         name: e.name,
         quantity: e.quantity,
         description: e.description,
-        image: e.image
+        image: e.image,
       }));
       const presetPayload = selectedInstruments
-        .filter(preset => !equipment.some(e => e.name === preset.name))
-        .map(preset => ({ name: preset.name, image: preset.image }));
+        .filter((preset) => !equipment.some((e) => e.name === preset.name))
+        .map((preset) => ({ name: preset.name, image: preset.image }));
       const instrumentsPayload = [...equipmentPayload, ...presetPayload];
 
-      const orderedImages = selectedImages.length > 0 && selectedImages[thumbnailIndex]
-        ? [selectedImages[thumbnailIndex], ...selectedImages.filter((_, i) => i !== thumbnailIndex)]
-        : selectedImages;
+      const orderedImages =
+        selectedImages.length > 0 && selectedImages[thumbnailIndex]
+          ? [
+              selectedImages[thumbnailIndex],
+              ...selectedImages.filter((_, i) => i !== thumbnailIndex),
+            ]
+          : selectedImages;
 
       const payload = {
         name: studioName,
@@ -1022,7 +1384,10 @@ export default function EditStudioScreen() {
         description,
         address,
         // Dynamic pricing based on studio type
-        hourly_rate: studioType === 'Recording' ? parseFloat(recordingRate) || 0 : parseFloat(rehearsalRate) || 0,
+        hourly_rate:
+          studioType === "Recording"
+            ? parseFloat(recordingRate) || 0
+            : parseFloat(rehearsalRate) || 0,
         rehearsal_rate: parseFloat(rehearsalRate) || 0,
         recording_rate: parseFloat(recordingRate) || 0,
         pax: pax ? parseInt(pax) : null,
@@ -1033,13 +1398,13 @@ export default function EditStudioScreen() {
         images: orderedImages,
         contract_url: contractUrl || null,
         availability: availability
-          .filter(day => day.slots.length > 0)
-          .map(day => ({
+          .filter((day) => day.slots.length > 0)
+          .map((day) => ({
             ...day,
-            slots: day.slots.map(slot => ({
+            slots: day.slots.map((slot) => ({
               start: convertTo24Hour(slot.start),
-              end: convertTo24Hour(slot.end)
-            }))
+              end: convertTo24Hour(slot.end),
+            })),
           })),
         calendar_availability: calendarAvailability,
         // Booking settings - default 24hr advance booking
@@ -1050,94 +1415,140 @@ export default function EditStudioScreen() {
           peak_season_dates: [],
           off_peak_multiplier: 1.0,
           off_peak_dates: [],
-        }
+        },
       };
 
-      console.log(' RAW availability state:', JSON.stringify(availability, null, 2));
-      console.log('📅 FILTERED availability (days with slots):', payload.availability);
-      console.log('📅 Number of days with availability:', payload.availability.length);
-      console.log('🔵 Updating studio with payload:', JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload }, null, 2));
+      console.log(
+        " RAW availability state:",
+        JSON.stringify(availability, null, 2),
+      );
+      console.log(
+        "📅 FILTERED availability (days with slots):",
+        payload.availability,
+      );
+      console.log(
+        "📅 Number of days with availability:",
+        payload.availability.length,
+      );
+      console.log(
+        "🔵 Updating studio with payload:",
+        JSON.stringify(
+          {
+            action: "update",
+            type: "studio",
+            id: studioId,
+            userId: user.id,
+            payload,
+          },
+          null,
+          2,
+        ),
+      );
 
-      const response = await supabase.functions.invoke('manage-listings', {
-        body: { action: 'update', type: 'studio', id: studioId, userId: user.id, payload }
+      const response = await supabase.functions.invoke("manage-listings", {
+        body: {
+          action: "update",
+          type: "studio",
+          id: studioId,
+          userId: user.id,
+          payload,
+        },
       });
 
-      console.log('🔵 Response data:', response.data);
-      console.log('🔵 Response error:', response.error);
+      console.log("🔵 Response data:", response.data);
+      console.log("🔵 Response error:", response.error);
 
       if (response.error) {
-        console.error('❌ Error details:', JSON.stringify(response.error, null, 2));
+        console.error(
+          "❌ Error details:",
+          JSON.stringify(response.error, null, 2),
+        );
 
         // Try to read the actual error message from the response body
-        let errorMessage = 'Unknown error occurred';
+        let errorMessage = "Unknown error occurred";
         let errorDetails = null;
 
         try {
           // Check if there's a response context with body
           if (response.error.context && response.error.context._bodyBlob) {
-            console.log('🔍 Attempting to read error response body...');
+            console.log("🔍 Attempting to read error response body...");
             // Try to read the body as text
             const errorResponse = await fetch(response.error.context.url, {
-              method: 'POST',
+              method: "POST",
               headers: {
-                'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-                'Content-Type': 'application/json'
+                Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+                "Content-Type": "application/json",
               },
-              body: JSON.stringify({ action: 'update', type: 'studio', id: studioId, userId: user.id, payload })
+              body: JSON.stringify({
+                action: "update",
+                type: "studio",
+                id: studioId,
+                userId: user.id,
+                payload,
+              }),
             });
 
             const errorBody = await errorResponse.text();
-            console.log('🔍 Raw error response:', errorBody);
+            console.log("🔍 Raw error response:", errorBody);
 
             try {
               errorDetails = JSON.parse(errorBody);
-              errorMessage = errorDetails.error || errorDetails.message || errorMessage;
-              console.error('❌ Server error message:', errorMessage);
-              console.error('❌ Server error details:', errorDetails.details);
-              console.error('❌ Server error code:', errorDetails.code);
-              console.error('❌ Server error hint:', errorDetails.hint);
+              errorMessage =
+                errorDetails.error || errorDetails.message || errorMessage;
+              console.error("❌ Server error message:", errorMessage);
+              console.error("❌ Server error details:", errorDetails.details);
+              console.error("❌ Server error code:", errorDetails.code);
+              console.error("❌ Server error hint:", errorDetails.hint);
             } catch (parseError) {
               errorMessage = errorBody || errorMessage;
             }
-          } else if (response.data && typeof response.data === 'object') {
-            errorMessage = response.data.error || response.data.message || errorMessage;
-            console.error('❌ Server error message:', errorMessage);
-            console.error('❌ Server error details:', response.data.details);
+          } else if (response.data && typeof response.data === "object") {
+            errorMessage =
+              response.data.error || response.data.message || errorMessage;
+            console.error("❌ Server error message:", errorMessage);
+            console.error("❌ Server error details:", response.data.details);
           } else if (response.error.message) {
             errorMessage = response.error.message;
           }
         } catch (readError) {
-          console.error('❌ Failed to read error body:', readError);
+          console.error("❌ Failed to read error body:", readError);
         }
 
-        console.error('❌ Final error message:', errorMessage);
+        console.error("❌ Final error message:", errorMessage);
         throw new Error(errorMessage);
       }
 
       // Check if data indicates an error
       if (!response.data) {
-        throw new Error('No data returned from server');
+        throw new Error("No data returned from server");
       }
 
-      console.log('✅ Studio Updated successfully');
-      showAlert('success', 'Success', 'Studio updated successfully!', [
+      console.log("✅ Studio Updated successfully");
+      showAlert("success", "Success", "Studio updated successfully!", [
         {
-          text: 'OK',
+          text: "OK",
           onPress: () => {
             if (router.canGoBack()) {
               router.back();
             } else {
-              router.push('/manage_studio');
+              router.push("/manage_studio");
             }
-          }
-        }
+          },
+        },
       ]);
     } catch (e: any) {
-      console.error('❌ Error updating studio:', e);
-      console.error('❌ Error message:', e?.message);
-      console.error('❌ Error stack:', e?.stack);
-      console.error('❌ Full error object:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
-      showAlert('error', 'Error', `Failed to update studio: ${e?.message || 'Unknown error'}`);
+      console.error("❌ Error updating studio:", e);
+      console.error("❌ Error message:", e?.message);
+      console.error("❌ Error stack:", e?.stack);
+      console.error(
+        "❌ Full error object:",
+        JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
+      );
+      showAlert(
+        "error",
+        "Error",
+        `Failed to update studio: ${e?.message || "Unknown error"}`,
+      );
     } finally {
       setSaving(false);
     }
@@ -1148,20 +1559,25 @@ export default function EditStudioScreen() {
       return;
     }
 
-    showAlert('warning', 'Save Changes', 'Are you sure you want to update this studio profile?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Save & Update',
-        style: 'default',
-        onPress: () => performSave()
-      }
-    ]);
+    showAlert(
+      "warning",
+      "Save Changes",
+      "Are you sure you want to update this studio profile?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Save & Update",
+          style: "default",
+          onPress: () => performSave(),
+        },
+      ],
+    );
   };
 
   const addAmenity = () => {
     if (newAmenity.trim()) {
       setAmenities([...amenities, newAmenity.trim()]);
-      setNewAmenity('');
+      setNewAmenity("");
     }
   };
 
@@ -1173,7 +1589,7 @@ export default function EditStudioScreen() {
     try {
       setUploadingContract(true);
 
-      if (Platform.OS === 'web') {
+      if (Platform.OS === "web") {
         if (fileInputRef.current) {
           fileInputRef.current.click();
         }
@@ -1182,9 +1598,9 @@ export default function EditStudioScreen() {
       }
 
       // Dynamic import for native platforms only
-      const DocumentPicker = await import('expo-document-picker');
+      const DocumentPicker = await import("expo-document-picker");
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/pdf',
+        type: "application/pdf",
         copyToCacheDirectory: true,
       });
 
@@ -1197,9 +1613,11 @@ export default function EditStudioScreen() {
       const fileName = file.name;
       const fileUri = file.uri;
 
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
-        showAlert('error', 'Error', 'Session expired. Please log in again.');
+        showAlert("error", "Error", "Session expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -1209,32 +1627,36 @@ export default function EditStudioScreen() {
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
-        .from('documents')
+        .from("documents")
         .upload(filePath, arrayBuffer, {
-          contentType: 'application/pdf',
+          contentType: "application/pdf",
           upsert: false,
         });
 
       if (error) throw error;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
 
       setContractUrl(publicUrl);
       setContractFileName(fileName);
-      showAlert('success', 'Success', 'Contract uploaded successfully!');
+      showAlert("success", "Success", "Contract uploaded successfully!");
     } catch (error) {
-      console.error('Error uploading contract:', error);
-      showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
+      console.error("Error uploading contract:", error);
+      showAlert(
+        "error",
+        "Error",
+        "Failed to upload contract. Please try again.",
+      );
     } finally {
       setUploadingContract(false);
     }
   };
 
   const removeContract = () => {
-    setContractUrl('');
-    setContractFileName('');
+    setContractUrl("");
+    setContractFileName("");
   };
 
   // Equipment image upload state
@@ -1243,43 +1665,51 @@ export default function EditStudioScreen() {
   // Pick and upload equipment image
   const pickEquipmentImage = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
-        showAlert('error', 'Error', 'Session expired. Please log in again.');
+        showAlert("error", "Error", "Session expired. Please log in again.");
         return;
       }
 
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
-        showAlert('error', 'Permission Needed', 'Please allow access to your photos.');
+        showAlert(
+          "error",
+          "Permission Needed",
+          "Please allow access to your photos.",
+        );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images',
+        mediaTypes: "images",
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
       });
 
-      if (result.canceled || !result.assets || result.assets.length === 0) return;
+      if (result.canceled || !result.assets || result.assets.length === 0)
+        return;
 
       setUploadingEquipmentImage(true);
       const asset = result.assets[0];
-      const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
       const response = await fetch(asset.uri);
       if (!response.ok) {
-        throw new Error('Failed to fetch image');
+        throw new Error("Failed to fetch image");
       }
 
       const arrayBuffer = await response.arrayBuffer();
       const { data, error } = await supabase.storage
-        .from('listings')
+        .from("listings")
         .upload(fileName, arrayBuffer, {
           contentType: `image/${fileExt}`,
-          upsert: false
+          upsert: false,
         });
 
       if (error) {
@@ -1287,13 +1717,13 @@ export default function EditStudioScreen() {
       }
 
       const { data: urlData } = supabase.storage
-        .from('listings')
+        .from("listings")
         .getPublicUrl(data.path);
 
       setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
     } catch (error) {
-      console.error('Error uploading equipment image:', error);
-      showAlert('error', 'Error', 'Failed to upload image. Please try again.');
+      console.error("Error uploading equipment image:", error);
+      showAlert("error", "Error", "Failed to upload image. Please try again.");
     } finally {
       setUploadingEquipmentImage(false);
     }
@@ -1307,37 +1737,43 @@ export default function EditStudioScreen() {
       setUploadingContract(true);
       const fileName = file.name;
 
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
-        showAlert('error', 'Error', 'Session expired. Please log in again.');
+        showAlert("error", "Error", "Session expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
-        .from('documents')
+        .from("documents")
         .upload(filePath, file, {
-          contentType: 'application/pdf',
+          contentType: "application/pdf",
           upsert: false,
         });
 
       if (error) throw error;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
 
       setContractUrl(publicUrl);
       setContractFileName(fileName);
-      showAlert('success', 'Success', 'Contract uploaded successfully!');
+      showAlert("success", "Success", "Contract uploaded successfully!");
     } catch (error) {
-      console.error('Error uploading contract:', error);
-      showAlert('error', 'Error', 'Failed to upload contract. Please try again.');
+      console.error("Error uploading contract:", error);
+      showAlert(
+        "error",
+        "Error",
+        "Failed to upload contract. Please try again.",
+      );
     } finally {
       setUploadingContract(false);
       if (event.target) {
-        event.target.value = '';
+        event.target.value = "";
       }
     }
   };
@@ -1349,24 +1785,40 @@ export default function EditStudioScreen() {
     </View>
   );
 
-  const renderInput = (label: string, value: string, setValue: (text: string) => void, multiline = false, numeric = false) => (
+  const renderInput = (
+    label: string,
+    value: string,
+    setValue: (text: string) => void,
+    multiline = false,
+    numeric = false,
+  ) => (
     <View style={styles.inputContainer}>
-      <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{label}</Text>
-      <View style={[styles.inputWrapper, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
+      <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+        {label}
+      </Text>
+      <View
+        style={[
+          styles.inputWrapper,
+          {
+            borderColor: isDark ? "#374151" : "#E5E7EB",
+            backgroundColor: colors.inputBackground,
+          },
+        ]}
+      >
         <TextInput
           value={value}
           onChangeText={setValue}
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
-          keyboardType={numeric ? 'numeric' : 'default'}
+          keyboardType={numeric ? "numeric" : "default"}
           style={[
             styles.input,
             {
-              fontFamily: 'Poppins_400Regular',
+              fontFamily: "Poppins_400Regular",
               color: colors.text,
-              height: multiline ? 120 : 'auto',
-              textAlignVertical: multiline ? 'top' : 'center'
-            }
+              height: multiline ? 120 : "auto",
+              textAlignVertical: multiline ? "top" : "center",
+            },
           ]}
         />
       </View>
@@ -1376,9 +1828,21 @@ export default function EditStudioScreen() {
   // Show loading while checking authorization
   if (checkingAuth) {
     return (
-      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+      <View
+        style={[
+          styles.flex1,
+          styles.centerContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+        <Text
+          style={{
+            marginTop: 16,
+            color: colors.textSecondary,
+            fontFamily: "Poppins_400Regular",
+          }}
+        >
           Checking permissions...
         </Text>
       </View>
@@ -1393,9 +1857,21 @@ export default function EditStudioScreen() {
   // Show loading while fetching data
   if (loading) {
     return (
-      <View style={[styles.flex1, styles.centerContainer, { backgroundColor: colors.background }]}>
+      <View
+        style={[
+          styles.flex1,
+          styles.centerContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: 16, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+        <Text
+          style={{
+            marginTop: 16,
+            color: colors.textSecondary,
+            fontFamily: "Poppins_400Regular",
+          }}
+        >
           Loading studio details...
         </Text>
       </View>
@@ -1404,28 +1880,33 @@ export default function EditStudioScreen() {
 
   return (
     <>
-      {Platform.OS === 'web' && (
+      {Platform.OS === "web" && (
         <input
           ref={fileInputRef as any}
           type="file"
           accept="application/pdf"
           onChange={handleWebFileSelect}
-          style={{ display: 'none' }}
+          style={{ display: "none" }}
         />
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Studio" />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} style={styles.flex1}>
-
-          {renderSectionHeader('Studio Details', 'business')}
-          {renderInput('Studio Name', studioName, setStudioName)}
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          style={styles.flex1}
+        >
+          {renderSectionHeader("Studio Details", "business")}
+          {renderInput("Studio Name", studioName, setStudioName)}
 
           {/* Studio Type Selection */}
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Studio Type</Text>
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              {(['Rehearsal', 'Recording', 'Both'] as const).map((type) => (
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Studio Type
+            </Text>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              {(["Rehearsal", "Recording", "Both"] as const).map((type) => (
                 <TouchableOpacity
                   key={type}
                   onPress={() => setStudioType(type)}
@@ -1433,41 +1914,67 @@ export default function EditStudioScreen() {
                     flex: 1,
                     paddingVertical: 12,
                     borderRadius: 12,
-                    backgroundColor: studioType === type ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    backgroundColor:
+                      studioType === type
+                        ? colors.primary
+                        : isDark
+                          ? "#374151"
+                          : "#F3F4F6",
+                    alignItems: "center",
+                    justifyContent: "center",
                     borderWidth: 1,
-                    borderColor: studioType === type ? colors.primary : 'transparent'
+                    borderColor:
+                      studioType === type ? colors.primary : "transparent",
                   }}
                 >
-                  <Text style={{
-                    color: studioType === type ? '#FFF' : colors.textSecondary,
-                    fontFamily: 'Poppins_600SemiBold',
-                    fontSize: type === 'Both' ? 14 : 12
-                  }}>
-                    {type === 'Both' ? 'Both' : type}
+                  <Text
+                    style={{
+                      color:
+                        studioType === type ? "#FFF" : colors.textSecondary,
+                      fontFamily: "Poppins_600SemiBold",
+                      fontSize: type === "Both" ? 14 : 12,
+                    }}
+                  >
+                    {type === "Both" ? "Both" : type}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
 
-          {renderInput('Description', description, setDescription, true)}
+          {renderInput("Description", description, setDescription, true)}
 
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Location</Text>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Location
+            </Text>
             <TouchableOpacity
               onPress={() => setLocationPickerVisible(true)}
-              style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', padding: 16 }]}
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  padding: 16,
+                },
+              ]}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
-                <Text style={{
-                  flex: 1,
-                  color: address ? colors.text : colors.textSecondary,
-                  fontFamily: 'Poppins_400Regular'
-                }}>
-                  {address || 'Tap to select location on map'}
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Ionicons
+                  name="location-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <Text
+                  style={{
+                    flex: 1,
+                    color: address ? colors.text : colors.textSecondary,
+                    fontFamily: "Poppins_400Regular",
+                  }}
+                >
+                  {address || "Tap to select location on map"}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -1475,20 +1982,62 @@ export default function EditStudioScreen() {
 
           {/* Dynamic Pricing Section */}
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Pricing</Text>
-            <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
-              Set hourly rates for each studio type
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Pricing
+            </Text>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
+            >
+              Set rates for each studio type
             </Text>
 
             {/* Rehearsal Rate */}
-            {(studioType === 'Rehearsal' || studioType === 'Both') && (
+            {(studioType === "Rehearsal" || studioType === "Both") && (
               <View style={{ marginBottom: 12 }}>
-                <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                    <Ionicons name="musical-notes" size={20} color={colors.primary} />
-                    <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium', minWidth: 80 }}>Rehearsal</Text>
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: isDark ? "#374151" : "#E5E7EB",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingHorizontal: 16,
+                    },
+                  ]}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      flex: 1,
+                    }}
+                  >
+                    <Ionicons
+                      name="musical-notes"
+                      size={20}
+                      color={colors.primary}
+                    />
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontFamily: "Poppins_500Medium",
+                        minWidth: 80,
+                      }}
+                    >
+                      Rehearsal
+                    </Text>
                   </View>
-                  <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', marginRight: 4 }}>₱</Text>
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontFamily: "Poppins_600SemiBold",
+                      marginRight: 4,
+                    }}
+                  >
+                    ₱
+                  </Text>
                   <TextInput
                     value={rehearsalRate}
                     onChangeText={setRehearsalRate}
@@ -1497,27 +2046,69 @@ export default function EditStudioScreen() {
                     keyboardType="numeric"
                     style={{
                       color: colors.text,
-                      fontFamily: 'Poppins_600SemiBold',
+                      fontFamily: "Poppins_600SemiBold",
                       fontSize: 16,
                       minWidth: 80,
-                      textAlign: 'right',
-                      paddingVertical: 16
+                      textAlign: "right",
+                      paddingVertical: 16,
                     }}
                   />
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', marginLeft: 4 }}>/hr</Text>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      marginLeft: 4,
+                    }}
+                  >
+                    /hr
+                  </Text>
                 </View>
               </View>
             )}
 
             {/* Recording Rate */}
-            {(studioType === 'Recording' || studioType === 'Both') && (
+            {(studioType === "Recording" || studioType === "Both") && (
               <View>
-                <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: isDark ? "#374151" : "#E5E7EB",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingHorizontal: 16,
+                    },
+                  ]}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      flex: 1,
+                    }}
+                  >
                     <Ionicons name="mic" size={20} color="#EF4444" />
-                    <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium', minWidth: 80 }}>Recording</Text>
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontFamily: "Poppins_500Medium",
+                        minWidth: 80,
+                      }}
+                    >
+                      Recording
+                    </Text>
                   </View>
-                  <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold', marginRight: 4 }}>₱</Text>
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontFamily: "Poppins_600SemiBold",
+                      marginRight: 4,
+                    }}
+                  >
+                    ₱
+                  </Text>
                   <TextInput
                     value={recordingRate}
                     onChangeText={setRecordingRate}
@@ -1526,14 +2117,22 @@ export default function EditStudioScreen() {
                     keyboardType="numeric"
                     style={{
                       color: colors.text,
-                      fontFamily: 'Poppins_600SemiBold',
+                      fontFamily: "Poppins_600SemiBold",
                       fontSize: 16,
                       minWidth: 80,
-                      textAlign: 'right',
-                      paddingVertical: 16
+                      textAlign: "right",
+                      paddingVertical: 16,
                     }}
                   />
-                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', marginLeft: 4 }}>/hr</Text>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      marginLeft: 4,
+                    }}
+                  >
+                    /song
+                  </Text>
                 </View>
               </View>
             )}
@@ -1541,12 +2140,32 @@ export default function EditStudioScreen() {
 
           {/* Pax / Capacity */}
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Studio Capacity (Pax)</Text>
-            <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Studio Capacity (Pax)
+            </Text>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
+            >
               Maximum number of people the studio can accommodate
             </Text>
-            <View style={[styles.inputWrapper, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 }]}>
-              <Ionicons name="people" size={20} color={colors.primary} style={{ marginRight: 12 }} />
+            <View
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingHorizontal: 16,
+                },
+              ]}
+            >
+              <Ionicons
+                name="people"
+                size={20}
+                color={colors.primary}
+                style={{ marginRight: 12 }}
+              />
               <TextInput
                 value={pax}
                 onChangeText={setPax}
@@ -1556,37 +2175,77 @@ export default function EditStudioScreen() {
                 style={{
                   flex: 1,
                   color: colors.text,
-                  fontFamily: 'Poppins_500Medium',
+                  fontFamily: "Poppins_500Medium",
                   fontSize: 16,
-                  paddingVertical: 16
+                  paddingVertical: 16,
                 }}
               />
-              <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>persons</Text>
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontFamily: "Poppins_400Regular",
+                }}
+              >
+                persons
+              </Text>
             </View>
           </View>
 
           {/* Contract Upload */}
-          {renderSectionHeader('Contract', 'document-text')}
+          {renderSectionHeader("Contract", "document-text")}
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
+            >
               Upload a PDF contract that musicians will see before booking
             </Text>
             {contractUrl ? (
-              <View style={[styles.contractPreview, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', borderColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-                  <View style={[styles.pdfIcon, { backgroundColor: colors.primary }]}>
+              <View
+                style={[
+                  styles.contractPreview,
+                  {
+                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                    flex: 1,
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.pdfIcon,
+                      { backgroundColor: colors.primary },
+                    ]}
+                  >
                     <Ionicons name="document-text" size={24} color="#fff" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.contractFileName, { color: colors.text }]} numberOfLines={1}>
+                    <Text
+                      style={[styles.contractFileName, { color: colors.text }]}
+                      numberOfLines={1}
+                    >
                       {contractFileName}
                     </Text>
-                    <Text style={[styles.contractFileSize, { color: colors.textSecondary }]}>
+                    <Text
+                      style={[
+                        styles.contractFileSize,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
                       PDF Document
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity onPress={removeContract} style={styles.removeContractBtn}>
+                <TouchableOpacity
+                  onPress={removeContract}
+                  style={styles.removeContractBtn}
+                >
                   <Ionicons name="trash-outline" size={20} color="#EF4444" />
                 </TouchableOpacity>
               </View>
@@ -1595,17 +2254,32 @@ export default function EditStudioScreen() {
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
                 activeOpacity={0.8}
-                style={[styles.uploadContractBtn, { backgroundColor: colors.inputBackground, borderColor: isDark ? '#374151' : '#E5E7EB' }]}
+                style={[
+                  styles.uploadContractBtn,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
               >
                 {uploadingContract ? (
                   <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
                   <>
-                    <Ionicons name="cloud-upload-outline" size={32} color={colors.textSecondary} />
+                    <Ionicons
+                      name="cloud-upload-outline"
+                      size={32}
+                      color={colors.textSecondary}
+                    />
                     <Text style={[styles.uploadText, { color: colors.text }]}>
                       Upload Contract (PDF)
                     </Text>
-                    <Text style={[styles.uploadSubText, { color: colors.textSecondary }]}>
+                    <Text
+                      style={[
+                        styles.uploadSubText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
                       Tap to browse files
                     </Text>
                   </>
@@ -1614,20 +2288,34 @@ export default function EditStudioScreen() {
             )}
           </View>
 
-          {renderSectionHeader('Facilities & Equipment', 'mic')}
+          {renderSectionHeader("Facilities & Equipment", "mic")}
           <View style={styles.addAmenityContainer}>
-            <View style={[styles.addAmenityInput, { borderColor: isDark ? '#374151' : '#E5E7EB', backgroundColor: colors.inputBackground }]}>
+            <View
+              style={[
+                styles.addAmenityInput,
+                {
+                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  backgroundColor: colors.inputBackground,
+                },
+              ]}
+            >
               <TextInput
                 value={newAmenity}
                 onChangeText={setNewAmenity}
                 placeholder="e.g. Drum Kit"
                 placeholderTextColor={colors.textSecondary}
-                style={[styles.input, { fontFamily: 'Poppins_400Regular', color: colors.text }]}
+                style={[
+                  styles.input,
+                  { fontFamily: "Poppins_400Regular", color: colors.text },
+                ]}
               />
             </View>
             <TouchableOpacity
               onPress={addAmenity}
-              style={[styles.addAmenityButton, { backgroundColor: colors.primary }]}
+              style={[
+                styles.addAmenityButton,
+                { backgroundColor: colors.primary },
+              ]}
             >
               <Ionicons name="add" size={24} color="#fff" />
             </TouchableOpacity>
@@ -1635,18 +2323,35 @@ export default function EditStudioScreen() {
 
           <View style={styles.amenitiesList}>
             {amenities.map((item, index) => (
-              <View key={index} style={[styles.amenityItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Text style={[styles.amenityText, { color: colors.text }]}>{item}</Text>
+              <View
+                key={index}
+                style={[
+                  styles.amenityItem,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.amenityText, { color: colors.text }]}>
+                  {item}
+                </Text>
                 <TouchableOpacity onPress={() => removeAmenity(index)}>
-                  <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                  <Ionicons
+                    name="close-circle"
+                    size={16}
+                    color={colors.textSecondary}
+                  />
                 </TouchableOpacity>
               </View>
             ))}
           </View>
 
           {/* Studio Equipment Section */}
-          {renderSectionHeader('Studio Equipment', 'cube-outline')}
-          <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 12 }]}>
+          {renderSectionHeader("Studio Equipment", "cube-outline")}
+          <Text
+            style={[
+              styles.subtitle,
+              { color: colors.textSecondary, marginBottom: 12 },
+            ]}
+          >
             Add equipment available at your studio with details
           </Text>
 
@@ -1654,13 +2359,30 @@ export default function EditStudioScreen() {
           <TouchableOpacity
             onPress={() => {
               setEditingEquipment(null);
-              setEquipmentForm({ name: '', quantity: '1', description: '', image: '' });
+              setEquipmentForm({
+                name: "",
+                quantity: "1",
+                description: "",
+                image: "",
+              });
               setShowEquipmentModal(true);
             }}
-            style={[styles.addEquipmentBtn, { backgroundColor: isDark ? '#1F2937' : '#F3F4F6', borderColor: colors.primary }]}
+            style={[
+              styles.addEquipmentBtn,
+              {
+                backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                borderColor: colors.primary,
+              },
+            ]}
           >
             <Ionicons name="add-circle" size={24} color={colors.primary} />
-            <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', marginLeft: 8 }}>
+            <Text
+              style={{
+                color: colors.primary,
+                fontFamily: "Poppins_600SemiBold",
+                marginLeft: 8,
+              }}
+            >
               Add Equipment
             </Text>
           </TouchableOpacity>
@@ -1669,27 +2391,70 @@ export default function EditStudioScreen() {
           {equipment.length > 0 && (
             <View style={{ marginTop: 16 }}>
               {equipment.map((item) => (
-                <View key={item.id} style={[styles.equipmentCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border }]}>
-                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                <View
+                  key={item.id}
+                  style={[
+                    styles.equipmentCard,
+                    {
+                      backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={{ flexDirection: "row", gap: 12 }}>
                     {item.image ? (
-                      <Image source={{ uri: item.image }} style={styles.equipmentImage} />
+                      <Image
+                        source={{ uri: item.image }}
+                        style={styles.equipmentImage}
+                      />
                     ) : (
-                      <View style={[styles.equipmentImage, { backgroundColor: isDark ? '#374151' : '#E5E7EB', alignItems: 'center', justifyContent: 'center' }]}>
-                        <Ionicons name="cube-outline" size={24} color={colors.textSecondary} />
+                      <View
+                        style={[
+                          styles.equipmentImage,
+                          {
+                            backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="cube-outline"
+                          size={24}
+                          color={colors.textSecondary}
+                        />
                       </View>
                     )}
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.equipmentName, { color: colors.text }]}>{item.name}</Text>
-                      <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular' }}>
+                      <Text
+                        style={[styles.equipmentName, { color: colors.text }]}
+                      >
+                        {item.name}
+                      </Text>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 12,
+                          fontFamily: "Poppins_400Regular",
+                        }}
+                      >
                         Qty: {item.quantity}
                       </Text>
                       {item.description && (
-                        <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 4 }} numberOfLines={2}>
+                        <Text
+                          style={{
+                            color: colors.textSecondary,
+                            fontSize: 11,
+                            fontFamily: "Poppins_400Regular",
+                            marginTop: 4,
+                          }}
+                          numberOfLines={2}
+                        >
                           {item.description}
                         </Text>
                       )}
                     </View>
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flexDirection: "row", gap: 8 }}>
                       <TouchableOpacity
                         onPress={() => {
                           setEditingEquipment(item);
@@ -1697,17 +2462,29 @@ export default function EditStudioScreen() {
                             name: item.name,
                             quantity: item.quantity.toString(),
                             description: item.description,
-                            image: item.image
+                            image: item.image,
                           });
                           setShowEquipmentModal(true);
                         }}
                       >
-                        <Ionicons name="pencil" size={18} color={colors.primary} />
+                        <Ionicons
+                          name="pencil"
+                          size={18}
+                          color={colors.primary}
+                        />
                       </TouchableOpacity>
                       <TouchableOpacity
-                        onPress={() => setEquipment(equipment.filter(e => e.id !== item.id))}
+                        onPress={() =>
+                          setEquipment(
+                            equipment.filter((e) => e.id !== item.id),
+                          )
+                        }
                       >
-                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                        <Ionicons
+                          name="trash-outline"
+                          size={18}
+                          color="#EF4444"
+                        />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -1717,19 +2494,29 @@ export default function EditStudioScreen() {
           )}
 
           {equipment.length > 0 && (
-            <Text style={[styles.selectedCount, { color: colors.textSecondary }]}>
-              {equipment.length} equipment item{equipment.length !== 1 ? 's' : ''} added
+            <Text
+              style={[styles.selectedCount, { color: colors.textSecondary }]}
+            >
+              {equipment.length} equipment item
+              {equipment.length !== 1 ? "s" : ""} added
             </Text>
           )}
 
           {/* Quick Add from Presets */}
-          <Text style={[styles.subtitle, { color: colors.textSecondary, marginTop: 24, marginBottom: 12 }]}>
+          <Text
+            style={[
+              styles.subtitle,
+              { color: colors.textSecondary, marginTop: 24, marginBottom: 12 },
+            ]}
+          >
             Or quickly select from common equipment
           </Text>
 
           <View style={styles.instrumentsGrid}>
             {INSTRUMENT_OPTIONS.map((instrument) => {
-              const isSelected = selectedInstruments.some(i => i.name === instrument.name);
+              const isSelected = selectedInstruments.some(
+                (i) => i.name === instrument.name,
+              );
               return (
                 <TouchableOpacity
                   key={instrument.name}
@@ -1737,20 +2524,36 @@ export default function EditStudioScreen() {
                   style={[
                     styles.instrumentCard,
                     {
-                      backgroundColor: isSelected ? colors.primary + '20' : (isDark ? '#1F2937' : '#F9FAFB'),
-                      borderColor: isSelected ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
-                    }
+                      backgroundColor: isSelected
+                        ? colors.primary + "20"
+                        : isDark
+                          ? "#1F2937"
+                          : "#F9FAFB",
+                      borderColor: isSelected
+                        ? colors.primary
+                        : isDark
+                          ? "#374151"
+                          : "#E5E7EB",
+                    },
                   ]}
                 >
                   <Image
                     source={{ uri: instrument.image }}
                     style={styles.instrumentImage}
                   />
-                  <Text style={[styles.instrumentName, { color: colors.text }]} numberOfLines={1}>
+                  <Text
+                    style={[styles.instrumentName, { color: colors.text }]}
+                    numberOfLines={1}
+                  >
                     {instrument.name}
                   </Text>
                   {isSelected && (
-                    <View style={[styles.instrumentCheckmark, { backgroundColor: colors.primary }]}>
+                    <View
+                      style={[
+                        styles.instrumentCheckmark,
+                        { backgroundColor: colors.primary },
+                      ]}
+                    >
                       <Ionicons name="checkmark" size={12} color="#fff" />
                     </View>
                   )}
@@ -1759,45 +2562,80 @@ export default function EditStudioScreen() {
             })}
           </View>
           {selectedInstruments.length > 0 && (
-            <Text style={[styles.selectedCount, { color: colors.textSecondary }]}>
-              {selectedInstruments.length} preset{selectedInstruments.length !== 1 ? 's' : ''} selected
+            <Text
+              style={[styles.selectedCount, { color: colors.textSecondary }]}
+            >
+              {selectedInstruments.length} preset
+              {selectedInstruments.length !== 1 ? "s" : ""} selected
             </Text>
           )}
 
-          {renderSectionHeader('Availability', 'time')}
-          <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 16 }]}>
+          {renderSectionHeader("Availability", "time")}
+          <Text
+            style={[
+              styles.subtitle,
+              { color: colors.textSecondary, marginBottom: 16 },
+            ]}
+          >
             Set your regular weekly schedule and/or select specific dates
           </Text>
 
           {/* Calendar Date Selection */}
           <View style={{ marginBottom: 24 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 12,
+              }}
+            >
               <Ionicons name="calendar" size={16} color={colors.primary} />
-              <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Specific Dates</Text>
+              <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
+                Specific Dates
+              </Text>
             </View>
-            <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginBottom: 12 }}>
+            <Text
+              style={{
+                color: colors.textSecondary,
+                fontSize: 12,
+                fontFamily: "Poppins_400Regular",
+                marginBottom: 12,
+              }}
+            >
               Tap on dates to set special hours or override weekly schedule
             </Text>
 
-            <View style={[styles.calendarContainer, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: colors.border }]}>
+            <View
+              style={[
+                styles.calendarContainer,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <Calendar
-                current={new Date().toISOString().split('T')[0]}
-                minDate={new Date().toISOString().split('T')[0]}
+                current={new Date().toISOString().split("T")[0]}
+                minDate={new Date().toISOString().split("T")[0]}
                 maxDate={(() => {
                   const maxDate = new Date();
                   maxDate.setDate(maxDate.getDate() + 90);
-                  return maxDate.toISOString().split('T')[0];
+                  return maxDate.toISOString().split("T")[0];
                 })()}
-                markedDates={Object.entries(selectedDates).reduce((acc, [dateStr, data]) => {
-                  if (data.selected) {
-                    acc[dateStr] = {
-                      selected: true,
-                      selectedColor: colors.primary,
-                      selectedTextColor: '#FFFFFF'
-                    };
-                  }
-                  return acc;
-                }, {} as Record<string, any>)}
+                markedDates={Object.entries(selectedDates).reduce(
+                  (acc, [dateStr, data]) => {
+                    if (data.selected) {
+                      acc[dateStr] = {
+                        selected: true,
+                        selectedColor: colors.primary,
+                        selectedTextColor: "#FFFFFF",
+                      };
+                    }
+                    return acc;
+                  },
+                  {} as Record<string, any>,
+                )}
                 onDayPress={(day) => {
                   const dateStr = day.dateString;
                   const newDates = { ...selectedDates };
@@ -1806,147 +2644,333 @@ export default function EditStudioScreen() {
                   } else {
                     newDates[dateStr] = {
                       selected: true,
-                      slots: [{ start: '09:00 AM', end: '05:00 PM' }]
+                      slots: [{ start: "09:00 AM", end: "05:00 PM" }],
                     };
                   }
                   setSelectedDates(newDates);
                 }}
                 theme={{
-                  backgroundColor: 'transparent',
-                  calendarBackground: 'transparent',
+                  backgroundColor: "transparent",
+                  calendarBackground: "transparent",
                   textSectionTitleColor: colors.textSecondary,
                   selectedDayBackgroundColor: colors.primary,
-                  selectedDayTextColor: '#FFFFFF',
+                  selectedDayTextColor: "#FFFFFF",
                   todayTextColor: colors.primary,
                   dayTextColor: colors.text,
-                  textDisabledColor: isDark ? '#4B5563' : '#D1D5DB',
+                  textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
                   dotColor: colors.primary,
-                  selectedDotColor: '#FFFFFF',
+                  selectedDotColor: "#FFFFFF",
                   arrowColor: colors.primary,
                   monthTextColor: colors.text,
                   indicatorColor: colors.primary,
-                  textDayFontFamily: 'Poppins_500Medium',
-                  textMonthFontFamily: 'Poppins_600SemiBold',
-                  textDayHeaderFontFamily: 'Poppins_500Medium',
+                  textDayFontFamily: "Poppins_500Medium",
+                  textMonthFontFamily: "Poppins_600SemiBold",
+                  textDayHeaderFontFamily: "Poppins_500Medium",
                   textDayFontSize: 14,
                   textMonthFontSize: 16,
-                  textDayHeaderFontSize: 12
+                  textDayHeaderFontSize: 12,
                 }}
               />
-              {Object.keys(selectedDates).filter(d => selectedDates[d]?.selected).length > 0 && (
-                <View style={{ paddingHorizontal: 12, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
-                  <Text style={{ color: colors.text, fontFamily: 'Poppins_500Medium', fontSize: 13 }}>
-                    {Object.keys(selectedDates).filter(d => selectedDates[d]?.selected).length} date(s) selected
+              {Object.keys(selectedDates).filter(
+                (d) => selectedDates[d]?.selected,
+              ).length > 0 && (
+                <View
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingBottom: 12,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color={colors.primary}
+                  />
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontFamily: "Poppins_500Medium",
+                      fontSize: 13,
+                    }}
+                  >
+                    {
+                      Object.keys(selectedDates).filter(
+                        (d) => selectedDates[d]?.selected,
+                      ).length
+                    }{" "}
+                    date(s) selected
                   </Text>
                 </View>
               )}
             </View>
 
             {/* Selected Dates with Time Slots */}
-            {Object.entries(selectedDates).filter(([_, data]) => data.selected).length > 0 && (
+            {Object.entries(selectedDates).filter(([_, data]) => data.selected)
+              .length > 0 && (
               <View style={{ marginTop: 16 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_600SemiBold",
+                    marginBottom: 8,
+                  }}
+                >
                   SELECTED DATES (OVERRIDES WEEKLY SCHEDULE)
                 </Text>
                 {Object.entries(selectedDates)
                   .filter(([_, data]) => data.selected)
                   .sort(([a], [b]) => a.localeCompare(b))
                   .map(([dateStr, data]) => {
-                    const date = new Date(dateStr + 'T00:00:00');
-                    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
-                    const weeklySchedule = availability.find(a => a.day === dayName);
-                    const hasConflict = weeklySchedule && weeklySchedule.slots.length > 0;
+                    const date = new Date(dateStr + "T00:00:00");
+                    const dayName = date.toLocaleDateString("en-US", {
+                      weekday: "long",
+                    });
+                    const weeklySchedule = availability.find(
+                      (a) => a.day === dayName,
+                    );
+                    const hasConflict =
+                      weeklySchedule && weeklySchedule.slots.length > 0;
 
                     const toggleAmPm = (timeStr: string) => {
-                      const [time, period] = timeStr.split(' ');
-                      return `${time} ${period === 'AM' ? 'PM' : 'AM'}`;
+                      const [time, period] = timeStr.split(" ");
+                      return `${time} ${period === "AM" ? "PM" : "AM"}`;
                     };
 
                     return (
-                      <View key={dateStr} style={[styles.selectedDateCard, { backgroundColor: isDark ? '#374151' : '#FFF', borderColor: hasConflict ? '#F59E0B' : colors.border }]}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            <Text style={{ color: colors.text, fontFamily: 'Poppins_600SemiBold' }}>
-                              {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      <View
+                        key={dateStr}
+                        style={[
+                          styles.selectedDateCard,
+                          {
+                            backgroundColor: isDark ? "#374151" : "#FFF",
+                            borderColor: hasConflict
+                              ? "#F59E0B"
+                              : colors.border,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
+                        >
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: colors.text,
+                                fontFamily: "Poppins_600SemiBold",
+                              }}
+                            >
+                              {date.toLocaleDateString("en-US", {
+                                weekday: "short",
+                                month: "short",
+                                day: "numeric",
+                              })}
                             </Text>
                             {hasConflict && (
-                              <View style={{ backgroundColor: '#F59E0B20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                                <Text style={{ color: '#F59E0B', fontSize: 10, fontFamily: 'Poppins_500Medium' }}>Override</Text>
+                              <View
+                                style={{
+                                  backgroundColor: "#F59E0B20",
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    color: "#F59E0B",
+                                    fontSize: 10,
+                                    fontFamily: "Poppins_500Medium",
+                                  }}
+                                >
+                                  Override
+                                </Text>
                               </View>
                             )}
                           </View>
-                          <TouchableOpacity onPress={() => {
-                            const newDates = { ...selectedDates };
-                            delete newDates[dateStr];
-                            setSelectedDates(newDates);
-                          }}>
-                            <Ionicons name="close-circle" size={20} color="#EF4444" />
+                          <TouchableOpacity
+                            onPress={() => {
+                              const newDates = { ...selectedDates };
+                              delete newDates[dateStr];
+                              setSelectedDates(newDates);
+                            }}
+                          >
+                            <Ionicons
+                              name="close-circle"
+                              size={20}
+                              color="#EF4444"
+                            />
                           </TouchableOpacity>
                         </View>
 
                         {/* Editable Time Slots for Specific Date */}
                         {data.slots.map((slot, slotIndex) => (
-                          <View key={slotIndex} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}>
+                          <View
+                            key={slotIndex}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 8,
+                              marginTop: 12,
+                            }}
+                          >
                             <View style={{ flex: 1 }}>
-                              <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>START</Text>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <Text
+                                style={{
+                                  color: colors.textSecondary,
+                                  fontSize: 11,
+                                  marginBottom: 4,
+                                  fontFamily: "Poppins_600SemiBold",
+                                }}
+                              >
+                                START
+                              </Text>
+                              <View
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  gap: 4,
+                                }}
+                              >
                                 <TextInput
-                                  value={slot.start.split(' ')[0]}
+                                  value={slot.start.split(" ")[0]}
                                   onChangeText={(text) => {
                                     const formatted = formatTimeInput(text);
                                     const newDates = { ...selectedDates };
-                                    const period = slot.start.split(' ')[1] || 'AM';
-                                    newDates[dateStr].slots[slotIndex].start = `${formatted} ${period}`;
+                                    const period =
+                                      slot.start.split(" ")[1] || "AM";
+                                    newDates[dateStr].slots[slotIndex].start =
+                                      `${formatted} ${period}`;
                                     setSelectedDates(newDates);
                                   }}
                                   placeholder="09:00"
                                   keyboardType="numeric"
                                   maxLength={5}
-                                  style={[styles.timeInput, { backgroundColor: isDark ? '#1F2937' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                                  style={[
+                                    styles.timeInput,
+                                    {
+                                      backgroundColor: isDark
+                                        ? "#1F2937"
+                                        : "white",
+                                      borderColor: colors.border,
+                                      color: colors.text,
+                                      flex: 1,
+                                    },
+                                  ]}
                                 />
                                 <TouchableOpacity
                                   onPress={() => {
                                     const newDates = { ...selectedDates };
-                                    newDates[dateStr].slots[slotIndex].start = toggleAmPm(slot.start);
+                                    newDates[dateStr].slots[slotIndex].start =
+                                      toggleAmPm(slot.start);
                                     setSelectedDates(newDates);
                                   }}
-                                  style={[styles.ampmBtn, { backgroundColor: isDark ? '#1F2937' : '#E5E7EB' }]}
+                                  style={[
+                                    styles.ampmBtn,
+                                    {
+                                      backgroundColor: isDark
+                                        ? "#1F2937"
+                                        : "#E5E7EB",
+                                    },
+                                  ]}
                                 >
-                                  <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                                    {slot.start.split(' ')[1] || 'AM'}
+                                  <Text
+                                    style={{
+                                      fontSize: 12,
+                                      fontFamily: "Poppins_600SemiBold",
+                                      color: colors.text,
+                                    }}
+                                  >
+                                    {slot.start.split(" ")[1] || "AM"}
                                   </Text>
                                 </TouchableOpacity>
                               </View>
                             </View>
-                            <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} style={{ marginTop: 20 }} />
+                            <Ionicons
+                              name="arrow-forward"
+                              size={20}
+                              color={colors.textSecondary}
+                              style={{ marginTop: 20 }}
+                            />
                             <View style={{ flex: 1 }}>
-                              <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>END</Text>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <Text
+                                style={{
+                                  color: colors.textSecondary,
+                                  fontSize: 11,
+                                  marginBottom: 4,
+                                  fontFamily: "Poppins_600SemiBold",
+                                }}
+                              >
+                                END
+                              </Text>
+                              <View
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  gap: 4,
+                                }}
+                              >
                                 <TextInput
-                                  value={slot.end.split(' ')[0]}
+                                  value={slot.end.split(" ")[0]}
                                   onChangeText={(text) => {
                                     const formatted = formatTimeInput(text);
                                     const newDates = { ...selectedDates };
-                                    const period = slot.end.split(' ')[1] || 'PM';
-                                    newDates[dateStr].slots[slotIndex].end = `${formatted} ${period}`;
+                                    const period =
+                                      slot.end.split(" ")[1] || "PM";
+                                    newDates[dateStr].slots[slotIndex].end =
+                                      `${formatted} ${period}`;
                                     setSelectedDates(newDates);
                                   }}
                                   placeholder="05:00"
                                   keyboardType="numeric"
                                   maxLength={5}
-                                  style={[styles.timeInput, { backgroundColor: isDark ? '#1F2937' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                                  style={[
+                                    styles.timeInput,
+                                    {
+                                      backgroundColor: isDark
+                                        ? "#1F2937"
+                                        : "white",
+                                      borderColor: colors.border,
+                                      color: colors.text,
+                                      flex: 1,
+                                    },
+                                  ]}
                                 />
                                 <TouchableOpacity
                                   onPress={() => {
                                     const newDates = { ...selectedDates };
-                                    newDates[dateStr].slots[slotIndex].end = toggleAmPm(slot.end);
+                                    newDates[dateStr].slots[slotIndex].end =
+                                      toggleAmPm(slot.end);
                                     setSelectedDates(newDates);
                                   }}
-                                  style={[styles.ampmBtn, { backgroundColor: isDark ? '#1F2937' : '#E5E7EB' }]}
+                                  style={[
+                                    styles.ampmBtn,
+                                    {
+                                      backgroundColor: isDark
+                                        ? "#1F2937"
+                                        : "#E5E7EB",
+                                    },
+                                  ]}
                                 >
-                                  <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                                    {slot.end.split(' ')[1] || 'PM'}
+                                  <Text
+                                    style={{
+                                      fontSize: 12,
+                                      fontFamily: "Poppins_600SemiBold",
+                                      color: colors.text,
+                                    }}
+                                  >
+                                    {slot.end.split(" ")[1] || "PM"}
                                   </Text>
                                 </TouchableOpacity>
                               </View>
@@ -1960,7 +2984,11 @@ export default function EditStudioScreen() {
                                 }}
                                 style={{ marginTop: 20 }}
                               >
-                                <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                                <Ionicons
+                                  name="trash-outline"
+                                  size={20}
+                                  color="#EF4444"
+                                />
                               </TouchableOpacity>
                             )}
                           </View>
@@ -1971,19 +2999,48 @@ export default function EditStudioScreen() {
                           <TouchableOpacity
                             onPress={() => {
                               const newDates = { ...selectedDates };
-                              newDates[dateStr].slots.push({ start: '06:00 PM', end: '09:00 PM' });
+                              newDates[dateStr].slots.push({
+                                start: "06:00 PM",
+                                end: "09:00 PM",
+                              });
                               setSelectedDates(newDates);
                             }}
-                            style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                            style={{
+                              marginTop: 12,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 4,
+                            }}
                           >
-                            <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
-                            <Text style={{ color: colors.primary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Time Slot</Text>
+                            <Ionicons
+                              name="add-circle-outline"
+                              size={16}
+                              color={colors.primary}
+                            />
+                            <Text
+                              style={{
+                                color: colors.primary,
+                                fontSize: 12,
+                                fontFamily: "Poppins_500Medium",
+                              }}
+                            >
+                              Add Time Slot
+                            </Text>
                           </TouchableOpacity>
                         )}
 
                         {hasConflict && (
-                          <Text style={{ color: '#F59E0B', fontSize: 11, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>
-                            ⚠️ This overrides weekly {dayName} schedule ({weeklySchedule.slots[0]?.start} - {weeklySchedule.slots[0]?.end})
+                          <Text
+                            style={{
+                              color: "#F59E0B",
+                              fontSize: 11,
+                              fontFamily: "Poppins_400Regular",
+                              marginTop: 8,
+                            }}
+                          >
+                            ⚠️ This overrides weekly {dayName} schedule (
+                            {weeklySchedule.slots[0]?.start} -{" "}
+                            {weeklySchedule.slots[0]?.end})
                           </Text>
                         )}
                       </View>
@@ -1994,103 +3051,241 @@ export default function EditStudioScreen() {
           </View>
 
           {/* Weekly Schedule Section */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 12,
+            }}
+          >
             <Ionicons name="repeat" size={16} color={colors.primary} />
-            <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Weekly Schedule</Text>
+            <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
+              Weekly Schedule
+            </Text>
           </View>
-          <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_400Regular', marginBottom: 16 }}>
+          <Text
+            style={{
+              color: colors.textSecondary,
+              fontSize: 12,
+              fontFamily: "Poppins_400Regular",
+              marginBottom: 16,
+            }}
+          >
             Set recurring availability for each day of the week
           </Text>
 
           {availability.map((daySchedule, dayIndex) => (
-            <View key={daySchedule.day} style={[styles.dayCard, { backgroundColor: isDark ? '#1F2937' : '#F9FAFB', borderColor: colors.border, marginBottom: 12 }]}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <Text style={[styles.dayLabel, { color: colors.text }]}>{daySchedule.day}</Text>
+            <View
+              key={daySchedule.day}
+              style={[
+                styles.dayCard,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                  borderColor: colors.border,
+                  marginBottom: 12,
+                },
+              ]}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
+                <Text style={[styles.dayLabel, { color: colors.text }]}>
+                  {daySchedule.day}
+                </Text>
                 <TouchableOpacity
                   onPress={() => {
                     const newAvailability = [...availability];
                     if (newAvailability[dayIndex].slots.length === 0) {
-                      newAvailability[dayIndex].slots.push({ start: '09:00 AM', end: '05:00 PM' });
+                      newAvailability[dayIndex].slots.push({
+                        start: "09:00 AM",
+                        end: "05:00 PM",
+                      });
                     } else {
                       newAvailability[dayIndex].slots = [];
                     }
                     setAvailability(newAvailability);
                   }}
-                  style={[styles.toggleBtn, { backgroundColor: daySchedule.slots.length > 0 ? colors.primary : (isDark ? '#374151' : '#E5E7EB') }]}
+                  style={[
+                    styles.toggleBtn,
+                    {
+                      backgroundColor:
+                        daySchedule.slots.length > 0
+                          ? colors.primary
+                          : isDark
+                            ? "#374151"
+                            : "#E5E7EB",
+                    },
+                  ]}
                 >
-                  <Text style={{ color: daySchedule.slots.length > 0 ? '#FFFFFF' : colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold' }}>
-                    {daySchedule.slots.length > 0 ? 'Available' : 'Closed'}
+                  <Text
+                    style={{
+                      color:
+                        daySchedule.slots.length > 0
+                          ? "#FFFFFF"
+                          : colors.textSecondary,
+                      fontSize: 12,
+                      fontFamily: "Poppins_600SemiBold",
+                    }}
+                  >
+                    {daySchedule.slots.length > 0 ? "Available" : "Closed"}
                   </Text>
                 </TouchableOpacity>
               </View>
 
               {daySchedule.slots.map((slot, slotIndex) => {
                 const toggleAmPm = (timeStr: string) => {
-                  const [time, period] = timeStr.split(' ');
-                  return `${time} ${period === 'AM' ? 'PM' : 'AM'}`;
+                  const [time, period] = timeStr.split(" ");
+                  return `${time} ${period === "AM" ? "PM" : "AM"}`;
                 };
 
                 return (
-                  <View key={slotIndex} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                  <View
+                    key={slotIndex}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>START</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          marginBottom: 4,
+                          fontFamily: "Poppins_600SemiBold",
+                        }}
+                      >
+                        START
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
                         <TextInput
-                          value={slot.start.split(' ')[0]}
+                          value={slot.start.split(" ")[0]}
                           onChangeText={(text) => {
                             const formatted = formatTimeInput(text);
                             const newAvailability = [...availability];
-                            const period = slot.start.split(' ')[1];
-                            newAvailability[dayIndex].slots[slotIndex].start = `${formatted} ${period}`;
+                            const period = slot.start.split(" ")[1];
+                            newAvailability[dayIndex].slots[slotIndex].start =
+                              `${formatted} ${period}`;
                             setAvailability(newAvailability);
                           }}
                           placeholder="09:00"
                           keyboardType="numeric"
                           maxLength={5}
-                          style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                          style={[
+                            styles.timeInput,
+                            {
+                              backgroundColor: isDark ? "#374151" : "white",
+                              borderColor: colors.border,
+                              color: colors.text,
+                              flex: 1,
+                            },
+                          ]}
                         />
                         <TouchableOpacity
                           onPress={() => {
                             const newAvailability = [...availability];
-                            newAvailability[dayIndex].slots[slotIndex].start = toggleAmPm(slot.start);
+                            newAvailability[dayIndex].slots[slotIndex].start =
+                              toggleAmPm(slot.start);
                             setAvailability(newAvailability);
                           }}
-                          style={[styles.ampmBtn, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}
+                          style={[
+                            styles.ampmBtn,
+                            { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                          ]}
                         >
-                          <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                            {slot.start.split(' ')[1]}
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontFamily: "Poppins_600SemiBold",
+                              color: colors.text,
+                            }}
+                          >
+                            {slot.start.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
                       </View>
                     </View>
-                    <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} style={{ marginTop: 20 }} />
+                    <Ionicons
+                      name="arrow-forward"
+                      size={20}
+                      color={colors.textSecondary}
+                      style={{ marginTop: 20 }}
+                    />
                     <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 4, fontFamily: 'Poppins_600SemiBold' }}>END</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          marginBottom: 4,
+                          fontFamily: "Poppins_600SemiBold",
+                        }}
+                      >
+                        END
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
                         <TextInput
-                          value={slot.end.split(' ')[0]}
+                          value={slot.end.split(" ")[0]}
                           onChangeText={(text) => {
                             const formatted = formatTimeInput(text);
                             const newAvailability = [...availability];
-                            const period = slot.end.split(' ')[1];
-                            newAvailability[dayIndex].slots[slotIndex].end = `${formatted} ${period}`;
+                            const period = slot.end.split(" ")[1];
+                            newAvailability[dayIndex].slots[slotIndex].end =
+                              `${formatted} ${period}`;
                             setAvailability(newAvailability);
                           }}
                           placeholder="05:00"
                           keyboardType="numeric"
                           maxLength={5}
-                          style={[styles.timeInput, { backgroundColor: isDark ? '#374151' : 'white', borderColor: colors.border, color: colors.text, flex: 1 }]}
+                          style={[
+                            styles.timeInput,
+                            {
+                              backgroundColor: isDark ? "#374151" : "white",
+                              borderColor: colors.border,
+                              color: colors.text,
+                              flex: 1,
+                            },
+                          ]}
                         />
                         <TouchableOpacity
                           onPress={() => {
                             const newAvailability = [...availability];
-                            newAvailability[dayIndex].slots[slotIndex].end = toggleAmPm(slot.end);
+                            newAvailability[dayIndex].slots[slotIndex].end =
+                              toggleAmPm(slot.end);
                             setAvailability(newAvailability);
                           }}
-                          style={[styles.ampmBtn, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}
+                          style={[
+                            styles.ampmBtn,
+                            { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                          ]}
                         >
-                          <Text style={{ fontSize: 12, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                            {slot.end.split(' ')[1]}
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontFamily: "Poppins_600SemiBold",
+                              color: colors.text,
+                            }}
+                          >
+                            {slot.end.split(" ")[1]}
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -2104,7 +3299,11 @@ export default function EditStudioScreen() {
                         }}
                         style={{ marginTop: 20 }}
                       >
-                        <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                        <Ionicons
+                          name="trash-outline"
+                          size={20}
+                          color="#EF4444"
+                        />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -2115,19 +3314,39 @@ export default function EditStudioScreen() {
                 <TouchableOpacity
                   onPress={() => {
                     const newAvailability = [...availability];
-                    newAvailability[dayIndex].slots.push({ start: '06:00 PM', end: '09:00 PM' });
+                    newAvailability[dayIndex].slots.push({
+                      start: "06:00 PM",
+                      end: "09:00 PM",
+                    });
                     setAvailability(newAvailability);
                   }}
-                  style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  style={{
+                    marginTop: 8,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
                 >
-                  <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
-                  <Text style={{ color: colors.primary, fontSize: 12, fontFamily: 'Poppins_500Medium' }}>Add Time Slot</Text>
+                  <Ionicons
+                    name="add-circle-outline"
+                    size={16}
+                    color={colors.primary}
+                  />
+                  <Text
+                    style={{
+                      color: colors.primary,
+                      fontSize: 12,
+                      fontFamily: "Poppins_500Medium",
+                    }}
+                  >
+                    Add Time Slot
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
           ))}
 
-          {renderSectionHeader('Visuals', 'image')}
+          {renderSectionHeader("Visuals", "image")}
           <ImageUploader
             images={selectedImages}
             onImagesChange={setSelectedImages}
@@ -2141,7 +3360,15 @@ export default function EditStudioScreen() {
 
           <View style={styles.footerActions}>
             <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: saving ? colors.textSecondary : colors.primary, shadowColor: colors.primary }]}
+              style={[
+                styles.saveButton,
+                {
+                  backgroundColor: saving
+                    ? colors.textSecondary
+                    : colors.primary,
+                  shadowColor: colors.primary,
+                },
+              ]}
               onPress={handleSave}
               disabled={saving}
               activeOpacity={0.8}
@@ -2157,10 +3384,16 @@ export default function EditStudioScreen() {
               style={[styles.cancelButton, { borderColor: colors.border }]}
               onPress={() => router.back()}
             >
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.text }}>Cancel</Text>
+              <Text
+                style={{
+                  fontFamily: "Poppins_600SemiBold",
+                  color: colors.text,
+                }}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
           </View>
-
         </ScrollView>
 
         <Navbar />
@@ -2196,34 +3429,53 @@ export default function EditStudioScreen() {
           setLongitude(location.lng);
           setLocationPickerVisible(false);
         }}
-        initialLocation={latitude && longitude ? { lat: latitude, lng: longitude } : undefined}
+        initialLocation={
+          latitude && longitude ? { lat: latitude, lng: longitude } : undefined
+        }
       />
 
       {/* Equipment Modal */}
       {showEquipmentModal && (
-        <View style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: 24,
-          zIndex: 1000
-        }}>
-          <View style={{
-            backgroundColor: colors.background,
-            borderRadius: 16,
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            justifyContent: "center",
+            alignItems: "center",
             padding: 24,
-            width: '100%',
-            maxWidth: 400,
-            maxHeight: '80%'
-          }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={{ fontSize: 18, fontFamily: 'Poppins_600SemiBold', color: colors.text }}>
-                {editingEquipment ? 'Edit Equipment' : 'Add Equipment'}
+            zIndex: 1000,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: colors.background,
+              borderRadius: 16,
+              padding: 24,
+              width: "100%",
+              maxWidth: 400,
+              maxHeight: "80%",
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 18,
+                  fontFamily: "Poppins_600SemiBold",
+                  color: colors.text,
+                }}
+              >
+                {editingEquipment ? "Edit Equipment" : "Add Equipment"}
               </Text>
               <TouchableOpacity onPress={() => setShowEquipmentModal(false)}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
@@ -2233,10 +3485,21 @@ export default function EditStudioScreen() {
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Name */}
               <View style={{ marginBottom: 16 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>NAME *</Text>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_600SemiBold",
+                    marginBottom: 8,
+                  }}
+                >
+                  NAME *
+                </Text>
                 <TextInput
                   value={equipmentForm.name}
-                  onChangeText={(text) => setEquipmentForm({ ...equipmentForm, name: text })}
+                  onChangeText={(text) =>
+                    setEquipmentForm({ ...equipmentForm, name: text })
+                  }
                   placeholder="e.g. Yamaha DTX Drums"
                   placeholderTextColor={colors.textSecondary}
                   style={{
@@ -2244,19 +3507,33 @@ export default function EditStudioScreen() {
                     borderRadius: 12,
                     padding: 16,
                     color: colors.text,
-                    fontFamily: 'Poppins_400Regular',
+                    fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
-                    borderColor: isDark ? '#374151' : '#E5E7EB'
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
                   }}
                 />
               </View>
 
               {/* Quantity */}
               <View style={{ marginBottom: 16 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>QUANTITY *</Text>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_600SemiBold",
+                    marginBottom: 8,
+                  }}
+                >
+                  QUANTITY *
+                </Text>
                 <TextInput
                   value={equipmentForm.quantity}
-                  onChangeText={(text) => setEquipmentForm({ ...equipmentForm, quantity: text.replace(/[^0-9]/g, '') })}
+                  onChangeText={(text) =>
+                    setEquipmentForm({
+                      ...equipmentForm,
+                      quantity: text.replace(/[^0-9]/g, ""),
+                    })
+                  }
                   placeholder="1"
                   placeholderTextColor={colors.textSecondary}
                   keyboardType="numeric"
@@ -2265,19 +3542,30 @@ export default function EditStudioScreen() {
                     borderRadius: 12,
                     padding: 16,
                     color: colors.text,
-                    fontFamily: 'Poppins_400Regular',
+                    fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
-                    borderColor: isDark ? '#374151' : '#E5E7EB'
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
                   }}
                 />
               </View>
 
               {/* Description */}
               <View style={{ marginBottom: 16 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>DESCRIPTION</Text>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_600SemiBold",
+                    marginBottom: 8,
+                  }}
+                >
+                  DESCRIPTION
+                </Text>
                 <TextInput
                   value={equipmentForm.description}
-                  onChangeText={(text) => setEquipmentForm({ ...equipmentForm, description: text })}
+                  onChangeText={(text) =>
+                    setEquipmentForm({ ...equipmentForm, description: text })
+                  }
                   placeholder="Brief description of the equipment"
                   placeholderTextColor={colors.textSecondary}
                   multiline
@@ -2287,24 +3575,45 @@ export default function EditStudioScreen() {
                     borderRadius: 12,
                     padding: 16,
                     color: colors.text,
-                    fontFamily: 'Poppins_400Regular',
+                    fontFamily: "Poppins_400Regular",
                     borderWidth: 1,
-                    borderColor: isDark ? '#374151' : '#E5E7EB',
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
                     height: 80,
-                    textAlignVertical: 'top'
+                    textAlignVertical: "top",
                   }}
                 />
               </View>
 
               {/* Image Upload */}
               <View style={{ marginBottom: 24 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: 'Poppins_600SemiBold', marginBottom: 8 }}>IMAGE</Text>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_600SemiBold",
+                    marginBottom: 8,
+                  }}
+                >
+                  IMAGE
+                </Text>
                 {equipmentForm.image ? (
-                  <View style={{ position: 'relative' }}>
-                    <Image source={{ uri: equipmentForm.image }} style={{ width: '100%', height: 150, borderRadius: 12 }} />
+                  <View style={{ position: "relative" }}>
+                    <Image
+                      source={{ uri: equipmentForm.image }}
+                      style={{ width: "100%", height: 150, borderRadius: 12 }}
+                    />
                     <TouchableOpacity
-                      onPress={() => setEquipmentForm({ ...equipmentForm, image: '' })}
-                      style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12, padding: 4 }}
+                      onPress={() =>
+                        setEquipmentForm({ ...equipmentForm, image: "" })
+                      }
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        backgroundColor: "rgba(0,0,0,0.5)",
+                        borderRadius: 12,
+                        padding: 4,
+                      }}
                     >
                       <Ionicons name="close" size={16} color="#FFF" />
                     </TouchableOpacity>
@@ -2318,18 +3627,30 @@ export default function EditStudioScreen() {
                       backgroundColor: colors.inputBackground,
                       borderRadius: 12,
                       padding: 24,
-                      alignItems: 'center',
+                      alignItems: "center",
                       borderWidth: 2,
-                      borderStyle: 'dashed',
-                      borderColor: isDark ? '#374151' : '#E5E7EB'
+                      borderStyle: "dashed",
+                      borderColor: isDark ? "#374151" : "#E5E7EB",
                     }}
                   >
                     {uploadingEquipmentImage ? (
                       <ActivityIndicator size="small" color={colors.primary} />
                     ) : (
                       <>
-                        <Ionicons name="camera-outline" size={32} color={colors.textSecondary} />
-                        <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', marginTop: 8 }}>Tap to add image</Text>
+                        <Ionicons
+                          name="camera-outline"
+                          size={32}
+                          color={colors.textSecondary}
+                        />
+                        <Text
+                          style={{
+                            color: colors.textSecondary,
+                            fontFamily: "Poppins_400Regular",
+                            marginTop: 8,
+                          }}
+                        >
+                          Tap to add image
+                        </Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -2340,37 +3661,57 @@ export default function EditStudioScreen() {
               <TouchableOpacity
                 onPress={() => {
                   if (!equipmentForm.name.trim()) {
-                    showAlert('error', 'Required', 'Please enter equipment name');
+                    showAlert(
+                      "error",
+                      "Required",
+                      "Please enter equipment name",
+                    );
                     return;
                   }
                   if (editingEquipment) {
-                    setEquipment(equipment.map(e =>
-                      e.id === editingEquipment.id
-                        ? { ...e, ...equipmentForm, quantity: parseInt(equipmentForm.quantity) || 1 }
-                        : e
-                    ));
+                    setEquipment(
+                      equipment.map((e) =>
+                        e.id === editingEquipment.id
+                          ? {
+                              ...e,
+                              ...equipmentForm,
+                              quantity: parseInt(equipmentForm.quantity) || 1,
+                            }
+                          : e,
+                      ),
+                    );
                   } else {
-                    setEquipment([...equipment, {
-                      id: Date.now().toString(),
-                      name: equipmentForm.name,
-                      quantity: parseInt(equipmentForm.quantity) || 1,
-                      description: equipmentForm.description,
-                      image: equipmentForm.image
-                    }]);
+                    setEquipment([
+                      ...equipment,
+                      {
+                        id: Date.now().toString(),
+                        name: equipmentForm.name,
+                        quantity: parseInt(equipmentForm.quantity) || 1,
+                        description: equipmentForm.description,
+                        image: equipmentForm.image,
+                      },
+                    ]);
                   }
                   setShowEquipmentModal(false);
-                  setEquipmentForm({ name: '', quantity: '1', description: '', image: '' });
+                  setEquipmentForm({
+                    name: "",
+                    quantity: "1",
+                    description: "",
+                    image: "",
+                  });
                   setEditingEquipment(null);
                 }}
                 style={{
                   backgroundColor: colors.primary,
                   borderRadius: 12,
                   padding: 16,
-                  alignItems: 'center'
+                  alignItems: "center",
                 }}
               >
-                <Text style={{ color: '#FFF', fontFamily: 'Poppins_600SemiBold' }}>
-                  {editingEquipment ? 'Update Equipment' : 'Add Equipment'}
+                <Text
+                  style={{ color: "#FFF", fontFamily: "Poppins_600SemiBold" }}
+                >
+                  {editingEquipment ? "Update Equipment" : "Add Equipment"}
                 </Text>
               </TouchableOpacity>
             </ScrollView>
@@ -2386,21 +3727,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   centerContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   scrollContent: {
     paddingBottom: 160,
     paddingHorizontal: 24,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     marginBottom: 16,
   },
   sectionTitle: {
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
   },
   inputContainer: {
@@ -2409,21 +3750,21 @@ const styles = StyleSheet.create({
   inputLabel: {
     marginBottom: 8,
     fontSize: 12,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
     letterSpacing: 1,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
   inputWrapper: {
     borderRadius: 12,
     borderWidth: 1,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   input: {
     padding: 16,
-    textAlignVertical: 'center',
+    textAlignVertical: "center",
   },
   addAmenityContainer: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
     marginBottom: 16,
   },
@@ -2431,22 +3772,22 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     borderWidth: 1,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   addAmenityButton: {
     width: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: 12,
   },
   amenitiesList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   amenityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
@@ -2454,7 +3795,7 @@ const styles = StyleSheet.create({
   },
   amenityText: {
     marginRight: 8,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: "Poppins_500Medium",
   },
   footerActions: {
     marginTop: 32,
@@ -2462,8 +3803,8 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 16,
     marginBottom: 16,
     shadowOpacity: 0.3,
@@ -2473,42 +3814,42 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     fontSize: 16,
-    color: 'white',
-    fontFamily: 'Poppins_600SemiBold',
+    color: "white",
+    fontFamily: "Poppins_600SemiBold",
   },
   cancelButton: {
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 16,
     borderWidth: 1,
   },
   inputSubLabel: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
     marginBottom: 8,
   },
   uploadContractBtn: {
     padding: 32,
     borderWidth: 2,
-    borderStyle: 'dashed',
+    borderStyle: "dashed",
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
   },
   uploadText: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
     marginTop: 8,
   },
   uploadSubText: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
   },
   contractPreview: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
@@ -2518,16 +3859,16 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   contractFileName: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
   contractFileSize: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
     marginTop: 2,
   },
   removeContractBtn: {
@@ -2540,7 +3881,7 @@ const styles = StyleSheet.create({
   },
   dayLabel: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
   toggleBtn: {
     paddingHorizontal: 12,
@@ -2552,7 +3893,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: "Poppins_500Medium",
     fontSize: 14,
   },
   ampmBtn: {
@@ -2560,27 +3901,27 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     minWidth: 50,
-    alignItems: 'center',
+    alignItems: "center",
   },
   subtitle: {
     fontSize: 13,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
   },
   // Instruments styles
   instrumentsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
   },
   instrumentCard: {
-    width: '30%',
+    width: "30%",
     aspectRatio: 1,
     borderRadius: 12,
     borderWidth: 1.5,
     padding: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
   },
   instrumentImage: {
     width: 48,
@@ -2590,34 +3931,34 @@ const styles = StyleSheet.create({
   },
   instrumentName: {
     fontSize: 10,
-    fontFamily: 'Poppins_500Medium',
-    textAlign: 'center',
+    fontFamily: "Poppins_500Medium",
+    textAlign: "center",
   },
   instrumentCheckmark: {
-    position: 'absolute',
+    position: "absolute",
     top: 6,
     right: 6,
     width: 20,
     height: 20,
     borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   selectedCount: {
     fontSize: 12,
-    fontFamily: 'Poppins_400Regular',
+    fontFamily: "Poppins_400Regular",
     marginTop: 12,
-    textAlign: 'center',
+    textAlign: "center",
   },
   // Equipment styles
   addEquipmentBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     padding: 16,
     borderRadius: 12,
     borderWidth: 2,
-    borderStyle: 'dashed',
+    borderStyle: "dashed",
   },
   equipmentCard: {
     padding: 12,
@@ -2632,7 +3973,7 @@ const styles = StyleSheet.create({
   },
   equipmentName: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
   // Calendar styles
   calendarContainer: {
@@ -2645,8 +3986,8 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 12,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: 8,
   },
   selectedDateCard: {
@@ -2657,7 +3998,6 @@ const styles = StyleSheet.create({
   },
   sectionSubtitle: {
     fontSize: 14,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: "Poppins_600SemiBold",
   },
 });
-

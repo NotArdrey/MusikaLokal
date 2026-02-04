@@ -328,7 +328,7 @@ export default function HomeScreen() {
           genre: item.genres?.join(", ") || item.genre || "", // For solo artists
           // Owner/Organizer IDs for chat functionality
           // For profiles (solo artists), the id IS the owner
-          owner_id: item.owner_id || (type === 'Artist' ? item.id : null),
+          owner_id: item.owner_id || (type === "Artist" ? item.id : null),
           organizer_id: item.organizer_id || null,
           // Seasonal pricing fields for studios
           has_seasonal_pricing: item.has_seasonal_pricing || false,
@@ -361,22 +361,29 @@ export default function HomeScreen() {
         return dateB - dateA; // Newest first
       });
 
-      console.log("🆕 Setting New Arrivals:", sortedByDate.length, "items available");
+      console.log(
+        "🆕 Setting New Arrivals:",
+        sortedByDate.length,
+        "items available",
+      );
       setNewArrivals(sortedByDate.slice(0, 10));
 
       // === RANDOM RECOMMENDATIONS - Simple random shuffle ===
       const shuffled = [...allItemsList].sort(() => Math.random() - 0.5);
       setRandomRecommendations(shuffled.slice(0, 20));
-      
+
       // === AI RECOMMENDATIONS - Fetch from RPC if user is logged in ===
       if (userId) {
         try {
           console.log("🤖 Fetching AI recommendations for user:", userId);
-          const { data: aiData, error: aiError } = await supabase.rpc('get_ai_recommendations', {
-            p_user_id: userId,
-            p_limit: 20
-          });
-          
+          const { data: aiData, error: aiError } = await supabase.rpc(
+            "get_ai_recommendations",
+            {
+              p_user_id: userId,
+              p_limit: 20,
+            },
+          );
+
           if (aiError) {
             console.log("⚠️ AI recommendations error:", aiError);
             setAiRecommendations([]);
@@ -390,7 +397,10 @@ export default function HomeScreen() {
               images: item.images || [],
               rating: item.rating || 0,
               review_count: item.review_count || 0,
-              rate: item.rate?.toString() || item.hourly_rate?.toString() || item.budget?.toString(),
+              rate:
+                item.rate?.toString() ||
+                item.hourly_rate?.toString() ||
+                item.budget?.toString(),
               hourly_rate: item.hourly_rate?.toString(),
               budget: item.budget?.toString(),
               location: item.location || "",
@@ -401,14 +411,23 @@ export default function HomeScreen() {
               organizer_id: item.organizer_id,
               similarity: item.similarity, // AI similarity score
             }));
-            console.log("🤖 AI recommendations loaded:", normalizedAi.length, "items");
-            console.log("🤖 Top 3 AI matches:", normalizedAi.slice(0, 3).map((i: any) => ({
-              name: i.name,
-              similarity: (i.similarity * 100).toFixed(1) + '%'
-            })));
+            console.log(
+              "🤖 AI recommendations loaded:",
+              normalizedAi.length,
+              "items",
+            );
+            console.log(
+              "🤖 Top 3 AI matches:",
+              normalizedAi.slice(0, 3).map((i: any) => ({
+                name: i.name,
+                similarity: (i.similarity * 100).toFixed(1) + "%",
+              })),
+            );
             setAiRecommendations(normalizedAi);
           } else {
-            console.log("🤖 No AI recommendations - user has no interest vector yet");
+            console.log(
+              "🤖 No AI recommendations - user has no interest vector yet",
+            );
             setAiRecommendations([]);
           }
         } catch (aiErr) {
@@ -456,13 +475,17 @@ export default function HomeScreen() {
   const handleChat = (item: any) => {
     if (!userId) {
       setAlertConfig({
-        type: 'info',
-        title: 'Login Required',
-        message: 'Please login or sign up to chat with this user.',
+        type: "info",
+        title: "Login Required",
+        message: "Please login or sign up to chat with this user.",
         buttons: [
-          { text: 'Cancel', style: 'cancel', onPress: () => setAlertVisible(false) },
-          { text: 'Login', onPress: () => router.push('/') }
-        ]
+          {
+            text: "Cancel",
+            style: "cancel",
+            onPress: () => setAlertVisible(false),
+          },
+          { text: "Login", onPress: () => router.push("/") },
+        ],
       });
       setAlertVisible(true);
       return;
@@ -471,20 +494,20 @@ export default function HomeScreen() {
     // Determine the owner/organizer ID based on item type
     const recipientId = item.owner_id || item.organizer_id;
     if (!recipientId) {
-      console.log('No owner/organizer found for item:', item);
+      console.log("No owner/organizer found for item:", item);
       return;
     }
 
     // Navigate to chat with context (use correct case - Group, Studio, Gig, Artist)
     router.push({
-      pathname: '/chat',
+      pathname: "/chat",
       params: {
         recipientId,
         recipientName: item.name,
-        ...(item.type === 'Group' && { groupId: item.id }),
-        ...(item.type === 'Studio' && { studioId: item.id }),
-        ...(item.type === 'Gig' && { gigId: item.id }),
-      }
+        ...(item.type === "Group" && { groupId: item.id }),
+        ...(item.type === "Studio" && { studioId: item.id }),
+        ...(item.type === "Gig" && { gigId: item.id }),
+      },
     });
   };
 
@@ -525,7 +548,10 @@ export default function HomeScreen() {
       const AsyncStorage =
         require("@react-native-async-storage/async-storage").default;
       const existingJson = await AsyncStorage.getItem("recently_viewed_items");
-      console.log("📚 Recently viewed from storage:", existingJson ? 'Found' : 'Empty');
+      console.log(
+        "📚 Recently viewed from storage:",
+        existingJson ? "Found" : "Empty",
+      );
       if (existingJson) {
         const items = JSON.parse(existingJson);
         console.log("📚 Recently viewed items count:", items.length);
@@ -581,7 +607,7 @@ export default function HomeScreen() {
               }),
               time:
                 gig.requirements?.event_start_time &&
-                  gig.requirements?.event_end_time
+                gig.requirements?.event_end_time
                   ? `${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                   : "Time TBA",
               location: gig.location || "Location TBA",
@@ -752,12 +778,14 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              Top Picks {aiModeEnabled ? '🤖' : '🎲'}
+              Top Picks {aiModeEnabled ? "🤖" : "🎲"}
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
-              {aiModeEnabled ? 'AI-powered recommendations' : 'Random selection'}
+              {aiModeEnabled
+                ? "AI-powered recommendations"
+                : "Random selection"}
             </Text>
           </View>
           <TouchableOpacity onPress={openSearchSheet}>
@@ -799,9 +827,9 @@ export default function HomeScreen() {
                       ]}
                     >
                       <Text style={styles.glassBadgeText}>
-                        {aiModeEnabled && topItems[0].similarity 
-                          ? `🤖 ${(topItems[0].similarity * 100).toFixed(0)}% Match` 
-                          : '🔥 Highly Rated'}
+                        {aiModeEnabled && topItems[0].similarity
+                          ? `🤖 ${(topItems[0].similarity * 100).toFixed(0)}% Match`
+                          : "🔥 Highly Rated"}
                       </Text>
                     </View>
                     <Text style={styles.bentoTitleLarge} numberOfLines={2}>
@@ -937,16 +965,22 @@ export default function HomeScreen() {
     // Helper to get type badge color
     const getTypeBadgeColor = (type: string) => {
       switch (type) {
-        case "Studio": return "#7C3AED";
-        case "Gig": return "#10B981";
-        case "Group": return "#3B82F6";
-        case "Artist": return "#EC4899";
-        default: return "#7C3AED";
+        case "Studio":
+          return "#7C3AED";
+        case "Gig":
+          return "#10B981";
+        case "Group":
+          return "#3B82F6";
+        case "Artist":
+          return "#EC4899";
+        default:
+          return "#7C3AED";
       }
     };
 
-    // Helper to get price label
+    // Helper to get price label - skip Groups
     const getPriceLabel = (item: any) => {
+      if (item.type === "Group") return null;
       if (item.hourly_rate && item.hourly_rate !== "0") {
         return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
       }
@@ -1321,12 +1355,12 @@ export default function HomeScreen() {
                       {
                         backgroundColor:
                           event.status === "Confirmed" ||
-                            event.status === "Accepted"
+                          event.status === "Accepted"
                             ? "#10B98115"
                             : "#F59E0B15",
                         borderColor:
                           event.status === "Confirmed" ||
-                            event.status === "Accepted"
+                          event.status === "Accepted"
                             ? "#10B981"
                             : "#F59E0B",
                       },
@@ -1338,7 +1372,7 @@ export default function HomeScreen() {
                         {
                           color:
                             event.status === "Confirmed" ||
-                              event.status === "Accepted"
+                            event.status === "Accepted"
                               ? "#10B981"
                               : "#F59E0B",
                         },
@@ -1412,14 +1446,14 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              For You {aiModeEnabled ? '🤖' : '🎲'}
+              For You {aiModeEnabled ? "🤖" : "🎲"}
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
-              {aiModeEnabled 
-                ? 'Personalized picks based on your interests' 
-                : 'Random suggestions for comparison'}
+              {aiModeEnabled
+                ? "Personalized picks based on your interests"
+                : "Random suggestions for comparison"}
             </Text>
           </View>
           <TouchableOpacity onPress={openSearchSheet}>
@@ -1467,9 +1501,9 @@ export default function HomeScreen() {
                 >
                   <View style={styles.featuredBadge}>
                     <Text style={styles.featuredBadgeText}>
-                      {aiModeEnabled && uniqueItems[0].similarity 
-                        ? `🤖 ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match` 
-                        : '✨ Top Recommendation'}
+                      {aiModeEnabled && uniqueItems[0].similarity
+                        ? `🤖 ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match`
+                        : "✨ Top Recommendation"}
                     </Text>
                   </View>
                   <View
@@ -1560,17 +1594,40 @@ export default function HomeScreen() {
                 <View
                   style={[
                     styles.forYouTypeBadge,
-                    { backgroundColor: item.type === 'Gig' ? '#10B981' : item.type === 'Group' ? '#3B82F6' : '#7C3AED' },
+                    {
+                      backgroundColor:
+                        item.type === "Gig"
+                          ? "#10B981"
+                          : item.type === "Group"
+                            ? "#3B82F6"
+                            : "#7C3AED",
+                    },
                   ]}
                 >
-                  <Text style={styles.forYouTypeBadgeText}>
-                    {item.type}
-                  </Text>
+                  <Text style={styles.forYouTypeBadgeText}>{item.type}</Text>
                 </View>
                 {/* Recommended Badge (Simulated validation) */}
-                <View style={[styles.glassBadge, { position: 'absolute', top: 12, right: 12, paddingVertical: 4, paddingHorizontal: 8 }]}>
-                  <Ionicons name="star" size={10} color="#FCD34D" style={{ marginRight: 4 }} />
-                  <Text style={styles.glassBadgeText}>{item.rating > 0 ? item.rating.toFixed(1) : "New"}</Text>
+                <View
+                  style={[
+                    styles.glassBadge,
+                    {
+                      position: "absolute",
+                      top: 12,
+                      right: 12,
+                      paddingVertical: 4,
+                      paddingHorizontal: 8,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="star"
+                    size={10}
+                    color="#FCD34D"
+                    style={{ marginRight: 4 }}
+                  />
+                  <Text style={styles.glassBadgeText}>
+                    {item.rating > 0 ? item.rating.toFixed(1) : "New"}
+                  </Text>
                 </View>
               </View>
 
@@ -1590,29 +1647,26 @@ export default function HomeScreen() {
                     color={colors.textSecondary}
                   />
                   <Text
-                    style={[
-                      styles.forYouText,
-                      { color: colors.textSecondary },
-                    ]}
+                    style={[styles.forYouText, { color: colors.textSecondary }]}
                     numberOfLines={1}
                   >
                     {item.location || item.genre || "Location TBA"}
                   </Text>
                 </View>
 
-                {/* Price */}
-                {(item.hourly_rate || item.budget || item.rate) && (
-                  <Text
-                    style={[styles.forYouPrice, { color: colors.primary }]}
-                  >
-                    {item.hourly_rate
-                      ? `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`
-                      : item.budget
-                        ? `₱${parseInt(item.budget).toLocaleString()}`
-                        : `₱${parseInt(item.rate || '0').toLocaleString()}`
-                    }
-                  </Text>
-                )}
+                {/* Price - hide for Groups */}
+                {item.type !== "Group" &&
+                  (item.hourly_rate || item.budget || item.rate) && (
+                    <Text
+                      style={[styles.forYouPrice, { color: colors.primary }]}
+                    >
+                      {item.hourly_rate
+                        ? `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`
+                        : item.budget
+                          ? `₱${parseInt(item.budget).toLocaleString()}`
+                          : `₱${parseInt(item.rate || "0").toLocaleString()}`}
+                    </Text>
+                  )}
               </View>
             </TouchableOpacity>
           ))}
@@ -1664,50 +1718,74 @@ export default function HomeScreen() {
         </View>
 
         {/* AI Recommendation Comparison Toggle */}
-        <View style={{
-          marginHorizontal: 24,
-          marginTop: 20,
-          marginBottom: 8,
-          padding: 16,
-          borderRadius: 20,
-          backgroundColor: isDark ? '#1F2937' : '#F3F4F6',
-          borderWidth: 1,
-          borderColor: aiModeEnabled ? colors.primary : (isDark ? '#374151' : '#E5E7EB'),
-        }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <View
+          style={{
+            marginHorizontal: 24,
+            marginTop: 20,
+            marginBottom: 8,
+            padding: 16,
+            borderRadius: 20,
+            backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+            borderWidth: 1,
+            borderColor: aiModeEnabled
+              ? colors.primary
+              : isDark
+                ? "#374151"
+                : "#E5E7EB",
+          }}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
             <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  backgroundColor: aiModeEnabled ? colors.primary : (isDark ? '#374151' : '#D1D5DB'),
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  <Ionicons 
-                    name={aiModeEnabled ? "sparkles" : "shuffle"} 
-                    size={18} 
-                    color="#FFF" 
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <View
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
+                    backgroundColor: aiModeEnabled
+                      ? colors.primary
+                      : isDark
+                        ? "#374151"
+                        : "#D1D5DB",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Ionicons
+                    name={aiModeEnabled ? "sparkles" : "shuffle"}
+                    size={18}
+                    color="#FFF"
                   />
                 </View>
                 <View>
-                  <Text style={{
-                    fontFamily: 'Poppins_600SemiBold',
-                    fontSize: 14,
-                    color: colors.text,
-                  }}>
-                    {aiModeEnabled ? '🤖 AI Recommendations' : '🎲 Random Mode'}
+                  <Text
+                    style={{
+                      fontFamily: "Poppins_600SemiBold",
+                      fontSize: 14,
+                      color: colors.text,
+                    }}
+                  >
+                    {aiModeEnabled ? "🤖 AI Recommendations" : "🎲 Random Mode"}
                   </Text>
-                  <Text style={{
-                    fontFamily: 'Poppins_400Regular',
-                    fontSize: 11,
-                    color: colors.textSecondary,
-                    marginTop: -2,
-                  }}>
-                    {aiModeEnabled 
-                      ? `Personalized based on your interests${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ''}` 
-                      : 'Showing random listings for comparison'}
+                  <Text
+                    style={{
+                      fontFamily: "Poppins_400Regular",
+                      fontSize: 11,
+                      color: colors.textSecondary,
+                      marginTop: -2,
+                    }}
+                  >
+                    {aiModeEnabled
+                      ? `Personalized based on your interests${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ""}`
+                      : "Showing random listings for comparison"}
                   </Text>
                 </View>
               </View>
@@ -1725,62 +1803,81 @@ export default function HomeScreen() {
                   setDiscover(randomRecommendations.slice(10, 20));
                 }
               }}
-              trackColor={{ false: isDark ? '#374151' : '#D1D5DB', true: colors.primary + '60' }}
-              thumbColor={aiModeEnabled ? colors.primary : '#9CA3AF'}
+              trackColor={{
+                false: isDark ? "#374151" : "#D1D5DB",
+                true: colors.primary + "60",
+              }}
+              thumbColor={aiModeEnabled ? colors.primary : "#9CA3AF"}
             />
           </View>
-          
+
           {/* AI Similarity Preview */}
           {aiModeEnabled && aiRecommendations.length > 0 && (
-            <View style={{ 
-              marginTop: 12, 
-              paddingTop: 12, 
-              borderTopWidth: 1, 
-              borderTopColor: isDark ? '#374151' : '#E5E7EB' 
-            }}>
-              <Text style={{
-                fontFamily: 'Poppins_500Medium',
-                fontSize: 11,
-                color: colors.textSecondary,
-                marginBottom: 8,
-                textTransform: 'uppercase',
-                letterSpacing: 0.5,
-              }}>
-                {aiRecommendations.some((i: any) => i.similarity > 0.1) 
-                  ? 'Top Matches by AI Similarity' 
-                  : '📊 Sorted by Popularity (No embeddings yet)'}
+            <View
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTopWidth: 1,
+                borderTopColor: isDark ? "#374151" : "#E5E7EB",
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: "Poppins_500Medium",
+                  fontSize: 11,
+                  color: colors.textSecondary,
+                  marginBottom: 8,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                }}
+              >
+                {aiRecommendations.some((i: any) => i.similarity > 0.1)
+                  ? "Top Matches by AI Similarity"
+                  : "📊 Sorted by Popularity (No embeddings yet)"}
               </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                 {aiRecommendations.slice(0, 4).map((item, idx) => (
-                  <View key={item.id} style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    backgroundColor: isDark ? '#374151' : '#E5E7EB',
-                    paddingHorizontal: 10,
-                    paddingVertical: 5,
-                    borderRadius: 12,
-                    gap: 4,
-                  }}>
-                    <Text style={{
-                      fontFamily: 'Poppins_500Medium',
-                      fontSize: 11,
-                      color: colors.text,
-                    }} numberOfLines={1}>
-                      {item.name?.substring(0, 15)}{item.name?.length > 15 ? '...' : ''}
+                  <View
+                    key={item.id}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 12,
+                      gap: 4,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 11,
+                        color: colors.text,
+                      }}
+                      numberOfLines={1}
+                    >
+                      {item.name?.substring(0, 15)}
+                      {item.name?.length > 15 ? "..." : ""}
                     </Text>
-                    <View style={{
-                      backgroundColor: item.similarity > 0.1 ? colors.primary : '#6B7280',
-                      paddingHorizontal: 5,
-                      paddingVertical: 1,
-                      borderRadius: 6,
-                    }}>
-                      <Text style={{
-                        fontFamily: 'Poppins_600SemiBold',
-                        fontSize: 9,
-                        color: '#FFF',
-                      }}>
-                        {item.similarity > 0.1 
-                          ? `${((item.similarity || 0) * 100).toFixed(0)}%` 
+                    <View
+                      style={{
+                        backgroundColor:
+                          item.similarity > 0.1 ? colors.primary : "#6B7280",
+                        paddingHorizontal: 5,
+                        paddingVertical: 1,
+                        borderRadius: 6,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontFamily: "Poppins_600SemiBold",
+                          fontSize: 9,
+                          color: "#FFF",
+                        }}
+                      >
+                        {item.similarity > 0.1
+                          ? `${((item.similarity || 0) * 100).toFixed(0)}%`
                           : item.type}
                       </Text>
                     </View>
@@ -1789,26 +1886,35 @@ export default function HomeScreen() {
               </View>
             </View>
           )}
-          
+
           {/* No AI Data Message */}
           {aiModeEnabled && aiRecommendations.length === 0 && userId && (
-            <View style={{ 
-              marginTop: 12, 
-              paddingTop: 12, 
-              borderTopWidth: 1, 
-              borderTopColor: isDark ? '#374151' : '#E5E7EB',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-            }}>
-              <Ionicons name="information-circle" size={16} color={colors.textSecondary} />
-              <Text style={{
-                fontFamily: 'Poppins_400Regular',
-                fontSize: 11,
-                color: colors.textSecondary,
-                flex: 1,
-              }}>
-                Start favoriting listings to build your interest profile. AI will learn your preferences!
+            <View
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTopWidth: 1,
+                borderTopColor: isDark ? "#374151" : "#E5E7EB",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Ionicons
+                name="information-circle"
+                size={16}
+                color={colors.textSecondary}
+              />
+              <Text
+                style={{
+                  fontFamily: "Poppins_400Regular",
+                  fontSize: 11,
+                  color: colors.textSecondary,
+                  flex: 1,
+                }}
+              >
+                Start favoriting listings to build your interest profile. AI
+                will learn your preferences!
               </Text>
             </View>
           )}
@@ -1823,155 +1929,166 @@ export default function HomeScreen() {
         {renderSmartFeed()}
 
         {/* Recently Viewed Section - Custom Cards */}
-        {recentlyViewed.length > 0 && (() => {
-          // Helper to get type badge color
-          const getTypeBadgeColor = (type: string) => {
-            switch (type) {
-              case "Studio": return "#7C3AED";
-              case "Gig": return "#10B981";
-              case "Group": return "#3B82F6";
-              case "Artist": return "#EC4899";
-              default: return "#7C3AED";
-            }
-          };
+        {recentlyViewed.length > 0 &&
+          (() => {
+            // Helper to get type badge color
+            const getTypeBadgeColor = (type: string) => {
+              switch (type) {
+                case "Studio":
+                  return "#7C3AED";
+                case "Gig":
+                  return "#10B981";
+                case "Group":
+                  return "#3B82F6";
+                case "Artist":
+                  return "#EC4899";
+                default:
+                  return "#7C3AED";
+              }
+            };
 
-          return (
-            <View style={styles.sectionContainer}>
-              <View
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  paddingHorizontal: 24,
-                  marginBottom: 12,
-                }}
-              >
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Recently Viewed
-                </Text>
-                <TouchableOpacity onPress={openRecentlyViewedSheet}>
-                  <Text
-                    style={{
-                      color: colors.primary,
-                      fontFamily: "Poppins_500Medium",
-                      fontSize: moderateScale(12),
-                    }}
-                  >
-                    See all
+            return (
+              <View style={styles.sectionContainer}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    paddingHorizontal: 24,
+                    marginBottom: 12,
+                  }}
+                >
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                    Recently Viewed
                   </Text>
-                </TouchableOpacity>
-              </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{
-                  paddingLeft: 24,
-                  paddingRight: 24,
-                  paddingVertical: 8,
-                }}
-                decelerationRate="fast"
-                snapToInterval={240 + 16}
-              >
-                {recentlyViewed.map((item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    activeOpacity={0.9}
-                    onPress={() => handleCardPress(item)}
-                    style={[
-                      styles.recentlyViewedCard,
-                      { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
-                    ]}
-                  >
-                    {/* Image Section */}
-                    <View style={styles.recentlyViewedImageContainer}>
-                      {item.image ? (
-                        <Image
-                          source={{ uri: item.image }}
-                          style={styles.recentlyViewedImage}
-                        />
-                      ) : (
+                  <TouchableOpacity onPress={openRecentlyViewedSheet}>
+                    <Text
+                      style={{
+                        color: colors.primary,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: moderateScale(12),
+                      }}
+                    >
+                      See all
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{
+                    paddingLeft: 24,
+                    paddingRight: 24,
+                    paddingVertical: 8,
+                  }}
+                  decelerationRate="fast"
+                  snapToInterval={240 + 16}
+                >
+                  {recentlyViewed.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      activeOpacity={0.9}
+                      onPress={() => handleCardPress(item)}
+                      style={[
+                        styles.recentlyViewedCard,
+                        { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                      ]}
+                    >
+                      {/* Image Section */}
+                      <View style={styles.recentlyViewedImageContainer}>
+                        {item.image ? (
+                          <Image
+                            source={{ uri: item.image }}
+                            style={styles.recentlyViewedImage}
+                          />
+                        ) : (
+                          <View
+                            style={[
+                              styles.recentlyViewedImagePlaceholder,
+                              { backgroundColor: colors.primary + "20" },
+                            ]}
+                          >
+                            <Ionicons
+                              name={
+                                item.type === "Gig"
+                                  ? "musical-notes"
+                                  : item.type === "Studio"
+                                    ? "business"
+                                    : "people"
+                              }
+                              size={24}
+                              color={colors.primary}
+                            />
+                          </View>
+                        )}
+                        {/* Type Badge */}
                         <View
                           style={[
-                            styles.recentlyViewedImagePlaceholder,
-                            { backgroundColor: colors.primary + "20" },
+                            styles.recentlyViewedTypeBadge,
+                            { backgroundColor: getTypeBadgeColor(item.type) },
                           ]}
                         >
-                          <Ionicons
-                            name={
-                              item.type === "Gig"
-                                ? "musical-notes"
-                                : item.type === "Studio"
-                                  ? "business"
-                                  : "people"
-                            }
-                            size={24}
-                            color={colors.primary}
-                          />
+                          <Text style={styles.recentlyViewedTypeBadgeText}>
+                            {item.type}
+                          </Text>
                         </View>
-                      )}
-                      {/* Type Badge */}
-                      <View
-                        style={[
-                          styles.recentlyViewedTypeBadge,
-                          { backgroundColor: getTypeBadgeColor(item.type) },
-                        ]}
-                      >
-                        <Text style={styles.recentlyViewedTypeBadgeText}>
-                          {item.type}
-                        </Text>
                       </View>
-                    </View>
 
-                    {/* Details Section */}
-                    <View style={styles.recentlyViewedDetails}>
-                      <Text
-                        style={[styles.recentlyViewedName, { color: colors.text }]}
-                        numberOfLines={1}
-                      >
-                        {item.name}
-                      </Text>
-
-                      {/* Location/Genre */}
-                      <View style={styles.recentlyViewedRow}>
-                        <Ionicons
-                          name="location-outline"
-                          size={12}
-                          color={colors.textSecondary}
-                        />
+                      {/* Details Section */}
+                      <View style={styles.recentlyViewedDetails}>
                         <Text
                           style={[
-                            styles.recentlyViewedText,
-                            { color: colors.textSecondary },
+                            styles.recentlyViewedName,
+                            { color: colors.text },
                           ]}
                           numberOfLines={1}
                         >
-                          {item.location || item.genre || "Location TBA"}
+                          {item.name}
                         </Text>
-                      </View>
 
-                      {/* Rating - Compact */}
-                      <View style={styles.recentlyViewedRow}>
-                        <Ionicons name="star" size={12} color="#FCD34D" />
-                        <Text
-                          style={[
-                            styles.recentlyViewedText,
-                            { color: colors.textSecondary },
-                          ]}
-                        >
-                          {item.rating > 0
-                            ? item.rating.toFixed(1)
-                            : "New"}
-                        </Text>
-                        <View style={{ flex: 1 }} />
-                        <Ionicons name="time-outline" size={12} color={colors.textSecondary} />
+                        {/* Location/Genre */}
+                        <View style={styles.recentlyViewedRow}>
+                          <Ionicons
+                            name="location-outline"
+                            size={12}
+                            color={colors.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.recentlyViewedText,
+                              { color: colors.textSecondary },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item.location || item.genre || "Location TBA"}
+                          </Text>
+                        </View>
+
+                        {/* Rating - Compact */}
+                        <View style={styles.recentlyViewedRow}>
+                          <Ionicons name="star" size={12} color="#FCD34D" />
+                          <Text
+                            style={[
+                              styles.recentlyViewedText,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
+                            {item.rating > 0 ? item.rating.toFixed(1) : "New"}
+                          </Text>
+                          <View style={{ flex: 1 }} />
+                          <Ionicons
+                            name="time-outline"
+                            size={12}
+                            color={colors.textSecondary}
+                          />
+                        </View>
                       </View>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          );
-        })()}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            );
+          })()}
       </ScrollView>
 
       <Navbar />
@@ -1979,7 +2096,7 @@ export default function HomeScreen() {
       <ListingDetailsSheet ref={bottomSheetRef} listingId={selectedListingId} />
       <SearchBottomSheet
         ref={searchSheetRef}
-        onClose={() => { }}
+        onClose={() => {}}
         onItemPress={(id) => {
           console.log("=== SearchBottomSheet onItemPress ===");
           console.log("Item ID from search:", id);
