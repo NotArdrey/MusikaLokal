@@ -145,13 +145,20 @@ function RootContent() {
       if (hostname === "payment-result" || path === "payment-result") {
         const status = queryParams?.status as string;
         const bookingId = queryParams?.booking_id as string;
+        const type = queryParams?.type as string;
+        const planId = queryParams?.plan_id as string;
 
-        console.log("💳 Payment result deep link:", { status, bookingId });
+        console.log("💳 Payment result deep link:", { status, bookingId, type, planId });
 
         // Navigate to payment result screen
         router.replace({
           pathname: "/payment-result",
-          params: { status, booking_id: bookingId },
+          params: { 
+            status, 
+            booking_id: bookingId,
+            type,
+            plan_id: planId
+          },
         });
       }
     } catch (e) {

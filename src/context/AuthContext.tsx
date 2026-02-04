@@ -89,69 +89,58 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [subscriptionRequired, setSubscriptionRequired] = useState(false);
 
   // Check subscription status for owners
-  // MCP Server Override: All users are treated as subscribed
   const checkSubscription = useCallback(async () => {
-    // MCP Server Check: Always grant subscription access
-    console.log(
-      "📋 MCP Server: Subscription check bypassed - all users are subscribed",
-    );
-    setSubscriptionStatus("active");
-    setSubscriptionRequired(false);
-    return;
+    if (!session?.user?.id) {
+      setSubscriptionStatus(null);
+      setSubscriptionRequired(false);
+      return;
+    }
 
-    // Original subscription check code (disabled by MCP server)
-    /*
-        if (!session?.user?.id) {
-            setSubscriptionStatus(null);
-            setSubscriptionRequired(false);
-            return;
+    try {
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("role, subscription_status, subscription_expires_at")
+        .eq("id", session.user.id)
+        .single();
+
+      if (error) {
+        console.log("Error checking subscription:", error);
+        return;
+      }
+
+      // Only studio-owner and venue-owner need subscription
+      const needsSubscription =
+        profile?.role === "studio-owner" || profile?.role === "venue-owner";
+
+      if (needsSubscription) {
+        const status = profile?.subscription_status;
+        const expiresAt = profile?.subscription_expires_at;
+
+        // Check if subscription is active and not expired
+        let isActive = status === "active";
+        if (isActive && expiresAt) {
+          const expiryDate = new Date(expiresAt);
+          isActive = expiryDate > new Date();
         }
 
-        try {
-            const { data: profile, error } = await supabase
-                .from('profiles')
-                .select('role, subscription_status, subscription_expires_at')
-                .eq('id', session.user.id)
-                .single();
+        setSubscriptionStatus(isActive ? "active" : status);
+        setSubscriptionRequired(!isActive);
 
-            if (error) {
-                console.log('Error checking subscription:', error);
-                return;
-            }
-
-            // Only studio-owner and venue-owner need subscription
-            const needsSubscription = profile?.role === 'studio-owner' || profile?.role === 'venue-owner';
-            
-            if (needsSubscription) {
-                const status = profile?.subscription_status;
-                const expiresAt = profile?.subscription_expires_at;
-                
-                // Check if subscription is active and not expired
-                let isActive = status === 'active';
-                if (isActive && expiresAt) {
-                    const expiryDate = new Date(expiresAt);
-                    isActive = expiryDate > new Date();
-                }
-
-                setSubscriptionStatus(isActive ? 'active' : status);
-                setSubscriptionRequired(!isActive);
-                
-                console.log('📋 Subscription check:', { 
-                    role: profile?.role, 
-                    status, 
-                    expiresAt, 
-                    isActive,
-                    required: !isActive 
-                });
-            } else {
-                // Musicians don't need subscription
-                setSubscriptionStatus(null);
-                setSubscriptionRequired(false);
-            }
-        } catch (e) {
-            console.log('Error in checkSubscription:', e);
-        }
-        */
+        console.log("📋 Subscription check:", {
+          role: profile?.role,
+          status,
+          expiresAt,
+          isActive,
+          required: !isActive,
+        });
+      } else {
+        // Musicians don't need subscription
+        setSubscriptionStatus(null);
+        setSubscriptionRequired(false);
+      }
+    } catch (e) {
+      console.log("Error in checkSubscription:", e);
+    }
   }, [session?.user?.id]);
 
   // Check for unpaid balances
