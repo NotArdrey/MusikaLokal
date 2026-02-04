@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 
@@ -12,6 +13,7 @@ interface HeaderProps {
 
 export default function Header({ title, transparent }: HeaderProps) {
     const { colors, isDark } = useTheme();
+    const insets = useSafeAreaInsets();
 
     const pathname = usePathname();
     const [backVisible, setBackVisible] = useState(false);
@@ -54,7 +56,7 @@ export default function Header({ title, transparent }: HeaderProps) {
     };
 
     useEffect(() => {
-        if (pathname === "/explore" || pathname === "/home" || pathname === "/manage" || pathname === "/bookings") {
+        if (pathname === "/explore" || pathname === "/home" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions") {
             setnotifVisible(true)
             setBackVisible(false)
             setaddbtnvisible(false)
@@ -92,40 +94,58 @@ export default function Header({ title, transparent }: HeaderProps) {
     }, [addPath])
 
     return (
-        <View style={[styles.container, { backgroundColor: transparent ? 'transparent' : colors.background }]}>
-            <View style={styles.leftContainer}>
-                {backVisible ? (
+        <View style={[styles.container, {
+            backgroundColor: transparent ? 'transparent' : colors.background,
+            paddingTop: insets.top + 8
+        }]}>
+            {/* Left Container - Only for Back Button */}
+            {backVisible && (
+                <View style={styles.leftContainer}>
                     <TouchableOpacity
                         onPress={() => router.back()}
                         style={[styles.backButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}
                     >
                         <Ionicons name="arrow-back" size={20} color={colors.text} />
                     </TouchableOpacity>
-                ) : null}
-            </View>
+                </View>
+            )}
 
-            {/* Title */}
-            <View style={styles.titleContainer}>
-                <Text style={[styles.title, { color: colors.text }]}>
+            {/* Title - Dynamic Alignment */}
+            <View style={[
+                styles.titleContainer,
+                !backVisible && styles.mainTitleContainer
+            ]}>
+                <Text style={[
+                    styles.title,
+                    { color: colors.text },
+                    !backVisible && styles.mainTitle
+                ]}>
                     {title}
                 </Text>
             </View>
 
-            {/* Action Button */}
+            {/* Action Buttons */}
             <View style={styles.rightContainer}>
                 {notifVisible ? (
-                    <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.iconButton}>
-                        <Ionicons name="notifications-outline" size={24} color={colors.text} />
-                        {hasUnread && (
-                            <View style={styles.badge} />
-                        )}
-                    </TouchableOpacity>
+                    <View style={styles.iconRow}>
+                        {/* Chat Button */}
+                        <TouchableOpacity onPress={() => router.push('/chat')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>
+                            <Ionicons name="chatbubbles" size={24} color={colors.text} />
+                        </TouchableOpacity>
+                        {/* Notifications Button */}
+                        <TouchableOpacity onPress={() => router.push('/notifications')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>
+                            <Ionicons name="notifications" size={24} color={colors.text} />
+                            {hasUnread && (
+                                <View style={styles.badge} />
+                            )}
+                        </TouchableOpacity>
+                    </View>
                 ) : addbtnvisible ? (
                     <TouchableOpacity
                         onPress={() => router.push(btn)}
-                        style={styles.addButton}
+                        style={[styles.addButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}
                     >
-                        <Ionicons name="add" size={28} color={colors.primary} />
+                        <Ionicons name="add" size={24} color={colors.text} />
                     </TouchableOpacity>
                 ) : null}
             </View>
@@ -138,19 +158,24 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingTop: 48, // pt-12 (safe area approx)
         paddingBottom: 16, // pb-4
-        paddingHorizontal: 8, // px-2
+        paddingHorizontal: 16, // px-4
     },
+    // Simplified Left Container logic - if not visible, it shouldn't take space in FB layout
     leftContainer: {
-        width: 48, // w-12
+        width: 40,
         justifyContent: 'center',
-        alignItems: 'center',
+        alignItems: 'flex-start',
     },
     rightContainer: {
-        width: 48, // w-12
+        // minWidth: 48, 
         justifyContent: 'center',
+        alignItems: 'flex-end',
+    },
+    iconRow: {
+        flexDirection: 'row',
         alignItems: 'center',
+        gap: 8,
     },
     backButton: {
         padding: 8,
@@ -161,29 +186,39 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
+    mainTitleContainer: {
+        alignItems: 'flex-start',
+    },
     title: {
-        fontSize: 18, // text-lg
-        fontWeight: '600', // font-semibold
-        letterSpacing: 0.5, // tracking-wide
+        fontSize: 16,
+        fontWeight: '600',
         fontFamily: 'Poppins_600SemiBold',
+    },
+    mainTitle: {
+        fontSize: 26,
+        fontWeight: '700',
+        fontFamily: 'Poppins_700Bold',
+        letterSpacing: -0.5,
     },
     iconButton: {
         padding: 8,
         position: 'relative',
+        backgroundColor: '#F3F4F6', // light gray bg for icons
+        borderRadius: 9999,
     },
     badge: {
         position: 'absolute',
-        top: 8,
-        right: 8,
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        backgroundColor: '#EF4444', // red-500
-        borderWidth: 1,
+        top: 0,
+        right: 0,
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: '#EF4444',
+        borderWidth: 2,
         borderColor: 'white',
     },
     addButton: {
-        padding: 4,
+        padding: 8,
         borderRadius: 9999,
     },
 });

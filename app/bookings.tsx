@@ -781,7 +781,7 @@ export default function BookingsScreen() {
         Alert.alert(
           "Refund Processed",
           refundData.message ||
-            `Your refund of ₱${refundData.refund_amount?.toLocaleString()} has been processed.`,
+          `Your refund of ₱${refundData.refund_amount?.toLocaleString()} has been processed.`,
           [
             {
               text: "OK",
@@ -2067,7 +2067,7 @@ export default function BookingsScreen() {
                         ]}
                       >
                         {activeTab === "Pending" &&
-                        item.action === "Confirm Now" ? (
+                          item.action === "Confirm Now" ? (
                           <View
                             style={{
                               flexDirection: "row",
@@ -2369,33 +2369,13 @@ export default function BookingsScreen() {
                   : modalMode === "renew"
                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
                     : (() => {
-                        // Cancel mode
-                        if (selectedItem?.type_id === "gig_application") {
-                          // For gig applications
-                          if (userRole === "venue-owner") {
-                            return "Are you sure you want to revoke this accepted application? The musician will be notified.";
-                          } else {
-                            // Musician withdrawing
-                            if (selectedItem?.raw_date) {
-                              const eventDate = new Date(selectedItem.raw_date);
-                              const now = new Date();
-                              const diffTime =
-                                eventDate.getTime() - now.getTime();
-                              const diffDays = Math.ceil(
-                                diffTime / (1000 * 60 * 60 * 24),
-                              );
-
-                              if (diffDays > 7) {
-                                return "Warning: You are withdrawing from an accepted gig with more than 7 days notice. This may affect your reputation with this venue.";
-                              } else if (diffDays >= 3) {
-                                return "Warning: You are withdrawing within 3-7 days. This may significantly affect your reputation with this venue.";
-                              }
-                              return "You are withdrawing with less than 3 days notice. This may severely damage your reputation with this venue.";
-                            }
-                            return "Are you sure you want to withdraw from this gig? The venue owner will be notified.";
-                          }
+                      // Cancel mode
+                      if (selectedItem?.type_id === "gig_application") {
+                        // For gig applications
+                        if (userRole === "venue-owner") {
+                          return "Are you sure you want to revoke this accepted application? The musician will be notified.";
                         } else {
-                          // For studio bookings - show refund policy
+                          // Musician withdrawing
                           if (selectedItem?.raw_date) {
                             const eventDate = new Date(selectedItem.raw_date);
                             const now = new Date();
@@ -2405,15 +2385,35 @@ export default function BookingsScreen() {
                               diffTime / (1000 * 60 * 60 * 24),
                             );
 
-                            if (diffDays > 7)
-                              return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
-                            if (diffDays >= 3)
-                              return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
-                            return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
+                            if (diffDays > 7) {
+                              return "Warning: You are withdrawing from an accepted gig with more than 7 days notice. This may affect your reputation with this venue.";
+                            } else if (diffDays >= 3) {
+                              return "Warning: You are withdrawing within 3-7 days. This may significantly affect your reputation with this venue.";
+                            }
+                            return "You are withdrawing with less than 3 days notice. This may severely damage your reputation with this venue.";
                           }
-                          return "Are you sure you want to cancel this booking? This action cannot be undone.";
+                          return "Are you sure you want to withdraw from this gig? The venue owner will be notified.";
                         }
-                      })()
+                      } else {
+                        // For studio bookings - show refund policy
+                        if (selectedItem?.raw_date) {
+                          const eventDate = new Date(selectedItem.raw_date);
+                          const now = new Date();
+                          const diffTime =
+                            eventDate.getTime() - now.getTime();
+                          const diffDays = Math.ceil(
+                            diffTime / (1000 * 60 * 60 * 24),
+                          );
+
+                          if (diffDays > 7)
+                            return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
+                          if (diffDays >= 3)
+                            return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
+                          return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
+                        }
+                        return "Are you sure you want to cancel this booking? This action cannot be undone.";
+                      }
+                    })()
         }
         buttonText={
           modalMode === "confirm"
@@ -2543,22 +2543,32 @@ export default function BookingsScreen() {
               { backgroundColor: colors.card },
             ]}
           >
-            <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>
-              Choose Payment Option
-            </Text>
-            <Text
-              style={[
-                styles.paymentOptionSubtitle,
-                { color: colors.textSecondary },
-              ]}
-            >
-              Total Amount: ₱
-              {(
-                paymentItem?.payment_amount ||
-                paymentItem?.total_cost ||
-                0
-              ).toLocaleString()}
-            </Text>
+            <View style={styles.paymentModalHeader}>
+              <View>
+                <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>
+                  Choose Payment Option
+                </Text>
+                <Text
+                  style={[
+                    styles.paymentOptionSubtitle,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Total Amount: ₱
+                  {(
+                    paymentItem?.payment_amount ||
+                    paymentItem?.total_cost ||
+                    0
+                  ).toLocaleString()}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowPaymentOptionModal(false)}
+                style={styles.modalCloseIcon}
+              >
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
 
             {/* Full Payment Option */}
             <TouchableOpacity
@@ -2572,29 +2582,17 @@ export default function BookingsScreen() {
                       ? colors.primary
                       : colors.border,
                   borderWidth: selectedPaymentType === "full" ? 2 : 1,
+                  transform: [{ scale: selectedPaymentType === "full" ? 1.02 : 1 }]
                 },
               ]}
             >
               <View style={styles.paymentOptionRow}>
-                <View
-                  style={[
-                    styles.paymentOptionRadio,
-                    {
-                      borderColor:
-                        selectedPaymentType === "full"
-                          ? colors.primary
-                          : colors.border,
-                      backgroundColor:
-                        selectedPaymentType === "full"
-                          ? colors.primary
-                          : "transparent",
-                    },
-                  ]}
-                >
-                  {selectedPaymentType === "full" && (
-                    <View style={styles.paymentOptionRadioInner} />
-                  )}
-                </View>
+                <Ionicons
+                  name={selectedPaymentType === 'full' ? "radio-button-on" : "radio-button-off"}
+                  size={24}
+                  color={selectedPaymentType === 'full' ? colors.primary : colors.textSecondary}
+                  style={{ marginRight: 12 }}
+                />
                 <View style={styles.paymentOptionInfo}>
                   <Text
                     style={[styles.paymentOptionLabel, { color: colors.text }]}
@@ -2638,29 +2636,17 @@ export default function BookingsScreen() {
                       ? colors.primary
                       : colors.border,
                   borderWidth: selectedPaymentType === "downpayment" ? 2 : 1,
+                  transform: [{ scale: selectedPaymentType === "downpayment" ? 1.02 : 1 }]
                 },
               ]}
             >
               <View style={styles.paymentOptionRow}>
-                <View
-                  style={[
-                    styles.paymentOptionRadio,
-                    {
-                      borderColor:
-                        selectedPaymentType === "downpayment"
-                          ? colors.primary
-                          : colors.border,
-                      backgroundColor:
-                        selectedPaymentType === "downpayment"
-                          ? colors.primary
-                          : "transparent",
-                    },
-                  ]}
-                >
-                  {selectedPaymentType === "downpayment" && (
-                    <View style={styles.paymentOptionRadioInner} />
-                  )}
-                </View>
+                <Ionicons
+                  name={selectedPaymentType === 'downpayment' ? "radio-button-on" : "radio-button-off"}
+                  size={24}
+                  color={selectedPaymentType === 'downpayment' ? colors.primary : colors.textSecondary}
+                  style={{ marginRight: 12 }}
+                />
                 <View style={styles.paymentOptionInfo}>
                   <Text
                     style={[styles.paymentOptionLabel, { color: colors.text }]}
@@ -2701,22 +2687,6 @@ export default function BookingsScreen() {
             {/* Action Buttons */}
             <View style={styles.paymentOptionButtons}>
               <TouchableOpacity
-                onPress={() => setShowPaymentOptionModal(false)}
-                style={[
-                  styles.paymentOptionCancelBtn,
-                  { borderColor: colors.border },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.paymentOptionCancelText,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  Cancel
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
                 onPress={() => {
                   setShowPaymentOptionModal(false);
                   handlePayNow(paymentItem, selectedPaymentType);
@@ -2728,26 +2698,23 @@ export default function BookingsScreen() {
               >
                 <Ionicons
                   name="card-outline"
-                  size={18}
+                  size={20}
                   color="white"
-                  style={{ marginRight: 6 }}
+                  style={{ marginRight: 8 }}
                 />
                 <Text style={styles.paymentOptionConfirmText}>
-                  Pay ₱
-                  {selectedPaymentType === "downpayment"
-                    ? Math.round(
-                        (paymentItem?.payment_amount ||
-                          paymentItem?.total_cost ||
-                          0) / 2,
-                      ).toLocaleString()
-                    : (
-                        paymentItem?.payment_amount ||
-                        paymentItem?.total_cost ||
-                        0
-                      ).toLocaleString()}
+                  Proceed to Payment
                 </Text>
+                <Ionicons name="arrow-forward" size={18} color="white" style={{ marginLeft: 8 }} />
               </TouchableOpacity>
             </View>
+
+            <TouchableOpacity
+              onPress={() => setShowPaymentOptionModal(false)}
+              style={{ marginTop: 16, alignItems: 'center' }}
+            >
+              <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </RNModal>
@@ -3120,50 +3087,41 @@ const styles = StyleSheet.create({
   // Payment Option Modal Styles
   paymentOptionContainer: {
     width: "90%",
-    borderRadius: 20,
+    borderRadius: 24,
     padding: 24,
+    backgroundColor: "white",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
-    elevation: 10,
+    elevation: 20,
+  },
+  paymentModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 20,
   },
   paymentOptionTitle: {
-    fontSize: 20,
-    fontFamily: "Poppins_600SemiBold",
-    textAlign: "center",
-    marginBottom: 8,
+    fontSize: 22,
+    fontFamily: "Poppins_700Bold",
+    marginBottom: 4,
   },
   paymentOptionSubtitle: {
     fontSize: 14,
     fontFamily: "Poppins_400Regular",
-    textAlign: "center",
-    marginBottom: 20,
+  },
+  modalCloseIcon: {
+    padding: 4,
   },
   paymentOptionCard: {
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 16,
     marginBottom: 12,
   },
   paymentOptionRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
-  },
-  paymentOptionRadio: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  paymentOptionRadioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "white",
   },
   paymentOptionInfo: {
     flex: 1,
@@ -3182,36 +3140,27 @@ const styles = StyleSheet.create({
   paymentOptionDesc: {
     fontSize: 12,
     fontFamily: "Poppins_400Regular",
-    marginLeft: 34,
+    marginLeft: 36, // space for icon + margin
+    marginTop: 4,
   },
   paymentOptionButtons: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 8,
-  },
-  paymentOptionCancelBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  paymentOptionCancelText: {
-    fontSize: 14,
-    fontFamily: "Poppins_500Medium",
+    marginTop: 20,
   },
   paymentOptionConfirmBtn: {
-    flex: 2,
-    paddingVertical: 14,
-    borderRadius: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    paddingVertical: 16,
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
   },
   paymentOptionConfirmText: {
     color: "white",
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: "Poppins_600SemiBold",
   },
 });

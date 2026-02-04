@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ExpoLinking from 'expo-linking';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -32,7 +33,7 @@ export default function SubscriptionRequiredScreen() {
     const { colors, isDark } = useTheme();
     const { userId, userRole, checkSubscription } = useAuth();
     const insets = useSafeAreaInsets();
-    
+
     const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
     const [loading, setLoading] = useState(true);
     const [subscribing, setSubscribing] = useState(false);
@@ -75,6 +76,14 @@ export default function SubscriptionRequiredScreen() {
             const plan = plans.find(p => p.id === planId);
             if (!plan) throw new Error('Plan not found');
 
+            // Generate environment-aware redirect URLs (works with Expo Go and production)
+            const redirectUrl = ExpoLinking.createURL('payment-result', {
+                queryParams: { status: 'success', type: 'subscription', plan_id: planId },
+            });
+            const cancelRedirectUrl = ExpoLinking.createURL('payment-result', {
+                queryParams: { status: 'cancelled', type: 'subscription' },
+            });
+
             // Call edge function to create subscription checkout
             const { data, error } = await supabase.functions.invoke('paymongo', {
                 body: {
@@ -83,8 +92,8 @@ export default function SubscriptionRequiredScreen() {
                     plan_id: planId,
                     amount: plan.price,
                     plan_name: plan.name,
-                    redirect_url: `musikalokal://payment-result?status=success&type=subscription&plan_id=${planId}`,
-                    cancel_redirect_url: `musikalokal://payment-result?status=cancelled&type=subscription`,
+                    redirect_url: redirectUrl,
+                    cancel_redirect_url: cancelRedirectUrl,
                 },
             });
 
@@ -92,7 +101,12 @@ export default function SubscriptionRequiredScreen() {
 
             if (data?.checkout_url) {
                 // Open PayMongo checkout
-                await Linking.openURL(data.checkout_url);
+                const canOpen = await Linking.canOpenURL(data.checkout_url);
+                if (canOpen) {
+                    await Linking.openURL(data.checkout_url);
+                } else {
+                    Alert.alert('Error', 'Unable to open payment page. Please try again.');
+                }
             } else {
                 throw new Error('No checkout URL returned');
             }
@@ -158,7 +172,7 @@ export default function SubscriptionRequiredScreen() {
                 </View>
             </View>
 
-            <ScrollView 
+            <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
             >
@@ -217,16 +231,17 @@ export default function SubscriptionRequiredScreen() {
                             {plans.map((plan, index) => {
                                 const planColor = getPlanColor(index);
                                 const isPopular = index === 1; // Pro plan is popular
-                                
+
                                 return (
-                                    <View 
-                                        key={plan.id} 
+                                    <View
+                                        key={plan.id}
                                         style={[
-                                            styles.planCard, 
-                                            { 
+                                            styles.planCard,
+                                            {
                                                 backgroundColor: colors.card,
                                                 borderColor: isPopular ? planColor : colors.border,
                                                 borderWidth: isPopular ? 2 : 1,
+                                                transform: [{ scale: isPopular ? 1.02 : 1 }]
                                             }
                                         ]}
                                     >
@@ -235,32 +250,36 @@ export default function SubscriptionRequiredScreen() {
                                                 <Text style={styles.popularText}>MOST POPULAR</Text>
                                             </View>
                                         )}
-                                        
+
                                         <View style={styles.planHeader}>
                                             <View style={[styles.planIconContainer, { backgroundColor: planColor + '20' }]}>
-                                                <Ionicons 
-                                                    name={getPlanIcon(plan.name) as any} 
-                                                    size={28} 
-                                                    color={planColor} 
+                                                <Ionicons
+                                                    name={getPlanIcon(plan.name) as any}
+                                                    size={24}
+                                                    color={planColor}
                                                 />
                                             </View>
-                                            <Text style={[styles.planName, { color: colors.text }]}>
-                                                {plan.name}
-                                            </Text>
-                                            <Text style={[styles.planDescription, { color: colors.textSecondary }]}>
-                                                {plan.description}
-                                            </Text>
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={[styles.planName, { color: colors.text }]}>
+                                                    {plan.name}
+                                                </Text>
+                                                <Text style={[styles.planDescription, { color: colors.textSecondary }]}>
+                                                    {plan.description}
+                                                </Text>
+                                            </View>
                                         </View>
 
                                         <View style={styles.priceContainer}>
-                                            <Text style={[styles.currency, { color: colors.textSecondary }]}>₱</Text>
+                                            {/* <Text style={[styles.currency, { color: colors.textSecondary }]}>₱</Text> */}
                                             <Text style={[styles.price, { color: colors.text }]}>
-                                                {plan.price.toLocaleString()}
+                                                ₱{plan.price.toLocaleString()}
                                             </Text>
                                             <Text style={[styles.period, { color: colors.textSecondary }]}>
                                                 /{plan.duration_days} days
                                             </Text>
                                         </View>
+
+                                        <View style={styles.separator} />
 
                                         <View style={styles.featuresContainer}>
                                             {plan.features.map((feature, fIndex) => (
@@ -276,7 +295,14 @@ export default function SubscriptionRequiredScreen() {
                                         <TouchableOpacity
                                             style={[
                                                 styles.subscribeButton,
-                                                { backgroundColor: planColor },
+                                                {
+                                                    backgroundColor: planColor,
+                                                    shadowColor: planColor,
+                                                    shadowOffset: { width: 0, height: 4 },
+                                                    shadowOpacity: 0.3,
+                                                    shadowRadius: 8,
+                                                    elevation: 5
+                                                },
                                                 subscribing && selectedPlan === plan.id && styles.buttonDisabled
                                             ]}
                                             onPress={() => handleSubscribe(plan.id)}
@@ -301,7 +327,7 @@ export default function SubscriptionRequiredScreen() {
                 </View>
 
                 {/* Refresh Button */}
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[styles.refreshButton, { borderColor: colors.border }]}
                     onPress={handleRefresh}
                 >
@@ -437,9 +463,15 @@ const styles = StyleSheet.create({
         gap: 16,
     },
     planCard: {
-        borderRadius: 16,
+        borderRadius: 20,
         padding: 20,
         overflow: 'hidden',
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 3,
+        marginBottom: 10,
     },
     popularBadge: {
         position: 'absolute',
@@ -447,56 +479,62 @@ const styles = StyleSheet.create({
         right: 0,
         paddingHorizontal: 12,
         paddingVertical: 6,
-        borderBottomLeftRadius: 12,
+        borderBottomLeftRadius: 16,
+        zIndex: 10,
     },
     popularText: {
         color: 'white',
         fontSize: 10,
-        fontFamily: 'Poppins_600SemiBold',
+        fontFamily: 'Poppins_700Bold',
     },
     planHeader: {
-        alignItems: 'center',
+        flexDirection: 'row',
+        alignItems: 'flex-start',
         marginBottom: 16,
+        gap: 12,
     },
     planIconContainer: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 12,
     },
     planName: {
-        fontSize: 20,
+        fontSize: 18,
         fontFamily: 'Poppins_700Bold',
         marginBottom: 4,
     },
     planDescription: {
         fontSize: 13,
         fontFamily: 'Poppins_400Regular',
-        textAlign: 'center',
+        lineHeight: 18,
     },
     priceContainer: {
         flexDirection: 'row',
         alignItems: 'baseline',
-        justifyContent: 'center',
-        marginBottom: 20,
+        marginBottom: 16,
     },
     currency: {
         fontSize: 18,
         fontFamily: 'Poppins_500Medium',
     },
     price: {
-        fontSize: 36,
+        fontSize: 28,
         fontFamily: 'Poppins_700Bold',
     },
     period: {
         fontSize: 14,
-        fontFamily: 'Poppins_400Regular',
+        fontFamily: 'Poppins_500Medium',
         marginLeft: 4,
     },
+    separator: {
+        height: 1,
+        backgroundColor: 'rgba(0,0,0,0.05)',
+        marginBottom: 16,
+    },
     featuresContainer: {
-        gap: 10,
+        gap: 12,
         marginBottom: 20,
     },
     featureRow: {
@@ -514,7 +552,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         paddingVertical: 14,
-        borderRadius: 12,
+        borderRadius: 14,
         gap: 8,
     },
     subscribeButtonText: {

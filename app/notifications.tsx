@@ -1,17 +1,29 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+    ActivityIndicator,
+    Alert,
+    Image,
+    RefreshControl,
+    SectionList,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
+} from 'react-native';
 import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
+
 
 export default function NotificationsScreen() {
     const { colors, isDark } = useTheme();
     const [notifications, setNotifications] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [processingTransferId, setProcessingTransferId] = useState<string | null>(null);
 
     const fetchNotifications = useCallback(async () => {
         try {
@@ -58,7 +70,6 @@ export default function NotificationsScreen() {
             });
         } catch (e) {
             console.log('Error marking as read:', e);
-            // Revert on error? For now, keep it simple.
         }
     };
 
@@ -79,8 +90,6 @@ export default function NotificationsScreen() {
     };
 
     // Leadership Transfer Handlers
-    const [processingTransferId, setProcessingTransferId] = useState<string | null>(null);
-
     const handleAcceptTransfer = async (notification: any) => {
         const requestId = notification.meta?.request_id;
         if (!requestId) {
@@ -108,11 +117,21 @@ export default function NotificationsScreen() {
                             // Send notifications
                             const { data: request } = await supabase
                                 .from('leadership_transfer_requests')
-                                .select('from_user_id, group_id, groups:group_id(name)')
+                                .select('from_user_id, group_id, groups:group_id(name, images)')
                                 .eq('id', requestId)
                                 .single();
 
                             if (request) {
+                                // Get current user's profile for the avatar
+                                const { data: profile } = await supabase
+                                    .from('profiles')
+                                    .select('avatar_url')
+                                    .eq('id', user?.id)
+                                    .single();
+
+                                const groupImage = (request.groups as any)?.images?.[0];
+                                const userAvatar = profile?.avatar_url;
+
                                 // Notify old leader
                                 await supabase.functions.invoke('manage-listings', {
                                     body: {
@@ -122,6 +141,7 @@ export default function NotificationsScreen() {
                                         type: 'success',
                                         title: 'Leadership Transfer Accepted',
                                         message: `Your leadership transfer request for "${(request.groups as any)?.name}" was accepted.`,
+                                        image: userAvatar || groupImage,
                                         meta: { type: 'leadership_transfer_accepted', group_id: request.group_id }
                                     }
                                 });
@@ -141,6 +161,7 @@ export default function NotificationsScreen() {
                                             type: 'info',
                                             title: 'Group Leadership Changed',
                                             message: `"${(request.groups as any)?.name}" has a new leader.`,
+                                            image: groupImage || userAvatar,
                                             meta: { type: 'leadership_changed', group_id: request.group_id }
                                         }));
 
@@ -202,11 +223,21 @@ export default function NotificationsScreen() {
                             // Notify old leader
                             const { data: request } = await supabase
                                 .from('leadership_transfer_requests')
-                                .select('from_user_id, groups:group_id(name)')
+                                .select('from_user_id, group_id, groups:group_id(name, images)')
                                 .eq('id', requestId)
                                 .single();
 
                             if (request) {
+                                // Get current user's profile for the avatar
+                                const { data: profile } = await supabase
+                                    .from('profiles')
+                                    .select('avatar_url')
+                                    .eq('id', user?.id)
+                                    .single();
+
+                                const groupImage = (request.groups as any)?.images?.[0];
+                                const userAvatar = profile?.avatar_url;
+
                                 await supabase.functions.invoke('manage-listings', {
                                     body: {
                                         action: 'create_notification',
@@ -215,6 +246,7 @@ export default function NotificationsScreen() {
                                         type: 'warning',
                                         title: 'Leadership Transfer Declined',
                                         message: `Your leadership transfer request for "${(request.groups as any)?.name}" was declined.`,
+                                        image: userAvatar || groupImage,
                                         meta: { type: 'leadership_transfer_declined' }
                                     }
                                 });
@@ -236,14 +268,12 @@ export default function NotificationsScreen() {
         );
     };
 
-    // Check if notification is a pending leadership transfer
     const isLeadershipTransfer = (notification: any) => {
         return notification.meta?.type === 'leadership_transfer';
     };
 
     const unreadCount = notifications.filter(n => !n.read).length;
 
-    // Helper to format time (simple version)
     const formatTime = (dateString: string) => {
         const date = new Date(dateString);
         const now = new Date();
@@ -251,153 +281,168 @@ export default function NotificationsScreen() {
         const diffHrs = diffMs / (1000 * 60 * 60);
 
         if (diffHrs < 24) {
-            if (diffHrs < 1) return 'Just now';
+            if (diffHrs < 1) {
+                const diffMins = Math.floor(diffMs / (1000 * 60));
+                return diffMins <= 1 ? 'Just now' : `${diffMins}m ago`;
+            }
             return `${Math.floor(diffHrs)}h ago`;
         }
         return date.toLocaleDateString();
     };
 
-    // Group notifications (Simplified: Just listing them for now, or group by date if needed)
-    // For simplicity, let's just show them in a single list or group strictly by "Today" vs "Earlier"
     const today = new Date().toDateString();
-
     const todayNotifications = notifications.filter(n => new Date(n.created_at).toDateString() === today);
     const earlierNotifications = notifications.filter(n => new Date(n.created_at).toDateString() !== today);
 
     const sections = [
         { title: 'Today', data: todayNotifications },
         { title: 'Earlier', data: earlierNotifications }
-    ];
+    ].filter(section => section.data.length > 0);
+
+    const NotificationItem = ({ item }: { item: any }) => {
+        const isTransfer = isLeadershipTransfer(item);
+        const isRead = item.read;
+
+        return (
+            <TouchableOpacity
+                style={[
+                    styles.notificationItem,
+                    {
+                        backgroundColor: isRead ? 'transparent' : (isDark ? 'rgba(99, 102, 241, 0.05)' : '#F0F4FF'),
+                        borderLeftWidth: isRead ? 0 : 4,
+                        borderLeftColor: colors.primary,
+                        opacity: isRead ? 0.7 : 1,
+                    }
+                ]}
+                onPress={() => !isTransfer && markAsRead(item.id, item.read)}
+                activeOpacity={isTransfer ? 1 : 0.7}
+            >
+                <View style={styles.notificationContent}>
+                    <View style={styles.leftContent}>
+                        <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
+                            <Image
+                                source={{ uri: item.image || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop' }}
+                                style={styles.avatarImage}
+                                resizeMode="cover"
+                            />
+                            {/* Icon Badge */}
+                            <View style={[styles.iconBadge, {
+                                backgroundColor: item.type === 'success' ? '#10B981' :
+                                    item.type === 'warning' ? '#F59E0B' :
+                                        item.type === 'error' ? '#EF4444' : '#3B82F6',
+                                borderColor: colors.card
+                            }]}>
+                                <Ionicons
+                                    name={
+                                        item.type === 'success' ? "checkmark" :
+                                            item.type === 'warning' ? "alert" :
+                                                item.type === 'error' ? "warning" : "information"
+                                    }
+                                    size={8}
+                                    color="white"
+                                />
+                            </View>
+                        </View>
+                    </View>
+
+                    <View style={styles.rightContent}>
+                        <View style={styles.headerRow}>
+                            <Text
+                                style={[
+                                    styles.titleText,
+                                    {
+                                        color: colors.text,
+                                        fontFamily: isRead ? 'Poppins_500Medium' : 'Poppins_600SemiBold'
+                                    }
+                                ]}
+                                numberOfLines={1}
+                            >
+                                {item.title}
+                            </Text>
+                            <Text style={[styles.timeText, { color: colors.textSecondary }]}>
+                                {formatTime(item.created_at)}
+                            </Text>
+                        </View>
+
+                        <Text
+                            style={[
+                                styles.messageText,
+                                { color: colors.textSecondary }
+                            ]}
+                            numberOfLines={isTransfer ? undefined : 2}
+                        >
+                            {item.message}
+                        </Text>
+
+                        {isTransfer && !isRead && (
+                            <View style={styles.actionButtonsContainer}>
+                                {processingTransferId === item.meta?.request_id ? (
+                                    <ActivityIndicator size="small" color={colors.primary} style={{ alignSelf: 'flex-start' }} />
+                                ) : (
+                                    <View style={styles.actionButtonsRow}>
+                                        <TouchableOpacity
+                                            style={[styles.actionButton, styles.declineButton, { borderColor: colors.border }]}
+                                            onPress={() => handleDeclineTransfer(item)}
+                                        >
+                                            <Text style={[styles.actionButtonText, { color: colors.text }]}>Decline</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.actionButton, styles.acceptButton]}
+                                            onPress={() => handleAcceptTransfer(item)}
+                                        >
+                                            <Text style={[styles.actionButtonText, { color: 'white' }]}>Accept</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                            </View>
+                        )}
+                    </View>
+                </View>
+            </TouchableOpacity>
+        );
+    };
 
     return (
-        <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
             <Header title="Notifications" />
-            <ScrollView
+
+            {unreadCount > 0 && (
+                <View style={[styles.toolbar, { borderBottomColor: colors.border }]}>
+                    <Text style={[styles.unreadText, { color: colors.primary }]}>{unreadCount} unread</Text>
+                    <TouchableOpacity onPress={markAllAsRead}>
+                        <Text style={[styles.markReadText, { color: colors.textSecondary }]}>Mark all as read</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+
+            <SectionList
+                sections={sections}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => <NotificationItem item={item} />}
+                renderSectionHeader={({ section: { title } }) => (
+                    <View style={[styles.sectionHeader, { backgroundColor: colors.background }]}>
+                        <Text style={[styles.sectionHeaderText, { color: colors.textSecondary }]}>{title}</Text>
+                    </View>
+                )}
+                contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.scrollContent}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-            >
-                {/* Mark all as read button */}
-                {unreadCount > 0 && (
-                    <View style={styles.markAllContainer}>
-                        <TouchableOpacity
-                            style={[
-                                styles.markAllBtn,
-                                { backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF' }
-                            ]}
-                            onPress={markAllAsRead}
-                        >
-                            <Ionicons name="checkmark-done" size={16} color={colors.primary} />
-                            <Text style={[styles.markAllText, { color: colors.primary }]}>
-                                Mark all as read
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
-
-                {loading && notifications.length === 0 ? (
-                    <View style={styles.loadingContainer}>
-                        <Text style={{ color: colors.textSecondary }}>Loading...</Text>
-                    </View>
-                ) : (
-                    sections.map(section => {
-                        if (section.data.length === 0) return null;
-
-                        return (
-                            <View key={section.title} style={{ marginBottom: 8 }}>
-                                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-                                    {section.title}
-                                </Text>
-
-                                {section.data.map((notification) => (
-                                    <TouchableOpacity
-                                        key={notification.id}
-                                        style={[
-                                            styles.notificationItem,
-                                            {
-                                                backgroundColor: notification.read ? 'transparent' : (isDark ? 'rgba(30, 41, 59, 0.5)' : '#F5F7FF'),
-                                                borderColor: notification.read ? 'transparent' : (isDark ? colors.border : '#E0E7FF')
-                                            },
-                                            isLeadershipTransfer(notification) && { flexDirection: 'column', alignItems: 'stretch' }
-                                        ]}
-                                        onPress={() => !isLeadershipTransfer(notification) && markAsRead(notification.id, notification.read)}
-                                        activeOpacity={isLeadershipTransfer(notification) ? 1 : 0.7}
-                                    >
-                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                            <View style={styles.avatarWrapper}>
-                                                <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
-                                                    <Image
-                                                        source={{ uri: notification.image || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop' }}
-                                                        style={styles.avatarImage}
-                                                        resizeMode="cover"
-                                                    />
-                                                </View>
-                                                {/* Status indicator badge based on type */}
-                                                <View style={[styles.statusBadge, { backgroundColor: colors.card, borderColor: colors.card }]}>
-                                                    {notification.type === 'success' && <Ionicons name="checkmark-circle" size={14} color="#10B981" />}
-                                                    {notification.type === 'warning' && <Ionicons name="alert-circle" size={14} color="#F59E0B" />}
-                                                    {notification.type === 'info' && <Ionicons name="information-circle" size={14} color="#3B82F6" />}
-                                                    {(!notification.type || notification.type === 'error') && <Ionicons name="information-circle" size={14} color="#EF4444" />}
-                                                </View>
-                                            </View>
-
-                                            <View style={styles.textContainer}>
-                                                <View style={styles.headerRow}>
-                                                    <Text style={[styles.titleText, { color: colors.text }]} numberOfLines={1}>
-                                                        {notification.title}
-                                                    </Text>
-                                                    <Text style={[styles.timeText, { color: colors.textSecondary }]}>
-                                                        {formatTime(notification.created_at)}
-                                                    </Text>
-                                                </View>
-
-                                                <Text style={[styles.messageText, { color: notification.read ? colors.textSecondary : colors.text }]} numberOfLines={2}>
-                                                    {notification.message}
-                                                </Text>
-                                            </View>
-
-                                            {!notification.read && !isLeadershipTransfer(notification) && (
-                                                <View style={styles.unreadDot} />
-                                            )}
-                                        </View>
-
-                                        {/* Leadership Transfer Actions */}
-                                        {isLeadershipTransfer(notification) && !notification.read && (
-                                            <View style={styles.transferActions}>
-                                                {processingTransferId === notification.meta?.request_id ? (
-                                                    <ActivityIndicator size="small" color={colors.primary} />
-                                                ) : (
-                                                    <>
-                                                        <TouchableOpacity
-                                                            style={[styles.declineBtn, { borderColor: colors.border }]}
-                                                            onPress={() => handleDeclineTransfer(notification)}
-                                                        >
-                                                            <Text style={[styles.declineBtnText, { color: colors.text }]}>Decline</Text>
-                                                        </TouchableOpacity>
-                                                        <TouchableOpacity
-                                                            style={[styles.acceptBtn, { backgroundColor: '#10B981' }]}
-                                                            onPress={() => handleAcceptTransfer(notification)}
-                                                        >
-                                                            <Text style={styles.acceptBtnText}>Accept</Text>
-                                                        </TouchableOpacity>
-                                                    </>
-                                                )}
-                                            </View>
-                                        )}
-                                    </TouchableOpacity>
-                                ))}
+                stickySectionHeadersEnabled={false}
+                refreshControl={
+                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+                }
+                ListEmptyComponent={
+                    !loading ? (
+                        <View style={styles.emptyState}>
+                            <View style={[styles.emptyIconContainer, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#F5F5F5' }]}>
+                                <Ionicons name="notifications-outline" size={32} color={colors.textSecondary} />
                             </View>
-                        );
-                    })
-                )}
-
-                {!loading && notifications.length === 0 && (
-                    <View style={styles.emptyState}>
-                        <Ionicons name="notifications-off-outline" size={48} color={colors.textSecondary} />
-                        <Text style={{ marginTop: 8, color: colors.textSecondary }}>No notifications yet</Text>
-                    </View>
-                )}
-            </ScrollView>
+                            <Text style={[styles.emptyTitle, { color: colors.text }]}>No Notifications</Text>
+                            <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>We'll let you know when something update!</Text>
+                        </View>
+                    ) : null
+                }
+                ListFooterComponent={loading ? <ActivityIndicator style={{ marginTop: 20 }} color={colors.primary} /> : <View style={{ height: 100 }} />}
+            />
 
             <View style={styles.navbarContainer}>
                 <Navbar />
@@ -407,149 +452,153 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-    flex1: {
+    container: {
         flex: 1,
     },
-    scrollContent: {
-        paddingBottom: 100,
-    },
-    markAllContainer: {
-        paddingHorizontal: 24,
-        paddingVertical: 8,
+    toolbar: {
         flexDirection: 'row',
-        justifyContent: 'flex-end',
-    },
-    markAllBtn: {
-        flexDirection: 'row',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 100,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(0,0,0,0.05)',
     },
-    markAllText: {
+    unreadText: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 14,
+    },
+    markReadText: {
         fontFamily: 'Poppins_500Medium',
         fontSize: 12,
-        marginLeft: 6,
     },
-    loadingContainer: {
-        paddingVertical: 40,
-        alignItems: 'center',
+    listContent: {
+        paddingTop: 10,
+        paddingBottom: 100,
     },
-    sectionTitle: {
-        paddingHorizontal: 24,
-        marginBottom: 12,
-        fontSize: 12,
+    sectionHeader: {
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+    },
+    sectionHeaderText: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 13,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
-        fontFamily: 'Poppins_600SemiBold',
     },
     notificationItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 24,
+        paddingHorizontal: 20,
         paddingVertical: 16,
-        marginHorizontal: 8,
-        borderRadius: 16,
-        marginBottom: 8,
-        borderWidth: 1,
+        marginBottom: 1, // Separator line effect if distinct backgrounds, or just spacing
     },
-    avatarWrapper: {
-        position: 'relative',
+    notificationContent: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+    },
+    leftContent: {
         marginRight: 16,
     },
+    rightContent: {
+        flex: 1,
+    },
     avatarContainer: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        overflow: 'hidden',
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         borderWidth: 1,
+        position: 'relative',
     },
     avatarImage: {
         width: '100%',
         height: '100%',
+        borderRadius: 22,
     },
-    statusBadge: {
+    iconBadge: {
         position: 'absolute',
-        bottom: -4,
-        right: -4,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        alignItems: 'center',
+        bottom: -2,
+        right: -2,
+        width: 16,
+        height: 16,
+        borderRadius: 8,
         justifyContent: 'center',
-        borderWidth: 2,
-    },
-    textContainer: {
-        flex: 1,
+        alignItems: 'center',
+        borderWidth: 1.5,
     },
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
+        alignItems: 'center',
+        marginBottom: 4,
     },
     titleText: {
+        fontSize: 14,
         flex: 1,
         marginRight: 8,
-        fontSize: 14,
-        fontFamily: 'Poppins_600SemiBold',
     },
     timeText: {
+        fontSize: 11,
         fontFamily: 'Poppins_400Regular',
-        fontSize: 10,
     },
     messageText: {
-        fontSize: 12,
-        marginTop: 4,
+        fontSize: 13,
         lineHeight: 20,
         fontFamily: 'Poppins_400Regular',
     },
-    unreadDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#6366F1', // primary-500
-        marginLeft: 8,
+    actionButtonsContainer: {
+        marginTop: 12,
+        width: '100%',
+    },
+    actionButtonsRow: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    actionButton: {
+        flex: 1,
+        paddingVertical: 8,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    declineButton: {
+        borderWidth: 1,
+        backgroundColor: 'transparent',
+    },
+    acceptButton: {
+        backgroundColor: '#10B981',
+    },
+    actionButtonText: {
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 13,
     },
     emptyState: {
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 40,
-        opacity: 0.5,
+        paddingVertical: 60,
+        paddingHorizontal: 40,
+    },
+    emptyIconContainer: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 16,
+    },
+    emptyTitle: {
+        fontSize: 18,
+        fontFamily: 'Poppins_600SemiBold',
+        marginBottom: 8,
+    },
+    emptySubtitle: {
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 20,
+        fontFamily: 'Poppins_400Regular',
     },
     navbarContainer: {
         position: 'absolute',
         bottom: 0,
         left: 0,
         right: 0,
-    },
-    // Leadership Transfer Styles
-    transferActions: {
-        flexDirection: 'row',
-        gap: 12,
-        marginTop: 12,
-        marginLeft: 64,
-    },
-    declineBtn: {
-        flex: 1,
-        paddingVertical: 10,
-        borderRadius: 8,
-        borderWidth: 1,
-        alignItems: 'center',
-    },
-    declineBtnText: {
-        fontFamily: 'Poppins_500Medium',
-        fontSize: 13,
-    },
-    acceptBtn: {
-        flex: 1,
-        paddingVertical: 10,
-        borderRadius: 8,
-        alignItems: 'center',
-    },
-    acceptBtnText: {
-        color: 'white',
-        fontFamily: 'Poppins_600SemiBold',
-        fontSize: 13,
     },
 });
