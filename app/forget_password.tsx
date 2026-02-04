@@ -1,5 +1,5 @@
-import { router } from "expo-router";
 import * as Linking from "expo-linking";
+import { router } from "expo-router";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
@@ -30,8 +30,8 @@ export default function ForgetPasswordScreen() {
   // Get the Expo deep link URL for password reset
   const getRedirectUrl = () => {
     // This creates exp://192.168.x.x:8082/--/change_password
-    const url = Linking.createURL('change_password');
-    console.log('Generated Expo redirect URL:', url);
+    const url = Linking.createURL("change_password");
+    console.log("Generated Expo redirect URL:", url);
     return url;
   };
 
