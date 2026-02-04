@@ -323,6 +323,10 @@ export default function HomeScreen() {
             item.rate ||
             item.hourly_rate?.toString() ||
             item.budget?.toString(),
+          // Studio-specific pricing fields
+          rehearsal_rate: item.rehearsal_rate?.toString(),
+          recording_rate: item.recording_rate?.toString(),
+          studio_type: item.studio_type || null,
           location: item.location || item.address || "",
           amenities: item.amenities || [],
           experience_level: item.requirements?.experience_level || null,
@@ -379,10 +383,13 @@ export default function HomeScreen() {
       if (userId) {
         try {
           console.log("🤖 Fetching AI recommendations for user:", userId);
-          const { data: aiData, error: aiError } = await supabase.rpc('get_ai_recommendations', {
-            p_user_id: userId,
-            p_limit: 20
-          });
+          const { data: aiData, error: aiError } = await supabase.rpc(
+            "get_ai_recommendations",
+            {
+              p_user_id: userId,
+              p_limit: 20,
+            },
+          );
 
           if (aiError) {
             console.log("⚠️ AI recommendations error:", aiError);
@@ -708,8 +715,6 @@ export default function HomeScreen() {
           style={styles.heroGradient}
         />
 
-
-
         {/* Content within Hero */}
         <View style={styles.heroContent}>
           {/* Greeting with Stats */}
@@ -818,7 +823,7 @@ export default function HomeScreen() {
                       <Text style={styles.glassBadgeText}>
                         {aiModeEnabled && topItems[0].similarity
                           ? `🤖 ${(topItems[0].similarity * 100).toFixed(0)}% Match`
-                          : '🔥 Highly Rated'}
+                          : "🔥 Highly Rated"}
                       </Text>
                     </View>
                     <Text style={styles.bentoTitleLarge} numberOfLines={2}>
@@ -967,9 +972,40 @@ export default function HomeScreen() {
       }
     };
 
-    // Helper to get price label - skip Groups
+    // Helper to get price label - skip Groups, handle Studio-specific pricing
     const getPriceLabel = (item: any) => {
       if (item.type === "Group") return null;
+
+      // Handle Studio pricing specifically
+      if (item.type === "Studio") {
+        const rehearsalRate =
+          item.rehearsal_rate && item.rehearsal_rate !== "0"
+            ? parseInt(item.rehearsal_rate)
+            : 0;
+        const recordingRate =
+          item.recording_rate && item.recording_rate !== "0"
+            ? parseInt(item.recording_rate)
+            : 0;
+
+        // Both rates available
+        if (rehearsalRate && recordingRate) {
+          return `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+        }
+        // Recording only
+        if (recordingRate) {
+          return `₱${recordingRate.toLocaleString()}/song`;
+        }
+        // Rehearsal only
+        if (rehearsalRate) {
+          return `₱${rehearsalRate.toLocaleString()}/hr`;
+        }
+        // Fallback to hourly_rate
+        if (item.hourly_rate && item.hourly_rate !== "0") {
+          return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+        }
+        return null;
+      }
+
       if (item.hourly_rate && item.hourly_rate !== "0") {
         return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
       }
@@ -1441,8 +1477,8 @@ export default function HomeScreen() {
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
               {aiModeEnabled
-                ? 'Personalized picks based on your interests'
-                : 'Random suggestions for comparison'}
+                ? "Personalized picks based on your interests"
+                : "Random suggestions for comparison"}
             </Text>
           </View>
           <TouchableOpacity onPress={openSearchSheet}>
@@ -1492,7 +1528,7 @@ export default function HomeScreen() {
                     <Text style={styles.featuredBadgeText}>
                       {aiModeEnabled && uniqueItems[0].similarity
                         ? `🤖 ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match`
-                        : '✨ Top Recommendation'}
+                        : "✨ Top Recommendation"}
                     </Text>
                   </View>
                   <View
@@ -1643,19 +1679,62 @@ export default function HomeScreen() {
                   </Text>
                 </View>
 
-                {/* Price - hide for Groups */}
+                {/* Price - hide for Groups, handle Studio-specific pricing */}
                 {item.type !== "Group" &&
-                  (item.hourly_rate || item.budget || item.rate) && (
-                    <Text
-                      style={[styles.forYouPrice, { color: colors.primary }]}
-                    >
-                      {item.hourly_rate
-                        ? `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`
-                        : item.budget
-                          ? `₱${parseInt(item.budget).toLocaleString()}`
-                          : `₱${parseInt(item.rate || "0").toLocaleString()}`}
-                    </Text>
-                  )}
+                  (() => {
+                    // Handle Studio pricing specifically
+                    if (item.type === "Studio") {
+                      const rehearsalRate =
+                        item.rehearsal_rate && item.rehearsal_rate !== "0"
+                          ? parseInt(item.rehearsal_rate)
+                          : 0;
+                      const recordingRate =
+                        item.recording_rate && item.recording_rate !== "0"
+                          ? parseInt(item.recording_rate)
+                          : 0;
+
+                      let priceText = null;
+                      if (rehearsalRate && recordingRate) {
+                        priceText = `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+                      } else if (recordingRate) {
+                        priceText = `₱${recordingRate.toLocaleString()}/song`;
+                      } else if (rehearsalRate) {
+                        priceText = `₱${rehearsalRate.toLocaleString()}/hr`;
+                      } else if (item.hourly_rate && item.hourly_rate !== "0") {
+                        priceText = `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+                      }
+
+                      return priceText ? (
+                        <Text
+                          style={[
+                            styles.forYouPrice,
+                            { color: colors.primary },
+                          ]}
+                        >
+                          {priceText}
+                        </Text>
+                      ) : null;
+                    }
+
+                    // Non-studio items
+                    if (item.hourly_rate || item.budget || item.rate) {
+                      return (
+                        <Text
+                          style={[
+                            styles.forYouPrice,
+                            { color: colors.primary },
+                          ]}
+                        >
+                          {item.hourly_rate
+                            ? `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`
+                            : item.budget
+                              ? `₱${parseInt(item.budget).toLocaleString()}`
+                              : `₱${parseInt(item.rate || "0").toLocaleString()}`}
+                        </Text>
+                      );
+                    }
+                    return null;
+                  })()}
               </View>
             </TouchableOpacity>
           ))}
@@ -1688,11 +1767,10 @@ export default function HomeScreen() {
         backgroundColor="transparent"
       />
 
-      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
-        <Header
-          title="MusikaLokal"
-          transparent={!isScrolled}
-        />
+      <View
+        style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
+      >
+        <Header title="MusikaLokal" transparent={!isScrolled} />
       </View>
 
       <ScrollView
@@ -1744,15 +1822,23 @@ export default function HomeScreen() {
             }}
           >
             <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  backgroundColor: aiModeEnabled ? colors.primary : (isDark ? '#374151' : '#D1D5DB'),
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <View
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
+                    backgroundColor: aiModeEnabled
+                      ? colors.primary
+                      : isDark
+                        ? "#374151"
+                        : "#D1D5DB",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
                   <Ionicons
                     name={aiModeEnabled ? "sparkles" : "shuffle"}
                     size={18}
@@ -1769,15 +1855,17 @@ export default function HomeScreen() {
                   >
                     {aiModeEnabled ? "🤖 AI Recommendations" : "🎲 Random Mode"}
                   </Text>
-                  <Text style={{
-                    fontFamily: 'Poppins_400Regular',
-                    fontSize: 11,
-                    color: colors.textSecondary,
-                    marginTop: -2,
-                  }}>
+                  <Text
+                    style={{
+                      fontFamily: "Poppins_400Regular",
+                      fontSize: 11,
+                      color: colors.textSecondary,
+                      marginTop: -2,
+                    }}
+                  >
                     {aiModeEnabled
-                      ? `Personalized based on your interests${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ''}`
-                      : 'Showing random listings for comparison'}
+                      ? `Personalized based on your interests${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ""}`
+                      : "Showing random listings for comparison"}
                   </Text>
                 </View>
               </View>
@@ -1805,23 +1893,27 @@ export default function HomeScreen() {
 
           {/* AI Similarity Preview */}
           {aiModeEnabled && aiRecommendations.length > 0 && (
-            <View style={{
-              marginTop: 12,
-              paddingTop: 12,
-              borderTopWidth: 1,
-              borderTopColor: isDark ? '#374151' : '#E5E7EB'
-            }}>
-              <Text style={{
-                fontFamily: 'Poppins_500Medium',
-                fontSize: 11,
-                color: colors.textSecondary,
-                marginBottom: 8,
-                textTransform: 'uppercase',
-                letterSpacing: 0.5,
-              }}>
+            <View
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTopWidth: 1,
+                borderTopColor: isDark ? "#374151" : "#E5E7EB",
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: "Poppins_500Medium",
+                  fontSize: 11,
+                  color: colors.textSecondary,
+                  marginBottom: 8,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                }}
+              >
                 {aiRecommendations.some((i: any) => i.similarity > 0.1)
-                  ? 'Top Matches by AI Similarity'
-                  : '📊 Sorted by Popularity (No embeddings yet)'}
+                  ? "Top Matches by AI Similarity"
+                  : "📊 Sorted by Popularity (No embeddings yet)"}
               </Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                 {aiRecommendations.slice(0, 4).map((item, idx) => (
@@ -1848,17 +1940,22 @@ export default function HomeScreen() {
                       {item.name?.substring(0, 15)}
                       {item.name?.length > 15 ? "..." : ""}
                     </Text>
-                    <View style={{
-                      backgroundColor: item.similarity > 0.1 ? colors.primary : '#6B7280',
-                      paddingHorizontal: 5,
-                      paddingVertical: 1,
-                      borderRadius: 6,
-                    }}>
-                      <Text style={{
-                        fontFamily: 'Poppins_600SemiBold',
-                        fontSize: 9,
-                        color: '#FFF',
-                      }}>
+                    <View
+                      style={{
+                        backgroundColor:
+                          item.similarity > 0.1 ? colors.primary : "#6B7280",
+                        paddingHorizontal: 5,
+                        paddingVertical: 1,
+                        borderRadius: 6,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontFamily: "Poppins_600SemiBold",
+                          fontSize: 9,
+                          color: "#FFF",
+                        }}
+                      >
                         {item.similarity > 0.1
                           ? `${((item.similarity || 0) * 100).toFixed(0)}%`
                           : item.type}
@@ -1872,23 +1969,32 @@ export default function HomeScreen() {
 
           {/* No AI Data Message */}
           {aiModeEnabled && aiRecommendations.length === 0 && userId && (
-            <View style={{
-              marginTop: 12,
-              paddingTop: 12,
-              borderTopWidth: 1,
-              borderTopColor: isDark ? '#374151' : '#E5E7EB',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-            }}>
-              <Ionicons name="information-circle" size={16} color={colors.textSecondary} />
-              <Text style={{
-                fontFamily: 'Poppins_400Regular',
-                fontSize: 11,
-                color: colors.textSecondary,
-                flex: 1,
-              }}>
-                Start favoriting listings to build your interest profile. AI will learn your preferences!
+            <View
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTopWidth: 1,
+                borderTopColor: isDark ? "#374151" : "#E5E7EB",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Ionicons
+                name="information-circle"
+                size={16}
+                color={colors.textSecondary}
+              />
+              <Text
+                style={{
+                  fontFamily: "Poppins_400Regular",
+                  fontSize: 11,
+                  color: colors.textSecondary,
+                  flex: 1,
+                }}
+              >
+                Start favoriting listings to build your interest profile. AI
+                will learn your preferences!
               </Text>
             </View>
           )}

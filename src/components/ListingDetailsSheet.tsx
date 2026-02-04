@@ -5180,14 +5180,22 @@ const ListingDetailsSheet = forwardRef<
                                     { color: colors.textSecondary },
                                   ]}
                                 >
-                                  Hourly Rate
+                                  {recordingRate && !rehearsalRate
+                                    ? "Recording Rate"
+                                    : rehearsalRate && !recordingRate
+                                      ? "Rehearsal Rate"
+                                      : "Hourly Rate"}
                                 </Text>
                                 <Text
                                   style={[
                                     styles.statValue,
                                     { color: colors.text },
                                   ]}
-                                >{`₱${displayRate}/hr`}</Text>
+                                >
+                                  {recordingRate && !rehearsalRate
+                                    ? `₱${recordingRate}/song`
+                                    : `₱${displayRate}/hr`}
+                                </Text>
                               </View>
                             )}
                           </View>
