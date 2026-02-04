@@ -64,8 +64,6 @@ export default function Navbar() {
 
     if (pathname.includes('home')) {
         activeTab = 'home';
-    } else if (pathname.includes('chat')) {
-        activeTab = 'chat';
     } else if (pathname.includes('bookings')) {
         activeTab = 'activity';
     } else if (
@@ -78,11 +76,13 @@ export default function Navbar() {
         activeTab = 'manage';
     } else if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
         activeTab = 'profile';
+    } else if (pathname.includes('ai_suggestions')) {
+        activeTab = 'ai-suggest';
     }
 
     const navItems = [
         { id: 'home', icon: 'home', label: 'Home', route: '/home' },
-        { id: 'chat', icon: 'chatbubbles', label: 'Chat', route: '/chat' },
+        { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
         { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
         { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
         { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
@@ -111,12 +111,16 @@ export default function Navbar() {
                                     styles.tabButton,
                                     isActive && { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }
                                 ]}
-                                onPress={() => router.replace(item.route as any)}
+                                onPress={() => {
+                                    if (item.route) {
+                                        router.replace(item.route as any);
+                                    }
+                                }}
                             >
                                 <View style={styles.iconWrapper}>
                                     <Ionicons
                                         name={isActive ? item.icon as any : `${item.icon}-outline` as any}
-                                        size={24}
+                                        size={28}
                                         color={isActive ? colors.primary : colors.textSecondary}
                                     />
                                     {isActive && <View style={[styles.activeDot, { backgroundColor: colors.primary }]} />}
@@ -163,8 +167,8 @@ const styles = StyleSheet.create({
     tabButton: {
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 12,
-        borderRadius: 16,
+        padding: 16,
+        borderRadius: 20,
         // width: 64, 
     },
     iconWrapper: {

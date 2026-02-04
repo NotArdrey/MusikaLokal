@@ -101,7 +101,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         if (selectedMessageId) {
             const message = messages.find(m => m.id === selectedMessageId);
             const existingReaction = message?.reactions?.find(r => r.user_id === currentUserId);
-            
+
             if (existingReaction?.emoji === emoji) {
                 // Same emoji - remove it
                 await removeReaction(selectedMessageId);
@@ -128,7 +128,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // Pick and send image
     const handlePickImage = async () => {
         setShowAttachmentPicker(false);
-        
+
         try {
             const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (!permissionResult.granted) {
@@ -185,7 +185,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // Take photo with camera
     const handleTakePhoto = async () => {
         setShowAttachmentPicker(false);
-        
+
         try {
             const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
             if (!permissionResult.granted) {
@@ -262,11 +262,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         const isMe = item.sender_id === currentUserId;
         const showDate = index === 0 ||
             formatDate(messages[index - 1].created_at) !== formatDate(item.created_at);
-        
+
         // For group chats, check if we should show sender name
         const prevMessage = index > 0 ? messages[index - 1] : null;
         const showSenderName = isGroupChat && !isMe && (
-            index === 0 || 
+            index === 0 ||
             prevMessage?.sender_id !== item.sender_id ||
             showDate
         );
@@ -368,8 +368,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                         return acc;
                                     }, {} as Record<string, number>)
                                 ).map(([emoji, count]) => (
-                                    <View 
-                                        key={emoji} 
+                                    <View
+                                        key={emoji}
                                         style={[
                                             styles.reactionBadge,
                                             { backgroundColor: isDark ? '#374151' : '#E5E7EB' }
@@ -407,8 +407,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // Get display info based on chat type
     const displayName = isGroupChat ? groupName : otherUser?.full_name;
     const displayAvatar = isGroupChat ? groupAvatar : otherUser?.avatar_url;
-    const displaySubtitle = isGroupChat 
-        ? `${participants.length} members` 
+    const displaySubtitle = isGroupChat
+        ? `${participants.length} members`
         : 'Online';
 
     return (
@@ -455,9 +455,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         {displaySubtitle}
                     </Text>
                 </View>
-                <TouchableOpacity style={styles.headerAction}>
-                    <Ionicons name="ellipsis-vertical" size={20} color={colors.text} />
-                </TouchableOpacity>
+                <View style={styles.headerActions}>
+                    <TouchableOpacity style={styles.headerAction}>
+                        <Ionicons name="call" size={24} color={colors.primary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.headerAction}>
+                        <Ionicons name="videocam" size={24} color={colors.primary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.headerAction}>
+                        <Ionicons name="information-circle" size={24} color={colors.primary} />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Messages */}
@@ -497,54 +505,64 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     {
                         backgroundColor: colors.background,
                         borderTopColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                        // Add extra padding for devices with notches/home indicators
-                        // Use at least 24px even if insets.bottom is 0
-                        paddingBottom: Math.max(insets.bottom, 24) + 8,
+                        paddingBottom: Math.max(insets.bottom, 10) + 8,
                     },
                 ]}>
-                    <TouchableOpacity 
-                        style={styles.attachButton}
-                        onPress={() => setShowAttachmentPicker(true)}
-                        disabled={uploading}
-                    >
-                        {uploading ? (
-                            <ActivityIndicator size="small" color={colors.primary} />
-                        ) : (
+                    <View style={styles.inputLeftActions}>
+                        <TouchableOpacity style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)}>
                             <Ionicons name="add-circle" size={28} color={colors.primary} />
-                        )}
-                    </TouchableOpacity>
-                    <TextInput
-                        style={[
-                            styles.input,
-                            {
-                                backgroundColor: isDark ? '#374151' : '#F3F4F6',
-                                color: colors.text,
-                            },
-                        ]}
-                        value={text}
-                        onChangeText={setText}
-                        placeholder="Type a message..."
-                        placeholderTextColor={colors.textSecondary}
-                        multiline
-                        maxLength={1000}
-                    />
-                    <TouchableOpacity
-                        onPress={handleSend}
-                        disabled={!text.trim() || sending}
-                        style={[
-                            styles.sendButton,
-                            {
-                                backgroundColor: text.trim() ? colors.primary : colors.textSecondary,
-                                opacity: sending ? 0.5 : 1,
-                            },
-                        ]}
-                    >
-                        {sending ? (
-                            <ActivityIndicator size="small" color="#FFF" />
-                        ) : (
-                            <Ionicons name="send" size={18} color="#FFF" />
-                        )}
-                    </TouchableOpacity>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.inputAction} onPress={handlePickImage}>
+                            <Ionicons name="images" size={26} color={colors.primary} />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.inputAction} onPress={handleTakePhoto}>
+                            <Ionicons name="camera" size={26} color={colors.primary} />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.inputAction}>
+                            <Ionicons name="mic" size={26} color={colors.primary} />
+                        </TouchableOpacity>
+                    </View>
+
+                    <View style={[
+                        styles.textInputWrapper,
+                        { backgroundColor: isDark ? '#3A3B3C' : '#F0F2F5' }
+                    ]}>
+                        <TextInput
+                            style={[
+                                styles.input,
+                                {
+                                    color: colors.text,
+                                },
+                            ]}
+                            value={text}
+                            onChangeText={setText}
+                            placeholder="Aa"
+                            placeholderTextColor={colors.textSecondary}
+                            multiline
+                            maxLength={1000}
+                        />
+                        <TouchableOpacity style={styles.emojiButton}>
+                            <Ionicons name="happy-outline" size={24} color={colors.primary} />
+                        </TouchableOpacity>
+                    </View>
+
+                    {text.trim().length > 0 ? (
+                        <TouchableOpacity
+                            onPress={handleSend}
+                            disabled={!text.trim() || sending}
+                            style={styles.sendButton}
+                        >
+                            {sending ? (
+                                <ActivityIndicator size="small" color={colors.primary} />
+                            ) : (
+                                <Ionicons name="send" size={24} color={colors.primary} />
+                            )}
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity style={styles.thumbsUpButton} onPress={() => sendMessage('👍')}>
+                            <Ionicons name="thumbs-up" size={28} color={colors.primary} />
+                        </TouchableOpacity>
+                    )}
                 </View>
             </KeyboardAvoidingView>
 
@@ -555,7 +573,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 animationType="fade"
                 onRequestClose={() => setShowReactionPicker(false)}
             >
-                <Pressable 
+                <Pressable
                     style={styles.modalOverlay}
                     onPress={() => setShowReactionPicker(false)}
                 >
@@ -583,7 +601,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 animationType="slide"
                 onRequestClose={() => setShowAttachmentPicker(false)}
             >
-                <Pressable 
+                <Pressable
                     style={styles.modalOverlay}
                     onPress={() => setShowAttachmentPicker(false)}
                 >
@@ -596,7 +614,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             Share
                         </Text>
                         <View style={styles.attachmentOptions}>
-                            <TouchableOpacity 
+                            <TouchableOpacity
                                 style={styles.attachmentOption}
                                 onPress={handlePickImage}
                             >
@@ -607,7 +625,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                     Gallery
                                 </Text>
                             </TouchableOpacity>
-                            <TouchableOpacity 
+                            <TouchableOpacity
                                 style={styles.attachmentOption}
                                 onPress={handleTakePhoto}
                             >
@@ -665,6 +683,11 @@ const styles = StyleSheet.create({
     },
     headerAction: {
         padding: 8,
+        marginLeft: 4,
+    },
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     messagesContainer: {
         flex: 1,
@@ -733,16 +756,16 @@ const styles = StyleSheet.create({
         marginLeft: 4,
     },
     messageBubble: {
-        paddingHorizontal: 14,
-        paddingVertical: 10,
-        borderRadius: 18,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 20,
         maxWidth: '100%',
     },
     myMessage: {
-        borderBottomRightRadius: 4,
+        backgroundColor: '#0084FF', // Classic Messenger Blue fallback if primary not set
     },
     theirMessage: {
-        borderBottomLeftRadius: 4,
+        backgroundColor: '#E4E6EB', // Classic Gray
     },
     messageText: {
         fontSize: 15,
@@ -759,31 +782,44 @@ const styles = StyleSheet.create({
     },
     inputContainer: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
-        paddingHorizontal: 12,
-        paddingTop: 12,
-        borderTopWidth: 1,
+        alignItems: 'center',
+        paddingHorizontal: 8,
+        paddingTop: 8,
+        borderTopWidth: 0, // Removed border for cleaner look
     },
-    attachButton: {
-        padding: 8,
-        marginBottom: 4,
+    inputLeftActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginRight: 8,
+    },
+    inputAction: {
+        padding: 4,
+    },
+    textInputWrapper: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderRadius: 20,
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        minHeight: 36,
     },
     input: {
         flex: 1,
-        borderRadius: 20,
-        paddingHorizontal: 16,
-        paddingVertical: 10,
         fontSize: 15,
         maxHeight: 100,
-        marginHorizontal: 8,
+        paddingVertical: 4,
+    },
+    emojiButton: {
+        marginLeft: 4,
     },
     sendButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 4,
+        marginLeft: 12,
+        padding: 4,
+    },
+    thumbsUpButton: {
+        marginLeft: 12,
+        padding: 4,
     },
     // Reaction styles
     reactionsContainer: {

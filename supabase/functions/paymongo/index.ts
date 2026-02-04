@@ -61,7 +61,7 @@ async function verifyWebhookSignature(payload: string, signatureHeader: string):
             .join('');
 
         const isValid = computedSignature === signature;
-        
+
         if (!isValid) {
             console.error('❌ Webhook signature mismatch');
             console.log('Expected:', signature);
@@ -102,6 +102,94 @@ async function paymongoRequest(endpoint: string, method: string = 'GET', body?: 
     }
 
     return data;
+}
+
+// Helper to credit owner's wallet when a booking payment is received
+async function creditOwnerWallet(supabaseAdmin: any, bookingId: string, paymentAmount: number) {
+    try {
+        console.log('💰 Crediting owner wallet for booking:', bookingId, 'Amount:', paymentAmount);
+
+        // Get booking details with studio owner
+        const { data: booking, error: bookingError } = await supabaseAdmin
+            .from('studio_bookings')
+            .select('id, final_price, payment_amount, studio:studios(id, name, owner_id)')
+            .eq('id', bookingId)
+            .single();
+
+        if (bookingError || !booking) {
+            console.error('❌ Error fetching booking for wallet credit:', bookingError);
+            return;
+        }
+
+        const ownerId = booking.studio?.owner_id;
+        if (!ownerId) {
+            console.error('❌ No owner_id found for studio');
+            return;
+        }
+
+        // Use the payment amount if provided, otherwise use the booking's payment_amount or final_price
+        const creditAmount = paymentAmount || booking.payment_amount || booking.final_price;
+        if (!creditAmount || creditAmount <= 0) {
+            console.error('❌ Invalid credit amount:', creditAmount);
+            return;
+        }
+
+        // Find or create owner's wallet
+        let { data: wallet, error: walletError } = await supabaseAdmin
+            .from('wallets')
+            .select('id, balance')
+            .eq('user_id', ownerId)
+            .single();
+
+        if (walletError || !wallet) {
+            // Create wallet if it doesn't exist
+            const { data: newWallet, error: createError } = await supabaseAdmin
+                .from('wallets')
+                .insert([{ user_id: ownerId, balance: 0 }])
+                .select()
+                .single();
+
+            if (createError) {
+                console.error('❌ Error creating wallet:', createError);
+                return;
+            }
+            wallet = newWallet;
+        }
+
+        // Update wallet balance
+        const newBalance = (wallet.balance || 0) + creditAmount;
+        const { error: updateError } = await supabaseAdmin
+            .from('wallets')
+            .update({ balance: newBalance, updated_at: new Date().toISOString() })
+            .eq('id', wallet.id);
+
+        if (updateError) {
+            console.error('❌ Error updating wallet balance:', updateError);
+            return;
+        }
+
+        // Create wallet transaction record
+        const { error: txError } = await supabaseAdmin
+            .from('wallet_transactions')
+            .insert({
+                wallet_id: wallet.id,
+                amount: creditAmount,
+                type: 'earning',
+                description: `Payment received for booking at ${booking.studio?.name}`,
+                reference_id: bookingId,
+                is_credit: true,
+                status: 'completed',
+            });
+
+        if (txError) {
+            console.error('❌ Error creating wallet transaction:', txError);
+            return;
+        }
+
+        console.log('✅ Successfully credited ₱' + creditAmount + ' to owner wallet. New balance: ₱' + newBalance);
+    } catch (e) {
+        console.error('❌ Error in creditOwnerWallet:', e);
+    }
 }
 
 serve(async (req: Request) => {
@@ -151,7 +239,7 @@ serve(async (req: Request) => {
         if (action === 'webhook') {
             const signatureHeader = req.headers.get('paymongo-signature') || '';
             const isValid = await verifyWebhookSignature(rawBody, signatureHeader);
-            
+
             if (!isValid) {
                 console.error('❌ Invalid webhook signature - rejecting request');
                 return new Response(JSON.stringify({ error: 'Invalid signature' }), {
@@ -215,7 +303,7 @@ serve(async (req: Request) => {
             const amountInCentavos = Math.round(amount * 100);
             const studioName = booking.studio?.name || studio_name || 'Studio Booking';
             const isDownpayment = payment_type === 'downpayment';
-            const bookingDescription = description || (isDownpayment 
+            const bookingDescription = description || (isDownpayment
                 ? `Downpayment (50%) for booking at ${studioName} on ${booking_date}`
                 : `Booking at ${studioName} on ${booking_date}`);
 
@@ -453,6 +541,7 @@ serve(async (req: Request) => {
                 const payment = payments[0];
                 const paymentMethod = payment?.attributes?.source?.type || 'unknown';
                 const paymentIntentId = sessionData.data.attributes.payment_intent?.id;
+                const paymentAmount = payment?.attributes?.amount ? payment.attributes.amount / 100 : 0; // Convert from centavos
 
                 // Update booking to confirmed and paid
                 const { error: updateError } = await supabaseAdmin
@@ -470,31 +559,36 @@ serve(async (req: Request) => {
                     console.error('Error updating booking:', updateError);
                 }
 
-                // Get booking details for notification
-                const { data: booking } = await supabaseAdmin
+                // Get full booking details for notifications
+                const { data: fullBooking } = await supabaseAdmin
                     .from('studio_bookings')
-                    .select('id, user_id, studio_id, booking_date, studio:studios(name, owner_id)')
-                    .eq('checkout_session_id', sessionId)
+                    .select('id, user_id, studio_id, booking_date, studio:studios(name, owner_id, images), profile:user_id(avatar_url)')
+                    .eq('id', booking.id)
                     .single();
 
-                if (booking) {
-                    // Notify the musician (booker)
+                if (fullBooking) {
+                    const studioImage = fullBooking.studio?.images?.[0];
+                    const userAvatar = fullBooking.profile?.avatar_url;
+
+                    // Notify musician
                     await supabaseAdmin.from('notifications').insert({
-                        user_id: booking.user_id,
+                        user_id: fullBooking.user_id,
                         type: 'success',
                         title: 'Payment Successful!',
-                        message: `Your booking at ${booking.studio?.name} on ${booking.booking_date} has been confirmed.`,
-                        meta: { booking_id: booking.id, studio_id: booking.studio_id },
+                        message: `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
+                        image: studioImage,
+                        meta: { booking_id: fullBooking.id },
                     });
 
-                    // Notify the studio owner
-                    if (booking.studio?.owner_id) {
+                    // Notify studio owner
+                    if (fullBooking.studio?.owner_id) {
                         await supabaseAdmin.from('notifications').insert({
-                            user_id: booking.studio.owner_id,
+                            user_id: fullBooking.studio.owner_id,
                             type: 'info',
-                            title: 'New Confirmed Booking',
-                            message: `A booking at ${booking.studio?.name} on ${booking.booking_date} has been paid and confirmed.`,
-                            meta: { booking_id: booking.id, studio_id: booking.studio_id },
+                            title: 'Booking Payment Received',
+                            message: `Payment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}.`,
+                            image: userAvatar,
+                            meta: { booking_id: fullBooking.id, studio_id: fullBooking.studio_id },
                         });
                     }
                 }
@@ -549,6 +643,7 @@ serve(async (req: Request) => {
                             const payment = payments[0];
                             const paymentMethod = payment?.attributes?.source?.type || 'unknown';
                             const paymentIntentId = sessionData.data.attributes.payment_intent?.id;
+                            const paymentAmount = payment?.attributes?.amount ? payment.attributes.amount / 100 : 0; // Convert from centavos
 
                             // Update booking
                             await supabaseAdmin
@@ -562,20 +657,27 @@ serve(async (req: Request) => {
                                 })
                                 .eq('id', bookingId);
 
+                            // Credit the owner's wallet
+                            await creditOwnerWallet(supabaseAdmin, bookingId, paymentAmount);
+
                             // Get full booking details for notifications
                             const { data: fullBooking } = await supabaseAdmin
                                 .from('studio_bookings')
-                                .select('id, user_id, studio_id, booking_date, studio:studios(name, owner_id)')
+                                .select('id, user_id, studio_id, booking_date, studio:studios(name, owner_id, images), profile:user_id(avatar_url)')
                                 .eq('id', bookingId)
                                 .single();
 
                             if (fullBooking) {
+                                const studioImage = fullBooking.studio?.images?.[0];
+                                const userAvatar = fullBooking.profile?.avatar_url;
+
                                 // Notify musician
                                 await supabaseAdmin.from('notifications').insert({
                                     user_id: fullBooking.user_id,
                                     type: 'success',
                                     title: 'Payment Successful!',
                                     message: `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
+                                    image: studioImage,
                                     meta: { booking_id: fullBooking.id },
                                 });
 
@@ -586,6 +688,7 @@ serve(async (req: Request) => {
                                         type: 'info',
                                         title: 'Booking Payment Received',
                                         message: `Payment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}.`,
+                                        image: userAvatar,
                                         meta: { booking_id: fullBooking.id },
                                     });
                                 }
@@ -600,9 +703,9 @@ serve(async (req: Request) => {
             // Use client-provided redirect URL if available, otherwise fallback to hardcoded scheme
             // This allows the redirect to work with Expo Go (exp://) during development
             const appDeepLink = clientRedirectUrl || `musikalokal://payment-result?status=success&booking_id=${bookingId}`;
-            
+
             console.log('🔀 Redirecting directly to:', appDeepLink);
-            
+
             // Use HTTP 302 redirect directly to the app deep link
             return new Response(null, {
                 status: 302,
@@ -629,7 +732,7 @@ serve(async (req: Request) => {
             if (bookingId) {
                 await supabaseAdmin
                     .from('studio_bookings')
-                    .update({ 
+                    .update({
                         payment_status: 'unpaid',
                         checkout_session_id: null // Clear the old session so a new one can be created
                     })
@@ -638,9 +741,9 @@ serve(async (req: Request) => {
 
             // Use client-provided redirect URL if available, otherwise fallback to hardcoded scheme
             const appDeepLink = clientRedirectUrl || `musikalokal://payment-result?status=cancelled&booking_id=${bookingId}`;
-            
+
             console.log('🔀 Redirecting directly to:', appDeepLink);
-            
+
             // Use HTTP 302 redirect directly to the app deep link
             return new Response(null, {
                 status: 302,
@@ -759,7 +862,7 @@ serve(async (req: Request) => {
             }
 
             const appDeepLink = clientRedirectUrl || `musikalokal://payment-result?status=success&type=subscription&plan_id=${planId}`;
-            
+
             return new Response(null, {
                 status: 302,
                 headers: {
@@ -779,7 +882,7 @@ serve(async (req: Request) => {
             console.log('❌ Subscription checkout cancelled');
 
             const appDeepLink = clientRedirectUrl || `musikalokal://payment-result?status=cancelled&type=subscription`;
-            
+
             return new Response(null, {
                 status: 302,
                 headers: {
@@ -800,7 +903,7 @@ serve(async (req: Request) => {
             console.log('📦 Webhook payload:', JSON.stringify(event, null, 2));
 
             // Helper function to process successful payment
-            async function processSuccessfulPayment(bookingId: string, paymentMethod?: string) {
+            async function processSuccessfulPayment(bookingId: string, paymentMethod?: string, paymentAmount?: number) {
                 if (!bookingId) return;
 
                 // Update booking
@@ -824,6 +927,9 @@ serve(async (req: Request) => {
                 }
 
                 console.log('✅ Webhook: Booking updated successfully');
+
+                // Credit the owner's wallet with the payment amount
+                await creditOwnerWallet(supabaseAdmin, bookingId, paymentAmount || 0);
 
                 // Send notifications
                 const { data: booking } = await supabaseAdmin
@@ -865,7 +971,7 @@ serve(async (req: Request) => {
                     const userId = metadata?.user_id;
                     const planId = metadata?.plan_id;
                     console.log('💰 Subscription payment via webhook:', { userId, planId, paymentMethod });
-                    
+
                     // Process subscription (similar to subscription_success handler)
                     if (userId && planId) {
                         const { data: plan } = await supabaseAdmin
@@ -943,8 +1049,8 @@ serve(async (req: Request) => {
             // Handle: link.payment.paid
             if (event.type === 'link.payment.paid') {
                 const linkId = event.data?.id;
-                const bookingId = event.data?.attributes?.metadata?.booking_id || 
-                                  event.data?.attributes?.reference_number;
+                const bookingId = event.data?.attributes?.metadata?.booking_id ||
+                    event.data?.attributes?.reference_number;
                 const paymentMethod = event.data?.attributes?.payments?.[0]?.attributes?.source?.type;
 
                 console.log('💰 Link payment paid:', { linkId, bookingId, paymentMethod });
@@ -1210,11 +1316,11 @@ serve(async (req: Request) => {
             const refundAmount = Math.round((booking.payment_amount * refundPercentage) / 100);
             const refundAmountCentavos = refundAmount * 100;
 
-            console.log('💰 Refund calculation:', { 
-                diffDays, 
-                refundPercentage, 
+            console.log('💰 Refund calculation:', {
+                diffDays,
+                refundPercentage,
                 originalAmount: booking.payment_amount,
-                refundAmount 
+                refundAmount
             });
 
             // If no refund due

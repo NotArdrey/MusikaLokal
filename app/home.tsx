@@ -3,17 +3,17 @@ import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Dimensions,
-    Image,
-    RefreshControl,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Dimensions,
+  Image,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
@@ -88,6 +88,9 @@ export default function HomeScreen() {
     message: string;
     buttons?: any[];
   }>({ type: "info", title: "", message: "" });
+
+  // Scroll State for Sticky Header
+  const [isScrolled, setIsScrolled] = useState(false);
 
   // Safe handler for opening search sheet - prevents reanimated timing issues
   const openSearchSheet = useCallback(() => {
@@ -367,7 +370,7 @@ export default function HomeScreen() {
       // === RANDOM RECOMMENDATIONS - Simple random shuffle ===
       const shuffled = [...allItemsList].sort(() => Math.random() - 0.5);
       setRandomRecommendations(shuffled.slice(0, 20));
-      
+
       // === AI RECOMMENDATIONS - Fetch from RPC if user is logged in ===
       if (userId) {
         try {
@@ -376,7 +379,7 @@ export default function HomeScreen() {
             p_user_id: userId,
             p_limit: 20
           });
-          
+
           if (aiError) {
             console.log("⚠️ AI recommendations error:", aiError);
             setAiRecommendations([]);
@@ -682,18 +685,7 @@ export default function HomeScreen() {
           style={styles.heroGradient}
         />
 
-        {/* Header Component Overlay */}
-        <View
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            zIndex: 20,
-          }}
-        >
-          <Header title="MusikaLokal" transparent />
-        </View>
+
 
         {/* Content within Hero */}
         <View style={styles.heroContent}>
@@ -799,8 +791,8 @@ export default function HomeScreen() {
                       ]}
                     >
                       <Text style={styles.glassBadgeText}>
-                        {aiModeEnabled && topItems[0].similarity 
-                          ? `🤖 ${(topItems[0].similarity * 100).toFixed(0)}% Match` 
+                        {aiModeEnabled && topItems[0].similarity
+                          ? `🤖 ${(topItems[0].similarity * 100).toFixed(0)}% Match`
                           : '🔥 Highly Rated'}
                       </Text>
                     </View>
@@ -1417,8 +1409,8 @@ export default function HomeScreen() {
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
-              {aiModeEnabled 
-                ? 'Personalized picks based on your interests' 
+              {aiModeEnabled
+                ? 'Personalized picks based on your interests'
                 : 'Random suggestions for comparison'}
             </Text>
           </View>
@@ -1467,8 +1459,8 @@ export default function HomeScreen() {
                 >
                   <View style={styles.featuredBadge}>
                     <Text style={styles.featuredBadgeText}>
-                      {aiModeEnabled && uniqueItems[0].similarity 
-                        ? `🤖 ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match` 
+                      {aiModeEnabled && uniqueItems[0].similarity
+                        ? `🤖 ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match`
                         : '✨ Top Recommendation'}
                     </Text>
                   </View>
@@ -1645,15 +1637,28 @@ export default function HomeScreen() {
         backgroundColor="transparent"
       />
 
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
+        <Header
+          title="MusikaLokal"
+          transparent={!isScrolled}
+        />
+      </View>
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 180 }}
         bounces={true}
+        onScroll={(e) => {
+          const contentOffsetY = e.nativeEvent.contentOffset.y;
+          setIsScrolled(contentOffsetY > 50);
+        }}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
             tintColor={colors.primary}
+            progressViewOffset={insets.top + 60} // Push refresh spinner below header
           />
         }
       >
@@ -1685,10 +1690,10 @@ export default function HomeScreen() {
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}>
-                  <Ionicons 
-                    name={aiModeEnabled ? "sparkles" : "shuffle"} 
-                    size={18} 
-                    color="#FFF" 
+                  <Ionicons
+                    name={aiModeEnabled ? "sparkles" : "shuffle"}
+                    size={18}
+                    color="#FFF"
                   />
                 </View>
                 <View>
@@ -1705,8 +1710,8 @@ export default function HomeScreen() {
                     color: colors.textSecondary,
                     marginTop: -2,
                   }}>
-                    {aiModeEnabled 
-                      ? `Personalized based on your interests${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ''}` 
+                    {aiModeEnabled
+                      ? `Personalized based on your interests${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ''}`
                       : 'Showing random listings for comparison'}
                   </Text>
                 </View>
@@ -1729,14 +1734,14 @@ export default function HomeScreen() {
               thumbColor={aiModeEnabled ? colors.primary : '#9CA3AF'}
             />
           </View>
-          
+
           {/* AI Similarity Preview */}
           {aiModeEnabled && aiRecommendations.length > 0 && (
-            <View style={{ 
-              marginTop: 12, 
-              paddingTop: 12, 
-              borderTopWidth: 1, 
-              borderTopColor: isDark ? '#374151' : '#E5E7EB' 
+            <View style={{
+              marginTop: 12,
+              paddingTop: 12,
+              borderTopWidth: 1,
+              borderTopColor: isDark ? '#374151' : '#E5E7EB'
             }}>
               <Text style={{
                 fontFamily: 'Poppins_500Medium',
@@ -1746,8 +1751,8 @@ export default function HomeScreen() {
                 textTransform: 'uppercase',
                 letterSpacing: 0.5,
               }}>
-                {aiRecommendations.some((i: any) => i.similarity > 0.1) 
-                  ? 'Top Matches by AI Similarity' 
+                {aiRecommendations.some((i: any) => i.similarity > 0.1)
+                  ? 'Top Matches by AI Similarity'
                   : '📊 Sorted by Popularity (No embeddings yet)'}
               </Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -1779,8 +1784,8 @@ export default function HomeScreen() {
                         fontSize: 9,
                         color: '#FFF',
                       }}>
-                        {item.similarity > 0.1 
-                          ? `${((item.similarity || 0) * 100).toFixed(0)}%` 
+                        {item.similarity > 0.1
+                          ? `${((item.similarity || 0) * 100).toFixed(0)}%`
                           : item.type}
                       </Text>
                     </View>
@@ -1789,13 +1794,13 @@ export default function HomeScreen() {
               </View>
             </View>
           )}
-          
+
           {/* No AI Data Message */}
           {aiModeEnabled && aiRecommendations.length === 0 && userId && (
-            <View style={{ 
-              marginTop: 12, 
-              paddingTop: 12, 
-              borderTopWidth: 1, 
+            <View style={{
+              marginTop: 12,
+              paddingTop: 12,
+              borderTopWidth: 1,
               borderTopColor: isDark ? '#374151' : '#E5E7EB',
               flexDirection: 'row',
               alignItems: 'center',

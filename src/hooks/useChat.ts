@@ -349,7 +349,7 @@ export function useConversations(currentUserId: string | null) {
             const allConversations = [
                 ...processedDirectConversations,
                 ...processedGroupConversations,
-            ].sort((a, b) => 
+            ].sort((a, b) =>
                 new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
             );
 
@@ -365,6 +365,70 @@ export function useConversations(currentUserId: string | null) {
     useEffect(() => {
         fetchConversations();
     }, [fetchConversations]);
+
+    // REALTIME SUBSCRIPTION FOR CONVERSATION LIST
+    useEffect(() => {
+        if (!currentUserId) return;
+
+        console.log('Setting up realtime subscription for conversation list...');
+
+        const channel = supabase
+            .channel('conversation_list_updates')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'messages',
+                },
+                async (payload) => {
+                    const newMessage = payload.new as Message;
+
+                    // Check if this message belongs to any of our conversations
+                    setConversations(prevConversations => {
+                        const conversationIndex = prevConversations.findIndex(c => c.id === newMessage.conversation_id);
+
+                        // If conversation exists in our list
+                        if (conversationIndex >= 0) {
+                            const updatedConversations = [...prevConversations];
+                            const conversation = { ...updatedConversations[conversationIndex] };
+
+                            // Check if message is relevant (not blocked, etc. - simplistic check for now)
+
+                            // Fetch sender profile if needed for group chat preview
+                            // For now, we'll optimistically update without full profile and let UI handle graceful fallback
+                            // or fetch asynchronously. 
+
+                            conversation.last_message = newMessage;
+                            conversation.updated_at = newMessage.created_at;
+
+                            if (newMessage.sender_id !== currentUserId) {
+                                conversation.unread_count = (conversation.unread_count || 0) + 1;
+                            }
+
+                            // Remove from old position and add to top
+                            updatedConversations.splice(conversationIndex, 1);
+                            updatedConversations.unshift(conversation);
+
+                            return updatedConversations;
+                        } else {
+                            // New conversation? Or one we didn't have loaded?
+                            // Safest to refetch or fetch just this conversation
+                            // Determining if I'm a participant in this new message's conversation is hard without fetching.
+                            // So we'll trigger a refetch of the list to be safe and accurate.
+                            // Debounce this? For now, direct call.
+                            fetchConversations();
+                            return prevConversations;
+                        }
+                    });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [currentUserId, fetchConversations]);
 
     return { conversations, loading, error, refetch: fetchConversations };
 }
@@ -482,6 +546,18 @@ export function useChat(conversationId: string | null, currentUserId: string | n
             });
 
             if (sendError) throw sendError;
+
+            // Touch the conversation updated_at for sorting
+            const { error: updateError } = await supabase
+                .from('conversations')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('id', conversationId);
+
+            if (updateError) {
+                console.warn('Failed to update conversation timestamp:', updateError);
+                // Non-fatal, proceed
+            }
+
             return { error: null };
         } catch (err: any) {
             console.error('Error sending message:', err);
@@ -527,7 +603,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                     const existingReactions = msg.reactions || [];
                     const existingIndex = existingReactions.findIndex(r => r.user_id === currentUserId);
                     let newReactions: MessageReaction[];
-                    
+
                     if (existingIndex >= 0) {
                         // Update existing reaction
                         newReactions = [...existingReactions];
