@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { createSubscriptionCheckout } from "../src/services/paymongo";
 
 const { width } = Dimensions.get("window");
 
@@ -111,25 +112,10 @@ export default function SubscriptionRequiredScreen() {
     setSubscribing(true);
 
     try {
-      // Refresh session first to ensure valid JWT for edge function
-      const { data: sessionData, error: sessionError } = await supabase.auth.refreshSession();
-
-      if (sessionError || !sessionData?.session) {
-        console.error('Session refresh error:', sessionError);
-        Alert.alert(
-          "Session Expired",
-          "Your session has expired. Please log in again.",
-          [{ text: "OK", onPress: () => router.replace("/") }]
-        );
-        setSubscribing(false);
-        setSelectedPlan(null);
-        return;
-      }
-
       const plan = plans.find((p) => p.id === planId);
       if (!plan) throw new Error("Plan not found");
 
-      // Generate environment-aware redirect URLs (works with Expo Go and production)
+      // Generate environment-aware redirect URLs
       const redirectUrl = ExpoLinking.createURL("payment-result", {
         queryParams: {
           status: "success",
@@ -141,91 +127,29 @@ export default function SubscriptionRequiredScreen() {
         queryParams: { status: "cancelled", type: "subscription" },
       });
 
-      // Call edge function to create subscription checkout
-      console.log("📤 Calling paymongo function with:", {
-        action: "create_subscription_checkout",
-        user_id: userId,
-        plan_id: planId,
+      console.log("📤 Creating subscription checkout locally...");
+
+      // Use local PayMongo service instead of edge function
+      const result = await createSubscriptionCheckout({
+        userId,
+        planId,
         amount: plan.price,
-        plan_name: plan.name,
+        planName: plan.name,
+        redirectUrl,
+        cancelRedirectUrl,
       });
 
-      const { data, error } = await supabase.functions.invoke("paymongo", {
-        body: {
-          action: "create_subscription_checkout",
-          user_id: userId,
-          plan_id: planId,
-          amount: plan.price,
-          plan_name: plan.name,
-          redirect_url: redirectUrl,
-          cancel_redirect_url: cancelRedirectUrl,
-        },
-      });
+      console.log("📥 Result:", result);
 
-      console.log("📥 Response data:", JSON.stringify(data, null, 2));
-      console.log("📥 Response error:", error);
-
-      // When there's a FunctionsHttpError, the actual error details may be in error.context
-      if (error) {
-        console.error(
-          "❌ Edge function error:",
-          JSON.stringify(error, null, 2),
-        );
-
-        let errorMsg = "Unknown function error";
-
-        // First try to get error from data
-        if (data && typeof data === "object") {
-          errorMsg = (data as any).error || (data as any).message || errorMsg;
-          console.error("❌ Error from data:", errorMsg);
-        }
-
-        // If data is null, try to read the response body from error.context
-        if (
-          !data &&
-          error.context &&
-          typeof error.context.json === "function"
-        ) {
-          try {
-            const errorBody = await error.context.json();
-            console.error("❌ Error body from context:", errorBody);
-            errorMsg = errorBody?.error || errorBody?.message || errorMsg;
-          } catch (parseError) {
-            console.error("❌ Failed to parse error body:", parseError);
-          }
-        }
-
-        // Try text() if json() failed and body not used
-        if (
-          !data &&
-          error.context &&
-          !error.context.bodyUsed &&
-          typeof error.context.text === "function"
-        ) {
-          try {
-            const errorText = await error.context.text();
-            console.error("❌ Error text from context:", errorText);
-            if (errorText) {
-              try {
-                const parsed = JSON.parse(errorText);
-                errorMsg = parsed?.error || parsed?.message || errorMsg;
-              } catch {
-                errorMsg = errorText;
-              }
-            }
-          } catch (textError) {
-            console.error("❌ Failed to read error text:", textError);
-          }
-        }
-
-        throw new Error(errorMsg);
+      if (!result.success) {
+        throw new Error(result.error || "Failed to create checkout");
       }
 
-      if (data?.checkout_url) {
+      if (result.checkout_url) {
         // Open PayMongo checkout
-        const canOpen = await Linking.canOpenURL(data.checkout_url);
+        const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
-          await Linking.openURL(data.checkout_url);
+          await Linking.openURL(result.checkout_url);
         } else {
           Alert.alert(
             "Error",
@@ -233,15 +157,10 @@ export default function SubscriptionRequiredScreen() {
           );
         }
       } else {
-        const errorMsg = data?.error || "No checkout URL returned";
-        throw new Error(errorMsg);
+        throw new Error("No checkout URL returned");
       }
     } catch (error: any) {
       console.error("Subscription error:", error);
-      console.error(
-        "Error details:",
-        JSON.stringify(error, Object.getOwnPropertyNames(error), 2),
-      );
       Alert.alert(
         "Subscription Error",
         error.message || "Failed to start subscription. Please try again.",

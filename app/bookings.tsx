@@ -26,6 +26,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useRequireAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { createBookingCheckout } from "../src/services/paymongo";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -620,16 +621,16 @@ export default function BookingsScreen() {
   // Show payment option modal before paying
   const showPaymentOptions = (item: any) => {
     setPaymentItem(item);
-    
+
     // Check if user already paid a downpayment - if so, they should only pay remaining balance
     const hasDownpaymentPaid = item.payment_type === "downpayment" && item.remaining_balance > 0;
-    
+
     if (hasDownpaymentPaid) {
       // Skip modal and directly pay balance
       handlePayBalance(item);
       return;
     }
-    
+
     setSelectedPaymentType("full"); // Reset to full payment as default
     setShowPaymentOptionModal(true);
   };
@@ -660,7 +661,7 @@ export default function BookingsScreen() {
         payAmount,
       );
 
-      // Generate environment-aware redirect URL (works with Expo Go and production)
+      // Generate environment-aware redirect URL
       const redirectUrl = ExpoLinking.createURL("payment-result", {
         queryParams: { status: "success", booking_id: item.id },
       });
@@ -668,44 +669,36 @@ export default function BookingsScreen() {
         queryParams: { status: "cancelled", booking_id: item.id },
       });
 
-      const { data: paymentData, error: paymentError } =
-        await supabase.functions.invoke("paymongo", {
-          body: {
-            action: "create_checkout",
-            booking_id: item.id,
-            user_id: userId,
-            amount: payAmount,
-            total_amount: totalAmount,
-            payment_type: paymentType,
-            remaining_balance: remainingBalance,
-            studio_name: item.name,
-            booking_date: item.raw_date,
-            description:
-              paymentType === "downpayment"
-                ? `Downpayment (50%) for studio booking at ${item.name}`
-                : `Studio booking at ${item.name}`,
-            redirect_url: redirectUrl,
-            cancel_redirect_url: cancelRedirectUrl,
-          },
-        });
+      // Use local PayMongo service instead of edge function
+      const result = await createBookingCheckout({
+        bookingId: item.id,
+        userId,
+        amount: payAmount,
+        totalAmount,
+        paymentType,
+        remainingBalance,
+        studioName: item.name,
+        bookingDate: item.raw_date,
+        description:
+          paymentType === "downpayment"
+            ? `Downpayment (50%) for studio booking at ${item.name}`
+            : `Studio booking at ${item.name}`,
+        redirectUrl,
+        cancelRedirectUrl,
+      });
 
-      if (paymentError) {
-        console.error("Payment error:", paymentError);
-        Alert.alert(
-          "Error",
-          "Failed to create payment session. Please try again.",
-        );
+      if (!result.success) {
+        Alert.alert("Error", result.error || "Failed to create payment session.");
         return;
       }
 
-      if (paymentData?.checkout_url) {
-        console.log("✅ Opening checkout URL:", paymentData.checkout_url);
-        const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
+      if (result.checkout_url) {
+        console.log("✅ Opening checkout URL:", result.checkout_url);
+        const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
-          // Set flag to track payment in progress and store the booking ID
           paymentInProgressRef.current = true;
           pendingPaymentBookingId.current = item.id;
-          await Linking.openURL(paymentData.checkout_url);
+          await Linking.openURL(result.checkout_url);
         } else {
           Alert.alert(
             "Error",
@@ -739,7 +732,7 @@ export default function BookingsScreen() {
         item.remaining_balance,
       );
 
-      // Generate environment-aware redirect URL (works with Expo Go and production)
+      // Generate environment-aware redirect URL
       const redirectUrl = ExpoLinking.createURL("payment-result", {
         queryParams: { status: "success", booking_id: item.id },
       });
@@ -747,40 +740,33 @@ export default function BookingsScreen() {
         queryParams: { status: "cancelled", booking_id: item.id },
       });
 
-      const { data: paymentData, error: paymentError } =
-        await supabase.functions.invoke("paymongo", {
-          body: {
-            action: "create_checkout",
-            booking_id: item.id,
-            user_id: userId,
-            amount: item.remaining_balance,
-            total_amount: item.total_cost,
-            payment_type: "balance",
-            remaining_balance: 0, // After this payment, balance will be 0
-            studio_name: item.name,
-            booking_date: item.raw_date,
-            description: `Remaining balance payment for studio booking at ${item.name}`,
-            redirect_url: redirectUrl,
-            cancel_redirect_url: cancelRedirectUrl,
-          },
-        });
+      // Use local PayMongo service instead of edge function
+      const result = await createBookingCheckout({
+        bookingId: item.id,
+        userId,
+        amount: item.remaining_balance,
+        totalAmount: item.total_cost,
+        paymentType: "balance",
+        remainingBalance: 0,
+        studioName: item.name,
+        bookingDate: item.raw_date,
+        description: `Remaining balance payment for studio booking at ${item.name}`,
+        redirectUrl,
+        cancelRedirectUrl,
+      });
 
-      if (paymentError) {
-        console.error("Payment error:", paymentError);
-        Alert.alert(
-          "Error",
-          "Failed to create payment session. Please try again.",
-        );
+      if (!result.success) {
+        Alert.alert("Error", result.error || "Failed to create payment session.");
         return;
       }
 
-      if (paymentData?.checkout_url) {
-        console.log("✅ Opening checkout URL:", paymentData.checkout_url);
-        const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
+      if (result.checkout_url) {
+        console.log("✅ Opening checkout URL:", result.checkout_url);
+        const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
           pendingPaymentBookingId.current = item.id;
-          await Linking.openURL(paymentData.checkout_url);
+          await Linking.openURL(result.checkout_url);
         } else {
           Alert.alert(
             "Error",
