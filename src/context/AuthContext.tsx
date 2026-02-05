@@ -109,6 +109,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (error) {
         console.log("Error checking subscription:", error);
+        // For first login, profile may not exist yet - check auth metadata for role
+        const metadataRole = session.user?.user_metadata?.role;
+        if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
+          console.log("📋 Profile not found but metadata role requires subscription:", metadataRole);
+          setSubscriptionStatus(null);
+          setSubscriptionRequired(true);
+        }
         setSubscriptionChecked(true);
         return;
       }
@@ -147,6 +154,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     } catch (e) {
       console.log("Error in checkSubscription:", e);
+      // For first login, profile may not exist yet - check auth metadata for role
+      const metadataRole = session.user?.user_metadata?.role;
+      if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
+        console.log("📋 Exception but metadata role requires subscription:", metadataRole);
+        setSubscriptionStatus(null);
+        setSubscriptionRequired(true);
+      }
       setSubscriptionChecked(true);
     }
   }, [session?.user?.id]);
