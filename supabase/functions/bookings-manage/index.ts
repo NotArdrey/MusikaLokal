@@ -29,7 +29,11 @@ Deno.serve(async (req: Request) => {
 
     try {
         const authHeader = req.headers.get('Authorization');
+        console.log('DEBUG: Auth Header present:', !!authHeader);
+        if (authHeader) console.log('DEBUG: Auth Header length:', authHeader.length);
+
         if (!authHeader) {
+            console.error('DEBUG: Missing authorization header');
             return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 401,
@@ -37,7 +41,10 @@ Deno.serve(async (req: Request) => {
         }
 
         const jwtPayload = decodeJwtPayload(authHeader)
+        console.log('DEBUG: JWT Payload:', JSON.stringify(jwtPayload));
+
         if (!jwtPayload || !jwtPayload.sub) {
+            console.error('DEBUG: Invalid token payload');
             return new Response(JSON.stringify({ error: 'Invalid token' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 401,

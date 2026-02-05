@@ -2,15 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -440,11 +440,15 @@ export default function AddGroupScreen() {
         .select()
         .single();
 
-      console.log("🔵 Response data:", JSON.stringify(data, null, 2));
-      console.log("🔵 Response error:", error);
+      // console.log("🔵 Response data:", JSON.stringify(data, null, 2));
+      // console.log("🔵 Response error:", error);
 
       if (error) {
-        console.error("❌ Error details:", JSON.stringify(error, null, 2));
+        try {
+          console.error("❌ Error details:", error.message);
+        } catch (err) {
+          console.error("❌ Error details: Could not log error details");
+        }
 
         let alertMessage = `Failed to create group: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;

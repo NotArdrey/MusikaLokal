@@ -2,16 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Image,
-    Linking,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -105,10 +105,10 @@ export default function GigDetailsScreen() {
         .single();
 
       if (gigError) {
-        console.error('[manage_gig] Failed to fetch gig details:', gigError);
-        if (gigError.message?.includes("non-2xx")) {
-          console.error('[manage_gig] Full error object:', JSON.stringify(gigError));
-        }
+        console.error('[manage_gig] Failed to fetch gig details:', gigError.message);
+        // if (gigError.message?.includes("non-2xx")) {
+        //   console.error('[manage_gig] Full error object:', JSON.stringify(gigError));
+        // }
         throw gigError;
       }
       setGig(gigData);
@@ -133,9 +133,8 @@ export default function GigDetailsScreen() {
       try {
         const { data: reviewData, error: reviewError } = await supabase
           .from('reviews')
-          .select('*, reviewer:profiles!reviews_reviewer_id_fkey(id, full_name, avatar_url)')
-          .eq('entity_type', 'gig')
-          .eq('entity_id', gigId)
+          .select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url)')
+          .eq('gig_id', gigId)
           .order('created_at', { ascending: false });
         if (reviewError) {
           console.error('[manage_gig] Failed to fetch reviews:', reviewError);
@@ -147,7 +146,7 @@ export default function GigDetailsScreen() {
       }
 
     } catch (e: any) {
-      console.error("[manage_gig] Critical error fetching data:", e);
+      console.error("[manage_gig] Critical error fetching data:", e.message || "Unknown error");
       let errorMsg = "Failed to load gig data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
