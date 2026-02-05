@@ -2,15 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -391,11 +391,11 @@ export default function AddGroupScreen() {
     setCreating(true);
 
     try {
-      // Refresh session to ensure valid token
+      // Get current session (auto-refresh is handled by Supabase client)
       const {
         data: { session },
         error: sessionError,
-      } = await supabase.auth.refreshSession();
+      } = await supabase.auth.getSession();
       if (sessionError || !session || !session.user) {
         showAlert("error", "Session Expired", "Please log in again.");
         router.replace("/");

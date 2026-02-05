@@ -278,10 +278,10 @@ export async function createBookingCheckout(
                     metadata: {
                         booking_id: bookingId,
                         user_id: userId,
-                        studio_name: studioName,
+                        studio_name: studioName || '',
                         payment_type: paymentType,
-                        total_amount: totalAmount,
-                        remaining_balance: remainingBalance,
+                        total_amount: String(totalAmount || 0),
+                        remaining_balance: String(remainingBalance || 0),
                     },
                 },
             },
@@ -296,7 +296,10 @@ export async function createBookingCheckout(
         };
 
         if (paymentType === 'balance') {
+            // Balance payment completes the full payment
             updateData.remaining_balance = 0;
+            updateData.payment_status = 'paid';
+            updateData.payment_amount = totalAmount; // Full amount is now paid
         } else {
             updateData.payment_amount = amount;
             updateData.payment_type = paymentType;

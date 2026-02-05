@@ -3,15 +3,15 @@ import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -281,11 +281,11 @@ export default function AddGigScreen() {
     setCreating(true);
 
     try {
-      // Refresh session to ensure valid token
+      // Get current session (auto-refresh is handled by Supabase client)
       const {
         data: { session },
         error: sessionError,
-      } = await supabase.auth.refreshSession();
+      } = await supabase.auth.getSession();
       if (sessionError || !session || !session.user) {
         showAlert("error", "Session Expired", "Please log in again.");
         router.replace("/");

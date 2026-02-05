@@ -1,34 +1,34 @@
 import { Ionicons } from "@expo/vector-icons";
 import {
-  BottomSheetBackdrop,
-  BottomSheetModal,
-  BottomSheetScrollView
+    BottomSheetBackdrop,
+    BottomSheetModal,
+    BottomSheetScrollView
 } from "@gorhom/bottom-sheet";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ExpoLinking from "expo-linking";
 import { router } from "expo-router";
 import React, {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState
+    forwardRef,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState
 } from "react";
 import {
-  ActivityIndicator,
-  BackHandler,
-  Dimensions,
-  Image,
-  Linking,
-  Modal as RNModal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    BackHandler,
+    Dimensions,
+    Image,
+    Linking,
+    Modal as RNModal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../../lib/supabase";
@@ -161,6 +161,13 @@ const ListingDetailsSheet = forwardRef<
   // Recording studio whole-day booking state
   const [isRecordingWholeDayAvailable, setIsRecordingWholeDayAvailable] = useState(false);
   const [recordingDaySlot, setRecordingDaySlot] = useState<{ start: string; end: string } | null>(null);
+
+  // Session type selection for studios offering Both (Rehearsal & Recording)
+  const [selectedSessionType, setSelectedSessionType] = useState<"Rehearsal" | "Recording" | null>(null);
+
+  // Helper: Check if we're in recording mode (either pure Recording studio OR Both with Recording selected)
+  const isRecordingMode = group?.studio_type === "Recording" || 
+    (group?.studio_type === "Both" && selectedSessionType === "Recording");
 
   // Multiple time slots state for multi-slot bookings (same day)
   const [selectedTimeSlots, setSelectedTimeSlots] = useState<
@@ -1424,7 +1431,8 @@ const ListingDetailsSheet = forwardRef<
 
         // RECORDING STUDIO WHOLE-DAY LOGIC:
         // For recording studios, if there are ANY bookings on this date, block the entire day
-        const isRecordingStudio = group?.studio_type === "Recording";
+        const isRecordingStudio = group?.studio_type === "Recording" || 
+          (group?.studio_type === "Both" && selectedSessionType === "Recording");
         if (isRecordingStudio) {
           // Also check cart bookings for recording studios
           const cartBookingsForDate = (cartBookings || []).filter((b) => {
@@ -1625,7 +1633,8 @@ const ListingDetailsSheet = forwardRef<
 
     // RECORDING STUDIO WHOLE-DAY LOGIC:
     // For recording studios, the entire day is booked as one unit
-    const isRecordingStudio = group?.studio_type === "Recording";
+    const isRecordingStudio = group?.studio_type === "Recording" || 
+      (group?.studio_type === "Both" && selectedSessionType === "Recording");
     if (isRecordingStudio) {
       // Also check cart bookings for recording studios
       const cartBookingsForDate = bookings.filter((b) => {
@@ -2014,6 +2023,108 @@ const ListingDetailsSheet = forwardRef<
         },
       ]}
     >
+      {/* Session Type Selector for Studios with Both Rehearsal & Recording */}
+      {group?.studio_type === "Both" && (
+        <View style={{ marginBottom: 16 }}>
+          <Text
+            style={[
+              styles.label,
+              { color: colors.textSecondary, marginBottom: 8 },
+            ]}
+          >
+            What would you like to book?
+          </Text>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <TouchableOpacity
+              style={[
+                {
+                  flex: 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 12,
+                  borderWidth: 2,
+                  borderColor: selectedSessionType === "Rehearsal" ? colors.primary : colors.border,
+                  backgroundColor: selectedSessionType === "Rehearsal" 
+                    ? (isDark ? "rgba(124, 58, 237, 0.15)" : "rgba(124, 58, 237, 0.08)")
+                    : "transparent",
+                },
+              ]}
+              onPress={() => {
+                setSelectedSessionType("Rehearsal");
+                // Reset booking state when switching types
+                setSelectedDate("");
+                setSelectedSlot(null);
+                setValidEndTimes([]);
+                setIsRecordingWholeDayAvailable(false);
+                setRecordingDaySlot(null);
+              }}
+            >
+              <Ionicons 
+                name="musical-notes" 
+                size={20} 
+                color={selectedSessionType === "Rehearsal" ? colors.primary : colors.textSecondary} 
+              />
+              <Text
+                style={{
+                  fontFamily: selectedSessionType === "Rehearsal" ? "Poppins_600SemiBold" : "Poppins_500Medium",
+                  color: selectedSessionType === "Rehearsal" ? colors.primary : colors.text,
+                  marginLeft: 8,
+                  fontSize: 14,
+                }}
+              >
+                Rehearsal
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                {
+                  flex: 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 12,
+                  borderWidth: 2,
+                  borderColor: selectedSessionType === "Recording" ? colors.primary : colors.border,
+                  backgroundColor: selectedSessionType === "Recording" 
+                    ? (isDark ? "rgba(124, 58, 237, 0.15)" : "rgba(124, 58, 237, 0.08)")
+                    : "transparent",
+                },
+              ]}
+              onPress={() => {
+                setSelectedSessionType("Recording");
+                // Reset booking state when switching types
+                setSelectedDate("");
+                setSelectedSlot(null);
+                setValidEndTimes([]);
+                setIsRecordingWholeDayAvailable(false);
+                setRecordingDaySlot(null);
+              }}
+            >
+              <Ionicons 
+                name="mic" 
+                size={20} 
+                color={selectedSessionType === "Recording" ? colors.primary : colors.textSecondary} 
+              />
+              <Text
+                style={{
+                  fontFamily: selectedSessionType === "Recording" ? "Poppins_600SemiBold" : "Poppins_500Medium",
+                  color: selectedSessionType === "Recording" ? colors.primary : colors.text,
+                  marginLeft: 8,
+                  fontSize: 14,
+                }}
+              >
+                Recording
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Header */}
       <View
         style={{
@@ -2029,9 +2140,9 @@ const ListingDetailsSheet = forwardRef<
             { color: colors.text, fontSize: 16, marginBottom: 0 },
           ]}
         >
-          {group?.studio_type === "Recording" ? "Select Recording Date" : "Select Date & Time"}
+          {isRecordingMode ? "Select Recording Date" : "Select Date & Time"}
         </Text>
-        {group?.studio_type === "Recording" ? (
+        {isRecordingMode ? (
           <View
             style={[
               styles.durationBadge,
@@ -2188,7 +2299,7 @@ const ListingDetailsSheet = forwardRef<
           ]}
         >
           {/* RECORDING STUDIO: Whole-Day Booking UI */}
-          {group?.studio_type === "Recording" ? (
+          {isRecordingMode ? (
             <View>
               <Text
                 style={{
@@ -3286,7 +3397,7 @@ const ListingDetailsSheet = forwardRef<
           (showAddBooking || bookings.length === 0) ? (
           <>
             {/* RECORDING STUDIO: Simplified whole-day booking flow */}
-            {group?.studio_type === "Recording" ? (
+            {isRecordingMode ? (
               <TouchableOpacity
                 style={[
                   styles.secondaryBtn,
@@ -3596,7 +3707,7 @@ const ListingDetailsSheet = forwardRef<
             onPress={() => setShowAddBooking(true)}
           >
             <Ionicons
-              name={group?.studio_type === "Recording" ? "mic-outline" : "add-circle-outline"}
+              name={isRecordingMode ? "mic-outline" : "add-circle-outline"}
               size={20}
               color={colors.primary}
             />
@@ -3606,7 +3717,7 @@ const ListingDetailsSheet = forwardRef<
                 { color: colors.primary, marginLeft: 8 },
               ]}
             >
-              {group?.studio_type === "Recording" ? "Add Another Recording Day" : "Add Another Session"}
+              {isRecordingMode ? "Add Another Recording Day" : "Add Another Session"}
             </Text>
           </TouchableOpacity>
         ) : null}
@@ -3736,12 +3847,18 @@ const ListingDetailsSheet = forwardRef<
                               },
                             ];
 
+                        // Determine session type for booking
+                        const sessionType = group.studio_type === "Recording" ? "recording" 
+                          : group.studio_type === "Both" && selectedSessionType === "Recording" ? "recording" 
+                          : "rehearsal";
+
                         console.log("📤 Creating multi-slot booking:", {
                           studio_id: group.id,
                           user_id: userId,
                           date: bookingDate,
                           time_slots: timeSlots,
                           notes: bookingNotes,
+                          session_type: sessionType,
                         });
 
                         const { data, error } = await supabase.functions.invoke(
@@ -3754,6 +3871,7 @@ const ListingDetailsSheet = forwardRef<
                               date: bookingDate,
                               time_slots: timeSlots, // Send multi-slot array
                               notes: bookingNotes,
+                              session_type: sessionType, // Include session type
                             },
                           },
                         );
@@ -3916,8 +4034,8 @@ const ListingDetailsSheet = forwardRef<
                       alert("An unexpected error occurred. Please try again.");
                     }
                   },
-                  group?.studio_type === "Recording" ? "Confirm Recording Booking" : "Confirm Session Booking",
-                  group?.studio_type === "Recording"
+                  isRecordingMode ? "Confirm Recording Booking" : "Confirm Session Booking",
+                  isRecordingMode
                     ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording sessions occupy the full day. The studio owner will review and approve your booking request.`
                     : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
                 )
@@ -3936,10 +4054,10 @@ const ListingDetailsSheet = forwardRef<
                   ]}
                 >
                   {bookings.length > 0
-                    ? group?.studio_type === "Recording"
+                    ? isRecordingMode
                       ? `Book ${bookings.length} Recording Date${bookings.length > 1 ? "s" : ""}`
                       : `Book ${bookings.length} Session${bookings.length > 1 ? "s" : ""}`
-                    : group?.studio_type === "Recording"
+                    : isRecordingMode
                       ? "Select a recording date"
                       : "Add at least one session"}
                 </Text>
@@ -6020,29 +6138,17 @@ const ListingDetailsSheet = forwardRef<
                         ? colors.primary
                         : colors.border,
                     borderWidth: selectedPaymentType === "full" ? 2 : 1,
+                    transform: [{ scale: selectedPaymentType === "full" ? 1.02 : 1 }]
                   },
                 ]}
               >
                 <View style={styles.paymentOptionRow}>
-                  <View
-                    style={[
-                      styles.paymentOptionRadio,
-                      {
-                        borderColor:
-                          selectedPaymentType === "full"
-                            ? colors.primary
-                            : colors.border,
-                        backgroundColor:
-                          selectedPaymentType === "full"
-                            ? colors.primary
-                            : "transparent",
-                      },
-                    ]}
-                  >
-                    {selectedPaymentType === "full" && (
-                      <View style={styles.paymentOptionRadioInner} />
-                    )}
-                  </View>
+                  <Ionicons
+                    name={selectedPaymentType === 'full' ? "radio-button-on" : "radio-button-off"}
+                    size={24}
+                    color={selectedPaymentType === 'full' ? colors.primary : colors.textSecondary}
+                    style={{ marginRight: 12 }}
+                  />
                   <View style={styles.paymentOptionInfo}>
                     <Text
                       style={[
@@ -6084,29 +6190,17 @@ const ListingDetailsSheet = forwardRef<
                         ? colors.primary
                         : colors.border,
                     borderWidth: selectedPaymentType === "downpayment" ? 2 : 1,
+                    transform: [{ scale: selectedPaymentType === "downpayment" ? 1.02 : 1 }]
                   },
                 ]}
               >
                 <View style={styles.paymentOptionRow}>
-                  <View
-                    style={[
-                      styles.paymentOptionRadio,
-                      {
-                        borderColor:
-                          selectedPaymentType === "downpayment"
-                            ? colors.primary
-                            : colors.border,
-                        backgroundColor:
-                          selectedPaymentType === "downpayment"
-                            ? colors.primary
-                            : "transparent",
-                      },
-                    ]}
-                  >
-                    {selectedPaymentType === "downpayment" && (
-                      <View style={styles.paymentOptionRadioInner} />
-                    )}
-                  </View>
+                  <Ionicons
+                    name={selectedPaymentType === 'downpayment' ? "radio-button-on" : "radio-button-off"}
+                    size={24}
+                    color={selectedPaymentType === 'downpayment' ? colors.primary : colors.textSecondary}
+                    style={{ marginRight: 12 }}
+                  />
                   <View style={styles.paymentOptionInfo}>
                     <Text
                       style={[
@@ -6146,33 +6240,6 @@ const ListingDetailsSheet = forwardRef<
               {/* Action Buttons */}
               <View style={styles.paymentOptionButtons}>
                 <TouchableOpacity
-                  onPress={() => {
-                    setShowPaymentOptionModal(false);
-                    // Clear form and navigate to bookings
-                    setBookings([]);
-                    setSelectedTimeSlots([]);
-                    setBookingNotes("");
-                    setModalVisible(false);
-                    (ref as any)?.current?.dismiss();
-                    setTimeout(() => {
-                      router.push("/bookings" as any);
-                    }, 100);
-                  }}
-                  style={[
-                    styles.paymentOptionCancelBtn,
-                    { borderColor: colors.border },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.paymentOptionCancelText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    Pay Later
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
                   onPress={() => processPaymentWithType(selectedPaymentType)}
                   style={[
                     styles.paymentOptionConfirmBtn,
@@ -6181,20 +6248,34 @@ const ListingDetailsSheet = forwardRef<
                 >
                   <Ionicons
                     name="card-outline"
-                    size={18}
+                    size={20}
                     color="white"
-                    style={{ marginRight: 6 }}
+                    style={{ marginRight: 8 }}
                   />
                   <Text style={styles.paymentOptionConfirmText}>
-                    Pay ₱
-                    {selectedPaymentType === "downpayment"
-                      ? Math.round(
-                        (paymentBookingData?.totalAmount || 0) / 2,
-                      ).toLocaleString()
-                      : (paymentBookingData?.totalAmount || 0).toLocaleString()}
+                    Proceed to Payment
                   </Text>
+                  <Ionicons name="arrow-forward" size={18} color="white" style={{ marginLeft: 8 }} />
                 </TouchableOpacity>
               </View>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setShowPaymentOptionModal(false);
+                  // Clear form and navigate to bookings
+                  setBookings([]);
+                  setSelectedTimeSlots([]);
+                  setBookingNotes("");
+                  setModalVisible(false);
+                  (ref as any)?.current?.dismiss();
+                  setTimeout(() => {
+                    router.push("/bookings" as any);
+                  }, 100);
+                }}
+                style={{ marginTop: 16, alignItems: 'center' }}
+              >
+                <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -6936,10 +7017,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 12,
   },
   paymentOptionLabel: {
     fontFamily: "Poppins_600SemiBold",
     fontSize: 16,
+    flex: 1,
   },
   paymentOptionAmount: {
     fontFamily: "Poppins_700Bold",
@@ -6952,38 +7035,24 @@ const styles = StyleSheet.create({
     marginLeft: 34,
   },
   paymentOptionButtons: {
-    flexDirection: "row",
-    gap: 12,
     marginTop: 20,
   },
-  paymentOptionCancelBtn: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  paymentOptionCancelText: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 14,
-  },
   paymentOptionConfirmBtn: {
-    flex: 2,
+    width: "100%",
     paddingVertical: 16,
-    borderRadius: 12,
+    borderRadius: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
-    shadowRadius: 4,
+    shadowRadius: 8,
     elevation: 4,
   },
   paymentOptionConfirmText: {
     fontFamily: "Poppins_600SemiBold",
-    fontSize: 14,
+    fontSize: 16,
     color: "#FFFFFF",
   },
 });

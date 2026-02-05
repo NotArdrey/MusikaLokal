@@ -5,18 +5,18 @@ import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  Alert,
-  AppState,
-  Dimensions,
-  Image,
-  Linking,
-  Modal as RNModal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
+    Alert,
+    AppState,
+    Dimensions,
+    Image,
+    Linking,
+    Modal as RNModal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { supabase } from "../lib/supabase";
@@ -52,7 +52,8 @@ type Tab =
   | "Pending"
   | "Upcoming"
   | "Ongoing"
-  | "Review";
+  | "Review"
+  | "History";
 
 // Venue owner specific tabs for managing gig applications
 type VenueOwnerTab = "Applicants" | "Active Musicians" | "Completed";
@@ -80,7 +81,7 @@ export default function BookingsScreen() {
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const { width } = useWindowDimensions();
   const [modalMode, setModalMode] = useState<
-    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "refund"
+    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "refund" | "clear_balance"
   >("confirm");
 
   // Renew Contract State
@@ -109,6 +110,7 @@ export default function BookingsScreen() {
     Upcoming: any[];
     Ongoing: any[];
     Review: any[];
+    History: any[];
   }>({
     Applicants: [],
     ActiveMusicians: [],
@@ -116,6 +118,7 @@ export default function BookingsScreen() {
     Upcoming: [],
     Ongoing: [],
     Review: [],
+    History: [],
   });
 
   // Application data separated by status for musicians
@@ -146,6 +149,7 @@ export default function BookingsScreen() {
         "Upcoming",
         "Ongoing",
         "Review",
+        "History",
       ];
       if (validTabs.includes(params.tab as Tab)) {
         setActiveTab(params.tab as Tab);
@@ -310,8 +314,36 @@ export default function BookingsScreen() {
 
       // 3. Upcoming/Ongoing - Include ALL items (both studio bookings and approved gig applications)
       // Musicians should see their approved gig applications in Upcoming
-      const allUpcoming = rawUpcoming;
+      // Filter out cancelled/declined bookings from Upcoming - they go to History
+      const allUpcoming = rawUpcoming.filter(
+        (item: any) => !item.isCancelled && item.status !== "Declined"
+      );
       const allOngoing = rawOngoing;
+
+      // 4. History - Cancelled/Declined bookings + Already reviewed completed
+      const rawReview = bookings?.Review || [];
+      const cancelledFromUpcoming = rawUpcoming.filter(
+        (item: any) => item.isCancelled || item.status === "Declined"
+      );
+      const alreadyReviewedCompleted = rawReview.filter(
+        (item: any) => 
+          item.type_id !== "gig_application" && 
+          (item.reviewed_by_customer === true || item.reviewed_by_owner === true)
+      );
+      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted];
+      // Sort history by date (most recent first)
+      historyItems.sort(
+        (a: any, b: any) =>
+          new Date(b.raw_date || b.date).getTime() -
+          new Date(a.raw_date || a.date).getTime(),
+      );
+
+      // 5. Review - Only unreviewed completed bookings (studio bookings only for musicians)
+      const unreviewedItems = rawReview.filter(
+        (item: any) => 
+          item.type_id !== "gig_application" && 
+          item.reviewed_by_customer !== true
+      );
 
       // Sort lists
       applicants.sort(
@@ -330,7 +362,8 @@ export default function BookingsScreen() {
         Pending: studioPending,
         Upcoming: allUpcoming,
         Ongoing: allOngoing,
-        Review: bookings?.Review || [], // Can probably leave mixed for now as history
+        Review: unreviewedItems,
+        History: historyItems,
       };
 
       setData(processedData);
@@ -787,6 +820,61 @@ export default function BookingsScreen() {
     }
   };
 
+  // Clear Remaining Balance Handler (F2F Payment)
+  const handleClearBalance = (item: any) => {
+    setSelectedItem(item);
+    setModalMode("clear_balance");
+    setModalVisible(true);
+  };
+
+  // Process Clear Balance (called from modal confirm)
+  const processClearBalance = async () => {
+    if (!selectedItem || !userId) return;
+
+    try {
+      setLoading(true);
+      console.log(
+        "💵 Clearing remaining balance for booking:",
+        selectedItem.id,
+        "Amount:",
+        selectedItem.remaining_balance,
+      );
+
+      const { data, error } = await supabase.functions.invoke(
+        "manage-bookings",
+        {
+          body: {
+            action: "clear_balance",
+            booking_id: selectedItem.id,
+            owner_id: userId,
+            amount: selectedItem.remaining_balance,
+          },
+        },
+      );
+
+      if (error) throw error;
+
+      if (data?.success) {
+        Alert.alert(
+          "Balance Cleared",
+          `₱${selectedItem.remaining_balance?.toLocaleString()} has been marked as paid and credited to your wallet.`,
+        );
+        setModalVisible(false);
+        if (userId) fetchBookings(userId);
+      } else {
+        Alert.alert("Error", data?.error || "Failed to clear balance.");
+      }
+    } catch (e: any) {
+      console.error("Clear balance error:", e);
+      Alert.alert(
+        "Error",
+        e?.message || "Failed to clear balance. Please try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Check payment status (for returning from payment)
   const checkPaymentStatus = async (bookingId: string) => {
     try {
@@ -1218,8 +1306,8 @@ export default function BookingsScreen() {
                 (tab) => renderVenueOwnerTab(tab),
               )
             ) : (
-              // Default tabs for other users
-              ["Applicants", "Pending", "Upcoming", "Ongoing", "Review"].map(
+              // Default tabs for other users (musicians, studio-owners)
+              ["Pending", "Upcoming", "Ongoing", "Review", "History"].map(
                 (tab) => renderTab(tab as Tab),
               )
             )}
@@ -2243,9 +2331,10 @@ export default function BookingsScreen() {
                           {item.status}
                         </Text>
 
-                        {/* Downpayment Badge */}
+                        {/* Downpayment Badge - only show if balance remains AND not fully paid */}
                         {item.payment_type === "downpayment" &&
-                          item.remaining_balance > 0 && (
+                          item.remaining_balance > 0 &&
+                          item.payment_status !== "paid" && (
                             <View
                               style={[
                                 styles.downpaymentBadge,
@@ -2333,7 +2422,7 @@ export default function BookingsScreen() {
                                   { color: "white" },
                                 ]}
                               >
-                                {item.payment_type === "downpayment" && item.remaining_balance > 0
+                                {item.payment_type === "downpayment" && item.remaining_balance > 0 && item.payment_status !== "paid"
                                   ? `Pay Balance ₱${item.remaining_balance?.toLocaleString()}`
                                   : "Pay Now"}
                               </Text>
@@ -2481,6 +2570,79 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               ))}
 
+                            {/* Pay Balance / Clear Balance (F2F) Buttons */}
+                            {activeTab === "Upcoming" &&
+                              item.type_id === "studio_booking" &&
+                              item.payment_type === "downpayment" &&
+                              item.remaining_balance > 0 &&
+                              item.payment_status !== "paid" && (
+                                userRole === "musician" ? (
+                                  <TouchableOpacity
+                                    onPress={() => handlePayBalance(item)}
+                                    style={[
+                                      styles.actionButton,
+                                      {
+                                        backgroundColor: "#F59E0B",
+                                        width: "100%",
+                                        alignItems: "center",
+                                        flexDirection: "row",
+                                        justifyContent: "center",
+                                      },
+                                    ]}
+                                  >
+                                    <Ionicons
+                                      name="card-outline"
+                                      size={18}
+                                      color="white"
+                                      style={{ marginRight: 8 }}
+                                    />
+                                    <Text
+                                      style={[
+                                        styles.actionButtonText,
+                                        {
+                                          color: "white",
+                                          fontSize: moderateScale(14),
+                                        },
+                                      ]}
+                                    >
+                                      Pay Remaining ₱{item.remaining_balance?.toLocaleString()}
+                                    </Text>
+                                  </TouchableOpacity>
+                                ) : (userRole === "studio-owner" || userRole === "venue-owner") && (
+                                  <TouchableOpacity
+                                    onPress={() => handleClearBalance(item)}
+                                    style={[
+                                      styles.actionButton,
+                                      {
+                                        backgroundColor: "#10B981",
+                                        width: "100%",
+                                        alignItems: "center",
+                                        flexDirection: "row",
+                                        justifyContent: "center",
+                                      },
+                                    ]}
+                                  >
+                                    <Ionicons
+                                      name="checkmark-circle-outline"
+                                      size={18}
+                                      color="white"
+                                      style={{ marginRight: 8 }}
+                                    />
+                                    <Text
+                                      style={[
+                                        styles.actionButtonText,
+                                        {
+                                          color: "white",
+                                          fontSize: moderateScale(14),
+                                        },
+                                      ]}
+                                    >
+                                      Clear Balance ₱{item.remaining_balance?.toLocaleString()} (F2F)
+                                    </Text>
+                                  </TouchableOpacity>
+                                )
+                              )}
+
                             {/* 2. Secondary Actions: Details & Cancel (Row) */}
                             <View
                               style={{ flexDirection: "row", gap: scale(8) }}
@@ -2573,9 +2735,11 @@ export default function BookingsScreen() {
                   ? "Complete Contract"
                   : modalMode === "renew"
                     ? "Renew Contract"
-                    : selectedItem?.type_id === "gig_application"
-                      ? "Withdraw from Gig"
-                      : "Cancel Booking"
+                    : modalMode === "clear_balance"
+                      ? "Clear Remaining Balance"
+                      : selectedItem?.type_id === "gig_application"
+                        ? "Withdraw from Gig"
+                        : "Cancel Booking"
         }
         message={
           modalMode === "confirm"
@@ -2592,14 +2756,36 @@ export default function BookingsScreen() {
                   ? "Confirm efficient completion of this gig? You will be redirected to review the musician."
                   : modalMode === "renew"
                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
-                    : (() => {
-                      // Cancel mode
-                      if (selectedItem?.type_id === "gig_application") {
-                        // For gig applications
-                        if (userRole === "venue-owner") {
-                          return "Are you sure you want to revoke this accepted application? The musician will be notified.";
+                    : modalMode === "clear_balance"
+                      ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
+                      : (() => {
+                        // Cancel mode
+                        if (selectedItem?.type_id === "gig_application") {
+                          // For gig applications
+                          if (userRole === "venue-owner") {
+                            return "Are you sure you want to revoke this accepted application? The musician will be notified.";
+                          } else {
+                            // Musician withdrawing
+                            if (selectedItem?.raw_date) {
+                              const eventDate = new Date(selectedItem.raw_date);
+                              const now = new Date();
+                              const diffTime =
+                                eventDate.getTime() - now.getTime();
+                              const diffDays = Math.ceil(
+                                diffTime / (1000 * 60 * 60 * 24),
+                              );
+
+                              if (diffDays > 7) {
+                                return "Warning: You are withdrawing from an accepted gig with more than 7 days notice. This may affect your reputation with this venue.";
+                              } else if (diffDays >= 3) {
+                                return "Warning: You are withdrawing within 3-7 days. This may significantly affect your reputation with this venue.";
+                              }
+                              return "You are withdrawing with less than 3 days notice. This may severely damage your reputation with this venue.";
+                            }
+                            return "Are you sure you want to withdraw from this gig? The venue owner will be notified.";
+                          }
                         } else {
-                          // Musician withdrawing
+                          // For studio bookings - show refund policy
                           if (selectedItem?.raw_date) {
                             const eventDate = new Date(selectedItem.raw_date);
                             const now = new Date();
@@ -2609,35 +2795,15 @@ export default function BookingsScreen() {
                               diffTime / (1000 * 60 * 60 * 24),
                             );
 
-                            if (diffDays > 7) {
-                              return "Warning: You are withdrawing from an accepted gig with more than 7 days notice. This may affect your reputation with this venue.";
-                            } else if (diffDays >= 3) {
-                              return "Warning: You are withdrawing within 3-7 days. This may significantly affect your reputation with this venue.";
-                            }
-                            return "You are withdrawing with less than 3 days notice. This may severely damage your reputation with this venue.";
+                            if (diffDays > 7)
+                              return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
+                            if (diffDays >= 3)
+                              return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
+                            return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
                           }
-                          return "Are you sure you want to withdraw from this gig? The venue owner will be notified.";
+                          return "Are you sure you want to cancel this booking? This action cannot be undone.";
                         }
-                      } else {
-                        // For studio bookings - show refund policy
-                        if (selectedItem?.raw_date) {
-                          const eventDate = new Date(selectedItem.raw_date);
-                          const now = new Date();
-                          const diffTime =
-                            eventDate.getTime() - now.getTime();
-                          const diffDays = Math.ceil(
-                            diffTime / (1000 * 60 * 60 * 24),
-                          );
-
-                          if (diffDays > 7)
-                            return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
-                          if (diffDays >= 3)
-                            return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
-                          return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
-                        }
-                        return "Are you sure you want to cancel this booking? This action cannot be undone.";
-                      }
-                    })()
+                      })()
         }
         buttonText={
           modalMode === "confirm"
@@ -2656,12 +2822,15 @@ export default function BookingsScreen() {
                     ? "Send Renewal Offer"
                     : modalMode === "refund"
                       ? `Request Refund (₱${getRefundInfo(selectedItem).amount.toLocaleString()})`
-                      : "Yes, Cancel Booking"
+                      : modalMode === "clear_balance"
+                        ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
+                        : "Yes, Cancel Booking"
         }
         showInput={
           modalMode !== "confirm" &&
           modalMode !== "complete" &&
-          modalMode !== "renew"
+          modalMode !== "renew" &&
+          modalMode !== "clear_balance"
         } // Show input for cancel AND decline AND fire
         danger={
           modalMode === "fire" ||
@@ -2692,6 +2861,12 @@ export default function BookingsScreen() {
             // Handle renew contract separately
             if (modalMode === "renew") {
               await processRenewContract();
+              return;
+            }
+
+            // Handle clear balance separately
+            if (modalMode === "clear_balance") {
+              await processClearBalance();
               return;
             }
 
@@ -3357,10 +3532,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 12,
   },
   paymentOptionLabel: {
     fontSize: 16,
     fontFamily: "Poppins_600SemiBold",
+    flex: 1,
   },
   paymentOptionAmount: {
     fontSize: 18,

@@ -46,22 +46,6 @@ export default function SubscriptionRequiredScreen() {
 
   const fetchPlans = async () => {
     try {
-      // Refresh session first to ensure valid JWT
-      const { data: sessionData, error: sessionError } = await supabase.auth.refreshSession();
-
-      if (sessionError) {
-        console.error('Session refresh error:', sessionError);
-        // If session refresh fails, redirect to login
-        if (sessionError.message?.includes('JWT') || sessionError.message?.includes('token')) {
-          Alert.alert(
-            "Session Expired",
-            "Your session has expired. Please log in again.",
-            [{ text: "OK", onPress: () => router.replace("/") }]
-          );
-          return;
-        }
-      }
-
       const { data, error } = await supabase
         .from('subscription_plans')
         .select('*')

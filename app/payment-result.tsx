@@ -32,9 +32,36 @@ export default function PaymentResultScreen() {
             setSubscriptionDetails(data);
           }
 
-          // If subscription payment was successful, refresh subscription status
-          if (isSuccess && checkSubscription) {
-            await checkSubscription();
+          // If subscription payment was successful, activate the subscription
+          if (isSuccess) {
+            // Get current user
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && data) {
+              // Calculate expiration date based on plan duration
+              const expiresAt = new Date();
+              expiresAt.setDate(expiresAt.getDate() + (data.duration_days || 30));
+
+              // Update user's subscription status in the database
+              const { error: updateError } = await supabase
+                .from('profiles')
+                .update({
+                  subscription_status: 'active',
+                  subscription_expires_at: expiresAt.toISOString(),
+                  subscription_plan_id: params.plan_id,
+                })
+                .eq('id', user.id);
+
+              if (updateError) {
+                console.error('Error activating subscription:', updateError);
+              } else {
+                console.log('✅ Subscription activated successfully!');
+              }
+
+              // Refresh subscription status in AuthContext
+              if (checkSubscription) {
+                await checkSubscription();
+              }
+            }
           }
         } catch (e) {
           console.error('Error fetching subscription plan:', e);
@@ -49,6 +76,8 @@ export default function PaymentResultScreen() {
               payment_status,
               status,
               final_price,
+              remaining_balance,
+              payment_type,
               studio:studios(name)
             `)
             .eq('id', params.booking_id)
@@ -56,6 +85,43 @@ export default function PaymentResultScreen() {
 
           if (data && !error) {
             setBookingDetails(data);
+
+            // If payment was successful, update the booking status
+            if (isSuccess && data.payment_status !== 'paid') {
+              console.log('💳 Confirming booking payment...');
+
+              // Determine the new status based on payment type
+              // For full payment or balance payment: mark as 'paid'
+              // For downpayment: mark as 'paid' (downpayment received), remaining_balance tracked separately
+              const updateData: any = {
+                payment_status: 'paid',
+                paid_at: new Date().toISOString(),
+                status: 'confirmed',
+              };
+
+              // If it's a downpayment, keep the remaining balance
+              if (data.payment_type === 'downpayment' && data.remaining_balance > 0) {
+                // Keep remaining_balance as is - it's already set
+              } else {
+                updateData.remaining_balance = 0;
+              }
+
+              const { error: updateError } = await supabase
+                .from('studio_bookings')
+                .update(updateData)
+                .eq('id', params.booking_id);
+
+              if (updateError) {
+                console.error('Error confirming booking:', updateError);
+              } else {
+                console.log('✅ Booking payment confirmed successfully!');
+                // Update local state to reflect changes
+                setBookingDetails({
+                  ...data,
+                  ...updateData,
+                });
+              }
+            }
           }
         } catch (e) {
           console.error('Error fetching booking:', e);
@@ -122,20 +188,20 @@ export default function PaymentResultScreen() {
 
         {/* Status Title */}
         <Text style={[styles.title, { color: colors.text }]}>
-          {isSuccess 
-            ? (isSubscription ? 'Subscription Activated!' : 'Payment Successful!') 
+          {isSuccess
+            ? (isSubscription ? 'Subscription Activated!' : 'Payment Successful!')
             : (isSubscription ? 'Subscription Cancelled' : 'Payment Cancelled')}
         </Text>
 
         {/* Status Description */}
         <Text style={[styles.description, { color: colors.textSecondary }]}>
           {isSuccess
-            ? (isSubscription 
-                ? `Your ${subscriptionDetails?.name || 'subscription'} is now active! Enjoy all the premium features.`
-                : 'Your studio booking has been confirmed and moved to Upcoming bookings.')
+            ? (isSubscription
+              ? `Your ${subscriptionDetails?.name || 'subscription'} is now active! Enjoy all the premium features.`
+              : 'Your studio booking has been confirmed and moved to Upcoming bookings.')
             : (isSubscription
-                ? 'Your subscription was cancelled. You can subscribe anytime from your Wallet & Subscription page.'
-                : 'Your payment was cancelled. The booking is still in Pending - you can try again anytime.')}
+              ? 'Your subscription was cancelled. You can subscribe anytime from your Wallet & Subscription page.'
+              : 'Your payment was cancelled. The booking is still in Pending - you can try again anytime.')}
         </Text>
 
         {/* Subscription Details */}
@@ -144,7 +210,7 @@ export default function PaymentResultScreen() {
             <Text style={[styles.detailsTitle, { color: colors.text }]}>
               Subscription Details
             </Text>
-            
+
             <View style={styles.detailRow}>
               <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Plan</Text>
               <Text style={[styles.detailValue, { color: colors.text }]}>
@@ -189,7 +255,7 @@ export default function PaymentResultScreen() {
             <Text style={[styles.detailsTitle, { color: colors.text }]}>
               Booking Details
             </Text>
-            
+
             <View style={styles.detailRow}>
               <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Studio</Text>
               <Text style={[styles.detailValue, { color: colors.text }]}>

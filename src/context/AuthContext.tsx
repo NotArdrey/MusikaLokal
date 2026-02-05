@@ -1,11 +1,11 @@
 import { Session } from "@supabase/supabase-js";
 import { router } from "expo-router";
 import React, {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useState,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
 } from "react";
 import { Alert } from "react-native";
 import { supabase } from "../../lib/supabase";
@@ -44,11 +44,11 @@ const AuthContext = createContext<AuthContextType>({
   isSystemLocked: false,
   unpaidBalance: 0,
   unpaidBookings: [],
-  checkSystemLock: async () => {},
-  showLockAlert: () => {},
+  checkSystemLock: async () => { },
+  showLockAlert: () => { },
   subscriptionStatus: null,
   subscriptionRequired: false,
-  checkSubscription: async () => {},
+  checkSubscription: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -212,15 +212,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return currentSession;
     };
 
+    // Helper to handle auth errors gracefully (e.g., invalid refresh tokens)
+    const handleAuthError = async (error: Error) => {
+      console.log("Auth error detected, clearing local session:", error.message);
+      try {
+        await supabase.auth.signOut({ scope: "local" });
+      } catch (signOutError) {
+        // Ignore sign out errors
+      }
+      setSession(null);
+      setIsAdmin(false);
+      setUserRole(null);
+      setIsSystemLocked(false);
+      setUnpaidBalance(0);
+      setUnpaidBookings([]);
+      setSubscriptionStatus(null);
+      setSubscriptionRequired(false);
+      setLoading(false);
+    };
+
     // Check active session
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       // Handle refresh token errors by clearing the session
       if (error) {
         console.log("Session error (expected on first launch):", error.message);
-        // Clear stale session data
-        supabase.auth.signOut({ scope: "local" }).catch(() => {});
-        setSession(null);
-        setLoading(false);
+        handleAuthError(error);
         return;
       }
       const secureSession = filterSession(session);
@@ -230,18 +246,35 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         fetchUserRole(secureSession.user.id);
       }
       setLoading(false);
+    }).catch((error) => {
+      // Catch any unexpected errors during session retrieval
+      handleAuthError(error);
     });
 
     // Listen for changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      // Handle token refresh errors
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth state change:", event);
+
+      // Handle sign out event
+      if (event === "SIGNED_OUT") {
+        setSession(null);
+        setIsAdmin(false);
+        setUserRole(null);
+        setIsSystemLocked(false);
+        setUnpaidBalance(0);
+        setUnpaidBookings([]);
+        setSubscriptionStatus(null);
+        setSubscriptionRequired(false);
+        setLoading(false);
+        return;
+      }
+
+      // Handle token refresh errors (session will be null if refresh failed)
       if (event === "TOKEN_REFRESHED" && !session) {
         console.log("Token refresh failed, clearing session");
-        supabase.auth.signOut({ scope: "local" }).catch(() => {});
-        setSession(null);
-        setLoading(false);
+        await handleAuthError(new Error("Token refresh failed"));
         return;
       }
 
@@ -250,7 +283,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (secureSession) {
         checkAdmin(secureSession.user.id);
         fetchUserRole(secureSession.user.id);
-      } else {
+      } else if (event !== "INITIAL_SESSION") {
+        // Only reset state if this isn't the initial session load
         setIsAdmin(false);
         setUserRole(null);
         setIsSystemLocked(false);

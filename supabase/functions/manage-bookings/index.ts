@@ -83,7 +83,7 @@ serve(async (req: Request) => {
 
           // Determine status text - for pending bookings, check if payment is needed
           const isUnpaid = b.status === "pending" && (!b.payment_status || b.payment_status === "unpaid" || b.payment_status === "pending" || b.payment_status === "failed");
-          
+
           const item = {
             id: b.id,
             type_id: "studio_booking",
@@ -97,7 +97,7 @@ serve(async (req: Request) => {
             image: b.studio?.images?.[0] || "https://picsum.photos/400/300",
             status:
               b.status === "pending"
-                ? isUnpaid 
+                ? isUnpaid
                   ? "Awaiting Payment"
                   : "Awaiting Payment"
                 : b.status === "confirmed"
@@ -194,7 +194,7 @@ serve(async (req: Request) => {
               "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop";
 
             const isVenue = b.studio?.amenities?.includes("Stage") ?? false;
-            
+
             // For studio owner: show payment status for pending bookings
             const isUnpaid = b.status === "pending" && (!b.payment_status || b.payment_status === "unpaid" || b.payment_status === "pending" || b.payment_status === "failed");
 
@@ -211,7 +211,7 @@ serve(async (req: Request) => {
               image: b.studio?.images?.[0] || "https://picsum.photos/400/300",
               status:
                 b.status === "pending"
-                  ? isUnpaid 
+                  ? isUnpaid
                     ? "Awaiting Payment"
                     : "Awaiting Payment"
                   : b.status === "confirmed"
@@ -500,6 +500,7 @@ serve(async (req: Request) => {
         end_time,
         time_slots,
         notes,
+        session_type, // "rehearsal" or "recording"
       } = params;
 
       // Support both old single-slot format and new multi-slot format
@@ -868,6 +869,7 @@ serve(async (req: Request) => {
           time_slots: slots, // Detailed slots
           notes: notes || null,
           status: "pending", // Await owner approval
+          session_type: session_type || "rehearsal", // Default to rehearsal if not specified
           // Store pricing details - use validated values
           base_rate: finalBaseRate,
           hours: finalHours,
@@ -1405,6 +1407,164 @@ serve(async (req: Request) => {
           message: `Renewal offer sent to ${applicantName}!`,
           applicant_id,
           gig_id,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    // CLEAR REMAINING BALANCE (Face-to-Face Payment)
+    if (action === "clear_balance") {
+      const { booking_id, owner_id, amount } = params;
+
+      if (!booking_id || !owner_id || !amount) {
+        return new Response(
+          JSON.stringify({ error: "Missing required parameters" }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      // 1. Get the booking and verify ownership
+      const { data: booking, error: bookingError } = await supabaseClient
+        .from("studio_bookings")
+        .select("*, studio:studios(id, owner_id, name)")
+        .eq("id", booking_id)
+        .single();
+
+      if (bookingError || !booking) {
+        return new Response(
+          JSON.stringify({ error: "Booking not found" }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 404,
+          },
+        );
+      }
+
+      // 2. Verify the owner owns this studio
+      if (booking.studio?.owner_id !== owner_id) {
+        return new Response(
+          JSON.stringify({ error: "You are not authorized to modify this booking" }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          },
+        );
+      }
+
+      // 3. Verify there's a remaining balance
+      if (!booking.remaining_balance || booking.remaining_balance <= 0) {
+        return new Response(
+          JSON.stringify({ error: "No remaining balance to clear" }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const balanceAmount = booking.remaining_balance;
+
+      // 4. Update the booking to clear the balance
+      const { error: updateError } = await supabaseClient
+        .from("studio_bookings")
+        .update({
+          remaining_balance: 0,
+          payment_status: "paid",
+          payment_amount: booking.final_price, // Full amount is now paid
+        })
+        .eq("id", booking_id);
+
+      if (updateError) {
+        console.error("Error updating booking:", updateError);
+        return new Response(
+          JSON.stringify({ error: "Failed to update booking" }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 500,
+          },
+        );
+      }
+
+      // 5. Credit the owner's wallet
+      const { data: wallet, error: walletError } = await supabaseAdmin
+        .from("wallets")
+        .select("id, balance")
+        .eq("user_id", owner_id)
+        .single();
+
+      if (walletError) {
+        console.error("Wallet fetch error:", walletError);
+        // Continue anyway - booking is updated
+      }
+
+      if (wallet) {
+        // Update wallet balance
+        const { error: walletUpdateError } = await supabaseAdmin
+          .from("wallets")
+          .update({ balance: (wallet.balance || 0) + balanceAmount })
+          .eq("id", wallet.id);
+
+        if (walletUpdateError) {
+          console.error("Wallet update error:", walletUpdateError);
+        }
+
+        // Create transaction record
+        const { error: transactionError } = await supabaseAdmin
+          .from("wallet_transactions")
+          .insert({
+            wallet_id: wallet.id,
+            amount: balanceAmount,
+            type: "credit",
+            description: `F2F payment collected - ${booking.studio?.name || "Studio"}`,
+            status: "completed",
+            meta: {
+              booking_id: booking_id,
+              payment_method: "face_to_face",
+              studio_name: booking.studio?.name,
+            },
+          });
+
+        if (transactionError) {
+          console.error("Transaction record error:", transactionError);
+        }
+      }
+
+      // 6. Notify the customer that their balance was cleared
+      const { error: notifyError } = await supabaseAdmin
+        .from("notifications")
+        .insert({
+          user_id: booking.user_id,
+          type: "success",
+          title: "Balance Cleared! ✅",
+          message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
+          read: false,
+          meta: {
+            type: "balance_cleared",
+            booking_id: booking_id,
+            amount: balanceAmount,
+          },
+        });
+
+      if (notifyError) {
+        console.error("Notification error:", notifyError);
+      }
+
+      console.log(
+        `💵 Balance cleared: ₱${balanceAmount} for booking ${booking_id} by owner ${owner_id}`,
+      );
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: `Balance of ₱${balanceAmount.toLocaleString()} cleared successfully`,
+          amount: balanceAmount,
+          booking_id,
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -215,9 +215,9 @@ async function creditOwnerWallet(
 
     console.log(
       "✅ Successfully credited ₱" +
-        creditAmount +
-        " to owner wallet. New balance: ₱" +
-        newBalance,
+      creditAmount +
+      " to owner wallet. New balance: ₱" +
+      newBalance,
     );
   } catch (e) {
     console.error("❌ Error in creditOwnerWallet:", e);
@@ -414,9 +414,9 @@ serve(async (req: Request) => {
           attributes: {
             billing: profile
               ? {
-                  name: profile.full_name || "Customer",
-                  email: profile.email,
-                }
+                name: profile.full_name || "Customer",
+                email: profile.email,
+              }
               : undefined,
             send_email_receipt: true,
             show_description: true,
@@ -640,9 +640,9 @@ serve(async (req: Request) => {
             attributes: {
               billing: profile
                 ? {
-                    name: profile.full_name || "Customer",
-                    email: profile.email,
-                  }
+                  name: profile.full_name || "Customer",
+                  email: profile.email,
+                }
                 : undefined,
               send_email_receipt: true,
               show_description: true,
@@ -1279,7 +1279,7 @@ serve(async (req: Request) => {
 
         if (booking) {
           const studioImage = booking.studio?.images?.[0] || null;
-          
+
           await supabaseAdmin.from("notifications").insert({
             user_id: booking.user_id,
             type: "success",
