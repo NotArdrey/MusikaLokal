@@ -360,7 +360,7 @@ serve(async (req: Request) => {
                     'name', 'address', 'hourly_rate', 'description', 'amenities',
                     'images', 'latitude', 'longitude', 'rate', 'contract_url',
                     'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax'
+                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -424,6 +424,20 @@ serve(async (req: Request) => {
             // Log gig requirements if creating a gig
             if (type === 'gig') {
                 console.log('📦 Creating gig with requirements:', JSON.stringify(insertPayload.requirements, null, 2));
+                
+                // For gigs, only allow valid columns to prevent PGRST204 errors
+                const validGigColumns = [
+                    'name', 'location', 'budget', 'description', 'event_date',
+                    'requirements', 'images', 'documents', 'status', 'latitude',
+                    'longitude', 'contract_url', 'business_permit_url'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validGigColumns) {
+                    if (insertPayload[key] !== undefined) {
+                        filteredPayload[key] = insertPayload[key];
+                    }
+                }
+                insertPayload = filteredPayload;
             }
 
             console.log('📤 Inserting into table:', table);
@@ -611,7 +625,7 @@ serve(async (req: Request) => {
                     'name', 'address', 'hourly_rate', 'description', 'amenities',
                     'images', 'latitude', 'longitude', 'rate', 'contract_url',
                     'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
-                    'recording_rate', 'open_dates', 'pax'
+                    'recording_rate', 'open_dates', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validStudioColumns) {
@@ -647,6 +661,20 @@ serve(async (req: Request) => {
             // Log gig requirements if updating a gig
             if (type === 'gig') {
                 console.log('📦 Updating gig with requirements:', JSON.stringify(updatePayload.requirements, null, 2));
+                
+                // For gigs, only allow valid columns to prevent PGRST204 errors
+                const validGigColumns = [
+                    'name', 'location', 'budget', 'description', 'event_date',
+                    'requirements', 'images', 'documents', 'status', 'latitude',
+                    'longitude', 'contract_url', 'business_permit_url'
+                ];
+                const filteredPayload: any = {};
+                for (const key of validGigColumns) {
+                    if (updatePayload[key] !== undefined) {
+                        filteredPayload[key] = updatePayload[key];
+                    }
+                }
+                updatePayload = filteredPayload;
             }
 
             console.log('📤 Updating table:', table);
