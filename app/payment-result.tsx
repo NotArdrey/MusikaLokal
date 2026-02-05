@@ -106,19 +106,41 @@ export default function PaymentResultScreen() {
                 updateData.remaining_balance = 0;
               }
 
+              // Update booking status directly in database
               const { error: updateError } = await supabase
                 .from('studio_bookings')
                 .update(updateData)
                 .eq('id', params.booking_id);
 
               if (updateError) {
-                console.error('Error confirming booking:', updateError);
+                console.error('Error confirming booking:', JSON.stringify(updateError, null, 2));
               } else {
                 console.log('✅ Booking payment confirmed successfully!');
+                
+                // Get current user for notification
+                const { data: { user } } = await supabase.auth.getUser();
+                
+                // Send confirmation notification
+                if (user) {
+                  await supabase.from('notifications').insert({
+                    user_id: user.id,
+                    type: 'success',
+                    title: 'Payment Successful! 🎉',
+                    message: `Your booking at ${data.studio?.name || 'the studio'} has been confirmed.`,
+                    read: false,
+                    meta: {
+                      booking_id: params.booking_id,
+                      type: 'booking_confirmation'
+                    }
+                  });
+                }
+                
                 // Update local state to reflect changes
                 setBookingDetails({
                   ...data,
-                  ...updateData,
+                  payment_status: 'paid',
+                  status: 'confirmed',
+                  remaining_balance: data.payment_type === 'downpayment' ? data.remaining_balance : 0
                 });
               }
             }

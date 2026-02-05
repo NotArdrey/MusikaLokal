@@ -114,13 +114,18 @@ export default function AiSuggestionsScreen() {
 
             if (funcError) throw funcError;
 
-            if (data?.suggestions) {
+            if (data?.suggestions && data.suggestions.length > 0) {
                 setSuggestions(data.suggestions);
                 setIsAIPowered(data.aiPowered || false);
                 setAIProvider(data.aiProvider || '');
                 setStep('results');
             } else {
-                setError('No suggestions found. Try different preferences.');
+                // Check if it's an AI availability issue or no matches
+                if (data?.aiPowered === false || data?.aiProvider === 'none') {
+                    setError('AI service is temporarily unavailable. Please try again later or check your preferences.');
+                } else {
+                    setError('No suggestions found. Try different preferences.');
+                }
             }
         } catch (err: any) {
             console.error('Error fetching suggestions:', err);

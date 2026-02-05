@@ -99,7 +99,7 @@ serve(async (req: Request) => {
               b.status === "pending"
                 ? isUnpaid
                   ? "Awaiting Payment"
-                  : "Awaiting Payment"
+                  : "Paid - Waiting for Confirmation"
                 : b.status === "confirmed"
                   ? "Confirmed"
                   : b.status === "checked_in"
@@ -213,7 +213,7 @@ serve(async (req: Request) => {
                 b.status === "pending"
                   ? isUnpaid
                     ? "Awaiting Payment"
-                    : "Awaiting Payment"
+                    : "Paid - Waiting for Confirmation"
                   : b.status === "confirmed"
                     ? "Confirmed"
                     : b.status === "checked_in"
@@ -1413,6 +1413,92 @@ serve(async (req: Request) => {
           status: 200,
         },
       );
+    }
+
+    // 9. CONFIRM PAYMENT (Secure Server-Side Confirmation)
+    if (action === "confirm_payment") {
+      const { booking_id, payment_intent_id, payment_method_id, amount } = params;
+
+      console.log("💳 Confirm payment requested:", { booking_id, amount });
+
+      if (!booking_id) {
+        return new Response(JSON.stringify({ error: "Booking ID is required" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      // 1. Fetch current booking to check status
+      const { data: booking, error: fetchError } = await supabaseClient
+        .from("studio_bookings")
+        .select("id, status, payment_status, payment_type, remaining_balance, final_price, user_id, studio:studios(name)")
+        .eq("id", booking_id)
+        .single();
+
+      if (fetchError || !booking) {
+        return new Response(JSON.stringify({ error: "Booking not found" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
+      // 2. Prepare update data
+      // If it sends 'confirmed' status, it moves to Upcoming
+      const updateData: any = {
+        payment_status: 'paid',
+        paid_at: new Date().toISOString(),
+        status: 'confirmed', // Auto-confirm when paid
+      };
+
+      // Handle remaining balance logic
+      if (booking.payment_type === 'downpayment' && booking.remaining_balance > 0) {
+        // Downpayment paid, but balance remains
+        // Keep remaining_balance as is (or update if partial payment logic existed, but here we assume the required amount was paid)
+      } else {
+        // Full payment or Balance payment -> clear balance
+        updateData.remaining_balance = 0;
+      }
+
+      console.log("💳 Updating booking with:", updateData);
+
+      // 3. Update using Admin client to bypass RLS if necessary (though service role is used here)
+      const { data: updatedBooking, error: updateError } = await supabaseAdmin
+        .from("studio_bookings")
+        .update(updateData)
+        .eq("id", booking_id)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error("❌ Notification error:", updateError);
+        return new Response(JSON.stringify({ error: "Failed to update booking status", details: updateError }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        });
+      }
+
+      // 4. Send Confirmation Notification to User
+      try {
+        await supabaseAdmin.from("notifications").insert({
+          user_id: booking.user_id,
+          type: "success",
+          title: "Payment Successful! 🎉",
+          message: `Your booking at ${booking.studio?.name} has been confirmed.`,
+          read: false,
+          meta: {
+            booking_id: booking.id,
+            type: "booking_confirmation"
+          }
+        });
+      } catch (notifyError) {
+        console.error("❌ Notification error:", notifyError);
+        // Don't fail the request just because notification failed
+      }
+
+      return new Response(JSON.stringify({ success: true, booking: updatedBooking }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
     }
 
     // CLEAR REMAINING BALANCE (Face-to-Face Payment)

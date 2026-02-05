@@ -69,7 +69,7 @@ ${availableInstruments.join(', ')}
 5. Pay special attention to their current role/identity as a musician`;
 
     // Build musician identity section
-    const identitySection = request.userRoles.length > 0 
+    const identitySection = request.userRoles.length > 0
         ? `🎭 MUSICIAN IDENTITY: ${request.userRoles.join(', ')}
 This person identifies as a ${request.userRoles.join('/')}. Consider:
 - Instruments that complement their primary role
@@ -109,11 +109,20 @@ Please provide ${request.limit} personalized instrument recommendations. For eac
 2. **matchScore** - 0-100 based on how well it fits their profile
 3. **headline** - A catchy one-liner (e.g., "Your gateway to rock stardom" or "The heartbeat of any band")
 4. **whyThisFits** - 2-3 sentences explaining why this is perfect for THEM specifically
-5. **learningCurve** - "easy" | "moderate" | "challenging" - how hard to get started
-6. **timeToBasics** - Realistic time to play basic songs (e.g., "2-4 weeks", "2-3 months")
-7. **proTip** - One actionable tip for getting started
+5. **learningCurve** - "easy" | "moderate" | "challenging" - PERSONALIZED based on the user's ${request.experienceLevel.toUpperCase()} level. What's "challenging" for a beginner might be "easy" for an advanced player. Consider their existing skills: ${request.currentInstruments.length > 0 ? request.currentInstruments.join(', ') : 'none yet'}.
+6. **timeToBasics** - PERSONALIZED time estimate for THIS USER at their ${request.experienceLevel} level to learn basic songs. Be specific and realistic:
+   - For beginners: estimate as if they have no prior music experience
+   - For intermediate: consider transferable skills, typically 30-50% faster
+   - For advanced: they likely pick up new instruments quickly, 50-70% faster
+   Format: "X-Y weeks" or "X-Y months" - make each instrument's estimate UNIQUE and SPECIFIC
+7. **proTip** - One actionable tip for getting started, personalized to their ${request.experienceLevel} level
 8. **famousPlayers** - 1-2 famous musicians known for this instrument in their preferred genres
 9. **perfectFor** - Short tag like "rhythm section", "lead melodies", "groove master"
+
+IMPORTANT: The learningCurve and timeToBasics MUST be personalized. Do NOT use generic values. Each instrument should have a DIFFERENT and SPECIFIC estimate based on:
+- The instrument's inherent difficulty
+- The user's ${request.experienceLevel} experience level
+- Their current skills (${request.currentInstruments.length > 0 ? request.currentInstruments.join(', ') : 'none'}) which may have transferable techniques
 
 Return as JSON:
 {"recommendations":[{"name":"...","matchScore":92,"headline":"...","whyThisFits":"...","learningCurve":"easy","timeToBasics":"2-4 weeks","proTip":"...","famousPlayers":["Name 1","Name 2"],"perfectFor":"..."}]}`;
@@ -121,8 +130,47 @@ Return as JSON:
     return { systemPrompt, userPrompt };
 }
 
+// Helper to calculate dynamic learning estimates
+function calculateLearningEstimates(instrumentInfo: any, experienceLevel: string) {
+    const baseDifficulty = instrumentInfo.difficulty || 'intermediate';
+
+    // Difficulty matrix
+    const difficulties = {
+        beginner: 1,
+        intermediate: 2,
+        advanced: 3
+    };
+
+    const userLevel = difficulties[experienceLevel as keyof typeof difficulties] || 1;
+    const instrumentLevel = difficulties[baseDifficulty as keyof typeof difficulties] || 2;
+
+    // Calculate relative difficulty
+    let relativeDifficulty = 'moderate';
+    if (userLevel > instrumentLevel) relativeDifficulty = 'easy';
+    else if (userLevel < instrumentLevel) relativeDifficulty = 'challenging';
+    else relativeDifficulty = 'moderate';
+
+    // Calculate time estimate based on levels
+    let timeEstimate = '2-3 months';
+
+    if (relativeDifficulty === 'easy') {
+        timeEstimate = '2-4 weeks';
+    } else if (relativeDifficulty === 'challenging') {
+        timeEstimate = '4-6 months';
+    } else {
+        timeEstimate = '2-3 months';
+    }
+
+    // Adjust for specific instrument types if needed
+    if (baseDifficulty === 'advanced' && experienceLevel === 'beginner') {
+        timeEstimate = '6-12 months'; // Specific override for hard instruments for beginners
+    }
+
+    return { relativeDifficulty, timeEstimate };
+}
+
 // Parse AI response and map to suggestions
-function parseAIResponse(content: string, aiProvider: string): InstrumentSuggestion[] {
+function parseAIResponse(content: string, aiProvider: string, request: AISuggestionRequest): InstrumentSuggestion[] {
     try {
         // Extract JSON from response (handle markdown code blocks)
         let jsonStr = content;
@@ -144,14 +192,22 @@ function parseAIResponse(content: string, aiProvider: string): InstrumentSuggest
             .filter((rec: any) => INSTRUMENT_DATABASE[rec.name as keyof typeof INSTRUMENT_DATABASE])
             .map((rec: any) => {
                 const instrumentInfo = INSTRUMENT_DATABASE[rec.name as keyof typeof INSTRUMENT_DATABASE];
+
+                // Calculate dynamic fallbacks
+                const { relativeDifficulty, timeEstimate } = calculateLearningEstimates(instrumentInfo, request.experienceLevel);
+
+                // Use AI value if present and looks valid (not empty), otherwise use calculated fallback
+                const learningCurve = (rec.learningCurve && rec.learningCurve.length > 2) ? rec.learningCurve : relativeDifficulty;
+                const timeToBasics = (rec.timeToBasics && rec.timeToBasics.length > 2) ? rec.timeToBasics : timeEstimate;
+
                 return {
                     name: rec.name,
                     image: instrumentInfo.image,
                     score: rec.matchScore || rec.score || 85,
                     headline: rec.headline || '',
                     matchReason: rec.whyThisFits || rec.matchReason || '',
-                    learningCurve: rec.learningCurve || 'moderate',
-                    timeToBasics: rec.timeToBasics || '',
+                    learningCurve,
+                    timeToBasics,
                     proTip: rec.proTip || rec.tips || '',
                     famousPlayers: rec.famousPlayers || [],
                     perfectFor: rec.perfectFor || '',
@@ -178,6 +234,7 @@ async function getGroqSuggestions(request: AISuggestionRequest): Promise<Instrum
     const { systemPrompt, userPrompt } = buildPrompts(request, availableInstruments);
 
     try {
+        console.log('Calling Groq API with key:', GROQ_API_KEY?.substring(0, 10) + '...');
         const response = await fetch(GROQ_API_URL, {
             method: 'POST',
             headers: {
@@ -185,7 +242,7 @@ async function getGroqSuggestions(request: AISuggestionRequest): Promise<Instrum
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                model: 'llama-3.1-70b-versatile', // Free, fast, high quality
+                model: 'llama-3.3-70b-versatile', // Updated to latest model
                 messages: [
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt }
@@ -197,7 +254,8 @@ async function getGroqSuggestions(request: AISuggestionRequest): Promise<Instrum
         });
 
         if (!response.ok) {
-            console.error('Groq API error:', response.status);
+            const errorText = await response.text();
+            console.error('Groq API error:', response.status, errorText);
             return null;
         }
 
@@ -205,7 +263,7 @@ async function getGroqSuggestions(request: AISuggestionRequest): Promise<Instrum
         const content = data.choices?.[0]?.message?.content;
         if (!content) return null;
 
-        const suggestions = parseAIResponse(content, 'Groq Llama 3.1');
+        const suggestions = parseAIResponse(content, 'Groq Llama 3.1', request);
         return suggestions.length > 0 ? suggestions : null;
     } catch (error) {
         console.error('Error calling Groq:', error);
@@ -249,7 +307,7 @@ async function getGeminiSuggestions(request: AISuggestionRequest): Promise<Instr
         const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!content) return null;
 
-        const suggestions = parseAIResponse(content, 'Google Gemini');
+        const suggestions = parseAIResponse(content, 'Google Gemini', request);
         return suggestions.length > 0 ? suggestions : null;
     } catch (error) {
         console.error('Error calling Gemini:', error);
@@ -292,7 +350,7 @@ async function getOpenAISuggestions(request: AISuggestionRequest): Promise<Instr
         const content = data.choices?.[0]?.message?.content;
         if (!content) return null;
 
-        const suggestions = parseAIResponse(content, 'OpenAI GPT-4');
+        const suggestions = parseAIResponse(content, 'OpenAI GPT-4', request);
         return suggestions.length > 0 ? suggestions : null;
     } catch (error) {
         console.error('Error calling OpenAI:', error);
@@ -574,10 +632,96 @@ interface InstrumentSuggestion {
     aiProvider?: string; // Which AI provider was used
 }
 
-// Main suggestion function - AI-powered only
+// Local fallback - genre-based matching when AI is unavailable
+function getLocalFallbackSuggestions(request: SuggestionRequest): InstrumentSuggestion[] {
+    const { genres = [], currentInstruments = [], experienceLevel = 'beginner', purpose = 'band', limit = 10 } = request;
+    
+    const scored: { name: string; score: number; matchedGenres: string[] }[] = [];
+    
+    // Score each instrument based on genre matches
+    Object.entries(INSTRUMENT_DATABASE).forEach(([name, data]) => {
+        // Skip instruments user already has
+        if (currentInstruments.some(ci => ci.toLowerCase().includes(name.toLowerCase()))) {
+            return;
+        }
+        
+        // Calculate genre match score
+        const matchedGenres = genres.filter(g => 
+            data.genres.some(ig => ig.toLowerCase() === g.toLowerCase())
+        );
+        
+        let score = matchedGenres.length * 20; // Base score from genre matches
+        
+        // Bonus for matching difficulty level
+        if (data.difficulty === experienceLevel) score += 15;
+        if (experienceLevel === 'advanced') score += 5; // Advanced players can use anything
+        
+        // Bonus based on purpose
+        if (purpose === 'band') {
+            if (['strings', 'percussion', 'wind'].includes(data.category)) score += 10;
+        } else if (purpose === 'solo') {
+            if (['keyboards', 'strings'].includes(data.category)) score += 10;
+        } else if (purpose === 'production') {
+            if (['electronic', 'keyboards'].includes(data.category)) score += 15;
+        } else if (purpose === 'studio') {
+            if (['recording', 'vocals', 'keyboards'].includes(data.category)) score += 10;
+        }
+        
+        // Only include instruments with some match
+        if (score > 0 || genres.length === 0) {
+            scored.push({ 
+                name, 
+                score: Math.min(95, Math.max(50, score + 50)), // Normalize to 50-95 range
+                matchedGenres 
+            });
+        }
+    });
+    
+    // Sort by score and take top results
+    scored.sort((a, b) => b.score - a.score);
+    const topResults = scored.slice(0, limit);
+    
+    // Map to suggestion format
+    return topResults.map(item => {
+        const instrumentInfo = INSTRUMENT_DATABASE[item.name as keyof typeof INSTRUMENT_DATABASE];
+        const { relativeDifficulty, timeEstimate } = calculateLearningEstimates(instrumentInfo, experienceLevel);
+        
+        // Generate a simple match reason
+        const reasonParts: string[] = [];
+        if (item.matchedGenres.length > 0) {
+            reasonParts.push(`Great for ${item.matchedGenres.slice(0, 2).join(' and ')} music`);
+        }
+        if (instrumentInfo.difficulty === experienceLevel) {
+            reasonParts.push(`perfect difficulty for ${experienceLevel} players`);
+        }
+        reasonParts.push(instrumentInfo.description);
+        
+        return {
+            name: item.name,
+            image: instrumentInfo.image,
+            score: item.score,
+            headline: `Recommended for ${genres.length > 0 ? genres[0] : 'you'}`,
+            matchReason: reasonParts.join('. '),
+            learningCurve: relativeDifficulty,
+            timeToBasics: timeEstimate,
+            proTip: `Start with ${instrumentInfo.difficulty === 'beginner' ? 'basic tutorials' : 'structured lessons'} to build a solid foundation.`,
+            famousPlayers: [],
+            perfectFor: purpose === 'band' ? 'band setup' : purpose,
+            genres: instrumentInfo.genres,
+            difficulty: instrumentInfo.difficulty,
+            category: instrumentInfo.category,
+            description: instrumentInfo.description,
+            relatedInstruments: instrumentInfo.relatedInstruments,
+            aiPowered: false,
+            aiProvider: 'Local'
+        };
+    });
+}
+
+// Main suggestion function - AI-powered with local fallback
 async function getSuggestionsWithAI(request: SuggestionRequest): Promise<{ suggestions: InstrumentSuggestion[]; aiPowered: boolean; aiProvider: string }> {
     const { genres = [], currentInstruments = [], userRoles = [], experienceLevel = 'beginner', purpose = 'band', limit = 10 } = request;
-    
+
     // Get AI-powered suggestions (FREE options prioritized)
     const { suggestions: aiSuggestions, provider } = await getAISuggestions({
         genres,
@@ -587,12 +731,18 @@ async function getSuggestionsWithAI(request: SuggestionRequest): Promise<{ sugge
         purpose,
         limit
     });
-    
+
     if (aiSuggestions && aiSuggestions.length > 0) {
         return { suggestions: aiSuggestions, aiPowered: true, aiProvider: provider };
     }
-    
-    // No AI suggestions available
+
+    // Fallback to local genre-based matching
+    const localSuggestions = getLocalFallbackSuggestions(request);
+    if (localSuggestions.length > 0) {
+        return { suggestions: localSuggestions, aiPowered: false, aiProvider: 'Local (Genre Match)' };
+    }
+
+    // No suggestions available
     return { suggestions: [], aiPowered: false, aiProvider: 'none' };
 }
 
@@ -635,26 +785,26 @@ serve(async (req: Request) => {
                     suggestions,
                     aiPowered,
                     aiProvider,
-                    message: aiPowered 
+                    message: aiPowered
                         ? `AI-powered recommendations via ${aiProvider} (FREE)`
                         : 'AI service temporarily unavailable. Please try again later.'
                 };
                 break;
-            
+
             case 'get-genres':
                 result = {
                     genres: getAvailableGenres(),
                     message: 'Available music genres'
                 };
                 break;
-            
+
             case 'get-categories':
                 result = {
                     categories: getInstrumentsByCategory(),
                     message: 'Instruments organized by category'
                 };
                 break;
-            
+
             case 'get-instrument-info':
                 const { instrumentName } = body;
                 const info = INSTRUMENT_DATABASE[instrumentName as keyof typeof INSTRUMENT_DATABASE];
@@ -667,7 +817,7 @@ serve(async (req: Request) => {
                     result = { error: 'Instrument not found', message: 'Unknown instrument' };
                 }
                 break;
-            
+
             default:
                 result = { error: 'Invalid action', message: 'Use: suggest, get-genres, get-categories, or get-instrument-info' };
         }
