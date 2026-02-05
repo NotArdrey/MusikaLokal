@@ -2,16 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Linking,
-    Modal as RNModal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Modal as RNModal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -117,10 +117,10 @@ export default function StudioDetailsScreen() {
         .single();
 
       if (studioError) {
-        console.error('[manage_studio] Failed to fetch studio details:', studioError);
-        if (studioError.message?.includes("non-2xx")) {
-          console.error('[manage_studio] Full error object:', JSON.stringify(studioError));
-        }
+        console.error('[manage_studio] Failed to fetch studio details:', studioError.message);
+        // if (studioError.message?.includes("non-2xx")) {
+        //   console.error('[manage_studio] Full error object:', JSON.stringify(studioError));
+        // }
         throw studioError;
       }
       setStudio(studioData);
@@ -144,9 +144,8 @@ export default function StudioDetailsScreen() {
       try {
         const { data: reviewData, error: reviewError } = await supabase
           .from('reviews')
-          .select('*, reviewer:profiles!reviews_reviewer_id_fkey(id, full_name, avatar_url)')
-          .eq('entity_type', 'studio')
-          .eq('entity_id', studioId)
+          .select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url)')
+          .eq('studio_id', studioId)
           .order('created_at', { ascending: false });
         if (reviewError) {
           console.error('[manage_studio] Failed to fetch reviews:', reviewError);
@@ -158,7 +157,7 @@ export default function StudioDetailsScreen() {
       }
 
     } catch (e: any) {
-      console.error("[manage_studio] Critical error fetching data:", e);
+      console.error("[manage_studio] Critical error fetching data:", e.message || "Unknown error");
       let errorMsg = "Failed to load studio data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
@@ -537,25 +536,11 @@ export default function StudioDetailsScreen() {
                       ₱{(studio?.rehearsal_rate || 0).toLocaleString()}/hr
                     </Text>
                   </View>
-                  <View
-                    style={[
-                      styles.infoCard,
-                      { backgroundColor: colors.surface },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.infoLabel,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      Recording Rate
-                    </Text>
-                    <Text style={[styles.infoValue, { color: colors.text }]}>
-                      ₱{(studio?.recording_rate || 0).toLocaleString()}/song
-                    </Text>
-                  </View>
                 </View>
+
+                {/* <View style={{ flexDirection: "row", gap: 16 }}> */}
+                {/* Recording Rate removed as requested */}
+                {/* </View> */}
 
                 <View>
                   <Text

@@ -2,14 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -98,10 +98,10 @@ export default function GroupDetailsScreen() {
         .single();
 
       if (groupError) {
-        console.error('[manage_group] Failed to fetch group details:', groupError);
-        if (groupError.message?.includes("non-2xx")) {
-          console.error('[manage_group] Full error object:', JSON.stringify(groupError));
-        }
+        console.error('[manage_group] Failed to fetch group details:', groupError.message);
+        // if (groupError.message?.includes("non-2xx")) {
+        //   console.error('[manage_group] Full error object:', JSON.stringify(groupError));
+        // }
         throw groupError;
       }
       setGroup(groupData);
@@ -129,9 +129,8 @@ export default function GroupDetailsScreen() {
       try {
         const { data: reviewData, error: reviewError } = await supabase
           .from('reviews')
-          .select('*, reviewer:profiles!reviews_reviewer_id_fkey(id, full_name, avatar_url)')
-          .eq('entity_type', 'group')
-          .eq('entity_id', groupId)
+          .select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url)')
+          .eq('group_id', groupId)
           .order('created_at', { ascending: false });
         if (reviewError) {
           console.error('[manage_group] Failed to fetch reviews:', reviewError);
@@ -143,7 +142,7 @@ export default function GroupDetailsScreen() {
       }
 
     } catch (e: any) {
-      console.error("[manage_group] Critical error fetching data:", e);
+      console.error("[manage_group] Critical error fetching data:", e.message || "Unknown error");
       let errorMsg = "Failed to load group data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
