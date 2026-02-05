@@ -1463,12 +1463,12 @@ const ListingDetailsSheet = forwardRef<
           }
         }
 
-        // 3. Mark slots as taken
+        
         const blockedTimes = new Set<string>();
 
-        // Block times from database bookings
+        
         dayDbBookings.forEach((b: any) => {
-          // Combine booking_date with start_time and end_time to create proper Date objects
+          
           const bStart = new Date(`${b.booking_date}T${b.start_time}`);
           const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
 

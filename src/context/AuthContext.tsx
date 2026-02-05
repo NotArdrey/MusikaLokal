@@ -100,6 +100,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
+    // Reset subscription required to false at start - only set true when confirmed
+    setSubscriptionRequired(false);
+
     try {
       const { data: profile, error } = await supabase
         .from("profiles")
@@ -109,12 +112,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (error) {
         console.log("Error checking subscription:", error);
-        // For first login, profile may not exist yet - check auth metadata for role
-        const metadataRole = session.user?.user_metadata?.role;
-        if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
-          console.log("📋 Profile not found but metadata role requires subscription:", metadataRole);
-          setSubscriptionStatus(null);
-          setSubscriptionRequired(true);
+        // Only check metadata if profile doesn't exist (PGRST116 = row not found)
+        // For other errors (network, auth, etc), don't lock out the user
+        if (error.code === "PGRST116") {
+          // Profile not found - check auth metadata for role (first login scenario)
+          const metadataRole = session.user?.user_metadata?.role;
+          if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
+            console.log("📋 Profile not found, metadata role requires subscription:", metadataRole);
+            setSubscriptionStatus(null);
+            setSubscriptionRequired(true);
+          }
+        } else {
+          // Other errors (network, etc) - don't lock out user, keep subscriptionRequired false
+          console.log("📋 Non-critical error, not locking user:", error.code);
         }
         setSubscriptionChecked(true);
         return;
@@ -152,14 +162,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSubscriptionRequired(false);
         setSubscriptionChecked(true);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.log("Error in checkSubscription:", e);
-      // For first login, profile may not exist yet - check auth metadata for role
-      const metadataRole = session.user?.user_metadata?.role;
-      if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
-        console.log("📋 Exception but metadata role requires subscription:", metadataRole);
-        setSubscriptionStatus(null);
-        setSubscriptionRequired(true);
+      // Only lock out for profile not found, not for general exceptions
+      if (e?.code === "PGRST116") {
+        const metadataRole = session.user?.user_metadata?.role;
+        if (metadataRole === "studio-owner" || metadataRole === "venue-owner") {
+          console.log("📋 Exception (profile not found), metadata role requires subscription:", metadataRole);
+          setSubscriptionStatus(null);
+          setSubscriptionRequired(true);
+        }
+      } else {
+        // General error - don't lock out user
+        console.log("📋 General exception, not locking user");
       }
       setSubscriptionChecked(true);
     }
