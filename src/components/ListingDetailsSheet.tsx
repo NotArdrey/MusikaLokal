@@ -1,34 +1,34 @@
 import { Ionicons } from "@expo/vector-icons";
 import {
-    BottomSheetBackdrop,
-    BottomSheetModal,
-    BottomSheetScrollView
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView
 } from "@gorhom/bottom-sheet";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ExpoLinking from "expo-linking";
 import { router } from "expo-router";
 import React, {
-    forwardRef,
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
 } from "react";
 import {
-    ActivityIndicator,
-    BackHandler,
-    Dimensions,
-    Image,
-    Linking,
-    Modal as RNModal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  BackHandler,
+  Dimensions,
+  Image,
+  Linking,
+  Modal as RNModal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../../lib/supabase";
@@ -250,7 +250,7 @@ const ListingDetailsSheet = forwardRef<
               body: { action: "fetch_studio_bookings", studioId: listingId },
             },
           );
-          const fetchedBookings = bookingData || [];
+          const fetchedBookings = Array.isArray(bookingData) ? bookingData : [];
           setExistingBookings(fetchedBookings);
 
           // Re-process availability with fresh booking data
@@ -1278,7 +1278,7 @@ const ListingDetailsSheet = forwardRef<
             body: { action: "fetch_studio_bookings", studioId: data.id },
           },
         );
-        const fetchedBookings = bookingData || [];
+        const fetchedBookings = Array.isArray(bookingData) ? bookingData : [];
         setExistingBookings(fetchedBookings);
 
         // Process availability (Availability + Bookings + Date Overrides)
@@ -1309,9 +1309,12 @@ const ListingDetailsSheet = forwardRef<
     dateOverrides?: any[],
     cartBookings?: any[],
   ) => {
+    // Safeguard against undefined or non-array dbBookings
+    const safeDbBookings = Array.isArray(dbBookings) ? dbBookings : [];
+    
     console.log("📅 processAvailability called with:", {
       availability,
-      dbBookingsCount: dbBookings.length,
+      dbBookingsCount: safeDbBookings.length,
       dateOverridesCount: dateOverrides?.length || 0,
       cartBookingsCount: cartBookings?.length || 0,
     });
@@ -1425,7 +1428,7 @@ const ListingDetailsSheet = forwardRef<
 
         // 2. Check database bookings for this day (Confirmed OR Pending should block)
         // Studio bookings have separate booking_date (DATE), start_time (TIME), end_time (TIME) columns
-        const dayDbBookings = dbBookings.filter((b: any) => {
+        const dayDbBookings = safeDbBookings.filter((b: any) => {
           if (b.status === "cancelled" || b.status === "rejected") return false;
           // Match booking_date directly with the selected date string
           return b.booking_date === dateStr;
@@ -1616,7 +1619,8 @@ const ListingDetailsSheet = forwardRef<
 
     // Identify blocked times from existing bookings (Confirmed OR Pending)
     // Studio bookings have separate booking_date (DATE), start_time (TIME), end_time (TIME) columns
-    const dayBookings = existingBookings.filter((b: any) => {
+    const safeExistingBookings = Array.isArray(existingBookings) ? existingBookings : [];
+    const dayBookings = safeExistingBookings.filter((b: any) => {
       if (b.status === "cancelled" || b.status === "rejected") return false;
       // Match booking_date directly with the selected date string
       const bookingDateStr = b.booking_date;
@@ -3964,9 +3968,15 @@ const ListingDetailsSheet = forwardRef<
                       setLoading(false);
 
                       if (errors.length > 0 && results.length === 0) {
-                        // All failed
-                        const errorMsg =
+                        // All failed - check for specific constraint violations
+                        let errorMsg =
                           errors[0].error?.message || "Failed to create bookings";
+                        
+                        // Handle overlapping bookings constraint error
+                        if (errorMsg.includes("no_overlapping_bookings") || errorMsg.includes("exclusion constraint")) {
+                          errorMsg = "This time slot was just booked by someone else. Please select a different time slot or refresh and try again.";
+                        }
+                        
                         alert(`Error: ${errorMsg}`);
                       } else if (errors.length > 0) {
                         // Partial success

@@ -54,3 +54,25 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         timeout: 30000,
     },
 });
+
+// Monkey-patch functions.invoke for React Native/Hermes compatibility
+// Workaround for @supabase/functions-js custom Error class instantiation issues
+// See: https://github.com/supabase/functions-js/issues/16
+const originalInvoke = supabase.functions.invoke.bind(supabase.functions);
+supabase.functions.invoke = async function<T = any>(
+    functionName: string,
+    options?: { body?: any; headers?: Record<string, string> }
+): Promise<{ data: T | null; error: Error | null }> {
+    try {
+        const result = await originalInvoke<T>(functionName, options);
+        if (result.error) {
+            // Convert FunctionsError to plain Error for Hermes compatibility
+            return { data: null, error: new Error(result.error.message || 'Function invocation failed') };
+        }
+        return result;
+    } catch (err) {
+        // Catch any instantiation errors from functions-js error classes
+        const message = err instanceof Error ? err.message : 'Unknown error invoking function';
+        return { data: null, error: new Error(message) };
+    }
+};

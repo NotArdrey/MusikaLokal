@@ -758,43 +758,109 @@ export default function BookingsScreen() {
     setModalVisible(true);
   };
 
-  // Process Clear Balance (called from modal confirm)
+  // Process Clear Balance (called from modal confirm) - Direct DB queries
   const processClearBalance = async () => {
     if (!selectedItem || !userId) return;
 
     try {
       setLoading(true);
+      const bookingId = selectedItem.id;
+      const balanceAmount = selectedItem.remaining_balance;
+
       console.log(
         "💵 Clearing remaining balance for booking:",
-        selectedItem.id,
+        bookingId,
         "Amount:",
-        selectedItem.remaining_balance,
+        balanceAmount,
       );
 
-      const { data, error } = await supabase.functions.invoke(
-        "manage-bookings",
-        {
-          body: {
-            action: "clear_balance",
-            booking_id: selectedItem.id,
-            owner_id: userId,
-            amount: selectedItem.remaining_balance,
-          },
-        },
-      );
+      // 1. Get the booking and verify ownership
+      const { data: booking, error: bookingError } = await supabase
+        .from("studio_bookings")
+        .select("*, studio:studios(id, owner_id, name)")
+        .eq("id", bookingId)
+        .single();
 
-      if (error) throw error;
-
-      if (data?.success) {
-        Alert.alert(
-          "Balance Cleared",
-          `₱${selectedItem.remaining_balance?.toLocaleString()} has been marked as paid and credited to your wallet.`,
-        );
-        setModalVisible(false);
-        if (userId) fetchBookings(userId);
-      } else {
-        Alert.alert("Error", data?.error || "Failed to clear balance.");
+      if (bookingError || !booking) {
+        throw new Error("Booking not found");
       }
+
+      // 2. Verify the owner owns this studio
+      if (booking.studio?.owner_id !== userId) {
+        throw new Error("You are not authorized to modify this booking");
+      }
+
+      // 3. Verify there's a remaining balance
+      if (!booking.remaining_balance || booking.remaining_balance <= 0) {
+        throw new Error("No remaining balance to clear");
+      }
+
+      // 4. Update the booking to clear the balance
+      const { error: updateError } = await supabase
+        .from("studio_bookings")
+        .update({
+          remaining_balance: 0,
+          payment_status: "paid",
+          payment_amount: booking.final_price,
+        })
+        .eq("id", bookingId);
+
+      if (updateError) {
+        console.error("Error updating booking:", updateError);
+        throw new Error("Failed to update booking");
+      }
+
+      // 5. Credit the owner's wallet
+      const { data: wallet, error: walletError } = await supabase
+        .from("wallets")
+        .select("id, balance")
+        .eq("user_id", userId)
+        .single();
+
+      if (!walletError && wallet) {
+        // Update wallet balance
+        await supabase
+          .from("wallets")
+          .update({ balance: (wallet.balance || 0) + balanceAmount })
+          .eq("id", wallet.id);
+
+        // Create transaction record
+        await supabase.from("wallet_transactions").insert({
+          wallet_id: wallet.id,
+          amount: balanceAmount,
+          type: "credit",
+          description: `F2F payment collected - ${booking.studio?.name || "Studio"}`,
+          status: "completed",
+          meta: {
+            booking_id: bookingId,
+            payment_method: "face_to_face",
+            studio_name: booking.studio?.name,
+          },
+        });
+      }
+
+      // 6. Notify the customer
+      await supabase.from("notifications").insert({
+        user_id: booking.user_id,
+        type: "success",
+        title: "Balance Cleared! ✅",
+        message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
+        read: false,
+        meta: {
+          type: "balance_cleared",
+          booking_id: bookingId,
+          amount: balanceAmount,
+        },
+      });
+
+      console.log(`💵 Balance cleared: ₱${balanceAmount} for booking ${bookingId}`);
+
+      Alert.alert(
+        "Balance Cleared",
+        `₱${balanceAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
+      );
+      setModalVisible(false);
+      if (userId) fetchBookings(userId);
     } catch (e: any) {
       console.error("Clear balance error:", e);
       Alert.alert(

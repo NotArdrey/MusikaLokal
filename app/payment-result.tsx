@@ -38,7 +38,7 @@ export default function PaymentResultScreen() {
           // The Edge Function already handled activating the subscription with admin privileges
           if (isSuccess) {
             console.log('✅ Subscription payment successful - refreshing subscription status');
-            
+
             // Refresh subscription status in AuthContext
             // This will fetch the updated status that the Edge Function set
             if (checkSubscription) {
@@ -69,26 +69,27 @@ export default function PaymentResultScreen() {
             setBookingDetails(data);
 
             // If payment was successful, update the booking status
-            if (isSuccess && data.payment_status !== 'paid') {
+            if (isSuccess && data.payment_status !== 'paid' && data.payment_status !== 'partial') {
               console.log('💳 Confirming booking payment...');
 
-              // Determine the new status based on payment type
-              // For full payment or balance payment: mark as 'paid'
-              // For downpayment: mark as 'paid' (downpayment received), remaining_balance tracked separately
+              // Determine payment status based on payment type
+              const isDownpayment = data.payment_type === 'downpayment' && data.remaining_balance > 0;
+              const newPaymentStatus = isDownpayment ? 'partial' : 'paid';
+
+              console.log('💰 Payment type:', data.payment_type, 'Remaining:', data.remaining_balance, 'Status:', newPaymentStatus);
+
+              // Update booking status directly in database
               const updateData: any = {
-                payment_status: 'paid',
+                payment_status: newPaymentStatus,
                 paid_at: new Date().toISOString(),
                 status: 'confirmed',
               };
 
-              // If it's a downpayment, keep the remaining balance
-              if (data.payment_type === 'downpayment' && data.remaining_balance > 0) {
-                // Keep remaining_balance as is - it's already set
-              } else {
+              // If it's a full/balance payment, clear remaining balance
+              if (!isDownpayment) {
                 updateData.remaining_balance = 0;
               }
 
-              // Update booking status directly in database
               const { error: updateError } = await supabase
                 .from('studio_bookings')
                 .update(updateData)
@@ -97,18 +98,25 @@ export default function PaymentResultScreen() {
               if (updateError) {
                 console.error('Error confirming booking:', JSON.stringify(updateError, null, 2));
               } else {
-                console.log('✅ Booking payment confirmed successfully!');
+                console.log('✅ Booking payment confirmed successfully!', { status: newPaymentStatus });
 
                 // Get current user for notification
                 const { data: { user } } = await supabase.auth.getUser();
 
-                // Send confirmation notification
+                // Send confirmation notification with appropriate message
                 if (user) {
+                  const notificationTitle = isDownpayment
+                    ? 'Downpayment Received! 🎉'
+                    : 'Payment Successful! 🎉';
+                  const notificationMessage = isDownpayment
+                    ? `Your downpayment for ${data.studio?.name || 'the studio'} has been received. Remaining balance: ₱${data.remaining_balance?.toLocaleString() || 0}`
+                    : `Your booking at ${data.studio?.name || 'the studio'} has been confirmed.`;
+
                   await supabase.from('notifications').insert({
                     user_id: user.id,
                     type: 'success',
-                    title: 'Payment Successful! 🎉',
-                    message: `Your booking at ${data.studio?.name || 'the studio'} has been confirmed.`,
+                    title: notificationTitle,
+                    message: notificationMessage,
                     read: false,
                     meta: {
                       booking_id: params.booking_id,
@@ -120,9 +128,9 @@ export default function PaymentResultScreen() {
                 // Update local state to reflect changes
                 setBookingDetails({
                   ...data,
-                  payment_status: 'paid',
+                  payment_status: newPaymentStatus,
                   status: 'confirmed',
-                  remaining_balance: data.payment_type === 'downpayment' ? data.remaining_balance : 0
+                  remaining_balance: isDownpayment ? data.remaining_balance : 0
                 });
               }
             }
@@ -202,7 +210,9 @@ export default function PaymentResultScreen() {
           {isSuccess
             ? (isSubscription
               ? `Your ${subscriptionDetails?.name || 'subscription'} is now active! Enjoy all the premium features.`
-              : 'Your studio booking has been confirmed and moved to Upcoming bookings.')
+              : (bookingDetails?.payment_status === 'partial' || (bookingDetails?.payment_type === 'downpayment' && bookingDetails?.remaining_balance > 0)
+                ? `Downpayment received! Your booking is confirmed. Remaining balance: ₱${bookingDetails?.remaining_balance?.toLocaleString() || 0}`
+                : 'Your studio booking has been confirmed and moved to Upcoming bookings.'))
             : (isSubscription
               ? 'Your subscription was cancelled. You can subscribe anytime from your Wallet & Subscription page.'
               : 'Your payment was cancelled. The booking is still in Pending - you can try again anytime.')}
