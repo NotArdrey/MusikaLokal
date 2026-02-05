@@ -15,7 +15,7 @@ serve(async (req: Request) => {
 
     try {
         const { action, ...params } = await req.json()
-        
+
         // Log authorization header for debugging (remove in production)
         const authHeader = req.headers.get('Authorization')
         console.log('Authorization header present:', !!authHeader)
@@ -135,7 +135,7 @@ serve(async (req: Request) => {
 
         // 4. CREATE PROFILE (Bypass RLS for signup)
         if (action === 'create') {
-            const { userId, email, full_name, role, is_verified, verification_status, didit_session_id } = params
+            const { userId, email, full_name, role, is_verified, verification_status, didit_session_id, display_name } = params
 
             // Validate required parameters
             if (!userId || !email || !role) {
@@ -174,7 +174,8 @@ serve(async (req: Request) => {
                     role,
                     is_verified,
                     verification_status,
-                    didit_session_id
+                    didit_session_id,
+                    display_name // Save display_name correctly
                 })
                 .select()
                 .single()

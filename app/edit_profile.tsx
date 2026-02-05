@@ -1,23 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Linking,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
+import LeafletAddressPicker from "../src/components/LeafletAddressPicker";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
 
@@ -104,8 +104,9 @@ export default function EditProfileScreen() {
   const [avatarUrl, setAvatarUrl] = useState(DEFAULT_AVATAR);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
-  const [resumeUrl, setResumeUrl] = useState<string | null>(null);
-  const [uploadingResume, setUploadingResume] = useState(false);
+  const [roleSearch, setRoleSearch] = useState("");
+  const [genreSearch, setGenreSearch] = useState("");
+
 
   useEffect(() => {
     loadProfile();
@@ -142,7 +143,7 @@ export default function EditProfileScreen() {
         setAvatarUrl(data.avatar_url || DEFAULT_AVATAR);
         setSelectedRoles(Array.isArray(data.skills) ? data.skills : []);
         setSelectedGenres(Array.isArray(data.genres) ? data.genres : []);
-        setResumeUrl(data.resume_url || null);
+
       }
     } catch (err) {
       console.error("Load error:", err);
@@ -151,83 +152,7 @@ export default function EditProfileScreen() {
     }
   }
 
-  async function handleUploadResume() {
-    if (!userId) return;
 
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "application/pdf",
-        copyToCacheDirectory: true,
-      });
-
-      if (result.canceled || !result.assets?.[0]) return;
-
-      const file = result.assets[0];
-
-      // Check file size (max 10MB)
-      if (file.size && file.size > 10 * 1024 * 1024) {
-        Alert.alert("File Too Large", "Resume must be under 10MB");
-        return;
-      }
-
-      setUploadingResume(true);
-
-      // Fetch the file and convert to ArrayBuffer
-      const response = await fetch(file.uri);
-      const arrayBuffer = await response.arrayBuffer();
-
-      const fileName = `${userId}/resume_${Date.now()}.pdf`;
-
-      console.log("📤 Uploading resume:", fileName);
-
-      const { data, error } = await supabase.storage
-        .from("documents")
-        .upload(fileName, arrayBuffer, {
-          contentType: "application/pdf",
-          upsert: true,
-        });
-
-      if (error) {
-        console.error("❌ Resume upload error:", error);
-        Alert.alert("Upload Failed", error.message);
-        setUploadingResume(false);
-        return;
-      }
-
-      const { data: urlData } = supabase.storage
-        .from("documents")
-        .getPublicUrl(data.path);
-      const newResumeUrl = urlData.publicUrl;
-
-      console.log("✅ Resume uploaded:", newResumeUrl);
-
-      setResumeUrl(newResumeUrl);
-      setUploadingResume(false);
-      Alert.alert(
-        "Success",
-        "Resume uploaded! Don't forget to save your profile.",
-      );
-    } catch (err: any) {
-      setUploadingResume(false);
-      console.error("❌ Resume error:", err);
-      Alert.alert("Error", err.message || "Failed to upload resume");
-    }
-  }
-
-  function handleRemoveResume() {
-    Alert.alert(
-      "Remove Resume",
-      "Are you sure you want to remove your resume?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: () => setResumeUrl(null),
-        },
-      ],
-    );
-  }
 
   function toggleRole(role: string) {
     setSelectedRoles((prev) =>
@@ -367,7 +292,7 @@ export default function EditProfileScreen() {
       contact_number: contactNumber,
       address: location,
       location: location,
-      resume_url: resumeUrl,
+
     };
 
     const { error } = await supabase
@@ -477,24 +402,15 @@ export default function EditProfileScreen() {
           />
         </View>
 
-        {/* Location */}
+        {/* Address */}
         <View style={styles.field}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>
-            LOCATION
+            ADDRESS
           </Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.border,
-                color: colors.text,
-              },
-            ]}
+          <LeafletAddressPicker
             value={location}
-            onChangeText={setLocation}
-            placeholder="Your location"
-            placeholderTextColor={colors.textSecondary}
+            onAddressSelect={(address) => setLocation(address)}
+            placeholder="Tap to select your address"
           />
         </View>
 
@@ -503,42 +419,91 @@ export default function EditProfileScreen() {
           <Text style={[styles.label, { color: colors.textSecondary }]}>
             ROLES & INSTRUMENTS
           </Text>
-          <View style={styles.chips}>
-            {ROLES.map((role) => {
-              const selected = selectedRoles.includes(role);
-              return (
+          {/* Selected roles */}
+          {selectedRoles.length > 0 && (
+            <View style={styles.selectedChips}>
+              {selectedRoles.map((role) => (
                 <TouchableOpacity
                   key={role}
                   onPress={() => toggleRole(role)}
                   style={[
-                    styles.chip,
+                    styles.chipCompact,
                     {
-                      borderColor: selected ? colors.primary : colors.border,
-                      backgroundColor: selected
-                        ? isDark
-                          ? "rgba(124, 58, 237, 0.3)"
-                          : "#EEF2FF"
-                        : "transparent",
+                      borderColor: colors.primary,
+                      backgroundColor: isDark
+                        ? "rgba(124, 58, 237, 0.3)"
+                        : "#EEF2FF",
                     },
                   ]}
                 >
                   <Text
                     style={[
-                      styles.chipText,
-                      {
-                        color: selected
-                          ? isDark
-                            ? "#A78BFA"
-                            : colors.primary
-                          : colors.textSecondary,
-                      },
+                      styles.chipTextCompact,
+                      { color: isDark ? "#A78BFA" : colors.primary },
+                    ]}
+                  >
+                    {role}
+                  </Text>
+                  <Ionicons
+                    name="close-circle"
+                    size={14}
+                    color={isDark ? "#A78BFA" : colors.primary}
+                    style={{ marginLeft: 4 }}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {/* Search input */}
+          <TextInput
+            style={[
+              styles.searchInput,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
+            value={roleSearch}
+            onChangeText={setRoleSearch}
+            placeholder="Search roles & instruments..."
+            placeholderTextColor={colors.textSecondary}
+          />
+          {/* Filtered chips */}
+          <View style={styles.chipsCompact}>
+            {ROLES.filter(
+              (role) =>
+                !selectedRoles.includes(role) &&
+                role.toLowerCase().includes(roleSearch.toLowerCase())
+            )
+              .slice(0, roleSearch ? 20 : 8)
+              .map((role) => (
+                <TouchableOpacity
+                  key={role}
+                  onPress={() => toggleRole(role)}
+                  style={[
+                    styles.chipCompact,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: "transparent",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.chipTextCompact,
+                      { color: colors.textSecondary },
                     ]}
                   >
                     {role}
                   </Text>
                 </TouchableOpacity>
-              );
-            })}
+              ))}
+            {!roleSearch && ROLES.filter((r) => !selectedRoles.includes(r)).length > 8 && (
+              <Text style={[styles.moreText, { color: colors.textSecondary }]}>
+                Search for more...
+              </Text>
+            )}
           </View>
         </View>
 
@@ -547,42 +512,91 @@ export default function EditProfileScreen() {
           <Text style={[styles.label, { color: colors.textSecondary }]}>
             GENRES
           </Text>
-          <View style={styles.chips}>
-            {GENRES.map((genre) => {
-              const selected = selectedGenres.includes(genre);
-              return (
+          {/* Selected genres */}
+          {selectedGenres.length > 0 && (
+            <View style={styles.selectedChips}>
+              {selectedGenres.map((genre) => (
                 <TouchableOpacity
                   key={genre}
                   onPress={() => toggleGenre(genre)}
                   style={[
-                    styles.chip,
+                    styles.chipCompact,
                     {
-                      borderColor: selected ? colors.primary : colors.border,
-                      backgroundColor: selected
-                        ? isDark
-                          ? "rgba(124, 58, 237, 0.3)"
-                          : "#EEF2FF"
-                        : "transparent",
+                      borderColor: colors.primary,
+                      backgroundColor: isDark
+                        ? "rgba(124, 58, 237, 0.3)"
+                        : "#EEF2FF",
                     },
                   ]}
                 >
                   <Text
                     style={[
-                      styles.chipText,
-                      {
-                        color: selected
-                          ? isDark
-                            ? "#A78BFA"
-                            : colors.primary
-                          : colors.textSecondary,
-                      },
+                      styles.chipTextCompact,
+                      { color: isDark ? "#A78BFA" : colors.primary },
+                    ]}
+                  >
+                    {genre}
+                  </Text>
+                  <Ionicons
+                    name="close-circle"
+                    size={14}
+                    color={isDark ? "#A78BFA" : colors.primary}
+                    style={{ marginLeft: 4 }}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {/* Search input */}
+          <TextInput
+            style={[
+              styles.searchInput,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.border,
+                color: colors.text,
+              },
+            ]}
+            value={genreSearch}
+            onChangeText={setGenreSearch}
+            placeholder="Search genres..."
+            placeholderTextColor={colors.textSecondary}
+          />
+          {/* Filtered chips */}
+          <View style={styles.chipsCompact}>
+            {GENRES.filter(
+              (genre) =>
+                !selectedGenres.includes(genre) &&
+                genre.toLowerCase().includes(genreSearch.toLowerCase())
+            )
+              .slice(0, genreSearch ? 20 : 8)
+              .map((genre) => (
+                <TouchableOpacity
+                  key={genre}
+                  onPress={() => toggleGenre(genre)}
+                  style={[
+                    styles.chipCompact,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: "transparent",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.chipTextCompact,
+                      { color: colors.textSecondary },
                     ]}
                   >
                     {genre}
                   </Text>
                 </TouchableOpacity>
-              );
-            })}
+              ))}
+            {!genreSearch && GENRES.filter((g) => !selectedGenres.includes(g)).length > 8 && (
+              <Text style={[styles.moreText, { color: colors.textSecondary }]}>
+                Search for more...
+              </Text>
+            )}
           </View>
         </View>
 
@@ -610,82 +624,7 @@ export default function EditProfileScreen() {
           />
         </View>
 
-        {/* Resume/CV Upload */}
-        <View style={styles.field}>
-          <Text style={[styles.label, { color: colors.textSecondary }]}>
-            RESUME / CV
-          </Text>
 
-          {!resumeUrl ? (
-            <TouchableOpacity
-              style={[
-                styles.uploadBtn,
-                {
-                  borderColor: colors.border,
-                  backgroundColor: isDark ? "#374151" : "#F9FAFB",
-                },
-              ]}
-              onPress={handleUploadResume}
-              disabled={uploadingResume}
-            >
-              {uploadingResume ? (
-                <ActivityIndicator size="small" color={colors.primary} />
-              ) : (
-                <>
-                  <Ionicons
-                    name="document-attach-outline"
-                    size={24}
-                    color={colors.primary}
-                  />
-                  <Text style={[styles.uploadText, { color: colors.text }]}>
-                    Upload PDF Resume
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          ) : (
-            <View
-              style={[
-                styles.fileContainer,
-                {
-                  backgroundColor: isDark ? "#374151" : "#F3F4F6",
-                  borderColor: colors.primary,
-                },
-              ]}
-            >
-              <TouchableOpacity
-                style={styles.fileInfo}
-                onPress={() => Linking.openURL(resumeUrl)}
-              >
-                <Ionicons
-                  name="document-text"
-                  size={24}
-                  color={colors.primary}
-                />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text
-                    style={[styles.fileName, { color: colors.text }]}
-                    numberOfLines={1}
-                  >
-                    Resume.pdf
-                  </Text>
-                  <Text style={[{ fontSize: 12, color: colors.primary }]}>
-                    Tap to view
-                  </Text>
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleRemoveResume}
-                style={styles.removeBtn}
-              >
-                <Ionicons name="trash-outline" size={20} color="#EF4444" />
-              </TouchableOpacity>
-            </View>
-          )}
-          <Text style={[styles.helper, { color: colors.textSecondary }]}>
-            PDF only, max 10MB
-          </Text>
-        </View>
 
         {/* Buttons */}
         <TouchableOpacity
@@ -796,6 +735,40 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   chipText: { fontSize: 13, fontFamily: "Poppins_500Medium" },
+  selectedChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  chipsCompact: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  chipCompact: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  chipTextCompact: { fontSize: 12, fontFamily: "Poppins_500Medium" },
+  searchInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 14,
+    fontFamily: "Poppins_400Regular",
+  },
+  moreText: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+    fontStyle: "italic",
+    marginTop: 4,
+  },
 
   saveBtn: {
     paddingVertical: 15,

@@ -51,12 +51,12 @@ export default function VideoUploader({
       if (result.canceled || !result.assets || result.assets.length === 0) return;
 
       const asset = result.assets[0];
-      
+
       // Check file size using ArrayBuffer
       const response = await fetch(asset.uri);
       const arrayBuffer = await response.arrayBuffer();
       const fileSizeMB = arrayBuffer.byteLength / (1024 * 1024);
-      
+
       if (fileSizeMB > maxSizeMB) {
         Alert.alert('File Too Large', `Video must be under ${maxSizeMB}MB. Your file is ${fileSizeMB.toFixed(1)}MB.`);
         return;
@@ -69,7 +69,7 @@ export default function VideoUploader({
         // Handle file extension - check if it's a blob URL or regular file path
         let fileExt = 'mp4'; // Default to mp4
         const uri = asset.uri;
-        
+
         // Check if it's NOT a blob URL and has a valid extension
         if (!uri.startsWith('blob:') && uri.includes('.')) {
           const ext = uri.split('.').pop()?.toLowerCase();
@@ -77,7 +77,7 @@ export default function VideoUploader({
             fileExt = ext;
           }
         }
-        
+
         // Also check the asset's mimeType if available
         if (asset.mimeType) {
           const mimeExt = asset.mimeType.split('/').pop()?.toLowerCase();
@@ -85,7 +85,7 @@ export default function VideoUploader({
             fileExt = mimeExt === 'quicktime' ? 'mov' : mimeExt;
           }
         }
-        
+
         const fileName = `${userId}/${folder}/${Date.now()}_video.${fileExt}`;
 
         console.log('📤 Uploading video:', fileName);
@@ -95,15 +95,15 @@ export default function VideoUploader({
         // Upload using ArrayBuffer for better React Native compatibility
         const { data, error } = await supabase.storage
           .from(bucketName)
-          .upload(fileName, arrayBuffer, { 
-            contentType: asset.mimeType || `video/${fileExt}`, 
-            upsert: false 
+          .upload(fileName, arrayBuffer, {
+            contentType: asset.mimeType || `video/${fileExt}`,
+            upsert: false
           });
 
         if (error) {
           console.error('❌ Upload error:', error);
           console.error('Error details:', JSON.stringify(error, null, 2));
-          
+
           let errorMsg = error.message || 'Unknown error';
           if (errorMsg.includes('row-level security') || errorMsg.includes('policy')) {
             errorMsg = 'Permission denied. Storage policies may not be configured.';
@@ -112,7 +112,7 @@ export default function VideoUploader({
           } else if (errorMsg.includes('Network')) {
             errorMsg = 'Network error. Check your internet connection.';
           }
-          
+
           Alert.alert('Upload Failed', errorMsg);
           return;
         }
@@ -145,8 +145,8 @@ export default function VideoUploader({
       'Are you sure you want to remove this video?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Remove', 
+        {
+          text: 'Remove',
           style: 'destructive',
           onPress: () => onVideoChange(null)
         }
@@ -172,8 +172,8 @@ export default function VideoUploader({
           </TouchableOpacity>
         </View>
       ) : (
-        <TouchableOpacity 
-          style={[styles.uploadBox, { borderColor: colors.border }]} 
+        <TouchableOpacity
+          style={[styles.uploadBox, { borderColor: colors.border }]}
           onPress={pickAndUploadVideo}
           disabled={uploading}
           activeOpacity={0.8}
@@ -189,7 +189,7 @@ export default function VideoUploader({
             <>
               <Ionicons name="videocam-outline" size={32} color={colors.primary} />
               <Text style={{ color: colors.text, marginTop: 8, fontFamily: 'Poppins_500Medium' }}>
-                Upload Performance Sample
+                Upload Performance Video (Required)
               </Text>
               <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
                 Max {maxSizeMB}MB • MP4, MOV

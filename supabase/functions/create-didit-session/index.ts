@@ -25,16 +25,16 @@ serve(async (req) => {
     if (!DIDIT_API_KEY) {
       console.error("Missing DIDIT_API_KEY");
       return new Response(
-        JSON.stringify({ error: "Server configuration error: Missing API key" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Server configuration error: Missing API key", success: false }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     if (!DIDIT_WORKFLOW_ID) {
       console.error("Missing DIDIT_WORKFLOW_ID");
       return new Response(
-        JSON.stringify({ error: "Server configuration error: Missing workflow ID" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Server configuration error: Missing workflow ID", success: false }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -89,24 +89,51 @@ serve(async (req) => {
       if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
         try {
           const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-          const { data: localData } = await supabaseAdmin
+
+          // 1. Try lookup by Session Reference (UUID)
+          let { data: localData, error } = await supabaseAdmin
             .from('verification_sessions')
-            .select('verification_data')
+            .select('status, verification_data')
             .eq('session_ref', session_id)
             .maybeSingle();
 
-          if (localData?.verification_data) {
-            console.log('Found data in verification_sessions table!', localData.verification_data);
+          // 2. If not found, and session_id looks like a TEMP ref, try lookup by user_ref inside JSON
+          if (!localData && session_id && session_id.startsWith('TEMP_')) {
+            console.log('Session lookup failed, trying lookup by user_ref in JSON data...');
+            const { data: userRefData } = await supabaseAdmin
+              .from('verification_sessions')
+              .select('status, verification_data')
+              // Use JSON arrow operator to filter by field inside verification_data
+              // Note: This requires the column to be JSONB
+              .eq('verification_data->>user_ref', session_id)
+              .maybeSingle();
+
+            if (userRefData) {
+              localData = userRefData;
+              console.log('Found session via user_ref lookup!');
+            }
+          }
+
+          if (localData) {
+            console.log('Found data in verification_sessions table!', localData);
+            // Read the ACTUAL status from the database - DO NOT hardcode 'Approved'
+            // The webhook now stores all statuses: APPROVED, DECLINED, ABANDONED, PENDING_REVIEW
+            const storedStatus = localData.status || 'Approved';
+            console.log('Stored status from verification_sessions:', storedStatus);
+
             // Merge local data (extracted by webhook) into sessionData
-            // We map the local fields to what the frontend expects
             sessionData = {
               ...sessionData,
+              status: storedStatus, // Use the ACTUAL status from database
+              verification_data: {
+                status: storedStatus, // Also include in verification_data for frontend compatibility
+              },
               extracted_data: {
                 ...sessionData.extracted_data,
-                ...localData.verification_data, // fullName, first_name, etc.
-                // Frontend looks for:
-                firstName: localData.verification_data.first_name,
-                lastName: localData.verification_data.last_name
+                ...(localData.verification_data || {}),
+                firstName: localData.verification_data?.first_name,
+                lastName: localData.verification_data?.last_name,
+                fullName: localData.verification_data?.full_name
               }
             };
           }
@@ -115,15 +142,64 @@ serve(async (req) => {
         }
       }
 
-      return new Response(JSON.stringify(sessionData), {
+      // --- NORMALIZATION STEP ---
+      // Dig through the messy Didit response to find the Name and Status reliably
+      const findIn = (obj: any, keys: string[]) => {
+        if (!obj) return undefined;
+        for (const k of keys) {
+          if (obj[k]) return obj[k];
+        }
+        return undefined;
+      };
+
+      const candidates = [
+        sessionData,
+        sessionData?.features?.extracted_data,
+        sessionData?.extracted_data,
+        sessionData?.verification_data,
+        sessionData?.details?.extracted_data,
+        sessionData?.decision?.details?.extracted_data,
+        sessionData?.ocr,
+        sessionData?.mrz
+      ];
+
+      let foundFull = '';
+      let foundFirst = '';
+      let foundMiddle = '';
+      let foundLast = '';
+
+      for (const src of candidates) {
+        if (!src) continue;
+        if (!foundFull) foundFull = findIn(src, ['fullName', 'full_name', 'name']);
+        if (!foundFirst) foundFirst = findIn(src, ['firstName', 'first_name']);
+        if (!foundMiddle) foundMiddle = findIn(src, ['middleName', 'middle_name']);
+        if (!foundLast) foundLast = findIn(src, ['lastName', 'last_name']);
+      }
+
+      let derivedName = foundFull;
+      if (!derivedName && (foundFirst && foundLast)) {
+        derivedName = [foundFirst, foundMiddle, foundLast].filter(Boolean).join(' ');
+      }
+
+      console.log(`Derived Name: ${derivedName}`);
+
+      // Return normalized data along with raw
+      return new Response(JSON.stringify({
+        ...sessionData,
+        derived: {
+          fullName: derivedName,
+          firstName: foundFirst,
+          lastName: foundLast
+        }
+      }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
 
     if (!userId) {
-      return new Response(JSON.stringify({ error: "userId is required" }), {
+      return new Response(JSON.stringify({ error: "userId is required", success: false }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 400,
+        status: 200,
       });
     }
 
@@ -169,9 +245,10 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({
           error: "Failed to create verification session",
-          details: errorText
+          details: errorText,
+          success: false
         }),
-        { status: diditResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -226,8 +303,8 @@ serve(async (req) => {
   } catch (error) {
     console.error("Error creating Didit session:", error);
     return new Response(
-      JSON.stringify({ error: "Internal server error", details: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: "Internal server error", details: error.message, success: false }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

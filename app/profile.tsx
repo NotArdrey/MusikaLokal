@@ -4,16 +4,16 @@ import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
-    Alert,
-    Dimensions,
-    Image,
-    Linking,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Dimensions,
+  Image,
+  Linking,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -289,7 +289,7 @@ export default function ProfileScreen() {
                     ? "Venue Owner"
                     : profile?.role
                       ? profile.role.charAt(0).toUpperCase() +
-                        profile.role.slice(1)
+                      profile.role.slice(1)
                       : "User"}{" "}
               • {profile?.location || "Unknown"}
             </Text>
@@ -352,6 +352,15 @@ export default function ProfileScreen() {
                 </Text>
               </View>
             </View>
+
+            {/* Bio Section */}
+            {profile?.bio && (
+              <View style={styles.bioContainer}>
+                <Text style={[styles.bioText, { color: colors.text }]}>
+                  {profile.bio}
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Menu Items (Owner Only) */}
@@ -701,6 +710,18 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     height: "100%",
+  },
+  bioContainer: {
+    marginTop: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    width: "100%",
+  },
+  bioText: {
+    fontSize: 14,
+    fontFamily: "Poppins_400Regular",
+    textAlign: "center",
+    lineHeight: 22,
   },
   menuContainer: {
     paddingHorizontal: 24,
