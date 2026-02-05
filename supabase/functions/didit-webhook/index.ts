@@ -129,6 +129,28 @@ serve(async (req) => {
         // Didit returns vendor_data that we passed when creating the session
         let userReference = payload.vendor_data || payload.reference || payload.external_id || payload.metadata?.user_id;
 
+        // ============================================
+        // CHECK IF THIS IS AN ADDRESS VERIFICATION
+        // Format: ADDRESS_<entityType>_<entityId>_<userId>_<timestamp>
+        // ============================================
+        if (userReference && typeof userReference === 'string' && userReference.startsWith('ADDRESS_')) {
+            console.log('=== ADDRESS VERIFICATION WEBHOOK ===');
+            const parts = userReference.split('_');
+            const entityType = parts[1]; // 'studio' or 'gig'
+            const entityId = parts[2];
+            const userId = parts[3];
+            
+            console.log('Address verification details:', { entityType, entityId, userId, status });
+            
+            // Handle address verification
+            await handleAddressVerification(supabaseAdmin, sessionId, entityType, entityId, userId, status, decision, payload);
+            
+            return new Response(JSON.stringify({ received: true, type: 'address_verification' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
         // HANDLE COMPOSITE REFERENCE (Fix for 400 Error)
         // If we used a randomized reference like "UUID_TIMESTAMP_RANDOM", we need to extract the UUID part.
         if (userReference && typeof userReference === 'string' && userReference.includes('_')) {
@@ -880,4 +902,244 @@ async function handleDuplicateDetected(
             .eq('id', userReference);
     }
 }
+
+/**
+ * Handle ADDRESS VERIFICATION from Didit Proof of Address workflow
+ * Validates that the utility bill name matches the owner and address matches the entity
+ */
+async function handleAddressVerification(
+    supabaseAdmin: any,
+    sessionId: string,
+    entityType: string,
+    entityId: string,
+    userId: string,
+    status: string,
+    decision: any,
+    payload: any
+) {
+    console.log('=== PROCESSING ADDRESS VERIFICATION ===');
+    console.log('Entity:', entityType, entityId);
+    console.log('User:', userId);
+    console.log('Status:', status);
+
+    // Get the stored session data with expected values
+    const { data: sessionData } = await supabaseAdmin
+        .from('address_verification_sessions')
+        .select('*')
+        .eq('session_id', sessionId)
+        .single();
+
+    const expectedAddress = sessionData?.expected_address || '';
+    const expectedName = sessionData?.expected_name || '';
+
+    // Extract POA (Proof of Address) data from decision
+    // Based on Didit docs, POA data is in decision.poa or decision.proof_of_addresses
+    const poaData = decision?.proof_of_addresses?.[0] || decision?.poa?.[0] || {};
+    const poaStatus = poaData?.status || status;
+    
+    // Extract address info from POA
+    const extractedData = poaData?.extracted_data || poaData?.ocr_data || {};
+    const extractedAddress = extractedData?.address || extractedData?.full_address || '';
+    const extractedName = extractedData?.name || extractedData?.account_holder || '';
+    const issuer = extractedData?.issuer || extractedData?.company || '';
+    const issueDate = extractedData?.issue_date || extractedData?.date || '';
+
+    console.log('Extracted POA data:', {
+        extractedAddress,
+        extractedName,
+        issuer,
+        issueDate,
+        expectedAddress,
+        expectedName
+    });
+
+    // Determine entity table
+    const entityTable = entityType === 'studio' ? 'studios' : 'gigs';
+
+    // Validate the extracted data against expected values
+    const nameMatches = compareNames(expectedName, extractedName);
+    const addressMatches = compareAddresses(expectedAddress, extractedAddress);
+    const isRecent = issueDate ? isWithinDays(issueDate, 90) : true; // Within 90 days
+    const isValidIssuer = isValidUtilityIssuer(issuer);
+
+    console.log('Validation results:', { nameMatches, addressMatches, isRecent, isValidIssuer });
+
+    // Determine final verification status
+    let verificationStatus = 'PENDING';
+    let verificationNotes = '';
+
+    if (poaStatus === 'Approved' || poaStatus === 'approved') {
+        if (nameMatches && addressMatches) {
+            verificationStatus = 'APPROVED';
+            verificationNotes = 'Address and name verified successfully';
+        } else if (addressMatches) {
+            verificationStatus = 'MANUAL_REVIEW';
+            verificationNotes = `Name mismatch: Expected "${expectedName}", got "${extractedName}"`;
+        } else if (nameMatches) {
+            verificationStatus = 'MANUAL_REVIEW';
+            verificationNotes = `Address mismatch: Expected "${expectedAddress}", got "${extractedAddress}"`;
+        } else {
+            verificationStatus = 'MANUAL_REVIEW';
+            verificationNotes = 'Both name and address require manual verification';
+        }
+    } else if (poaStatus === 'Declined' || poaStatus === 'declined') {
+        verificationStatus = 'DECLINED';
+        verificationNotes = 'Document was declined by Didit';
+    } else if (poaStatus === 'Abandoned' || poaStatus === 'abandoned') {
+        verificationStatus = 'ABANDONED';
+        verificationNotes = 'User abandoned the verification process';
+    } else {
+        verificationStatus = 'PENDING_REVIEW';
+        verificationNotes = 'Awaiting review';
+    }
+
+    // Update address_verification_sessions table
+    await supabaseAdmin
+        .from('address_verification_sessions')
+        .update({
+            status: verificationStatus,
+            extracted_address: extractedAddress,
+            extracted_name: extractedName,
+            issuer: issuer,
+            issue_date: issueDate,
+            name_matches: nameMatches,
+            address_matches: addressMatches,
+            notes: verificationNotes,
+            verified_at: verificationStatus === 'APPROVED' ? new Date().toISOString() : null,
+            raw_response: payload
+        })
+        .eq('session_id', sessionId);
+
+    // Update the entity (studio or gig) with verification status
+    await supabaseAdmin
+        .from(entityTable)
+        .update({
+            address_verification_status: verificationStatus,
+            address_verified_at: verificationStatus === 'APPROVED' ? new Date().toISOString() : null
+        })
+        .eq('id', entityId);
+
+    // Send notification to user
+    let notificationTitle = '';
+    let notificationMessage = '';
+    let notificationType = 'info';
+
+    if (verificationStatus === 'APPROVED') {
+        notificationTitle = 'Address Verified ✅';
+        notificationMessage = `Your ${entityType === 'studio' ? 'studio' : 'venue'} address has been verified. Your listing is now active!`;
+        notificationType = 'success';
+    } else if (verificationStatus === 'MANUAL_REVIEW') {
+        notificationTitle = 'Address Under Review';
+        notificationMessage = `Your ${entityType === 'studio' ? 'studio' : 'venue'} address verification requires manual review. We'll notify you within 1-2 business days.`;
+        notificationType = 'info';
+    } else if (verificationStatus === 'DECLINED') {
+        notificationTitle = 'Address Verification Failed';
+        notificationMessage = `We couldn't verify your ${entityType === 'studio' ? 'studio' : 'venue'} address. Please try again with a valid utility bill.`;
+        notificationType = 'error';
+    }
+
+    if (notificationTitle) {
+        await supabaseAdmin
+            .from('notifications')
+            .insert({
+                user_id: userId,
+                type: notificationType,
+                title: notificationTitle,
+                message: notificationMessage,
+            });
+    }
+
+    console.log(`Address verification completed: ${verificationStatus} for ${entityType} ${entityId}`);
+}
+
+/**
+ * Compare two names with fuzzy matching
+ */
+function compareNames(name1: string, name2: string): boolean {
+    if (!name1 || !name2) return false;
+    
+    const normalize = (n: string) => n.toLowerCase().replace(/[^a-z]/g, '');
+    const n1 = normalize(name1);
+    const n2 = normalize(name2);
+    
+    // Check containment
+    if (n1.includes(n2) || n2.includes(n1)) return true;
+    
+    // Check if at least 70% similar
+    return calculateStringSimilarity(n1, n2) > 0.7;
+}
+
+/**
+ * Compare two addresses with fuzzy matching
+ */
+function compareAddresses(addr1: string, addr2: string): boolean {
+    if (!addr1 || !addr2) return false;
+    
+    const normalize = (a: string) => a.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const a1 = normalize(addr1);
+    const a2 = normalize(addr2);
+    
+    // Check containment
+    if (a1.includes(a2) || a2.includes(a1)) return true;
+    
+    // Check if at least 60% similar (addresses can vary in format)
+    return calculateStringSimilarity(a1, a2) > 0.6;
+}
+
+/**
+ * Check if date is within specified days
+ */
+function isWithinDays(dateStr: string, days: number): boolean {
+    try {
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diffDays = Math.abs((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+        return diffDays <= days;
+    } catch {
+        return true; // If can't parse, assume valid
+    }
+}
+
+/**
+ * Check if issuer is a valid Philippine utility company
+ */
+function isValidUtilityIssuer(issuer: string): boolean {
+    if (!issuer) return true; // Don't fail if issuer not detected
+    
+    const validIssuers = [
+        'meralco', 'manila water', 'maynilad', 'pldt', 'globe', 
+        'smart', 'converge', 'sky', 'cignal', 'home credit',
+        'bpi', 'bdo', 'metrobank', 'security bank', 'pnb',
+        'landbank', 'unionbank', 'eastwest', 'rcbc', 'chinabank'
+    ];
+    
+    const normalizedIssuer = issuer.toLowerCase();
+    return validIssuers.some(v => normalizedIssuer.includes(v));
+}
+
+/**
+ * Calculate similarity between two strings using Dice coefficient
+ */
+function calculateStringSimilarity(str1: string, str2: string): number {
+    if (!str1 || !str2) return 0;
+    if (str1 === str2) return 1;
+
+    const bigrams1 = new Set<string>();
+    const bigrams2 = new Set<string>();
+
+    for (let i = 0; i < str1.length - 1; i++) {
+        bigrams1.add(str1.substring(i, i + 2));
+    }
+    for (let i = 0; i < str2.length - 1; i++) {
+        bigrams2.add(str2.substring(i, i + 2));
+    }
+
+    let intersection = 0;
+    bigrams1.forEach(bigram => {
+        if (bigrams2.has(bigram)) intersection++;
+    });
+
+    return (2 * intersection) / (bigrams1.size + bigrams2.size);
+}
+
 

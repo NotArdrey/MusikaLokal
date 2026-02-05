@@ -43,27 +43,28 @@ export default function SubscriptionRequiredScreen() {
     fetchPlans();
   }, []);
 
-  const fetchPlans = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("subscription_plans")
-        .select("*")
-        .order("price", { ascending: true });
+    const fetchPlans = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('subscription_plans')
+                .select('*')
+                .eq('is_active', true)
+                .single();
 
       if (error) throw error;
 
-      setPlans(
-        data.map((plan) => ({
-          ...plan,
-          features: plan.features || [],
-        })),
-      );
-    } catch (error) {
-      console.error("Error fetching plans:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+            if (data) {
+                setPlans([{
+                    ...data,
+                    features: data.features || []
+                }]);
+            }
+        } catch (error) {
+            console.error('Error fetching plan:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
   const handleSubscribe = async (planId: string) => {
     if (!userId) {
@@ -224,17 +225,13 @@ export default function SubscriptionRequiredScreen() {
     setLoading(false);
   };
 
-  const getPlanColor = (index: number) => {
-    const planColors = ["#3B82F6", "#8B5CF6", "#F59E0B"];
-    return planColors[index] || colors.primary;
-  };
+    const getPlanColor = () => {
+        return colors.primary;
+    };
 
-  const getPlanIcon = (name: string) => {
-    if (name.toLowerCase().includes("basic")) return "rocket-outline";
-    if (name.toLowerCase().includes("pro")) return "star-outline";
-    if (name.toLowerCase().includes("premium")) return "diamond-outline";
-    return "card-outline";
-  };
+    const getPlanIcon = () => {
+        return 'diamond-outline';
+    };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -332,90 +329,61 @@ export default function SubscriptionRequiredScreen() {
           </View>
         </View>
 
-        {/* Plans Section */}
-        <View style={styles.plansSection}>
-          <Text style={[styles.plansTitle, { color: colors.text }]}>
-            Choose Your Plan
-          </Text>
-          <Text style={[styles.plansSubtitle, { color: colors.textSecondary }]}>
-            Select a plan that fits your needs
-          </Text>
+                {/* Subscription Section */}
+                <View style={styles.plansSection}>
+                    <Text style={[styles.plansTitle, { color: colors.text }]}>
+                        Get Started
+                    </Text>
+                    <Text style={[styles.plansSubtitle, { color: colors.textSecondary }]}>
+                        One simple subscription for full access
+                    </Text>
 
-          {loading ? (
-            <ActivityIndicator
-              size="large"
-              color={colors.primary}
-              style={styles.loader}
-            />
-          ) : (
-            <View style={styles.plansList}>
-              {plans.map((plan, index) => {
-                const planColor = getPlanColor(index);
-                const isPopular = index === 1; // Pro plan is popular
+                    {loading ? (
+                        <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+                    ) : plans.length > 0 ? (
+                        <View style={styles.plansList}>
+                            {(() => {
+                                const plan = plans[0];
+                                const planColor = getPlanColor();
 
-                return (
-                  <View
-                    key={plan.id}
-                    style={[
-                      styles.planCard,
-                      {
-                        backgroundColor: colors.card,
-                        borderColor: isPopular ? planColor : colors.border,
-                        borderWidth: isPopular ? 2 : 1,
-                        transform: [{ scale: isPopular ? 1.02 : 1 }],
-                      },
-                    ]}
-                  >
-                    {isPopular && (
-                      <View
-                        style={[
-                          styles.popularBadge,
-                          { backgroundColor: planColor },
-                        ]}
-                      >
-                        <Text style={styles.popularText}>MOST POPULAR</Text>
-                      </View>
-                    )}
+                                return (
+                                    <View
+                                        key={plan.id}
+                                        style={[
+                                            styles.planCard,
+                                            {
+                                                backgroundColor: colors.card,
+                                                borderColor: planColor,
+                                                borderWidth: 2,
+                                            }
+                                        ]}
+                                    >
+                                        <View style={styles.planHeader}>
+                                            <View style={[styles.planIconContainer, { backgroundColor: planColor + '20' }]}>
+                                                <Ionicons
+                                                    name={getPlanIcon() as any}
+                                                    size={24}
+                                                    color={planColor}
+                                                />
+                                            </View>
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={[styles.planName, { color: colors.text }]}>
+                                                    {plan.name}
+                                                </Text>
+                                                <Text style={[styles.planDescription, { color: colors.textSecondary }]}>
+                                                    {plan.description}
+                                                </Text>
+                                            </View>
+                                        </View>
 
-                    <View style={styles.planHeader}>
-                      <View
-                        style={[
-                          styles.planIconContainer,
-                          { backgroundColor: planColor + "20" },
-                        ]}
-                      >
-                        <Ionicons
-                          name={getPlanIcon(plan.name) as any}
-                          size={24}
-                          color={planColor}
-                        />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.planName, { color: colors.text }]}>
-                          {plan.name}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.planDescription,
-                            { color: colors.textSecondary },
-                          ]}
-                        >
-                          {plan.description}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.priceContainer}>
-                      {/* <Text style={[styles.currency, { color: colors.textSecondary }]}>₱</Text> */}
-                      <Text style={[styles.price, { color: colors.text }]}>
-                        ₱{plan.price.toLocaleString()}
-                      </Text>
-                      <Text
-                        style={[styles.period, { color: colors.textSecondary }]}
-                      >
-                        /{plan.duration_days} days
-                      </Text>
-                    </View>
+                                        <View style={styles.priceContainer}>
+                                            <Text style={[styles.price, { color: colors.text }]}>
+                                                ₱{plan.price.toLocaleString()}
+                                            </Text>
+                                            <Text style={[styles.period, { color: colors.textSecondary }]}>
+                                                /month
+                                            </Text>
+                                        </View>
 
                     <View style={styles.separator} />
 
@@ -436,45 +404,43 @@ export default function SubscriptionRequiredScreen() {
                       ))}
                     </View>
 
-                    <TouchableOpacity
-                      style={[
-                        styles.subscribeButton,
-                        {
-                          backgroundColor: planColor,
-                          shadowColor: planColor,
-                          shadowOffset: { width: 0, height: 4 },
-                          shadowOpacity: 0.3,
-                          shadowRadius: 8,
-                          elevation: 5,
-                        },
-                        subscribing &&
-                          selectedPlan === plan.id &&
-                          styles.buttonDisabled,
-                      ]}
-                      onPress={() => handleSubscribe(plan.id)}
-                      disabled={subscribing}
-                    >
-                      {subscribing && selectedPlan === plan.id ? (
-                        <ActivityIndicator size="small" color="white" />
-                      ) : (
-                        <>
-                          <Text style={styles.subscribeButtonText}>
-                            Subscribe Now
-                          </Text>
-                          <Ionicons
-                            name="arrow-forward"
-                            size={18}
-                            color="white"
-                          />
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.subscribeButton,
+                                                {
+                                                    backgroundColor: planColor,
+                                                    shadowColor: planColor,
+                                                    shadowOffset: { width: 0, height: 4 },
+                                                    shadowOpacity: 0.3,
+                                                    shadowRadius: 8,
+                                                    elevation: 5
+                                                },
+                                                subscribing && styles.buttonDisabled
+                                            ]}
+                                            onPress={() => handleSubscribe(plan.id)}
+                                            disabled={subscribing}
+                                        >
+                                            {subscribing ? (
+                                                <ActivityIndicator size="small" color="white" />
+                                            ) : (
+                                                <>
+                                                    <Text style={styles.subscribeButtonText}>
+                                                        Subscribe Now
+                                                    </Text>
+                                                    <Ionicons name="arrow-forward" size={18} color="white" />
+                                                </>
+                                            )}
+                                        </TouchableOpacity>
+                                    </View>
+                                );
+                            })()}
+                        </View>
+                    ) : (
+                        <Text style={[styles.plansSubtitle, { color: colors.textSecondary }]}>
+                            No subscription plan available. Please try again later.
+                        </Text>
+                    )}
+                </View>
 
         {/* Refresh Button */}
         <TouchableOpacity
