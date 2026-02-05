@@ -393,7 +393,8 @@ serve(async (req: Request) => {
         .single();
 
       // Amount should be in centavos (PHP * 100)
-      const amountInCentavos = Math.round(amount * 100);
+      // TEST MODE: Using 1 peso for testing - REMOVE FOR PRODUCTION
+      const amountInCentavos = 100; // Math.round(amount * 100);
       const studioName =
         booking.studio?.name || studio_name || "Studio Booking";
       const isDownpayment = payment_type === "downpayment";
@@ -432,8 +433,8 @@ serve(async (req: Request) => {
                 quantity: 1,
               },
             ],
-            // Available payment methods on this account: qrph
-            // To add more, enable them in PayMongo Dashboard > Settings > Payment Methods
+            // QR Ph payment
+            // For production, use live keys and add: gcash, paymaya, grab_pay
             payment_method_types: ["qrph"],
             success_url:
               success_url ||
@@ -622,7 +623,8 @@ serve(async (req: Request) => {
       console.log("🔵 Plan found:", { name: plan.name, price: plan.price });
 
       // Amount in centavos
-      const amountInCentavos = Math.round(plan.price * 100);
+      // TEST MODE: Using 1 peso for testing - REMOVE FOR PRODUCTION
+      const amountInCentavos = 100; // Math.round(plan.price * 100);
       const subscriptionDescription =
         description || `${plan.name} Plan - Monthly Subscription`;
 
@@ -655,8 +657,8 @@ serve(async (req: Request) => {
                   quantity: 1,
                 },
               ],
-              // Available payment methods on this account: qrph
-              // To add more, enable them in PayMongo Dashboard > Settings > Payment Methods
+              // QR Ph payment
+              // For production, use live keys and add: gcash, paymaya, grab_pay
               payment_method_types: ["qrph"],
               success_url: `${baseUrl}/functions/v1/paymongo?action=subscription_success&user_id=${user_id}&plan_id=${plan_id}${redirect_url ? "&redirect_url=" + encodeURIComponent(redirect_url) : ""}`,
               cancel_url: `${baseUrl}/functions/v1/paymongo?action=subscription_cancelled&user_id=${user_id}${cancel_redirect_url ? "&redirect_url=" + encodeURIComponent(cancel_redirect_url) : ""}`,

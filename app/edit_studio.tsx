@@ -129,6 +129,12 @@ export default function EditStudioScreen() {
   const [uploadingContract, setUploadingContract] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Business Permit state
+  const [businessPermitUrl, setBusinessPermitUrl] = useState<string>("");
+  const [businessPermitFileName, setBusinessPermitFileName] = useState<string>("");
+  const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
+  const businessPermitInputRef = useRef<HTMLInputElement>(null);
+
   // Availability state
   const daysOfWeek = [
     "Monday",
@@ -573,6 +579,14 @@ export default function EditStudioScreen() {
         const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
         console.log("🔧 Setting contractFileName to:", fileName);
         setContractFileName(decodeURIComponent(fileName));
+      }
+
+      console.log("🔧 Setting businessPermitUrl to:", data.business_permit_url || "");
+      setBusinessPermitUrl(data.business_permit_url || "");
+      if (data.business_permit_url) {
+        const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
+        console.log("🔧 Setting businessPermitFileName to:", fileName);
+        setBusinessPermitFileName(decodeURIComponent(fileName));
       }
 
       // Load equipment/instruments from instruments JSONB
@@ -1397,6 +1411,7 @@ export default function EditStudioScreen() {
         longitude,
         images: orderedImages,
         contract_url: contractUrl || null,
+        business_permit_url: businessPermitUrl || null,
         availability: availability
           .filter((day) => day.slots.length > 0)
           .map((day) => ({
@@ -1659,6 +1674,135 @@ export default function EditStudioScreen() {
     setContractFileName("");
   };
 
+  // Business Permit Upload Handler
+  const handleBusinessPermitUpload = async () => {
+    try {
+      setUploadingBusinessPermit(true);
+
+      if (Platform.OS === "web") {
+        if (businessPermitInputRef.current) {
+          businessPermitInputRef.current.click();
+        }
+        setUploadingBusinessPermit(false);
+        return;
+      }
+
+      // Dynamic import for native platforms only
+      const DocumentPicker = await import("expo-document-picker");
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["application/pdf", "image/*"],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        setUploadingBusinessPermit(false);
+        return;
+      }
+
+      const file = result.assets[0];
+      const fileName = file.name;
+      const fileUri = file.uri;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        showAlert("error", "Error", "Session expired. Please log in again.");
+        setUploadingBusinessPermit(false);
+        return;
+      }
+
+      const response = await fetch(fileUri);
+      const arrayBuffer = await response.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+
+      const contentType = fileName.toLowerCase().endsWith('.pdf') 
+        ? 'application/pdf' 
+        : `image/${fileName.split('.').pop()?.toLowerCase() || 'jpeg'}`;
+
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .upload(filePath, bytes, {
+          contentType,
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+      setBusinessPermitUrl(publicUrl);
+      setBusinessPermitFileName(fileName);
+      showAlert("success", "Success", "Business permit uploaded successfully!");
+    } catch (error) {
+      console.error("Error uploading business permit:", error);
+      showAlert(
+        "error",
+        "Error",
+        "Failed to upload business permit. Please try again.",
+      );
+    } finally {
+      setUploadingBusinessPermit(false);
+    }
+  };
+
+  const removeBusinessPermit = () => {
+    setBusinessPermitUrl("");
+    setBusinessPermitFileName("");
+  };
+
+  const handleWebBusinessPermitSelect = async (event: any) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingBusinessPermit(true);
+      const fileName = file.name;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        showAlert("error", "Error", "Session expired. Please log in again.");
+        setUploadingBusinessPermit(false);
+        return;
+      }
+
+      const contentType = fileName.toLowerCase().endsWith('.pdf') 
+        ? 'application/pdf' 
+        : file.type || 'image/jpeg';
+
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .upload(filePath, file, {
+          contentType,
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+      setBusinessPermitUrl(publicUrl);
+      setBusinessPermitFileName(fileName);
+      showAlert("success", "Success", "Business permit uploaded successfully!");
+    } catch (error) {
+      console.error("Error uploading business permit:", error);
+      showAlert("error", "Error", "Failed to upload business permit. Please try again.");
+    } finally {
+      setUploadingBusinessPermit(false);
+      if (event.target) {
+        event.target.value = "";
+      }
+    }
+  };
+
   // Equipment image upload state
   const [uploadingEquipmentImage, setUploadingEquipmentImage] = useState(false);
 
@@ -1886,6 +2030,15 @@ export default function EditStudioScreen() {
           type="file"
           accept="application/pdf"
           onChange={handleWebFileSelect}
+          style={{ display: "none" }}
+        />
+      )}
+      {Platform.OS === "web" && (
+        <input
+          ref={businessPermitInputRef as any}
+          type="file"
+          accept="application/pdf,image/*"
+          onChange={handleWebBusinessPermitSelect}
           style={{ display: "none" }}
         />
       )}
@@ -2281,6 +2434,103 @@ export default function EditStudioScreen() {
                       ]}
                     >
                       Tap to browse files
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Business Permit Upload */}
+          {renderSectionHeader("Business Permit", "shield-checkmark")}
+          <View style={styles.inputContainer}>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
+            >
+              Upload your business permit (PDF or Image)
+            </Text>
+            {businessPermitUrl ? (
+              <View
+                style={[
+                  styles.contractPreview,
+                  {
+                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                    flex: 1,
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.pdfIcon,
+                      { backgroundColor: "#10B981" },
+                    ]}
+                  >
+                    <Ionicons name="shield-checkmark" size={24} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[styles.contractFileName, { color: colors.text }]}
+                      numberOfLines={1}
+                    >
+                      {businessPermitFileName}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.contractFileSize,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Business Permit
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={removeBusinessPermit}
+                  style={styles.removeContractBtn}
+                >
+                  <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={handleBusinessPermitUpload}
+                disabled={uploadingBusinessPermit}
+                activeOpacity={0.8}
+                style={[
+                  styles.uploadContractBtn,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
+                {uploadingBusinessPermit ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="shield-checkmark-outline"
+                      size={32}
+                      color={colors.textSecondary}
+                    />
+                    <Text style={[styles.uploadText, { color: colors.text }]}>
+                      Upload Business Permit
+                    </Text>
+                    <Text
+                      style={[
+                        styles.uploadSubText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      PDF or Image format
                     </Text>
                   </>
                 )}

@@ -743,12 +743,12 @@ const ListingDetailsSheet = forwardRef<
       return;
     }
 
-    // Validate Video (required for gig applications)
+    // Validate Video (required for venue gig applications)
     if (!videoUrl) {
       setAlertConfig({
         type: "error",
         title: "Video Required",
-        message: "Please upload a performance video to apply for this gig. This helps venue owners see your talent!",
+        message: "Please upload a performance video to apply. This helps venue owners evaluate your talent.",
       });
       setAlertVisible(true);
       return;
@@ -4086,6 +4086,7 @@ const ListingDetailsSheet = forwardRef<
             { backgroundColor: colors.primary },
             (isSubmittingApplication ||
               !pitchMessage.trim() ||
+              !videoUrl ||
               groupAlreadyApplied ||
               (group.requirements?.musician_type === "group" &&
                 !selectedGroupId)) && { opacity: 0.5 },
@@ -4136,6 +4137,7 @@ const ListingDetailsSheet = forwardRef<
           disabled={
             isSubmittingApplication ||
             !pitchMessage.trim() ||
+            !videoUrl ||
             hasExistingApplication ||
             isBlocked ||
             groupAlreadyApplied ||
