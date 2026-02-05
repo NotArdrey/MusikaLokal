@@ -1139,6 +1139,7 @@ serve(async (req: Request) => {
               .update({
                 subscription_status: "active",
                 subscription_expires_at: periodEnd.toISOString(),
+                subscription_plan_id: planId,
               })
               .eq("id", userId);
 

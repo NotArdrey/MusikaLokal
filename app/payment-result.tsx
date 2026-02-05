@@ -21,6 +21,8 @@ export default function PaymentResultScreen() {
     const fetchDetails = async () => {
       if (isSubscription && params.plan_id) {
         // Fetch subscription plan details
+        // NOTE: Subscription creation/update is handled by the Edge Function (subscription_success)
+        // using supabaseAdmin to bypass RLS. Client only fetches display data.
         try {
           const { data, error } = await supabase
             .from('subscription_plans')
@@ -32,87 +34,15 @@ export default function PaymentResultScreen() {
             setSubscriptionDetails(data);
           }
 
-          // If subscription payment was successful, activate the subscription
+          // If subscription payment was successful, refresh the auth context
+          // The Edge Function already handled activating the subscription with admin privileges
           if (isSuccess) {
-            // Get current user
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user && data) {
-              // Calculate expiration date based on plan duration
-              const now = new Date();
-              const expiresAt = new Date();
-              expiresAt.setDate(expiresAt.getDate() + (data.duration_days || 30));
-
-              // Update user's subscription status in profiles table
-              const { error: updateError } = await supabase
-                .from('profiles')
-                .update({
-                  subscription_status: 'active',
-                  subscription_expires_at: expiresAt.toISOString(),
-                  subscription_plan_id: params.plan_id,
-                })
-                .eq('id', user.id);
-
-              if (updateError) {
-                console.error('Error activating subscription:', updateError);
-              } else {
-                console.log('✅ Profile subscription status updated!');
-              }
-
-              // Also upsert the subscriptions table record for wallet page
-              const { data: existingSub } = await supabase
-                .from('subscriptions')
-                .select('id')
-                .eq('user_id', user.id)
-                .single();
-
-              if (existingSub) {
-                // Update existing subscription
-                const { error: subUpdateError } = await supabase
-                  .from('subscriptions')
-                  .update({
-                    plan_id: params.plan_id,
-                    status: 'active',
-                    current_period_start: now.toISOString(),
-                    current_period_end: expiresAt.toISOString(),
-                    last_payment_date: now.toISOString(),
-                    last_payment_amount: data.price,
-                    cancel_at_period_end: false,
-                    cancelled_at: null,
-                    updated_at: now.toISOString(),
-                  })
-                  .eq('id', existingSub.id);
-
-                if (subUpdateError) {
-                  console.error('Error updating subscription record:', subUpdateError);
-                } else {
-                  console.log('✅ Subscription record updated!');
-                }
-              } else {
-                // Create new subscription record
-                const { error: subInsertError } = await supabase
-                  .from('subscriptions')
-                  .insert({
-                    user_id: user.id,
-                    plan_id: params.plan_id,
-                    status: 'active',
-                    current_period_start: now.toISOString(),
-                    current_period_end: expiresAt.toISOString(),
-                    last_payment_date: now.toISOString(),
-                    last_payment_amount: data.price,
-                    cancel_at_period_end: false,
-                  });
-
-                if (subInsertError) {
-                  console.error('Error creating subscription record:', subInsertError);
-                } else {
-                  console.log('✅ Subscription record created!');
-                }
-              }
-
-              // Refresh subscription status in AuthContext
-              if (checkSubscription) {
-                await checkSubscription();
-              }
+            console.log('✅ Subscription payment successful - refreshing subscription status');
+            
+            // Refresh subscription status in AuthContext
+            // This will fetch the updated status that the Edge Function set
+            if (checkSubscription) {
+              await checkSubscription();
             }
           }
         } catch (e) {
