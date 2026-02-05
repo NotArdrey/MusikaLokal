@@ -17,6 +17,7 @@ export default function SignupScreen() {
     const { colors, isDark } = useTheme();
 
     // State
+    // State
     const [step, setStep] = useState<OnboardingStep>('role');
     const [userId, setUserId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
@@ -24,7 +25,7 @@ export default function SignupScreen() {
     const [tempSessionRef, setTempSessionRef] = useState('');
     const [sessionId, setSessionId] = useState<string>('');
 
-
+    const { verified, session_id, check_verification } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string }>();
 
     // Form Fields
     const [selectedRole, setSelectedRole] = useState<'musician' | 'venue-owner' | 'studio-owner' | null>(null);
@@ -42,9 +43,8 @@ export default function SignupScreen() {
     }, [email]);
 
     // Restore state on mount if returning from verification
-    const { verified, session_id } = useLocalSearchParams<{ verified: string; session_id: string }>();
     useEffect(() => {
-        if (verified === 'true') {
+        if (verified === 'true' || check_verification === 'true') {
             const restoreState = async () => {
                 try {
                     const savedState = await AsyncStorage.getItem('signup_current_session');
@@ -67,18 +67,201 @@ export default function SignupScreen() {
             };
             restoreState();
         }
-    }, [verified]);
+    }, [verified, check_verification]);
+
+    // Polling System: Automatically check for verification completion
+    // This bypasses any redirect issues by detecting status changes in the background
+    useEffect(() => {
+        let timer: any;
+        if (step === 'verification' && verificationUrl && verified !== 'true' && check_verification !== 'true') {
+            const poll = async () => {
+                const ref = sessionId || tempSessionRef;
+                if (!ref) return;
+                try {
+                    const { data, error } = await supabase.functions.invoke('create-didit-session', {
+                        body: { action: 'get_session', session_id: ref }
+                    });
+                    // Skip if there's an error (FunctionsHttpError) - just retry next poll
+                    if (error) return;
+                    const s = data?.status || data?.verification_data?.status;
+                    // If we detect a final status, manually trigger the completion flow
+                    if (['Approved', 'APPROVED', 'Declined', 'DECLINED', 'Abandoned', 'ABANDONED', 'PENDING_REVIEW', 'In Review'].includes(s)) {
+                        router.setParams({ check_verification: 'true' });
+                    }
+                } catch (e: any) {
+                    // Silent catch - FunctionsHttpError or network errors are expected during polling
+                    // The Didit session may not have a decision yet, which causes 404/500 errors
+                    console.log('Poll error (expected during verification):', e?.message || 'unknown');
+                }
+            };
+            timer = setInterval(poll, 500);
+        }
+        return () => { if (timer) clearInterval(timer); };
+    }, [step, verificationUrl, verified, sessionId, tempSessionRef, check_verification]);
 
     // Auto-submit verification when data is ready and we are in the verification step
     useEffect(() => {
         let mounted = true;
         // Only run if we are in verification step, have all data, and came back from verification
-        if (step === 'verification' && email && password && selectedRole && verified === 'true') {
-            console.log('Auto-submitting account creation...');
-            const timer = setTimeout(() => {
-                if (mounted) finishAccountCreation();
-            }, 500);
-            return () => { clearTimeout(timer); mounted = false; };
+        if (step === 'verification' && email && password && selectedRole && (verified === 'true' || check_verification === 'true')) {
+            console.log('Returning from verification. Checking status...');
+
+            const checkAndFinish = async (retries = 0) => {
+                const refToCheck = sessionId || tempSessionRef;
+                if (!refToCheck) {
+                    if (mounted) finishAccountCreation(); // Fallback
+                    return;
+                }
+
+                try {
+                    // Verify the ACTUAL status from Didit/Database
+                    const { data: sessionData, error: invokeError } = await supabase.functions.invoke('create-didit-session', {
+                        body: { action: 'get_session', session_id: refToCheck }
+                    });
+
+                    if (invokeError) throw invokeError;
+
+                    // Check status - supports robust checking of nested data
+                    const status = sessionData?.status || sessionData?.verification_data?.status;
+                    console.log(`Session Status Check (Attempt ${retries + 1}):`, status);
+
+                    // 1. SUCCESS
+                    if (status === 'Approved' || status === 'APPROVED') {
+                        if (mounted) finishAccountCreation();
+                        return;
+                    }
+
+                    // 2. FAILURE (Final) - Show alert and go back to signup form
+                    if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned', 'In Review', 'PENDING_REVIEW'].includes(status)) {
+                        setLoading(false);
+
+                        // Clear all verification state
+                        setVerificationUrl('');
+                        setSessionId('');
+                        setTempSessionRef('');
+                        await AsyncStorage.removeItem('signup_current_session');
+                        router.setParams({ verified: '', check_verification: '' });
+
+                        // Determine the alert message based on status
+                        let title = 'Verification Failed';
+                        let message = 'Your identity could not be verified. Please try again.';
+
+                        if (status === 'DECLINED' || status === 'Declined') {
+                            title = 'Invalid I.D.';
+                            message = 'Your I.D. was declined or does not match. Please try again with a valid government-issued I.D.';
+                        } else if (status === 'ABANDONED' || status === 'Abandoned') {
+                            title = 'Verification Incomplete';
+                            message = 'You did not complete the verification process. Please try again.';
+                        } else if (status === 'In Review' || status === 'PENDING_REVIEW') {
+                            title = 'Verification Pending';
+                            message = 'Your verification requires manual review. Please try again later or contact support.';
+                        }
+
+                        // Go back to signup form
+                        setStep('details');
+
+                        // Show alert AFTER going back
+                        Alert.alert(title, message, [{ text: 'OK' }]);
+                        return;
+                    }
+
+                    // 3. PENDING / RETRY (Created, Submitted, Processing)
+                    // Note: We now handle 'In Review' and 'PENDING_REVIEW' in failure case above
+                    const maxRetries = 10;
+                    if (retries < maxRetries) {
+                        console.log('Status not final, retrying...');
+                        setTimeout(() => {
+                            if (mounted) checkAndFinish(retries + 1);
+                        }, 1000); // Wait 1 second between checks
+                    } else {
+                        // TIMEOUT - Go back to signup form with alert
+                        setLoading(false);
+                        setVerificationUrl('');
+                        setSessionId('');
+                        setTempSessionRef('');
+                        await AsyncStorage.removeItem('signup_current_session');
+                        router.setParams({ verified: '', check_verification: '' });
+
+                        setStep('details');
+                        Alert.alert(
+                            'Verification Timeout',
+                            'We could not confirm your verification status in time. Please try again.',
+                            [{ text: 'OK' }]
+                        );
+                    }
+
+                } catch (e: any) {
+                    // Handle FunctionsHttpError gracefully
+                    // FunctionsHttpError is thrown when the Edge Function returns non-2xx status
+                    let errorStatus = null;
+                    let errorMessage = e?.message || 'Unknown error';
+
+                    // Try multiple ways to extract error details
+                    try {
+                        // Method 1: Check if error has a response body
+                        if (e?.context?.body) {
+                            const reader = e.context.body.getReader();
+                            const result = await reader.read();
+                            const text = new TextDecoder().decode(result.value);
+                            const errorJson = JSON.parse(text);
+                            errorStatus = errorJson?.status || errorJson?.verification_data?.status;
+                        }
+                    } catch { /* ignore parse errors */ }
+
+                    try {
+                        // Method 2: Check if it's a FunctionsHttpError with details in message
+                        if (e?.name === 'FunctionsHttpError' && e?.message) {
+                            // Sometimes the error message contains JSON
+                            const jsonMatch = e.message.match(/\{.*\}/);
+                            if (jsonMatch) {
+                                const parsed = JSON.parse(jsonMatch[0]);
+                                errorStatus = parsed?.status || errorStatus;
+                            }
+                        }
+                    } catch { /* ignore parse errors */ }
+
+                    console.log('Status check error (attempt', retries + 1, '):', errorMessage);
+
+                    // If we got a status from error, handle it
+                    if (errorStatus && ['DECLINED', 'Declined', 'ABANDONED', 'Abandoned', 'In Review', 'PENDING_REVIEW'].includes(errorStatus)) {
+                        setLoading(false);
+                        setVerificationUrl('');
+                        setSessionId('');
+                        setTempSessionRef('');
+                        await AsyncStorage.removeItem('signup_current_session');
+                        router.setParams({ verified: '', check_verification: '' });
+
+                        let title = 'Verification Failed';
+                        let message = 'Please try again.';
+                        if (errorStatus === 'DECLINED' || errorStatus === 'Declined') {
+                            title = 'Invalid I.D.';
+                            message = 'Your I.D. was declined. Please try again with a valid government-issued I.D.';
+                        }
+
+                        setStep('details');
+                        Alert.alert(title, message, [{ text: 'OK' }]);
+                        return;
+                    }
+
+                    // Retry on network/function error (FunctionsHttpError is common during initial polling)
+                    if (retries < 8) {
+                        console.log('Retrying status check in 2 seconds...');
+                        setTimeout(() => { if (mounted) checkAndFinish(retries + 1); }, 2000);
+                    } else {
+                        setLoading(false);
+                        Alert.alert(
+                            'Connection Error',
+                            'Could not connect to verification server. Please tap "I Have Verified" to try again.',
+                            [{ text: 'OK' }]
+                        );
+                    }
+                }
+            };
+
+            // Start the check loop
+            checkAndFinish(0);
+
+            return () => { mounted = false; };
         }
     }, [step, email, password, selectedRole, verified]);
 
@@ -159,12 +342,15 @@ export default function SignupScreen() {
             console.error('Failed to save session state', e);
         }
 
-        let redirectUrl = Linking.createURL('/', { queryParams: { verified: 'true' } });
+        // NEUTRAL SIGNAL: Don't assume 'verified=true'. Just signal that flow returned.
+        let redirectUrl = Linking.createURL('/', { queryParams: { check_verification: 'true' } });
 
         // WEB FIX: Explicitly use the current window location to ensure we return to this specific page
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
             const currentUrl = new URL(window.location.href);
-            currentUrl.searchParams.set('verified', 'true');
+            currentUrl.searchParams.set('check_verification', 'true');
+            // Remove old params if present
+            currentUrl.searchParams.delete('verified');
             redirectUrl = currentUrl.toString();
         }
 
@@ -223,10 +409,9 @@ export default function SignupScreen() {
     };
 
     const handleMobileNavState = (event: any) => {
-        if (event.url.includes('verified=true') || event.url.includes('musikalokal://')) {
-            Alert.alert('Verification Submitted', 'Please check your email to complete the process.',
-                [{ text: 'OK', onPress: () => router.push('/') }]
-            );
+        // Intercept redirect and trigger verification check
+        if (event.url.includes('check_verification=true') || event.url.includes('musikalokal://')) {
+            router.setParams({ check_verification: 'true' });
         }
     };
 
@@ -325,23 +510,10 @@ export default function SignupScreen() {
             if (sessionData) {
                 diditData = sessionData;
                 console.log('Didit Data Fetched (Keys):', Object.keys(sessionData));
+                console.log('Derived Data:', JSON.stringify(sessionData.derived));
 
-                const extracted = diditData?.features?.extracted_data || diditData?.extracted_data || {};
-                const mrz = extracted?.mrz || {};
-                const ocr = extracted?.ocr || {};
-
-                const first =
-                    extracted.firstName || extracted.first_name ||
-                    mrz.firstName || mrz.first_name ||
-                    ocr.firstName || ocr.first_name || '';
-
-                const last =
-                    extracted.lastName || extracted.last_name ||
-                    mrz.lastName || mrz.last_name ||
-                    ocr.lastName || ocr.last_name || '';
-
-                if (first || last) {
-                    verifiedName = [first, last].filter(Boolean).join(' ');
+                if (sessionData?.derived?.fullName) {
+                    verifiedName = sessionData.derived.fullName;
                 }
             }
         } catch (e) {
@@ -380,42 +552,44 @@ export default function SignupScreen() {
 
             if (authData.user) {
                 // FORCE CREATE PROFILE (Via Edge Function to Bypass RLS)
-                try {
-                    const { error: profileError } = await supabase.functions.invoke('manage-profile', {
-                        body: {
-                            action: 'create',
-                            userId: authData.user.id,
-                            email: email.trim(),
-                            full_name: verifiedName,
-                            role: selectedRole,
-                            is_verified: true,
-                            verification_status: 'APPROVED',
-                            didit_session_id: refToLink
-                        }
-                    });
+                // Use retry mechanism to handle race conditions with auth user propagation
+                const createProfileWithRetry = async (retries = 0): Promise<boolean> => {
+                    try {
+                        const { data: profileData, error: profileError } = await supabase.functions.invoke('manage-profile', {
+                            body: {
+                                action: 'create',
+                                userId: authData.user!.id,
+                                email: email.trim(),
+                                full_name: verifiedName,
+                                display_name: verifiedName,
+                                role: selectedRole,
+                                is_verified: true,
+                                verification_status: 'APPROVED',
+                                didit_session_id: refToLink
+                            }
+                        });
 
-                    if (profileError) {
-                        console.error('Manual Profile Creation Failed:', profileError);
-                    } else {
-                        console.log('Manual Profile Creation Success (Edge Function)');
+                        if (profileError) {
+                            throw profileError;
+                        }
+                        console.log('Profile created successfully');
+                        return true;
+                    } catch (profErr: any) {
+                        // Silently retry up to 3 times with 1 second delay
+                        if (retries < 3) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            return createProfileWithRetry(retries + 1);
+                        }
+                        // Silent fail - profile will be created on first login
+                        return false;
                     }
-                } catch (profErr) {
-                    console.error('Profile Invoke Exception:', profErr);
-                }
+                };
 
-                // Send Magic Link (matches user's expected "Login" email)
-                try {
-                    const { error: magicLinkError } = await supabase.auth.signInWithOtp({
-                        email: email.trim(),
-                        options: {
-                            emailRedirectTo: Linking.createURL('/'),
-                            shouldCreateUser: false
-                        }
-                    });
-                    if (magicLinkError) console.warn('Magic Link trigger failed:', magicLinkError);
-                } catch (mlErr) {
-                    console.warn('Magic Link error:', mlErr);
-                }
+                await createProfileWithRetry();
+
+                // (Magic Link block removed to ensure strict Account Confirmation flow)
+                // The signUp() call above already sends the "Confirm your email" link.
+
 
                 // Clear the temporary signup session
                 try {
@@ -424,8 +598,16 @@ export default function SignupScreen() {
                     console.log('Error clearing signup session:', e);
                 }
 
-                // Move to Email Verification Step
-                setStep('email_verification');
+                // SUCCESS: Alert and Redirect to Login
+                // SUCCESS: Redirect to Login immediately
+                // The Login screen will handle showing the "Email Sent" popup
+                router.replace({
+                    pathname: '/',
+                    params: {
+                        accountCreated: 'true',
+                        email: email
+                    }
+                } as any);
             }
 
         } catch (authErr: any) {
@@ -600,8 +782,70 @@ export default function SignupScreen() {
     const renderVerificationStep = () => {
         // const { verified } = useLocalSearchParams(); // Inherit from parent scope to avoid hook errors
 
+        // Helper function to manually check status (used by "Click here" button)
+        const manualStatusCheck = async () => {
+            setLoading(true);
+            const refToCheck = sessionId || tempSessionRef;
+            if (!refToCheck) {
+                Alert.alert('Error', 'No verification session found. Please try again.');
+                setLoading(false);
+                setStep('details');
+                return;
+            }
+
+            try {
+                const { data: sessionData } = await supabase.functions.invoke('create-didit-session', {
+                    body: { action: 'get_session', session_id: refToCheck }
+                });
+
+                const status = sessionData?.status || sessionData?.verification_data?.status;
+                console.log('Manual status check result:', status);
+
+                if (status === 'Approved' || status === 'APPROVED') {
+                    finishAccountCreation();
+                } else if (['DECLINED', 'Declined', 'ABANDONED', 'Abandoned', 'In Review', 'PENDING_REVIEW'].includes(status)) {
+                    // Failed - show alert and go back to form
+                    setLoading(false);
+                    setVerificationUrl('');
+                    setSessionId('');
+                    setTempSessionRef('');
+                    await AsyncStorage.removeItem('signup_current_session');
+                    router.setParams({ verified: '', check_verification: '' });
+
+                    let title = 'Invalid I.D.';
+                    let message = 'Your I.D. was declined. Please try again with a valid government-issued I.D.';
+                    if (status === 'ABANDONED' || status === 'Abandoned') {
+                        title = 'Verification Incomplete';
+                        message = 'You did not complete the verification. Please try again.';
+                    } else if (status === 'In Review' || status === 'PENDING_REVIEW') {
+                        title = 'Verification Pending';
+                        message = 'Your ID is under review. Please try again later.';
+                    }
+
+                    setStep('details');
+                    Alert.alert(title, message, [{ text: 'OK' }]);
+                } else {
+                    // Still processing - let the auto-check continue
+                    setLoading(false);
+                    Alert.alert('Still Processing', 'Verification is still in progress. Please wait a moment.');
+                }
+            } catch (e: any) {
+                console.warn('Manual status check error:', e?.message || e);
+                setLoading(false);
+                // More helpful error message for FunctionsHttpError
+                const isFunctionError = e?.name === 'FunctionsHttpError' || e?.message?.includes('FunctionsHttpError');
+                Alert.alert(
+                    'Verification Check Failed',
+                    isFunctionError
+                        ? 'The verification server is processing your request. Please wait a moment and try again.'
+                        : 'Could not check verification status. Please check your connection and try again.',
+                    [{ text: 'OK' }]
+                );
+            }
+        };
+
         // 1. Processing State (Returning from Didit)
-        if (verified === 'true') {
+        if (verified === 'true' || check_verification === 'true') {
             return (
                 <View style={styles.stepContainer}>
                     <View style={{ alignItems: 'center', flex: 1, justifyContent: 'center', padding: 24 }}>
@@ -613,7 +857,7 @@ export default function SignupScreen() {
 
                         {!loading && (
                             <TouchableOpacity
-                                onPress={finishAccountCreation}
+                                onPress={manualStatusCheck}
                                 style={{ marginTop: 20 }}
                             >
                                 <Text style={{ color: colors.primary, fontWeight: '600' }}>Click here if not redirected...</Text>
@@ -641,6 +885,16 @@ export default function SignupScreen() {
                             onNavigationStateChange={handleMobileNavState}
                             startInLoadingState
                             renderLoading={() => <ActivityIndicator size="large" color={colors.primary} style={StyleSheet.absoluteFill} />}
+                            onShouldStartLoadWithRequest={(request) => {
+                                // INTERCEPTOR: Prevent the broken HTML page from loading
+                                // Check for the function URL OR the static storage file
+                                if (request.url.includes('verification-redirect') || request.url.includes('verification-v2.html')) {
+                                    // We caught the redirect! Stop loading and force success.
+                                    router.setParams({ verified: 'true' });
+                                    return false;
+                                }
+                                return true;
+                            }}
                         />
                     ) : (
                         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>

@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   BottomSheetBackdrop,
   BottomSheetModal,
-  BottomSheetScrollView,
+  BottomSheetScrollView
 } from "@gorhom/bottom-sheet";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -14,7 +14,7 @@ import React, {
   useEffect,
   useMemo,
   useRef,
-  useState,
+  useState
 } from "react";
 import {
   ActivityIndicator,
@@ -28,7 +28,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../../lib/supabase";
@@ -209,7 +209,7 @@ const ListingDetailsSheet = forwardRef<
   }, [date, endTime]);
 
   // Confirmation State (reusing modal props logic or simple alerts)
-  const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
+  const [confirmAction, setConfirmAction] = useState<() => void>(() => { });
   const [confirmMessage, setConfirmMessage] = useState("");
   const [confirmTitle, setConfirmTitle] = useState("");
 
@@ -3571,8 +3571,8 @@ const ListingDetailsSheet = forwardRef<
             )}
           </>
         ) : !(
-            hasExistingStudioBooking && existingStudioBookingStatus === "unpaid"
-          ) ? (
+          hasExistingStudioBooking && existingStudioBookingStatus === "unpaid"
+        ) ? (
           <TouchableOpacity
             style={[
               styles.secondaryBtn,
@@ -3674,49 +3674,49 @@ const ListingDetailsSheet = forwardRef<
         {!(
           hasExistingStudioBooking && existingStudioBookingStatus === "unpaid"
         ) && (
-          <TouchableOpacity
-            style={[
-              styles.primaryBtn,
-              {
-                backgroundColor:
-                  bookings.length > 0 ? colors.primary : colors.border,
-                opacity: loading ? 0.6 : 1,
-              },
-            ]}
-            disabled={bookings.length === 0 || loading}
-            activeOpacity={0.8}
-            onPress={() =>
-              bookings.length > 0 &&
-              handleConfirm(
-                async () => {
-                  // Double check profile just in case, though handleConfirm handles it
-                  if (!userId) {
-                    alert("Please sign in to book a studio");
-                    return;
-                  }
+            <TouchableOpacity
+              style={[
+                styles.primaryBtn,
+                {
+                  backgroundColor:
+                    bookings.length > 0 ? colors.primary : colors.border,
+                  opacity: loading ? 0.6 : 1,
+                },
+              ]}
+              disabled={bookings.length === 0 || loading}
+              activeOpacity={0.8}
+              onPress={() =>
+                bookings.length > 0 &&
+                handleConfirm(
+                  async () => {
+                    // Double check profile just in case, though handleConfirm handles it
+                    if (!userId) {
+                      alert("Please sign in to book a studio");
+                      return;
+                    }
 
-                  try {
-                    setLoading(true);
-                    const results = [];
-                    const errors = [];
+                    try {
+                      setLoading(true);
+                      const results = [];
+                      const errors = [];
 
-                    console.log(
-                      "🛒 Total bookings to create:",
-                      bookings.length,
-                    );
-                    console.log("📋 Bookings array:", bookings);
+                      console.log(
+                        "🛒 Total bookings to create:",
+                        bookings.length,
+                      );
+                      console.log("📋 Bookings array:", bookings);
 
-                    // Create each booking (now supports multi-slot per booking)
-                    for (const booking of bookings) {
-                      const bookingDate = booking.date
-                        .toISOString()
-                        .split("T")[0];
+                      // Create each booking (now supports multi-slot per booking)
+                      for (const booking of bookings) {
+                        const bookingDate = booking.date
+                          .toISOString()
+                          .split("T")[0];
 
-                      // Use time_slots if available (multi-slot booking), otherwise fallback to single slot
-                      const timeSlots =
-                        booking.timeSlots && booking.timeSlots.length > 0
-                          ? booking.timeSlots
-                          : [
+                        // Use time_slots if available (multi-slot booking), otherwise fallback to single slot
+                        const timeSlots =
+                          booking.timeSlots && booking.timeSlots.length > 0
+                            ? booking.timeSlots
+                            : [
                               {
                                 start: booking.startTime
                                   .toTimeString()
@@ -3725,166 +3725,116 @@ const ListingDetailsSheet = forwardRef<
                               },
                             ];
 
-                      console.log("📤 Creating multi-slot booking:", {
-                        studio_id: group.id,
-                        user_id: userId,
-                        date: bookingDate,
-                        time_slots: timeSlots,
-                        notes: bookingNotes,
-                      });
+                        console.log("📤 Creating multi-slot booking:", {
+                          studio_id: group.id,
+                          user_id: userId,
+                          date: bookingDate,
+                          time_slots: timeSlots,
+                          notes: bookingNotes,
+                        });
 
-                      const { data, error } = await supabase.functions.invoke(
-                        "manage-bookings",
-                        {
-                          body: {
-                            action: "create",
-                            studio_id: group.id,
-                            user_id: userId,
-                            date: bookingDate,
-                            time_slots: timeSlots, // Send multi-slot array
-                            notes: bookingNotes,
+                        const { data, error } = await supabase.functions.invoke(
+                          "manage-bookings",
+                          {
+                            body: {
+                              action: "create",
+                              studio_id: group.id,
+                              user_id: userId,
+                              date: bookingDate,
+                              time_slots: timeSlots, // Send multi-slot array
+                              notes: bookingNotes,
+                            },
                           },
-                        },
-                      );
+                        );
 
-                      console.log("📥 Booking response:", { data, error });
+                        console.log("📥 Booking response:", { data, error });
 
-                      if (error) {
-                        // Try to extract actual error message
-                        let errorMessage = error.message || "Unknown error";
-                        let serverError: any = null;
+                        if (error) {
+                          // Try to extract actual error message
+                          let errorMessage = error.message || "Unknown error";
+                          let serverError: any = null;
 
-                        // Check if error has context with response body
-                        if (
-                          error.context &&
-                          typeof error.context === "object"
-                        ) {
-                          try {
-                            // Try to read response body
-                            const response = error.context;
-                            console.log(
-                              "📥 Error response status:",
-                              response.status,
-                            );
-                            console.log("📥 Error response (raw):", response);
-
-                            // If it's a Response object, try to parse body
-                            if (
-                              response.json &&
-                              typeof response.json === "function"
-                            ) {
-                              serverError = await response.json();
+                          // Check if error has context with response body
+                          if (
+                            error.context &&
+                            typeof error.context === "object"
+                          ) {
+                            try {
+                              // Try to read response body
+                              const response = error.context;
                               console.log(
-                                "📥 Parsed server error:",
-                                serverError,
+                                "📥 Error response status:",
+                                response.status,
                               );
-                              if (serverError?.error) {
-                                errorMessage = serverError.error;
-                              }
-                              if (serverError?.debug) {
+                              console.log("📥 Error response (raw):", response);
+
+                              // If it's a Response object, try to parse body
+                              if (
+                                response.json &&
+                                typeof response.json === "function"
+                              ) {
+                                serverError = await response.json();
                                 console.log(
-                                  "📥 Debug info:",
-                                  serverError.debug,
+                                  "📥 Parsed server error:",
+                                  serverError,
                                 );
-                              }
-                            } else if (
-                              response.text &&
-                              typeof response.text === "function"
-                            ) {
-                              const textBody = await response.text();
-                              console.log("📥 Error body (text):", textBody);
-                              try {
-                                serverError = JSON.parse(textBody);
                                 if (serverError?.error) {
                                   errorMessage = serverError.error;
                                 }
-                              } catch (e) {
-                                console.log("📥 Could not parse as JSON");
+                                if (serverError?.debug) {
+                                  console.log(
+                                    "📥 Debug info:",
+                                    serverError.debug,
+                                  );
+                                }
+                              } else if (
+                                response.text &&
+                                typeof response.text === "function"
+                              ) {
+                                const textBody = await response.text();
+                                console.log("📥 Error body (text):", textBody);
+                                try {
+                                  serverError = JSON.parse(textBody);
+                                  if (serverError?.error) {
+                                    errorMessage = serverError.error;
+                                  }
+                                } catch (e) {
+                                  console.log("📥 Could not parse as JSON");
+                                }
                               }
+                            } catch (e) {
+                              console.error("Failed to parse error response:", e);
                             }
-                          } catch (e) {
-                            console.error("Failed to parse error response:", e);
                           }
-                        }
 
-                        errors.push({
-                          booking,
-                          error: { message: errorMessage, serverError },
-                        });
-                        console.error("❌ Booking error:", errorMessage);
-                        if (serverError) {
-                          console.error(
-                            "❌ Full server error:",
-                            JSON.stringify(serverError, null, 2),
-                          );
-                        }
-                      } else {
-                        results.push(data);
-                        console.log("✅ Booking created successfully");
-                      }
-                    }
-
-                    setLoading(false);
-
-                    if (errors.length > 0 && results.length === 0) {
-                      // All failed
-                      const errorMsg =
-                        errors[0].error?.message || "Failed to create bookings";
-                      alert(`Error: ${errorMsg}`);
-                    } else if (errors.length > 0) {
-                      // Partial success
-                      alert(
-                        `${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`,
-                      );
-                      // Clear form and close
-                      setBookings([]);
-                      setSelectedTimeSlots([]);
-                      setBookingNotes("");
-                      setModalVisible(false);
-                      (ref as any)?.current?.dismiss();
-                    } else {
-                      // All success - AI LEARNING: Strong signal from booking
-                      if (group && group.embedding && userId) {
-                        try {
-                          await supabase.rpc("update_user_interest", {
-                            p_user_id: userId,
-                            p_item_vector: group.embedding,
-                            p_weight: 0.5, // Strongest learning signal for booking
+                          errors.push({
+                            booking,
+                            error: { message: errorMessage, serverError },
                           });
-                          console.log(
-                            "🤖 AI learned from studio booking:",
-                            group.name,
-                          );
-                        } catch (e) {
-                          console.log(
-                            "Error updating AI interest from booking:",
-                            e,
-                          );
+                          console.error("❌ Booking error:", errorMessage);
+                          if (serverError) {
+                            console.error(
+                              "❌ Full server error:",
+                              JSON.stringify(serverError, null, 2),
+                            );
+                          }
+                        } else {
+                          results.push(data);
+                          console.log("✅ Booking created successfully");
                         }
                       }
 
-                      // All success - show payment option modal before PayMongo
-                      console.log(
-                        "✅ All bookings created, showing payment options...",
-                      );
+                      setLoading(false);
 
-                      // For now, we process payment for the first booking
-                      const firstBooking = results[0];
-
-                      if (firstBooking?.requires_payment && firstBooking?.id) {
-                        // Store booking data and show payment option modal
-                        setPaymentBookingData({
-                          booking: firstBooking,
-                          studioName: group.name,
-                          totalAmount:
-                            firstBooking.payment_amount ||
-                            firstBooking.final_price,
-                        });
-                        setSelectedPaymentType("full"); // Reset to full payment
-                        setShowPaymentOptionModal(true);
-                      } else {
+                      if (errors.length > 0 && results.length === 0) {
+                        // All failed
+                        const errorMsg =
+                          errors[0].error?.message || "Failed to create bookings";
+                        alert(`Error: ${errorMsg}`);
+                      } else if (errors.length > 0) {
+                        // Partial success
                         alert(
-                          `Successfully created ${results.length} booking(s)! Please complete payment to confirm.`,
+                          `${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`,
                         );
                         // Clear form and close
                         setBookings([]);
@@ -3892,6 +3842,56 @@ const ListingDetailsSheet = forwardRef<
                         setBookingNotes("");
                         setModalVisible(false);
                         (ref as any)?.current?.dismiss();
+                      } else {
+                        // All success - AI LEARNING: Strong signal from booking
+                        if (group && group.embedding && userId) {
+                          try {
+                            await supabase.rpc("update_user_interest", {
+                              p_user_id: userId,
+                              p_item_vector: group.embedding,
+                              p_weight: 0.5, // Strongest learning signal for booking
+                            });
+                            console.log(
+                              "🤖 AI learned from studio booking:",
+                              group.name,
+                            );
+                          } catch (e) {
+                            console.log(
+                              "Error updating AI interest from booking:",
+                              e,
+                            );
+                          }
+                        }
+
+                        // All success - show payment option modal before PayMongo
+                        console.log(
+                          "✅ All bookings created, showing payment options...",
+                        );
+
+                        // For now, we process payment for the first booking
+                        const firstBooking = results[0];
+
+                        if (firstBooking?.requires_payment && firstBooking?.id) {
+                          // Store booking data and show payment option modal
+                          setPaymentBookingData({
+                            booking: firstBooking,
+                            studioName: group.name,
+                            totalAmount:
+                              firstBooking.payment_amount ||
+                              firstBooking.final_price,
+                          });
+                          setSelectedPaymentType("full"); // Reset to full payment
+                          setShowPaymentOptionModal(true);
+                        } else {
+                          alert(
+                            `Successfully created ${results.length} booking(s)! Please complete payment to confirm.`,
+                          );
+                          // Clear form and close
+                          setBookings([]);
+                          setSelectedTimeSlots([]);
+                          setBookingNotes("");
+                          setModalVisible(false);
+                          (ref as any)?.current?.dismiss();
 
                         // Navigate to bookings page
                         setTimeout(() => {
@@ -4098,99 +4098,8 @@ const ListingDetailsSheet = forwardRef<
       listingId,
     });
 
-    // Calculate application deadline (24hrs before event)
-    const getApplicationDeadline = () => {
-      if (!group.event_date) return null;
-      const eventDate = new Date(group.event_date);
-      const eventStartTime = group.requirements?.event_start_time;
-      if (eventStartTime) {
-        const [time, period] = eventStartTime.split(" ");
-        const [hours, minutes] = time.split(":").map(Number);
-        let hour24 = hours;
-        if (period === "PM" && hours !== 12) hour24 += 12;
-        if (period === "AM" && hours === 12) hour24 = 0;
-        eventDate.setHours(hour24, minutes, 0, 0);
-      }
-      const deadline = new Date(eventDate.getTime() - 24 * 60 * 60 * 1000);
-      return deadline;
-    };
-
-    const deadline = getApplicationDeadline();
-    const now = new Date();
-    const isDeadlinePassed = deadline && now >= deadline;
-    const hoursUntilDeadline = deadline
-      ? Math.max(0, (deadline.getTime() - now.getTime()) / (1000 * 60 * 60))
-      : null;
-
     return (
       <View style={styles.tabContent}>
-        {/* Application Deadline Notice */}
-        {deadline && (
-          <View
-            style={[
-              styles.infoBox,
-              {
-                backgroundColor: isDeadlinePassed
-                  ? "#EF444420"
-                  : hoursUntilDeadline && hoursUntilDeadline < 48
-                    ? "#F59E0B20"
-                    : "#10B98120",
-                borderColor: isDeadlinePassed
-                  ? "#EF4444"
-                  : hoursUntilDeadline && hoursUntilDeadline < 48
-                    ? "#F59E0B"
-                    : "#10B981",
-                marginBottom: 16,
-              },
-            ]}
-          >
-            <Ionicons
-              name={isDeadlinePassed ? "close-circle" : "time"}
-              size={20}
-              color={
-                isDeadlinePassed
-                  ? "#EF4444"
-                  : hoursUntilDeadline && hoursUntilDeadline < 48
-                    ? "#F59E0B"
-                    : "#10B981"
-              }
-            />
-            <View style={{ flex: 1 }}>
-              <Text
-                style={[
-                  styles.infoText,
-                  { color: colors.text, fontFamily: "Poppins_600SemiBold" },
-                ]}
-              >
-                {isDeadlinePassed
-                  ? "Application Deadline Passed"
-                  : "Application Deadline"}
-              </Text>
-              <Text style={[styles.infoText, { color: colors.text }]}>
-                {isDeadlinePassed
-                  ? "This gig is no longer accepting applications."
-                  : `Apply by ${deadline.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} at ${deadline.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`}
-              </Text>
-              {!isDeadlinePassed &&
-                hoursUntilDeadline &&
-                hoursUntilDeadline < 48 && (
-                  <Text
-                    style={[
-                      styles.infoText,
-                      {
-                        color: "#F59E0B",
-                        fontFamily: "Poppins_600SemiBold",
-                        marginTop: 4,
-                      },
-                    ]}
-                  >
-                    ⏰ Only {Math.floor(hoursUntilDeadline)} hours left!
-                  </Text>
-                )}
-            </View>
-          </View>
-        )}
-
         {/* SPAM BLOCK WARNING */}
         {isBlocked && (
           <View
@@ -4231,7 +4140,7 @@ const ListingDetailsSheet = forwardRef<
             musicianTypeRequired === "group" || musicianTypeRequired === "both";
           const hasGroups = userGroups.length > 0;
 
-          // Show restriction message if user can't apply
+          // Show restriction message if user can't apply (group-only gig but no groups)
           if (!canApplyAsSolo && !hasGroups) {
             return (
               <View
@@ -4256,92 +4165,94 @@ const ListingDetailsSheet = forwardRef<
             );
           }
 
-          // Don't show selection if only one valid option and no groups
-          if (canApplyAsSolo && !canApplyAsGroup && !hasGroups) {
-            return null; // Will apply as individual by default
-          }
-
-          // Show type indicator if restricted
-          if (musicianTypeRequired !== "both" && !hasExistingApplication) {
+          // Show solo-only indicator
+          if (musicianTypeRequired === "solo") {
             return (
               <View style={styles.inputContainer}>
                 <Text style={[styles.label, { color: colors.textSecondary }]}>
                   Apply as
                 </Text>
-                {musicianTypeRequired === "solo" && (
-                  <View
-                    style={[
-                      styles.infoBox,
-                      {
-                        backgroundColor: colors.primary + "20",
-                        borderColor: colors.primary,
-                        marginBottom: 8,
-                      },
-                    ]}
-                  >
-                    <Ionicons name="person" size={16} color={colors.primary} />
-                    <Text style={[styles.infoText, { color: colors.text }]}>
-                      This gig is for{" "}
-                      <Text style={{ fontFamily: "Poppins_600SemiBold" }}>
-                        solo artists only
-                      </Text>
+                <View
+                  style={[
+                    styles.infoBox,
+                    {
+                      backgroundColor: colors.primary + "20",
+                      borderColor: colors.primary,
+                      marginBottom: 8,
+                    },
+                  ]}
+                >
+                  <Ionicons name="person" size={16} color={colors.primary} />
+                  <Text style={[styles.infoText, { color: colors.text }]}>
+                    This gig is for{" "}
+                    <Text style={{ fontFamily: "Poppins_600SemiBold" }}>
+                      solo artists only
                     </Text>
-                  </View>
-                )}
-                {musicianTypeRequired === "group" && hasGroups && (
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={{ marginBottom: 8 }}
-                  >
-                    {userGroups.map((g) => (
-                      <TouchableOpacity
-                        key={g.id}
-                        style={[
-                          styles.groupSelectChip,
-                          {
-                            backgroundColor:
-                              selectedGroupId === g.id
-                                ? colors.primary
-                                : isDark
-                                  ? "#374151"
-                                  : "#F3F4F6",
-                            borderColor:
-                              selectedGroupId === g.id
-                                ? colors.primary
-                                : colors.border,
-                            marginRight: 8,
-                          },
-                        ]}
-                        onPress={() => setSelectedGroupId(g.id)}
-                      >
-                        <Ionicons
-                          name="people"
-                          size={16}
-                          color={
-                            selectedGroupId === g.id ? "#FFF" : colors.text
-                          }
-                        />
-                        <Text
-                          style={{
-                            color:
-                              selectedGroupId === g.id ? "#FFF" : colors.text,
-                            marginLeft: 8,
-                            fontFamily: "Poppins_500Medium",
-                          }}
-                        >
-                          {g.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                )}
+                  </Text>
+                </View>
               </View>
             );
           }
 
-          // Show full selection (both options available)
-          if (hasGroups && !hasExistingApplication) {
+          // Show group-only selector (group required, user has groups)
+          if (musicianTypeRequired === "group" && hasGroups) {
+            return (
+              <View style={styles.inputContainer}>
+                <Text style={[styles.label, { color: colors.textSecondary }]}>
+                  Select Your Group *
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{ marginBottom: 8 }}
+                >
+                  {userGroups.map((g) => (
+                    <TouchableOpacity
+                      key={g.id}
+                      style={[
+                        styles.groupSelectChip,
+                        {
+                          backgroundColor:
+                            selectedGroupId === g.id
+                              ? colors.primary
+                              : isDark
+                                ? "#374151"
+                                : "#F3F4F6",
+                          borderColor:
+                            selectedGroupId === g.id
+                              ? colors.primary
+                              : colors.border,
+                          marginRight: 8,
+                        },
+                      ]}
+                      onPress={() => setSelectedGroupId(g.id)}
+                    >
+                      <Ionicons
+                        name="people"
+                        size={16}
+                        color={
+                          selectedGroupId === g.id ? "#FFF" : colors.text
+                        }
+                      />
+                      <Text
+                        style={{
+                          color:
+                            selectedGroupId === g.id ? "#FFF" : colors.text,
+                          marginLeft: 8,
+                          fontFamily: "Poppins_500Medium",
+                        }}
+                      >
+                        {g.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            );
+          }
+
+          // Show full selection (both options available) - always show if user has groups
+          if (hasGroups && canApplyAsGroup) {
             return (
               <View style={styles.inputContainer}>
                 <Text style={[styles.label, { color: colors.textSecondary }]}>
@@ -4352,39 +4263,41 @@ const ListingDetailsSheet = forwardRef<
                   showsHorizontalScrollIndicator={false}
                   style={{ marginBottom: 8 }}
                 >
-                  <TouchableOpacity
-                    style={[
-                      styles.groupSelectChip,
-                      {
-                        backgroundColor:
-                          selectedGroupId === null
-                            ? colors.primary
-                            : isDark
-                              ? "#374151"
-                              : "#F3F4F6",
-                        borderColor:
-                          selectedGroupId === null
-                            ? colors.primary
-                            : colors.border,
-                      },
-                    ]}
-                    onPress={() => setSelectedGroupId(null)}
-                  >
-                    <Ionicons
-                      name="person"
-                      size={16}
-                      color={selectedGroupId === null ? "#FFF" : colors.text}
-                    />
-                    <Text
-                      style={{
-                        color: selectedGroupId === null ? "#FFF" : colors.text,
-                        marginLeft: 8,
-                        fontFamily: "Poppins_500Medium",
-                      }}
+                  {canApplyAsSolo && (
+                    <TouchableOpacity
+                      style={[
+                        styles.groupSelectChip,
+                        {
+                          backgroundColor:
+                            selectedGroupId === null
+                              ? colors.primary
+                              : isDark
+                                ? "#374151"
+                                : "#F3F4F6",
+                          borderColor:
+                            selectedGroupId === null
+                              ? colors.primary
+                              : colors.border,
+                        },
+                      ]}
+                      onPress={() => setSelectedGroupId(null)}
                     >
-                      Individual
-                    </Text>
-                  </TouchableOpacity>
+                      <Ionicons
+                        name="person"
+                        size={16}
+                        color={selectedGroupId === null ? "#FFF" : colors.text}
+                      />
+                      <Text
+                        style={{
+                          color: selectedGroupId === null ? "#FFF" : colors.text,
+                          marginLeft: 8,
+                          fontFamily: "Poppins_500Medium",
+                        }}
+                      >
+                        Individual
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                   {userGroups.map((g) => (
                     <TouchableOpacity
                       key={g.id}
@@ -4625,13 +4538,13 @@ const ListingDetailsSheet = forwardRef<
                 ? existingApplicationStatus === "rejected"
                   ? "Application Declined"
                   : existingApplicationStatus === "accepted" ||
-                      existingApplicationStatus === "approved"
+                    existingApplicationStatus === "approved"
                     ? "Application Accepted"
                     : "Already Applied"
                 : groupAlreadyApplied
                   ? "Group Already Applied"
                   : group.requirements?.musician_type === "group" &&
-                      !selectedGroupId
+                    !selectedGroupId
                     ? "Select a Group to Apply"
                     : "Submit Application"}
             </Text>
@@ -5497,72 +5410,72 @@ const ListingDetailsSheet = forwardRef<
               {(group.type === "Group" ||
                 group.type === "Artist" ||
                 !group.type) && (
-                <>
-                  {(activeTab === "About" || !showTabs) && renderGroupAbout()}
-                  {activeTab === "Timeline" && renderGroupTimeline()}
-                  {activeTab === "Review" && renderReviews()}
-                </>
-              )}
+                  <>
+                    {(activeTab === "About" || !showTabs) && renderGroupAbout()}
+                    {activeTab === "Timeline" && renderGroupTimeline()}
+                    {activeTab === "Review" && renderReviews()}
+                  </>
+                )}
 
               {/* Existing Tabs for Studio/Gig */}
               {(group.type === "Studio" ||
                 group.type === "Gig" ||
                 group.type === "Venue") && (
-                <>
-                  {activeTab === "About" && (
-                    <View style={styles.tabContent}>
-                      {/* Stats Row (Gig) */}
-                      {group.type === "Gig" && (
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            gap: 12,
-                            marginBottom: 24,
-                          }}
-                        >
+                  <>
+                    {activeTab === "About" && (
+                      <View style={styles.tabContent}>
+                        {/* Stats Row (Gig) */}
+                        {group.type === "Gig" && (
                           <View
-                            style={[
-                              styles.statCard,
-                              {
-                                backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                              },
-                            ]}
+                            style={{
+                              flexDirection: "row",
+                              gap: 12,
+                              marginBottom: 24,
+                            }}
                           >
-                            <Text
+                            <View
                               style={[
-                                styles.statLabel,
-                                { color: colors.textSecondary },
+                                styles.statCard,
+                                {
+                                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                                },
                               ]}
                             >
-                              Budget
-                            </Text>
-                            <Text
-                              style={[styles.statValue, { color: colors.text }]}
-                            >
-                              ₱{group.budget || "5,000"}
-                            </Text>
-                          </View>
-                          <View
-                            style={[
-                              styles.statCard,
-                              {
-                                backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                              },
-                            ]}
-                          >
-                            <Text
+                              <Text
+                                style={[
+                                  styles.statLabel,
+                                  { color: colors.textSecondary },
+                                ]}
+                              >
+                                Budget
+                              </Text>
+                              <Text
+                                style={[styles.statValue, { color: colors.text }]}
+                              >
+                                ₱{group.budget || "5,000"}
+                              </Text>
+                            </View>
+                            <View
                               style={[
-                                styles.statLabel,
-                                { color: colors.textSecondary },
+                                styles.statCard,
+                                {
+                                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                                },
                               ]}
                             >
-                              Event Date
-                            </Text>
-                            <Text
-                              style={[styles.statValue, { color: colors.text }]}
-                            >
-                              {group.event_date
-                                ? new Date(group.event_date).toLocaleDateString(
+                              <Text
+                                style={[
+                                  styles.statLabel,
+                                  { color: colors.textSecondary },
+                                ]}
+                              >
+                                Event Date
+                              </Text>
+                              <Text
+                                style={[styles.statValue, { color: colors.text }]}
+                              >
+                                {group.event_date
+                                  ? new Date(group.event_date).toLocaleDateString(
                                     undefined,
                                     {
                                       weekday: "short",
@@ -5571,424 +5484,424 @@ const ListingDetailsSheet = forwardRef<
                                       year: "numeric",
                                     },
                                   )
-                                : "TBA"}
-                            </Text>
+                                  : "TBA"}
+                              </Text>
+                            </View>
                           </View>
-                        </View>
-                      )}
+                        )}
 
-                      {/* Stats Row (Studio/Venue) */}
-                      {(group.type === "Studio" || group.type === "Venue") && (
+                        {/* Stats Row (Studio/Venue) */}
+                        {(group.type === "Studio" || group.type === "Venue") && (
+                          <View
+                            style={{
+                              flexDirection: "column",
+                              gap: 12,
+                              marginBottom: 24,
+                            }}
+                          >
+                            {/* Pricing Row */}
+                            <View style={{ flexDirection: "row", gap: 12 }}>
+                              {hasDualPricing ? (
+                                <>
+                                  <View
+                                    style={[
+                                      styles.statCard,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "#F3F4F6",
+                                        flex: 1,
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.statLabel,
+                                        { color: colors.textSecondary },
+                                      ]}
+                                    >
+                                      Rehearsal Rate
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.statValue,
+                                        { color: colors.text },
+                                      ]}
+                                    >{`₱${rehearsalRate}/hr`}</Text>
+                                  </View>
+                                  <View
+                                    style={[
+                                      styles.statCard,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "#F3F4F6",
+                                        flex: 1,
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.statLabel,
+                                        { color: colors.textSecondary },
+                                      ]}
+                                    >
+                                      Recording Rate
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.statValue,
+                                        { color: colors.text },
+                                      ]}
+                                    >{`₱${recordingRate}/song`}</Text>
+                                  </View>
+                                </>
+                              ) : (
+                                <View
+                                  style={[
+                                    styles.statCard,
+                                    {
+                                      backgroundColor: isDark
+                                        ? "#1F2937"
+                                        : "#F3F4F6",
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.statLabel,
+                                      { color: colors.textSecondary },
+                                    ]}
+                                  >
+                                    {recordingRate && !rehearsalRate
+                                      ? "Recording Rate"
+                                      : rehearsalRate && !recordingRate
+                                        ? "Rehearsal Rate"
+                                        : "Hourly Rate"}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.statValue,
+                                      { color: colors.text },
+                                    ]}
+                                  >
+                                    {recordingRate && !rehearsalRate
+                                      ? `₱${recordingRate}/song`
+                                      : `₱${displayRate}/hr`}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            {/* Stats Row */}
+                            <View style={{ flexDirection: "row", gap: 12 }}>
+                              <View
+                                style={[
+                                  styles.statCard,
+                                  {
+                                    backgroundColor: isDark
+                                      ? "#1F2937"
+                                      : "#F3F4F6",
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.statLabel,
+                                    { color: colors.textSecondary },
+                                  ]}
+                                >
+                                  Rating
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.statValue,
+                                    { color: colors.text },
+                                  ]}
+                                >
+                                  {group.rating ? group.rating.toFixed(1) : "-"}
+                                </Text>
+                              </View>
+                              <View
+                                style={[
+                                  styles.statCard,
+                                  {
+                                    backgroundColor: isDark
+                                      ? "#1F2937"
+                                      : "#F3F4F6",
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.statLabel,
+                                    { color: colors.textSecondary },
+                                  ]}
+                                >
+                                  Completion
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.statValue,
+                                    { color: colors.text },
+                                  ]}
+                                >
+                                  {group.completion_rate !== undefined
+                                    ? `${group.completion_rate}%`
+                                    : "--"}
+                                </Text>
+                              </View>
+                              {group.type === "Studio" && group.studio_type && (
+                                <View
+                                  style={[
+                                    styles.statCard,
+                                    {
+                                      backgroundColor: isDark
+                                        ? "#1F2937"
+                                        : "#F3F4F6",
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.statLabel,
+                                      { color: colors.textSecondary },
+                                    ]}
+                                  >
+                                    Type
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.statValue,
+                                      { color: colors.text },
+                                    ]}
+                                  >
+                                    {group.studio_type === "Both"
+                                      ? "Rehearsal & Recording"
+                                      : group.studio_type}
+                                  </Text>
+                                </View>
+                              )}
+                              {group.type === "Studio" && group.pax && (
+                                <View
+                                  style={[
+                                    styles.statCard,
+                                    {
+                                      backgroundColor: isDark
+                                        ? "#1F2937"
+                                        : "#F3F4F6",
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.statLabel,
+                                      { color: colors.textSecondary },
+                                    ]}
+                                  >
+                                    Capacity
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.statValue,
+                                      { color: colors.text },
+                                    ]}
+                                  >
+                                    {group.pax} pax
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        )}
+
+                        {/* Description */}
+                        <View style={styles.section}>
+                          <Text
+                            style={[styles.sectionTitle, { color: colors.text }]}
+                          >
+                            {labels.aboutTitle}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.description,
+                              { color: colors.textSecondary },
+                            ]}
+                          >
+                            {group.description || "No description provided."}
+                          </Text>
+                        </View>
+
+                        {/* Managed By & Completion Rate (Shared-like Component) */}
                         <View
-                          style={{
-                            flexDirection: "column",
-                            gap: 12,
-                            marginBottom: 24,
-                          }}
-                        >
-                          {/* Pricing Row */}
-                          <View style={{ flexDirection: "row", gap: 12 }}>
-                            {hasDualPricing ? (
-                              <>
-                                <View
-                                  style={[
-                                    styles.statCard,
-                                    {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "#F3F4F6",
-                                      flex: 1,
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.statLabel,
-                                      { color: colors.textSecondary },
-                                    ]}
-                                  >
-                                    Rehearsal Rate
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.statValue,
-                                      { color: colors.text },
-                                    ]}
-                                  >{`₱${rehearsalRate}/hr`}</Text>
-                                </View>
-                                <View
-                                  style={[
-                                    styles.statCard,
-                                    {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "#F3F4F6",
-                                      flex: 1,
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.statLabel,
-                                      { color: colors.textSecondary },
-                                    ]}
-                                  >
-                                    Recording Rate
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.statValue,
-                                      { color: colors.text },
-                                    ]}
-                                  >{`₱${recordingRate}/song`}</Text>
-                                </View>
-                              </>
-                            ) : (
-                              <View
-                                style={[
-                                  styles.statCard,
-                                  {
-                                    backgroundColor: isDark
-                                      ? "#1F2937"
-                                      : "#F3F4F6",
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.statLabel,
-                                    { color: colors.textSecondary },
-                                  ]}
-                                >
-                                  {recordingRate && !rehearsalRate
-                                    ? "Recording Rate"
-                                    : rehearsalRate && !recordingRate
-                                      ? "Rehearsal Rate"
-                                      : "Hourly Rate"}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.statValue,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {recordingRate && !rehearsalRate
-                                    ? `₱${recordingRate}/song`
-                                    : `₱${displayRate}/hr`}
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                          {/* Stats Row */}
-                          <View style={{ flexDirection: "row", gap: 12 }}>
-                            <View
-                              style={[
-                                styles.statCard,
-                                {
-                                  backgroundColor: isDark
-                                    ? "#1F2937"
-                                    : "#F3F4F6",
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.statLabel,
-                                  { color: colors.textSecondary },
-                                ]}
-                              >
-                                Rating
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.statValue,
-                                  { color: colors.text },
-                                ]}
-                              >
-                                {group.rating ? group.rating.toFixed(1) : "-"}
-                              </Text>
-                            </View>
-                            <View
-                              style={[
-                                styles.statCard,
-                                {
-                                  backgroundColor: isDark
-                                    ? "#1F2937"
-                                    : "#F3F4F6",
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.statLabel,
-                                  { color: colors.textSecondary },
-                                ]}
-                              >
-                                Completion
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.statValue,
-                                  { color: colors.text },
-                                ]}
-                              >
-                                {group.completion_rate !== undefined
-                                  ? `${group.completion_rate}%`
-                                  : "--"}
-                              </Text>
-                            </View>
-                            {group.type === "Studio" && group.studio_type && (
-                              <View
-                                style={[
-                                  styles.statCard,
-                                  {
-                                    backgroundColor: isDark
-                                      ? "#1F2937"
-                                      : "#F3F4F6",
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.statLabel,
-                                    { color: colors.textSecondary },
-                                  ]}
-                                >
-                                  Type
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.statValue,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {group.studio_type === "Both"
-                                    ? "Rehearsal & Recording"
-                                    : group.studio_type}
-                                </Text>
-                              </View>
-                            )}
-                            {group.type === "Studio" && group.pax && (
-                              <View
-                                style={[
-                                  styles.statCard,
-                                  {
-                                    backgroundColor: isDark
-                                      ? "#1F2937"
-                                      : "#F3F4F6",
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.statLabel,
-                                    { color: colors.textSecondary },
-                                  ]}
-                                >
-                                  Capacity
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.statValue,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {group.pax} pax
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                        </View>
-                      )}
-
-                      {/* Description */}
-                      <View style={styles.section}>
-                        <Text
-                          style={[styles.sectionTitle, { color: colors.text }]}
-                        >
-                          {labels.aboutTitle}
-                        </Text>
-                        <Text
                           style={[
-                            styles.description,
-                            { color: colors.textSecondary },
+                            styles.managerCard,
+                            {
+                              backgroundColor: colors.surface,
+                              borderColor: colors.border,
+                              borderWidth: 1,
+                              marginBottom: 24,
+                            },
                           ]}
                         >
-                          {group.description || "No description provided."}
-                        </Text>
-                      </View>
-
-                      {/* Managed By & Completion Rate (Shared-like Component) */}
-                      <View
-                        style={[
-                          styles.managerCard,
-                          {
-                            backgroundColor: colors.surface,
-                            borderColor: colors.border,
-                            borderWidth: 1,
-                            marginBottom: 24,
-                          },
-                        ]}
-                      >
-                        <View style={{ marginBottom: 16 }}>
-                          <View
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              gap: 12,
-                            }}
-                          >
-                            <Image
-                              source={{ uri: group.owner_avatar || undefined }}
-                              style={[
-                                styles.hostAvatar,
-                                { backgroundColor: colors.border },
-                              ]}
-                            />
-                            <View>
-                              <Text
-                                style={[
-                                  styles.managerLabel,
-                                  { color: colors.textSecondary },
-                                ]}
-                              >
-                                {group.type === "Gig"
-                                  ? "Organized by"
-                                  : "Managed by"}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.managerName,
-                                  { color: colors.text },
-                                ]}
-                              >
-                                {group.owner_name || "Unknown User"}
-                              </Text>
-                            </View>
-                          </View>
-
-                          {/* Completion Rate Indicator - Unified */}
-                          <View
-                            style={{
-                              marginTop: 12,
-                              flexDirection: "row",
-                              alignItems: "center",
-                              gap: 8,
-                            }}
-                          >
+                          <View style={{ marginBottom: 16 }}>
                             <View
                               style={{
-                                flex: 1,
-                                height: 6,
-                                backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                                borderRadius: 3,
-                                overflow: "hidden",
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 12,
+                              }}
+                            >
+                              <Image
+                                source={{ uri: group.owner_avatar || undefined }}
+                                style={[
+                                  styles.hostAvatar,
+                                  { backgroundColor: colors.border },
+                                ]}
+                              />
+                              <View>
+                                <Text
+                                  style={[
+                                    styles.managerLabel,
+                                    { color: colors.textSecondary },
+                                  ]}
+                                >
+                                  {group.type === "Gig"
+                                    ? "Organized by"
+                                    : "Managed by"}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.managerName,
+                                    { color: colors.text },
+                                  ]}
+                                >
+                                  {group.owner_name || "Unknown User"}
+                                </Text>
+                              </View>
+                            </View>
+
+                            {/* Completion Rate Indicator - Unified */}
+                            <View
+                              style={{
+                                marginTop: 12,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 8,
                               }}
                             >
                               <View
                                 style={{
-                                  width: `${group.completion_rate !== undefined ? group.completion_rate : calculateCompletion()}%`,
-                                  height: "100%",
-                                  backgroundColor:
+                                  flex: 1,
+                                  height: 6,
+                                  backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                                  borderRadius: 3,
+                                  overflow: "hidden",
+                                }}
+                              >
+                                <View
+                                  style={{
+                                    width: `${group.completion_rate !== undefined ? group.completion_rate : calculateCompletion()}%`,
+                                    height: "100%",
+                                    backgroundColor:
+                                      (group.completion_rate !== undefined
+                                        ? group.completion_rate
+                                        : calculateCompletion()) >= 90
+                                        ? "#10B981"
+                                        : colors.primary,
+                                  }}
+                                />
+                              </View>
+                              <Text
+                                style={{
+                                  fontSize: 11,
+                                  fontFamily: "Poppins_600SemiBold",
+                                  color:
                                     (group.completion_rate !== undefined
                                       ? group.completion_rate
                                       : calculateCompletion()) >= 90
                                       ? "#10B981"
-                                      : colors.primary,
+                                      : colors.textSecondary,
                                 }}
-                              />
+                              >
+                                {`${group.completion_rate !== undefined ? group.completion_rate : calculateCompletion()}% Complete`}
+                              </Text>
                             </View>
+                          </View>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.visitBtn,
+                              { borderColor: colors.primary },
+                            ]}
+                            onPress={handleProfileNavigation}
+                          >
                             <Text
                               style={{
-                                fontSize: 11,
+                                color: colors.primary,
+                                fontSize: 12,
                                 fontFamily: "Poppins_600SemiBold",
-                                color:
-                                  (group.completion_rate !== undefined
-                                    ? group.completion_rate
-                                    : calculateCompletion()) >= 90
-                                    ? "#10B981"
-                                    : colors.textSecondary,
                               }}
                             >
-                              {`${group.completion_rate !== undefined ? group.completion_rate : calculateCompletion()}% Complete`}
+                              {group.owner_id === currentUserId
+                                ? "Manage Profile"
+                                : "Visit Profile"}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* Deal Card (Gig) */}
+                        {group.type === "Gig" && (
+                          <View
+                            style={[
+                              styles.dealCard,
+                              {
+                                backgroundColor: isDark ? "#1e293b" : "#ECFDF5",
+                                borderColor: isDark ? "#064e3b" : "#10B981",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={{
+                                fontFamily: "Poppins_600SemiBold",
+                                color: isDark ? "#6ee7b7" : "#047857",
+                                marginBottom: 8,
+                              }}
+                            >
+                              The Deal
+                            </Text>
+                            <Text
+                              style={{
+                                fontFamily: "Poppins_500Medium",
+                                color: isDark ? "#d1fae5" : "#065F46",
+                              }}
+                            >
+                              Guarantee + Door Split
+                            </Text>
+                            <Text
+                              style={{
+                                fontFamily: "Poppins_400Regular",
+                                color: isDark ? "#d1fae5" : "#065F46",
+                                fontSize: 13,
+                                marginTop: 4,
+                              }}
+                            >
+                              45 min set • Meal Included
                             </Text>
                           </View>
-                        </View>
+                        )}
 
-                        <TouchableOpacity
-                          style={[
-                            styles.visitBtn,
-                            { borderColor: colors.primary },
-                          ]}
-                          onPress={handleProfileNavigation}
-                        >
-                          <Text
-                            style={{
-                              color: colors.primary,
-                              fontSize: 12,
-                              fontFamily: "Poppins_600SemiBold",
-                            }}
-                          >
-                            {group.owner_id === currentUserId
-                              ? "Manage Profile"
-                              : "Visit Profile"}
-                          </Text>
-                        </TouchableOpacity>
+                        {/* Gallery */}
+                        <View style={{ marginTop: 24 }}>{renderGallery()}</View>
                       </View>
-
-                      {/* Deal Card (Gig) */}
-                      {group.type === "Gig" && (
-                        <View
-                          style={[
-                            styles.dealCard,
-                            {
-                              backgroundColor: isDark ? "#1e293b" : "#ECFDF5",
-                              borderColor: isDark ? "#064e3b" : "#10B981",
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_600SemiBold",
-                              color: isDark ? "#6ee7b7" : "#047857",
-                              marginBottom: 8,
-                            }}
-                          >
-                            The Deal
-                          </Text>
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_500Medium",
-                              color: isDark ? "#d1fae5" : "#065F46",
-                            }}
-                          >
-                            Guarantee + Door Split
-                          </Text>
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_400Regular",
-                              color: isDark ? "#d1fae5" : "#065F46",
-                              fontSize: 13,
-                              marginTop: 4,
-                            }}
-                          >
-                            45 min set • Meal Included
-                          </Text>
-                        </View>
-                      )}
-
-                      {/* Gallery */}
-                      <View style={{ marginTop: 24 }}>{renderGallery()}</View>
-                    </View>
-                  )}
-                  {activeTab === "Setup" && renderStudioSetup()}
-                  {activeTab === "Specs" && renderStudioSetup()}
-                  {activeTab === "Book" && renderStudioBook()}
-                  {activeTab === "Info" && renderGigInfo()}
-                  {activeTab === "Apply" && renderGigApply()}
-                  {activeTab === "Review" && renderReviews()}
-                </>
-              )}
+                    )}
+                    {activeTab === "Setup" && renderStudioSetup()}
+                    {activeTab === "Specs" && renderStudioSetup()}
+                    {activeTab === "Book" && renderStudioBook()}
+                    {activeTab === "Info" && renderGigInfo()}
+                    {activeTab === "Apply" && renderGigApply()}
+                    {activeTab === "Review" && renderReviews()}
+                  </>
+                )}
             </View>
 
             {/* Bottom Bar for GROUP/Default only - Tabs have their own CTAs */}
@@ -6306,8 +6219,8 @@ const ListingDetailsSheet = forwardRef<
                     Pay ₱
                     {selectedPaymentType === "downpayment"
                       ? Math.round(
-                          (paymentBookingData?.totalAmount || 0) / 2,
-                        ).toLocaleString()
+                        (paymentBookingData?.totalAmount || 0) / 2,
+                      ).toLocaleString()
                       : (paymentBookingData?.totalAmount || 0).toLocaleString()}
                   </Text>
                 </TouchableOpacity>

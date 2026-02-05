@@ -139,12 +139,12 @@ serve(async (req) => {
             const entityType = parts[1]; // 'studio' or 'gig'
             const entityId = parts[2];
             const userId = parts[3];
-            
+
             console.log('Address verification details:', { entityType, entityId, userId, status });
-            
+
             // Handle address verification
             await handleAddressVerification(supabaseAdmin, sessionId, entityType, entityId, userId, status, decision, payload);
-            
+
             return new Response(JSON.stringify({ received: true, type: 'address_verification' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
@@ -334,38 +334,49 @@ serve(async (req) => {
                 isDuplicateOfApprovedAccount
             });
 
-            // Handle different decision statuses
-            switch (faceMatchStatus) {
-                case 'Approved':
-                    await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId);
-                    break;
+            const idStatus = idVerification?.status;
+            const faceStatus = faceMatch?.status || (idStatus === 'Approved' ? 'Approved' : undefined); // Fallback for face if ID is good (for doc-only flows)
 
-                case 'Declined':
-                    // Only delete account if this is a duplicate of an ALREADY APPROVED account
-                    // (someone trying to create a new account with same ID/face)
-                    // Regular declines (expired ID, different ID type retry, etc.) just allow retry
-                    if (isDuplicateOfApprovedAccount) {
-                        await handleDuplicateDetected(supabaseAdmin, finalUserReference, userEmail, allWarnings);
-                    } else {
-                        // Normal decline - user can retry with same account (different ID, better photo, etc.)
-                        await handleDeclined(supabaseAdmin, finalUserReference);
-                    }
-                    break;
+            console.log('Consolidated Verification Status:', { idStatus, faceStatus, faceMatchRaw: faceMatch?.status });
 
-                case 'Abandoned':
+            // 1. DECLINED: If EITHER is declined, the whole verification is declined.
+            if (faceStatus === 'Declined' || idStatus === 'Declined') {
+                console.log('Status is DECLINED (ID or Face)');
+                if (isDuplicateOfApprovedAccount) {
+                    await handleDuplicateDetected(supabaseAdmin, finalUserReference, userEmail, allWarnings);
+                } else {
+                    // This guarantees NO EMAIL is sent
+                    await handleDeclined(supabaseAdmin, finalUserReference, sessionId);
+                }
+            }
+            // 2. ABANDONED: If either is abandoned (and not declined)
+            else if (faceStatus === 'Abandoned' || idStatus === 'Abandoned') {
+                console.log('Status is ABANDONED');
+                await handleAbandoned(supabaseAdmin, finalUserReference, sessionId);
+            }
+            // 3. IN REVIEW: If manual review is required
+            else if (faceStatus === 'In Review' || idStatus === 'In Review' || faceStatus === 'Pending Review' || idStatus === 'Pending Review') {
+                console.log('Status is IN REVIEW');
+                await handleInReview(supabaseAdmin, finalUserReference, sessionId);
+            }
+            // 4. APPROVED: Both must be effectively approved
+            else if (idStatus === 'Approved' && (faceStatus === 'Approved' || !faceMatch)) {
+                console.log('Status is APPROVED');
+                await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
+            }
+            // 5. UNKNOWN / FALLBACK
+            else {
+                console.warn('Unhandled Status Combination:', { idStatus, faceStatus });
+                // Default to abandoned/incomplete rather than accidental approval
+                // But if ID is approved and Face is missing (and not required/declined?), maybe approve?
+                // The priority logic above handles the specific 'Declined' cases, so this is just safety.
+                if (idStatus === 'Approved') {
+                    console.log('ID Approved but Face execution unclear - Approving with caution.');
+                    await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId, 'APPROVED');
+                } else {
+                    console.log('Unknown status - Treating as abandoned/retryable');
                     await handleAbandoned(supabaseAdmin, finalUserReference);
-                    break;
-
-                case 'In Review':
-                    await handleInReview(supabaseAdmin, finalUserReference);
-                    break;
-
-                default:
-                    console.log('Unknown face match status:', faceMatchStatus);
-                    // Check if there's an overall approval despite unknown face status
-                    if (idVerification?.status === 'Approved') {
-                        await handleApproved(supabaseAdmin, finalUserReference, userEmail, idVerification, authUser, sessionId);
-                    }
+                }
             }
         }
 
@@ -606,12 +617,32 @@ async function handleApproved(
     userEmail: string | undefined,
     idVerification: any,
     authUser: any,
-    sessionId: string | null
+    sessionId: string | null,
+    finalDecision: 'APPROVED' | 'DECLINED' | 'REVIEW' | 'ABANDONED' // New explicit decision
 ) {
+    // FINAL SAFETY CHECK: Strict Whitelist for Email
+    // Only 'APPROVED' triggers an email. 'REVIEW', 'DECLINED', etc. do NOT.
+    if (finalDecision !== 'APPROVED') {
+        console.warn(`handleApproved called with decision '${finalDecision}'. BLOCKING EMAIL.`);
+        return;
+    }
+
+    // REDUNDANT SAFETY CHECK: Ensure we are not accidentally approving a decline
+    if (idVerification?.status === 'Declined' || idVerification?.status === 'Rejected') {
+        console.error('CRITICAL: handleApproved called but ID Status is DECLINED. Aborting.');
+        return;
+    }
+
     // Extract ID document data directly from idVerification object
     const firstName = idVerification?.first_name || '';
+    // Check for middle names or second surnames often found in extra_fields
+    const middleName = idVerification?.extra_fields?.middle_name || idVerification?.middle_name || '';
     const lastName = idVerification?.last_name || idVerification?.extra_fields?.first_surname || '';
-    const fullName = firstName && lastName ? `${firstName} ${lastName}` : (firstName || lastName || '');
+    const secondSurname = idVerification?.extra_fields?.second_surname || '';
+
+    // Construct Full Name intelligently
+    const nameParts = [firstName, middleName, lastName, secondSurname].filter(Boolean);
+    const fullName = nameParts.length > 0 ? nameParts.join(' ') : '';
 
     const documentExpiry = idVerification?.expiration_date || null;
 
@@ -636,7 +667,9 @@ async function handleApproved(
                 verification_data: {
                     full_name: fullName,
                     first_name: firstName,
+                    middle_name: middleName,
                     last_name: lastName,
+                    raw_data: idVerification, // Store the FULL raw object for safety
                     id_document_expiry: documentExpiry,
                     id_verified_at: new Date().toISOString(),
                     user_ref: userReference, // Store the user ID reference inside data
@@ -763,77 +796,122 @@ async function handleApproved(
  * Handle DECLINED verification - allow retry
  * Don't store any profile details, just mark as declined
  */
-async function handleDeclined(supabaseAdmin: any, userReference: string) {
+async function handleDeclined(supabaseAdmin: any, userReference: string, sessionId: string | null) {
     console.log('Verification declined for user:', userReference);
 
-    // Update status to allow retry - don't store any profile details
-    await supabaseAdmin
-        .from('profiles')
-        .update({
-            is_verified: false,
-            verification_status: 'DECLINED',
-            // Clear any partial data
-            full_name: null,
-            // Clear session to allow new verification attempt
-            didit_session_id: null,
-        })
-        .eq('id', userReference);
+    // ALWAYS store status in verification_sessions for frontend polling
+    if (sessionId) {
+        await supabaseAdmin
+            .from('verification_sessions')
+            .upsert({
+                session_ref: sessionId,
+                status: 'DECLINED',
+                verification_data: {
+                    user_ref: userReference,
+                    declined_at: new Date().toISOString()
+                }
+            });
+        console.log('Stored DECLINED status in verification_sessions');
+    }
 
-    // Don't insert notification - user will see status when they return to the app
-    console.log('Declined - no notification inserted, user will retry from app');
+    // Only update profiles if it's a real user (not TEMP_)
+    if (!userReference.startsWith('TEMP_')) {
+        await supabaseAdmin
+            .from('profiles')
+            .update({
+                is_verified: false,
+                verification_status: 'DECLINED',
+                full_name: null,
+                didit_session_id: null,
+            })
+            .eq('id', userReference);
+    }
+
+    console.log('Declined - no email sent, user will retry from app');
 }
 
 /**
  * Handle ABANDONED verification - user didn't complete, allow retry
  * Don't store any profile details, just mark as abandoned
  */
-async function handleAbandoned(supabaseAdmin: any, userReference: string) {
+async function handleAbandoned(supabaseAdmin: any, userReference: string, sessionId: string | null) {
     console.log('Verification abandoned for user:', userReference);
 
-    // Update status to allow retry - don't store any profile details
-    await supabaseAdmin
-        .from('profiles')
-        .update({
-            is_verified: false,
-            verification_status: 'ABANDONED',
-            // Clear any partial data
-            full_name: null,
-            // Clear session to allow new verification attempt
-            didit_session_id: null,
-        })
-        .eq('id', userReference);
+    // ALWAYS store status in verification_sessions for frontend polling
+    if (sessionId) {
+        await supabaseAdmin
+            .from('verification_sessions')
+            .upsert({
+                session_ref: sessionId,
+                status: 'ABANDONED',
+                verification_data: {
+                    user_ref: userReference,
+                    abandoned_at: new Date().toISOString()
+                }
+            });
+        console.log('Stored ABANDONED status in verification_sessions');
+    }
 
-    // Don't insert notification - user will see status when they return to the app
-    console.log('Abandoned - no notification inserted, user will retry from app');
+    // Only update profiles if it's a real user (not TEMP_)
+    if (!userReference.startsWith('TEMP_')) {
+        await supabaseAdmin
+            .from('profiles')
+            .update({
+                is_verified: false,
+                verification_status: 'ABANDONED',
+                full_name: null,
+                didit_session_id: null,
+            })
+            .eq('id', userReference);
+    }
+
+    console.log('Abandoned - no email sent, user will retry from app');
 }
 
 /**
  * Handle IN REVIEW - manual review needed, block new attempts
  * Don't store profile details yet - wait for manual review result
  */
-async function handleInReview(supabaseAdmin: any, userReference: string) {
+async function handleInReview(supabaseAdmin: any, userReference: string, sessionId: string | null) {
     console.log('Verification in review for user:', userReference);
 
-    // Don't store profile details yet - wait for manual review result
-    await supabaseAdmin
-        .from('profiles')
-        .update({
-            is_verified: false,
-            verification_status: 'PENDING_REVIEW',
-            // Keep session ID - user cannot start new session until review complete
-            // Don't clear profile data - review might approve it
-        })
-        .eq('id', userReference);
+    // ALWAYS store status in verification_sessions for frontend polling
+    if (sessionId) {
+        await supabaseAdmin
+            .from('verification_sessions')
+            .upsert({
+                session_ref: sessionId,
+                status: 'PENDING_REVIEW',
+                verification_data: {
+                    user_ref: userReference,
+                    review_started_at: new Date().toISOString()
+                }
+            });
+        console.log('Stored PENDING_REVIEW status in verification_sessions');
+    }
 
-    // Send notification - user should wait, not retry
-    await supabaseAdmin
-        .from('notifications')
-        .insert({
-            user_id: userReference,
-            type: 'info',
-            title: 'Manual Review in Progress',
-            message: 'Your verification requires manual review. Please wait - this usually takes 1-2 business days. We\'ll notify you once complete. Do not attempt to register again.',
-        });
+    // Only update profiles if it's a real user (not TEMP_)
+    if (!userReference.startsWith('TEMP_')) {
+        await supabaseAdmin
+            .from('profiles')
+            .update({
+                is_verified: false,
+                verification_status: 'PENDING_REVIEW',
+            })
+            .eq('id', userReference);
+
+        // Send notification only for real users
+        await supabaseAdmin
+            .from('notifications')
+            .insert({
+                user_id: userReference,
+                type: 'info',
+                title: 'Manual Review in Progress',
+                message: 'Your verification requires manual review. Please wait - this usually takes 1-2 business days.',
+            });
+    }
+
+    console.log('In Review - no email sent, user will be notified of review result');
 }
 
 /**
@@ -936,7 +1014,7 @@ async function handleAddressVerification(
     // Based on Didit docs, POA data is in decision.poa or decision.proof_of_addresses
     const poaData = decision?.proof_of_addresses?.[0] || decision?.poa?.[0] || {};
     const poaStatus = poaData?.status || status;
-    
+
     // Extract address info from POA
     const extractedData = poaData?.extracted_data || poaData?.ocr_data || {};
     const extractedAddress = extractedData?.address || extractedData?.full_address || '';
@@ -1057,14 +1135,14 @@ async function handleAddressVerification(
  */
 function compareNames(name1: string, name2: string): boolean {
     if (!name1 || !name2) return false;
-    
+
     const normalize = (n: string) => n.toLowerCase().replace(/[^a-z]/g, '');
     const n1 = normalize(name1);
     const n2 = normalize(name2);
-    
+
     // Check containment
     if (n1.includes(n2) || n2.includes(n1)) return true;
-    
+
     // Check if at least 70% similar
     return calculateStringSimilarity(n1, n2) > 0.7;
 }
@@ -1074,14 +1152,14 @@ function compareNames(name1: string, name2: string): boolean {
  */
 function compareAddresses(addr1: string, addr2: string): boolean {
     if (!addr1 || !addr2) return false;
-    
+
     const normalize = (a: string) => a.toLowerCase().replace(/[^a-z0-9]/g, '');
     const a1 = normalize(addr1);
     const a2 = normalize(addr2);
-    
+
     // Check containment
     if (a1.includes(a2) || a2.includes(a1)) return true;
-    
+
     // Check if at least 60% similar (addresses can vary in format)
     return calculateStringSimilarity(a1, a2) > 0.6;
 }
@@ -1105,14 +1183,14 @@ function isWithinDays(dateStr: string, days: number): boolean {
  */
 function isValidUtilityIssuer(issuer: string): boolean {
     if (!issuer) return true; // Don't fail if issuer not detected
-    
+
     const validIssuers = [
-        'meralco', 'manila water', 'maynilad', 'pldt', 'globe', 
+        'meralco', 'manila water', 'maynilad', 'pldt', 'globe',
         'smart', 'converge', 'sky', 'cignal', 'home credit',
         'bpi', 'bdo', 'metrobank', 'security bank', 'pnb',
         'landbank', 'unionbank', 'eastwest', 'rcbc', 'chinabank'
     ];
-    
+
     const normalizedIssuer = issuer.toLowerCase();
     return validIssuers.some(v => normalizedIssuer.includes(v));
 }

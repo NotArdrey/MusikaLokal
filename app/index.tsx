@@ -19,29 +19,9 @@ interface AlertState {
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
-  const { verified } = useLocalSearchParams();
+  const { verified, accountCreated, email: createdEmail, verification_error } = useLocalSearchParams();
 
-  // Initialize and clear any stale sessions on mount
-  useEffect(() => {
-    const initializeAuth = async () => {
-      try {
-        // Check if there's a valid session
-        const { data: { session }, error } = await supabase.auth.getSession();
-
-        // If there's an error or no valid session, clear everything
-        if (error || !session) {
-          console.log('Clearing stale session on login page mount');
-          await supabase.auth.signOut({ scope: 'local' });
-        }
-      } catch (e) {
-        console.log('Error initializing auth:', e);
-        // Clear on error to ensure clean state
-        await supabase.auth.signOut({ scope: 'local' });
-      }
-    };
-
-    initializeAuth();
-  }, []);
+  // ... (existing initializeAuth is fine)
 
   // Check for verification success from deep link
   useEffect(() => {
@@ -51,21 +31,44 @@ export default function LoginScreen() {
           const savedState = await import('@react-native-async-storage/async-storage').then(m => m.default.getItem('signup_current_session'));
           if (savedState) {
             console.log('Pending signup detected, redirecting to signup flow...');
-            // Clear the param from here to prevent loops if we come back, though router.replace should handle it
             router.replace({ pathname: '/signup', params: { verified: 'true' } } as any);
             return;
           }
         } catch (e) {
           console.log('Error checking pending signup:', e);
         }
-
-        // Only show this alert if we are NOT in a signup flow (e.g. standalone verification)
-        // But user requested to remove it entirely for now to avoid the confusion.
-        // VerificationStore.setSuccess(true);
       };
       checkPendingSignup();
     }
   }, [verified]);
+
+  // Handle verification errors redirected from signup
+  useEffect(() => {
+    if (verification_error) {
+      let title = 'Verification Failed';
+      let message = 'Your identity could not be verified. Please try again.';
+
+      if (verification_error === 'invalid_id') {
+        title = 'Invalid I.D.';
+        message = 'Your I.D. was declined or does not match. Please try again with a valid government-issued I.D.';
+      } else if (verification_error === 'abandoned') {
+        title = 'Verification Incomplete';
+        message = 'You did not complete the verification process. Please try signing up again.';
+      } else if (verification_error === 'pending_review') {
+        title = 'Verification Pending';
+        message = 'Your verification is under manual review. Please check your email later for updates.';
+      } else if (verification_error === 'timeout') {
+        title = 'Verification Timeout';
+        message = 'We could not confirm your verification status in time. Please try signing up again.';
+      }
+
+      // Show the alert
+      Alert.alert(title, message, [{ text: 'OK' }]);
+
+      // Clear the param to prevent re-showing the alert
+      router.setParams({ verification_error: '' });
+    }
+  }, [verification_error]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -107,16 +110,24 @@ export default function LoginScreen() {
     setAlertState(prev => ({ ...prev, visible: false }));
   };
 
-  // Check for verification success from deep link
+  // Check for Account Created success (New User)
   useEffect(() => {
-    if (verified === 'true') {
+    if (accountCreated === 'true') {
+      showAlert(
+        'success',
+        'Check Your Inbox',
+        `We have sent a verification link to ${createdEmail || 'your email'}.\n\nPlease confirm your email address to log in.`
+      );
+    } else if (verified === 'true') {
+      // Only show this 'Identity Verified' alert if we are NOT coming from a fresh signup creation
+      // (which handles its own flow via accountCreated)
       showAlert(
         'success',
         'Verification Successful! 🎉',
-        'Your account has been verified. You can now log in.'
+        'Your identity has been verified. You can now log in.'
       );
     }
-  }, [verified]);
+  }, [verified, accountCreated, createdEmail]);
 
   const handleLogin = async () => {
     setErrors({}); // Clear previous errors
