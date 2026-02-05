@@ -53,7 +53,7 @@ export default function RootLayout() {
 
 function RootContent() {
   const { colors } = useTheme();
-  const { session, loading, userId, userRole, subscriptionRequired } =
+  const { session, loading, userId, userRole, subscriptionRequired, subscriptionChecked } =
     useAuth();
   const segments = useSegments();
   const pathname = segments.join("/");
@@ -62,6 +62,8 @@ function RootContent() {
   // Handle subscription gate for owners
   useEffect(() => {
     if (loading) return;
+    // Wait for subscription check to complete before making decisions
+    if (!subscriptionChecked) return;
 
     // If user is logged in and subscription is required
     if (session && subscriptionRequired) {
@@ -83,7 +85,7 @@ function RootContent() {
         router.replace("/subscription_required");
       }
     }
-  }, [session, subscriptionRequired, loading, segments]);
+  }, [session, subscriptionRequired, subscriptionChecked, loading, segments]);
 
   // Handle deep links for payment redirects
   useEffect(() => {

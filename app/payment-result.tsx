@@ -38,10 +38,11 @@ export default function PaymentResultScreen() {
             const { data: { user } } = await supabase.auth.getUser();
             if (user && data) {
               // Calculate expiration date based on plan duration
+              const now = new Date();
               const expiresAt = new Date();
               expiresAt.setDate(expiresAt.getDate() + (data.duration_days || 30));
 
-              // Update user's subscription status in the database
+              // Update user's subscription status in profiles table
               const { error: updateError } = await supabase
                 .from('profiles')
                 .update({
@@ -54,7 +55,58 @@ export default function PaymentResultScreen() {
               if (updateError) {
                 console.error('Error activating subscription:', updateError);
               } else {
-                console.log('✅ Subscription activated successfully!');
+                console.log('✅ Profile subscription status updated!');
+              }
+
+              // Also upsert the subscriptions table record for wallet page
+              const { data: existingSub } = await supabase
+                .from('subscriptions')
+                .select('id')
+                .eq('user_id', user.id)
+                .single();
+
+              if (existingSub) {
+                // Update existing subscription
+                const { error: subUpdateError } = await supabase
+                  .from('subscriptions')
+                  .update({
+                    plan_id: params.plan_id,
+                    status: 'active',
+                    current_period_start: now.toISOString(),
+                    current_period_end: expiresAt.toISOString(),
+                    last_payment_date: now.toISOString(),
+                    last_payment_amount: data.price,
+                    cancel_at_period_end: false,
+                    cancelled_at: null,
+                    updated_at: now.toISOString(),
+                  })
+                  .eq('id', existingSub.id);
+
+                if (subUpdateError) {
+                  console.error('Error updating subscription record:', subUpdateError);
+                } else {
+                  console.log('✅ Subscription record updated!');
+                }
+              } else {
+                // Create new subscription record
+                const { error: subInsertError } = await supabase
+                  .from('subscriptions')
+                  .insert({
+                    user_id: user.id,
+                    plan_id: params.plan_id,
+                    status: 'active',
+                    current_period_start: now.toISOString(),
+                    current_period_end: expiresAt.toISOString(),
+                    last_payment_date: now.toISOString(),
+                    last_payment_amount: data.price,
+                    cancel_at_period_end: false,
+                  });
+
+                if (subInsertError) {
+                  console.error('Error creating subscription record:', subInsertError);
+                } else {
+                  console.log('✅ Subscription record created!');
+                }
               }
 
               // Refresh subscription status in AuthContext
@@ -116,10 +168,10 @@ export default function PaymentResultScreen() {
                 console.error('Error confirming booking:', JSON.stringify(updateError, null, 2));
               } else {
                 console.log('✅ Booking payment confirmed successfully!');
-                
+
                 // Get current user for notification
                 const { data: { user } } = await supabase.auth.getUser();
-                
+
                 // Send confirmation notification
                 if (user) {
                   await supabase.from('notifications').insert({
@@ -134,7 +186,7 @@ export default function PaymentResultScreen() {
                     }
                   });
                 }
-                
+
                 // Update local state to reflect changes
                 setBookingDetails({
                   ...data,

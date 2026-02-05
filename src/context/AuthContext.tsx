@@ -1,11 +1,11 @@
 import { Session } from "@supabase/supabase-js";
 import { router } from "expo-router";
 import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useState,
 } from "react";
 import { Alert } from "react-native";
 import { supabase } from "../../lib/supabase";
@@ -32,6 +32,7 @@ type AuthContextType = {
   // Subscription status
   subscriptionStatus: string | null;
   subscriptionRequired: boolean;
+  subscriptionChecked: boolean;
   checkSubscription: () => Promise<void>;
 };
 
@@ -48,6 +49,7 @@ const AuthContext = createContext<AuthContextType>({
   showLockAlert: () => { },
   subscriptionStatus: null,
   subscriptionRequired: false,
+  subscriptionChecked: false,
   checkSubscription: async () => { },
 });
 
@@ -87,12 +89,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     null,
   );
   const [subscriptionRequired, setSubscriptionRequired] = useState(false);
+  const [subscriptionChecked, setSubscriptionChecked] = useState(false);
 
   // Check subscription status for owners
   const checkSubscription = useCallback(async () => {
     if (!session?.user?.id) {
       setSubscriptionStatus(null);
       setSubscriptionRequired(false);
+      setSubscriptionChecked(true);
       return;
     }
 
@@ -105,6 +109,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (error) {
         console.log("Error checking subscription:", error);
+        setSubscriptionChecked(true);
         return;
       }
 
@@ -133,13 +138,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           isActive,
           required: !isActive,
         });
+        setSubscriptionChecked(true);
       } else {
         // Musicians don't need subscription
         setSubscriptionStatus(null);
         setSubscriptionRequired(false);
+        setSubscriptionChecked(true);
       }
     } catch (e) {
       console.log("Error in checkSubscription:", e);
+      setSubscriptionChecked(true);
     }
   }, [session?.user?.id]);
 
@@ -228,6 +236,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUnpaidBookings([]);
       setSubscriptionStatus(null);
       setSubscriptionRequired(false);
+      setSubscriptionChecked(true);
       setLoading(false);
     };
 
@@ -267,6 +276,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUnpaidBookings([]);
         setSubscriptionStatus(null);
         setSubscriptionRequired(false);
+        setSubscriptionChecked(true);
         setLoading(false);
         return;
       }
@@ -292,6 +302,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUnpaidBookings([]);
         setSubscriptionStatus(null);
         setSubscriptionRequired(false);
+        setSubscriptionChecked(true);
       }
       setLoading(false);
     });
@@ -306,12 +317,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [session?.user?.id, checkSystemLock]);
 
-  // Check subscription when session or role changes
+  // Check subscription when session changes (don't wait for userRole state, 
+  // checkSubscription fetches role from DB directly)
   useEffect(() => {
-    if (session?.user?.id && userRole) {
+    if (session?.user?.id) {
+      setSubscriptionChecked(false); // Reset before checking
       checkSubscription();
+    } else {
+      setSubscriptionChecked(true); // No session, no check needed
     }
-  }, [session?.user?.id, userRole, checkSubscription]);
+  }, [session?.user?.id, checkSubscription]);
 
   const checkAdmin = async (userId: string) => {
     // Optional: If you have an 'admin' role in your profiles table or metadata
@@ -361,6 +376,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         showLockAlert,
         subscriptionStatus,
         subscriptionRequired,
+        subscriptionChecked,
         checkSubscription,
       }}
     >
