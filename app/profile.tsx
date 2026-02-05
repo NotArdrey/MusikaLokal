@@ -4,20 +4,21 @@ import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
-    Alert,
-    Dimensions,
-    Image,
-    Linking,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Dimensions,
+  Image,
+  Linking,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
@@ -254,11 +255,11 @@ export default function ProfileScreen() {
                 ]}
               >
                 <Image
-                  source={{
-                    uri:
-                      profile?.avatar_url ||
-                      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop",
-                  }}
+                  source={
+                    profile?.avatar_url
+                      ? { uri: profile.avatar_url }
+                      : DEFAULT_AVATAR
+                  }
                   style={styles.avatarImage}
                   resizeMode="cover"
                 />
@@ -289,7 +290,7 @@ export default function ProfileScreen() {
                     ? "Venue Owner"
                     : profile?.role
                       ? profile.role.charAt(0).toUpperCase() +
-                        profile.role.slice(1)
+                      profile.role.slice(1)
                       : "User"}{" "}
               • {profile?.location || "Unknown"}
             </Text>

@@ -53,6 +53,15 @@ type Tab =
   | "Ongoing"
   | "Review";
 
+// Venue owner specific tabs for managing gig applications
+type VenueOwnerTab = "Applicants" | "Active Musicians" | "Completed";
+
+// Application-specific tabs for musician's gig application flow
+type ApplicationTab = "Applied" | "Accepted" | "Completed";
+
+// View mode for musicians to switch between bookings and applications
+type ViewMode = "bookings" | "applications";
+
 export default function BookingsScreen() {
   const { colors, isDark } = useTheme();
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
@@ -61,6 +70,8 @@ export default function BookingsScreen() {
     retry_payment?: string;
   }>();
   const [activeTab, setActiveTab] = useState<Tab>("Pending");
+  const [activeAppTab, setActiveAppTab] = useState<ApplicationTab>("Applied");
+  const [viewMode, setViewMode] = useState<ViewMode>("bookings");
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [cancellationReason, setCancellationReason] = useState("");
@@ -104,6 +115,17 @@ export default function BookingsScreen() {
     Upcoming: [],
     Ongoing: [],
     Review: [],
+  });
+
+  // Application data separated by status for musicians
+  const [applicationData, setApplicationData] = useState<{
+    Applied: any[];
+    Accepted: any[];
+    Completed: any[];
+  }>({
+    Applied: [],
+    Accepted: [],
+    Completed: [],
   });
   const [loading, setLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>("");
@@ -311,6 +333,51 @@ export default function BookingsScreen() {
       };
 
       setData(processedData);
+
+      // For musicians: Separate gig applications by status for the Applications view
+      if (role === "musician") {
+        // Get all gig applications from all categories
+        const allGigApps = [
+          ...rawPending.filter((item: any) => item.type_id === "gig_application"),
+          ...rawUpcoming.filter((item: any) => item.type_id === "gig_application"),
+          ...rawOngoing.filter((item: any) => item.type_id === "gig_application"),
+          ...(bookings?.Review || []).filter((item: any) => item.type_id === "gig_application"),
+        ];
+
+        // Separate by status
+        const appliedApps = allGigApps.filter(
+          (app: any) => app.status === "Applied" || app.status === "Pending" || app.status === "pending"
+        );
+        const acceptedApps = allGigApps.filter(
+          (app: any) => app.status === "Accepted" || app.status === "Happening Now"
+        );
+        const completedApps = allGigApps.filter(
+          (app: any) => app.status === "Completed" || app.status === "Declined" || app.status === "Rejected"
+        );
+
+        // Sort by date (most recent first for applied, closest first for accepted)
+        appliedApps.sort(
+          (a: any, b: any) =>
+            new Date(b.created_at || b.raw_date).getTime() -
+            new Date(a.created_at || a.raw_date).getTime(),
+        );
+        acceptedApps.sort(
+          (a: any, b: any) =>
+            new Date(a.raw_date || a.date).getTime() -
+            new Date(b.raw_date || b.date).getTime(),
+        );
+        completedApps.sort(
+          (a: any, b: any) =>
+            new Date(b.raw_date || b.date).getTime() -
+            new Date(a.raw_date || a.date).getTime(),
+        );
+
+        setApplicationData({
+          Applied: appliedApps,
+          Accepted: acceptedApps,
+          Completed: completedApps,
+        });
+      }
     } catch (e) {
       console.log("Error fetching bookings:", e);
     } finally {
@@ -553,6 +620,16 @@ export default function BookingsScreen() {
   // Show payment option modal before paying
   const showPaymentOptions = (item: any) => {
     setPaymentItem(item);
+    
+    // Check if user already paid a downpayment - if so, they should only pay remaining balance
+    const hasDownpaymentPaid = item.payment_type === "downpayment" && item.remaining_balance > 0;
+    
+    if (hasDownpaymentPaid) {
+      // Skip modal and directly pay balance
+      handlePayBalance(item);
+      return;
+    }
+    
     setSelectedPaymentType("full"); // Reset to full payment as default
     setShowPaymentOptionModal(true);
   };
@@ -944,11 +1021,135 @@ export default function BookingsScreen() {
     }
   };
 
-  // Determine items to show
-  const currentItems =
-    activeTab === "Active Musicians"
+  // Determine items to show based on view mode
+  const currentItems = userRole === "musician" && viewMode === "applications"
+    ? applicationData[activeAppTab as keyof typeof applicationData] || []
+    : activeTab === "Active Musicians"
       ? data.ActiveMusicians
       : data[activeTab as keyof typeof data] || [];
+
+  // Render application tab for musicians
+  const renderAppTab = (tab: ApplicationTab) => {
+    const count = applicationData[tab]?.length || 0;
+    const isActive = activeAppTab === tab;
+
+    return (
+      <TouchableOpacity
+        key={tab}
+        onPress={() => setActiveAppTab(tab)}
+        style={[
+          styles.tabButton,
+          {
+            backgroundColor: isActive ? colors.primary : "transparent",
+            borderColor: isActive ? colors.primary : colors.border,
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.tabText,
+            {
+              color: isActive ? "#FFF" : colors.textSecondary,
+            },
+          ]}
+        >
+          {tab}
+        </Text>
+
+        {/* Badge count */}
+        {count > 0 && (
+          <View
+            style={{
+              marginLeft: 6,
+              backgroundColor: isActive ? "white" : colors.primary,
+              borderRadius: 10,
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 10,
+                fontFamily: "Poppins_600SemiBold",
+                color: isActive ? colors.primary : "white",
+              }}
+            >
+              {count}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  // Render venue owner specific tab for managing gig applications
+  const renderVenueOwnerTab = (tab: VenueOwnerTab) => {
+    // Map tab to actual data key
+    const getTabData = (): any[] => {
+      switch (tab) {
+        case "Applicants":
+          return data.Applicants;
+        case "Active Musicians":
+          return data.ActiveMusicians;
+        case "Completed":
+          return data.Review.filter((item: any) => item.type_id === "gig_application");
+        default:
+          return [];
+      }
+    };
+
+    const tabData = getTabData();
+    const count = tabData.length;
+    const isActive = activeTab === (tab === "Completed" ? "Review" : tab);
+
+    return (
+      <TouchableOpacity
+        key={tab}
+        onPress={() => setActiveTab(tab === "Completed" ? "Review" : tab as Tab)}
+        style={[
+          styles.tabButton,
+          {
+            backgroundColor: isActive ? colors.primary : "transparent",
+            borderColor: isActive ? colors.primary : colors.border,
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.tabText,
+            {
+              color: isActive ? "#FFF" : colors.textSecondary,
+            },
+          ]}
+        >
+          {tab}
+        </Text>
+
+        {/* Badge count if > 0 */}
+        {count > 0 && (
+          <View
+            style={{
+              marginLeft: 6,
+              backgroundColor: isActive ? "white" : colors.primary,
+              borderRadius: 10,
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 10,
+                fontFamily: "Poppins_600SemiBold",
+                color: isActive ? colors.primary : "white",
+              }}
+            >
+              {count}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   const renderTab = (tab: Tab) => {
     // Hide Applicants tab if not venue owner AND empty
@@ -1016,7 +1217,7 @@ export default function BookingsScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="My Activity" />
+        <Header title={userRole === "venue-owner" ? "Manage Applications" : "My Activity"} />
 
         {/* Tab Navigation */}
         <View style={styles.tabContainer}>
@@ -1025,8 +1226,16 @@ export default function BookingsScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.tabScrollContent}
           >
-            {["Applicants", "Pending", "Upcoming", "Ongoing", "Review"].map(
-              (tab) => renderTab(tab as Tab),
+            {userRole === "venue-owner" ? (
+              // Venue owner specific tabs for managing gig applications
+              (["Applicants", "Active Musicians", "Completed"] as VenueOwnerTab[]).map(
+                (tab) => renderVenueOwnerTab(tab),
+              )
+            ) : (
+              // Default tabs for other users
+              ["Applicants", "Pending", "Upcoming", "Ongoing", "Review"].map(
+                (tab) => renderTab(tab as Tab),
+              )
             )}
           </ScrollView>
         </View>
@@ -1046,15 +1255,30 @@ export default function BookingsScreen() {
           ) : currentItems.length === 0 ? (
             <View style={styles.centerContainer}>
               <Ionicons
-                name="calendar-outline"
+                name={userRole === "venue-owner" ? "people-outline" : "calendar-outline"}
                 size={48}
                 color={colors.border}
               />
               <Text
                 style={[styles.emptyTitle, { color: colors.textSecondary }]}
               >
-                No {activeTab.toLowerCase()} bookings
+                {userRole === "venue-owner"
+                  ? activeTab === "Applicants"
+                    ? "No pending applications"
+                    : activeTab === "Active Musicians"
+                      ? "No active musicians"
+                      : activeTab === "Review"
+                        ? "No completed gigs"
+                        : "No items"
+                  : `No ${activeTab.toLowerCase()} bookings`}
               </Text>
+              {userRole === "venue-owner" && activeTab === "Applicants" && (
+                <Text
+                  style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
+                >
+                  When musicians apply to your gigs, they'll appear here
+                </Text>
+              )}
             </View>
           ) : (
             currentItems.map((item: any) => {
@@ -2066,8 +2290,11 @@ export default function BookingsScreen() {
                           { marginTop: 0, width: "100%" },
                         ]}
                       >
+                        {/* PENDING TAB: Studio Bookings - Payment Button for Musicians */}
                         {activeTab === "Pending" &&
-                          item.action === "Confirm Now" ? (
+                          item.type_id === "studio_booking" &&
+                          userRole === "musician" &&
+                          item.payment_status !== "paid" ? (
                           <View
                             style={{
                               flexDirection: "row",
@@ -2098,53 +2325,64 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
 
+                            {/* Pay Now Button - Shows Payment Options Modal or Pay Balance */}
                             <TouchableOpacity
-                              onPress={() => handleDeclineBooking(item)}
-                              style={[
-                                styles.actionButton,
-                                {
-                                  backgroundColor: isDark
-                                    ? "rgba(239, 68, 68, 0.2)"
-                                    : "#FEF2F2",
-                                  flex: 1,
-                                  justifyContent: "center",
-                                  alignItems: "center",
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.actionButtonText,
-                                  { color: "#EF4444" },
-                                ]}
-                              >
-                                Decline
-                              </Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              onPress={() => {
-                                setSelectedItem(item);
-                                setModalMode("confirm");
-                                setModalVisible(true);
-                              }}
+                              onPress={() => showPaymentOptions(item)}
                               style={[
                                 styles.actionButton,
                                 {
                                   backgroundColor: "#16A34A",
-                                  flex: 1,
+                                  flex: 2,
                                   justifyContent: "center",
                                   alignItems: "center",
+                                  flexDirection: "row",
+                                  gap: 6,
                                 },
                               ]}
                             >
+                              <Ionicons name="card-outline" size={16} color="white" />
                               <Text
                                 style={[
                                   styles.actionButtonText,
                                   { color: "white" },
                                 ]}
                               >
-                                Confirm
+                                {item.payment_type === "downpayment" && item.remaining_balance > 0
+                                  ? `Pay Balance ₱${item.remaining_balance?.toLocaleString()}`
+                                  : "Pay Now"}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : activeTab === "Pending" &&
+                          item.type_id === "studio_booking" &&
+                          (userRole === "studio-owner" || userRole === "venue-owner") ? (
+                          // Studio Owner view for pending bookings - just show details (no confirmation needed)
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              gap: scale(8),
+                              flex: 1,
+                            }}
+                          >
+                            <TouchableOpacity
+                              onPress={() => handleDetailsPress(item)}
+                              style={[
+                                styles.outlineButton,
+                                {
+                                  borderColor: colors.border,
+                                  flex: 1,
+                                  justifyContent: "center",
+                                  alignItems: "center",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.outlineButtonText,
+                                  { color: colors.textSecondary },
+                                ]}
+                              >
+                                View Details
                               </Text>
                             </TouchableOpacity>
                           </View>
@@ -2814,6 +3052,11 @@ const styles = StyleSheet.create({
     marginTop: moderateScale(16),
     fontSize: moderateScale(14),
     fontFamily: "Poppins_400Regular",
+  },
+  emptySubtitle: {
+    fontSize: moderateScale(12),
+    fontFamily: "Poppins_400Regular",
+    opacity: 0.7,
   },
   cardContainer: {
     marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(12) : moderateScale(16),

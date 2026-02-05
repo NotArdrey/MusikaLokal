@@ -81,6 +81,9 @@ serve(async (req: Request) => {
           // DEBUG: Log date parsing for first few items
           // console.log(`[DEBUG] Booking ${b.id}: Status=${b.status}, End=${endDate.toISOString()}, Now=${now.toISOString()}`)
 
+          // Determine status text - for pending bookings, check if payment is needed
+          const isUnpaid = b.status === "pending" && (!b.payment_status || b.payment_status === "unpaid" || b.payment_status === "pending" || b.payment_status === "failed");
+          
           const item = {
             id: b.id,
             type_id: "studio_booking",
@@ -94,7 +97,9 @@ serve(async (req: Request) => {
             image: b.studio?.images?.[0] || "https://picsum.photos/400/300",
             status:
               b.status === "pending"
-                ? "Waiting for Approval"
+                ? isUnpaid 
+                  ? "Awaiting Payment"
+                  : "Awaiting Payment"
                 : b.status === "confirmed"
                   ? "Confirmed"
                   : b.status === "checked_in"
@@ -113,6 +118,11 @@ serve(async (req: Request) => {
             reviewed_by_customer: b.reviewed_by_customer || false,
             reviewed_by_owner: b.reviewed_by_owner || false,
             proof_url: b.proof_url,
+            // Payment-related fields for musician to see payment status
+            payment_status: b.payment_status || "unpaid",
+            payment_amount: b.payment_amount || b.final_price,
+            payment_type: b.payment_type || null,
+            remaining_balance: b.remaining_balance || 0,
           };
 
           if (b.status === "pending") {
@@ -184,6 +194,9 @@ serve(async (req: Request) => {
               "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop";
 
             const isVenue = b.studio?.amenities?.includes("Stage") ?? false;
+            
+            // For studio owner: show payment status for pending bookings
+            const isUnpaid = b.status === "pending" && (!b.payment_status || b.payment_status === "unpaid" || b.payment_status === "pending" || b.payment_status === "failed");
 
             const item = {
               id: b.id,
@@ -198,7 +211,9 @@ serve(async (req: Request) => {
               image: b.studio?.images?.[0] || "https://picsum.photos/400/300",
               status:
                 b.status === "pending"
-                  ? "User Request"
+                  ? isUnpaid 
+                    ? "Awaiting Payment"
+                    : "Awaiting Payment"
                   : b.status === "confirmed"
                     ? "Confirmed"
                     : b.status === "checked_in"
@@ -208,7 +223,7 @@ serve(async (req: Request) => {
                         : b.status,
               type: isVenue ? "Venue Booking" : "Studio Booking",
               isCancelled: b.status === "cancelled",
-              action: b.status === "pending" ? "Confirm Now" : "Details",
+              action: "Details", // No confirmation needed - payment auto-confirms
               duration_hours: b.hours, // Use stored column
               base_rate: b.base_rate,
               total_cost: b.final_price, // Use stored column
@@ -222,6 +237,11 @@ serve(async (req: Request) => {
               reviewed_by_customer: b.reviewed_by_customer || false,
               reviewed_by_owner: b.reviewed_by_owner || false,
               proof_url: b.proof_url,
+              // Payment-related fields
+              payment_status: b.payment_status || "unpaid",
+              payment_amount: b.payment_amount || b.final_price,
+              payment_type: b.payment_type || null,
+              remaining_balance: b.remaining_balance || 0,
             };
 
             if (b.status === "pending") {
@@ -867,7 +887,7 @@ serve(async (req: Request) => {
       try {
         const { data: studioInfo } = await supabaseClient
           .from("studios")
-          .select("owner_id, name")
+          .select("owner_id, name, images")
           .eq("id", studio_id)
           .single();
 
@@ -877,6 +897,7 @@ serve(async (req: Request) => {
             type: "info",
             title: "New Booking Request",
             message: `New booking request for ${studioInfo.name} on ${date}.`,
+            image: studioInfo.images?.[0] || null,
             read: false,
             meta: {
               studio_id,
@@ -946,16 +967,18 @@ serve(async (req: Request) => {
           let notificationTitle = "";
           let notificationMessage = "";
           let notificationType = "info";
+          let notificationImage: string | null = null;
 
           if (table === "studio_bookings") {
             // For Studio Bookings
             const { data: bookingInfo } = await supabaseClient
               .from("studio_bookings")
-              .select("user_id, studio:studios(name)")
+              .select("user_id, studio:studios(name, images)")
               .eq("id", booking_id)
               .single();
 
             if (bookingInfo) {
+              notificationImage = bookingInfo.studio?.images?.[0] || null;
               if (new_status === "cancelled") {
                 targetUserId = bookingInfo.user_id;
                 notificationTitle = "Booking Declined";
@@ -974,11 +997,12 @@ serve(async (req: Request) => {
             // For Gig Applications
             const { data: gigInfo } = await supabaseClient
               .from("gig_applications")
-              .select("applicant_id, gig:gigs(name)")
+              .select("applicant_id, gig:gigs(name, images)")
               .eq("id", booking_id)
               .single();
 
             if (gigInfo) {
+              notificationImage = gigInfo.gig?.images?.[0] || null;
               if (new_status === "rejected") {
                 targetUserId = gigInfo.applicant_id;
                 notificationTitle = "Application Declined";
@@ -999,6 +1023,7 @@ serve(async (req: Request) => {
               type: notificationType,
               title: notificationTitle,
               message: notificationMessage,
+              image: notificationImage,
               read: false,
             });
             console.log(

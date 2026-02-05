@@ -3,15 +3,15 @@ import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -135,6 +135,22 @@ export default function AddGigScreen() {
   const [musicianType, setMusicianType] = useState<"solo" | "group" | "both">(
     "both",
   );
+
+  // Detailed Looking For Slots with Counts
+  const [soloSlotsNeeded, setSoloSlotsNeeded] = useState<number>(0);
+  const [duoSlotsNeeded, setDuoSlotsNeeded] = useState<number>(0);
+  const [bandSlotsNeeded, setBandSlotsNeeded] = useState<number>(0);
+  
+  // Specific roles/instruments needed
+  const [soloRolesNeeded, setSoloRolesNeeded] = useState<string[]>([]);
+  const [newSoloRole, setNewSoloRole] = useState("");
+  const [duoRolesNeeded, setDuoRolesNeeded] = useState<string[]>([]);
+  const [newDuoRole, setNewDuoRole] = useState("");
+  const [bandRolesNeeded, setBandRolesNeeded] = useState<string[]>([]);
+  const [newBandRole, setNewBandRole] = useState("");
+  
+  // Anti-spam settings
+  const [reapplicationCooldownDays, setReapplicationCooldownDays] = useState<number>(30);
 
   // Form Steps Configuration
   const steps = [
@@ -287,6 +303,7 @@ export default function AddGigScreen() {
         latitude,
         longitude,
         event_date: eventDate,
+        reapplication_cooldown_days: reapplicationCooldownDays,
         requirements: {
           genres: requiredGenres,
           instruments: requiredInstruments,
@@ -294,6 +311,22 @@ export default function AddGigScreen() {
           event_start_time: eventStartTime,
           event_end_time: eventEndTime,
           musician_type: musicianType,
+          // Detailed slots with counts
+          slots: {
+            solo: {
+              needed: soloSlotsNeeded,
+              roles: soloRolesNeeded,
+            },
+            duo: {
+              needed: duoSlotsNeeded,
+              roles: duoRolesNeeded,
+            },
+            band: {
+              needed: bandSlotsNeeded,
+              roles: bandRolesNeeded,
+            },
+          },
+          total_slots_needed: soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded,
         },
       };
 
@@ -1853,7 +1886,7 @@ export default function AddGigScreen() {
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
-                  Looking For
+                  Looking For (Select types to accept)
                 </Text>
                 <View style={styles.experienceLevelContainer}>
                   {[
@@ -1911,6 +1944,351 @@ export default function AddGigScreen() {
                       </Text>
                     </TouchableOpacity>
                   ))}
+                </View>
+              </View>
+
+              {/* Detailed Slots Configuration */}
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  How many performers do you need?
+                </Text>
+                <Text
+                  style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 12, fontSize: 12 }]}
+                >
+                  Set limits per category. Applicants cannot apply more than once per gig.
+                </Text>
+
+                {/* Solo Artists Slots */}
+                {(musicianType === "solo" || musicianType === "both") && (
+                  <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+                    <View style={styles.slotHeader}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Ionicons name="person" size={20} color="#EC4899" />
+                        <Text style={[styles.slotTitle, { color: colors.text }]}>Solo Artists</Text>
+                      </View>
+                      <View style={styles.counterContainer}>
+                        <TouchableOpacity
+                          onPress={() => setSoloSlotsNeeded(Math.max(0, soloSlotsNeeded - 1))}
+                          style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
+                        >
+                          <Ionicons name="remove" size={18} color={colors.text} />
+                        </TouchableOpacity>
+                        <Text style={[styles.counterValue, { color: colors.text }]}>{soloSlotsNeeded}</Text>
+                        <TouchableOpacity
+                          onPress={() => setSoloSlotsNeeded(soloSlotsNeeded + 1)}
+                          style={[styles.counterBtn, { backgroundColor: colors.primary }]}
+                        >
+                          <Ionicons name="add" size={18} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {soloSlotsNeeded > 0 && (
+                      <View style={{ marginTop: 12 }}>
+                        <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
+                          Specific roles/instruments needed (optional):
+                        </Text>
+                        <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                          <View
+                            style={[
+                              styles.inputWrapper,
+                              styles.flex1,
+                              { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
+                            ]}
+                          >
+                            <TextInput
+                              value={newSoloRole}
+                              onChangeText={setNewSoloRole}
+                              placeholder="e.g., Acoustic Guitarist, Singer..."
+                              placeholderTextColor={colors.textSecondary}
+                              style={[styles.textInput, { color: colors.text }]}
+                              onSubmitEditing={() => {
+                                if (newSoloRole.trim()) {
+                                  setSoloRolesNeeded([...soloRolesNeeded, newSoloRole.trim()]);
+                                  setNewSoloRole("");
+                                }
+                              }}
+                            />
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (newSoloRole.trim()) {
+                                setSoloRolesNeeded([...soloRolesNeeded, newSoloRole.trim()]);
+                                setNewSoloRole("");
+                              }
+                            }}
+                            style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                          >
+                            <Ionicons name="add" size={20} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                        {soloRolesNeeded.length > 0 && (
+                          <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                            {soloRolesNeeded.map((role, index) => (
+                              <View key={index} style={[styles.chip, { backgroundColor: "#EC489920" }]}>
+                                <Text style={[styles.chipText, { color: "#EC4899" }]}>{role}</Text>
+                                <TouchableOpacity onPress={() => setSoloRolesNeeded(soloRolesNeeded.filter((_, i) => i !== index))}>
+                                  <Ionicons name="close-circle" size={16} color="#EC4899" />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {/* Duo Slots */}
+                {(musicianType === "group" || musicianType === "both") && (
+                  <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
+                    <View style={styles.slotHeader}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Ionicons name="people" size={20} color="#8B5CF6" />
+                        <Text style={[styles.slotTitle, { color: colors.text }]}>Duos (2 members)</Text>
+                      </View>
+                      <View style={styles.counterContainer}>
+                        <TouchableOpacity
+                          onPress={() => setDuoSlotsNeeded(Math.max(0, duoSlotsNeeded - 1))}
+                          style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
+                        >
+                          <Ionicons name="remove" size={18} color={colors.text} />
+                        </TouchableOpacity>
+                        <Text style={[styles.counterValue, { color: colors.text }]}>{duoSlotsNeeded}</Text>
+                        <TouchableOpacity
+                          onPress={() => setDuoSlotsNeeded(duoSlotsNeeded + 1)}
+                          style={[styles.counterBtn, { backgroundColor: colors.primary }]}
+                        >
+                          <Ionicons name="add" size={18} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {duoSlotsNeeded > 0 && (
+                      <View style={{ marginTop: 12 }}>
+                        <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
+                          Specific roles/instruments needed (optional):
+                        </Text>
+                        <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                          <View
+                            style={[
+                              styles.inputWrapper,
+                              styles.flex1,
+                              { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
+                            ]}
+                          >
+                            <TextInput
+                              value={newDuoRole}
+                              onChangeText={setNewDuoRole}
+                              placeholder="e.g., Vocalist + Guitarist..."
+                              placeholderTextColor={colors.textSecondary}
+                              style={[styles.textInput, { color: colors.text }]}
+                              onSubmitEditing={() => {
+                                if (newDuoRole.trim()) {
+                                  setDuoRolesNeeded([...duoRolesNeeded, newDuoRole.trim()]);
+                                  setNewDuoRole("");
+                                }
+                              }}
+                            />
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (newDuoRole.trim()) {
+                                setDuoRolesNeeded([...duoRolesNeeded, newDuoRole.trim()]);
+                                setNewDuoRole("");
+                              }
+                            }}
+                            style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                          >
+                            <Ionicons name="add" size={20} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                        {duoRolesNeeded.length > 0 && (
+                          <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                            {duoRolesNeeded.map((role, index) => (
+                              <View key={index} style={[styles.chip, { backgroundColor: "#8B5CF620" }]}>
+                                <Text style={[styles.chipText, { color: "#8B5CF6" }]}>{role}</Text>
+                                <TouchableOpacity onPress={() => setDuoRolesNeeded(duoRolesNeeded.filter((_, i) => i !== index))}>
+                                  <Ionicons name="close-circle" size={16} color="#8B5CF6" />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {/* Band Slots */}
+                {(musicianType === "group" || musicianType === "both") && (
+                  <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
+                    <View style={styles.slotHeader}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Ionicons name="people-circle" size={20} color="#3B82F6" />
+                        <Text style={[styles.slotTitle, { color: colors.text }]}>Bands (3+ members)</Text>
+                      </View>
+                      <View style={styles.counterContainer}>
+                        <TouchableOpacity
+                          onPress={() => setBandSlotsNeeded(Math.max(0, bandSlotsNeeded - 1))}
+                          style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
+                        >
+                          <Ionicons name="remove" size={18} color={colors.text} />
+                        </TouchableOpacity>
+                        <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
+                        <TouchableOpacity
+                          onPress={() => setBandSlotsNeeded(bandSlotsNeeded + 1)}
+                          style={[styles.counterBtn, { backgroundColor: colors.primary }]}
+                        >
+                          <Ionicons name="add" size={18} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {bandSlotsNeeded > 0 && (
+                      <View style={{ marginTop: 12 }}>
+                        <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
+                          Specific requirements/genres (optional):
+                        </Text>
+                        <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                          <View
+                            style={[
+                              styles.inputWrapper,
+                              styles.flex1,
+                              { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
+                            ]}
+                          >
+                            <TextInput
+                              value={newBandRole}
+                              onChangeText={setNewBandRole}
+                              placeholder="e.g., Rock Band, Jazz Ensemble..."
+                              placeholderTextColor={colors.textSecondary}
+                              style={[styles.textInput, { color: colors.text }]}
+                              onSubmitEditing={() => {
+                                if (newBandRole.trim()) {
+                                  setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
+                                  setNewBandRole("");
+                                }
+                              }}
+                            />
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              if (newBandRole.trim()) {
+                                setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
+                                setNewBandRole("");
+                              }
+                            }}
+                            style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                          >
+                            <Ionicons name="add" size={20} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                        {bandRolesNeeded.length > 0 && (
+                          <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                            {bandRolesNeeded.map((role, index) => (
+                              <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
+                                <Text style={[styles.chipText, { color: "#3B82F6" }]}>{role}</Text>
+                                <TouchableOpacity onPress={() => setBandRolesNeeded(bandRolesNeeded.filter((_, i) => i !== index))}>
+                                  <Ionicons name="close-circle" size={16} color="#3B82F6" />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {/* Total Summary */}
+                {(soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded) > 0 && (
+                  <View style={[styles.totalSummary, { backgroundColor: colors.primary + "15", marginTop: 16 }]}>
+                    <Ionicons name="checkmark-circle" size={20} color={colors.primary} />
+                    <Text style={[styles.totalSummaryText, { color: colors.primary }]}>
+                      Total slots: {soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded} performer(s) needed
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Reapplication Cooldown Setting */}
+              <View style={styles.inputContainer}>
+                <Text
+                  style={[styles.inputLabel, { color: colors.textSecondary }]}
+                >
+                  Rejected Musician Reapplication Cooldown
+                </Text>
+                <Text
+                  style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 12, fontSize: 12 }]}
+                >
+                  How long must a rejected musician wait before they can apply again?
+                </Text>
+                <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+                  <View style={styles.slotHeader}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Ionicons name="time-outline" size={20} color={colors.primary} />
+                      <Text style={[styles.slotTitle, { color: colors.text }]}>Cooldown Period</Text>
+                    </View>
+                    <View style={styles.counterContainer}>
+                      <TouchableOpacity
+                        onPress={() => setReapplicationCooldownDays(Math.max(0, reapplicationCooldownDays - 7))}
+                        style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
+                      >
+                        <Ionicons name="remove" size={18} color={colors.text} />
+                      </TouchableOpacity>
+                      <Text style={[styles.counterValue, { color: colors.text, minWidth: 60, textAlign: "center" }]}>
+                        {reapplicationCooldownDays === 0 ? "None" : `${reapplicationCooldownDays} days`}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setReapplicationCooldownDays(Math.min(365, reapplicationCooldownDays + 7))}
+                        style={[styles.counterBtn, { backgroundColor: colors.primary }]}
+                      >
+                        <Ionicons name="add" size={18} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <View style={{ marginTop: 8 }}>
+                    <Text style={[styles.slotSubLabel, { color: colors.textSecondary, fontSize: 11 }]}>
+                      {reapplicationCooldownDays === 0 
+                        ? "Musicians can reapply immediately after rejection." 
+                        : `Musicians must wait ${reapplicationCooldownDays} days after rejection before reapplying.`}
+                    </Text>
+                  </View>
+                  {/* Quick preset buttons */}
+                  <View style={{ flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    {[
+                      { label: "None", value: 0 },
+                      { label: "7 days", value: 7 },
+                      { label: "14 days", value: 14 },
+                      { label: "30 days", value: 30 },
+                      { label: "90 days", value: 90 },
+                    ].map((preset) => (
+                      <TouchableOpacity
+                        key={preset.value}
+                        onPress={() => setReapplicationCooldownDays(preset.value)}
+                        style={[
+                          {
+                            paddingHorizontal: 12,
+                            paddingVertical: 6,
+                            borderRadius: 16,
+                            backgroundColor: reapplicationCooldownDays === preset.value 
+                              ? colors.primary 
+                              : isDark ? "#374151" : "#E5E7EB",
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontFamily: "Poppins_500Medium",
+                            color: reapplicationCooldownDays === preset.value ? "#fff" : colors.text,
+                          }}
+                        >
+                          {preset.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
               </View>
             </View>
@@ -2020,6 +2398,50 @@ export default function AddGigScreen() {
                           </Text>
                         </View>
                       )}
+                    </View>
+                  </>
+                )}
+
+                {/* Slots Summary in Review */}
+                {(soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded) > 0 && (
+                  <>
+                    <View
+                      style={[
+                        styles.divider,
+                        { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                      ]}
+                    />
+                    <View>
+                      <Text style={styles.reviewLabel}>Looking For</Text>
+                      <View style={{ gap: 8 }}>
+                        {soloSlotsNeeded > 0 && (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                            <Ionicons name="person" size={16} color="#EC4899" />
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
+                              {soloSlotsNeeded} Solo Artist{soloSlotsNeeded > 1 ? "s" : ""}
+                              {soloRolesNeeded.length > 0 && ` (${soloRolesNeeded.join(", ")})`}
+                            </Text>
+                          </View>
+                        )}
+                        {duoSlotsNeeded > 0 && (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                            <Ionicons name="people" size={16} color="#8B5CF6" />
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
+                              {duoSlotsNeeded} Duo{duoSlotsNeeded > 1 ? "s" : ""}
+                              {duoRolesNeeded.length > 0 && ` (${duoRolesNeeded.join(", ")})`}
+                            </Text>
+                          </View>
+                        )}
+                        {bandSlotsNeeded > 0 && (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                            <Ionicons name="people-circle" size={16} color="#3B82F6" />
+                            <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
+                              {bandSlotsNeeded} Band{bandSlotsNeeded > 1 ? "s" : ""}
+                              {bandRolesNeeded.length > 0 && ` (${bandRolesNeeded.join(", ")})`}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
                   </>
                 )}
@@ -2574,5 +2996,53 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontFamily: 'Poppins_600SemiBold',
+  },
+  // Slot Card Styles
+  slotCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+  },
+  slotHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  slotTitle: {
+    fontSize: 15,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  slotSubLabel: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+  },
+  counterContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  counterBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  counterValue: {
+    fontSize: 18,
+    fontFamily: "Poppins_600SemiBold",
+    minWidth: 24,
+    textAlign: "center",
+  },
+  totalSummary: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+  },
+  totalSummaryText: {
+    fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
   },
 });

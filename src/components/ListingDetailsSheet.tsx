@@ -1,34 +1,34 @@
 import { Ionicons } from "@expo/vector-icons";
 import {
-    BottomSheetBackdrop,
-    BottomSheetModal,
-    BottomSheetScrollView,
+  BottomSheetBackdrop,
+  BottomSheetModal,
+  BottomSheetScrollView,
 } from "@gorhom/bottom-sheet";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ExpoLinking from "expo-linking";
 import { router } from "expo-router";
 import React, {
-    forwardRef,
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 import {
-    ActivityIndicator,
-    BackHandler,
-    Dimensions,
-    Image,
-    Linking,
-    Modal as RNModal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  BackHandler,
+  Dimensions,
+  Image,
+  Linking,
+  Modal as RNModal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../../lib/supabase";
@@ -157,6 +157,10 @@ const ListingDetailsSheet = forwardRef<
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [validEndTimes, setValidEndTimes] = useState<string[]>([]);
   const [markedDates, setMarkedDates] = useState<any>({});
+
+  // Recording studio whole-day booking state
+  const [isRecordingWholeDayAvailable, setIsRecordingWholeDayAvailable] = useState(false);
+  const [recordingDaySlot, setRecordingDaySlot] = useState<{ start: string; end: string } | null>(null);
 
   // Multiple time slots state for multi-slot bookings (same day)
   const [selectedTimeSlots, setSelectedTimeSlots] = useState<
@@ -707,37 +711,6 @@ const ListingDetailsSheet = forwardRef<
       return;
     }
 
-    // 24-hour advance booking check for gig applications
-    if (group.event_date) {
-      const eventDate = new Date(group.event_date);
-      // If event has start time, use it; otherwise assume start of day
-      const eventStartTime = group.requirements?.event_start_time;
-      if (eventStartTime) {
-        // Parse time like "06:00 PM"
-        const [time, period] = eventStartTime.split(" ");
-        const [hours, minutes] = time.split(":").map(Number);
-        let hour24 = hours;
-        if (period === "PM" && hours !== 12) hour24 += 12;
-        if (period === "AM" && hours === 12) hour24 = 0;
-        eventDate.setHours(hour24, minutes, 0, 0);
-      }
-
-      const now = new Date();
-      const hoursUntilEvent =
-        (eventDate.getTime() - now.getTime()) / (1000 * 60 * 60);
-
-      if (hoursUntilEvent < 24) {
-        setAlertConfig({
-          type: "error",
-          title: "Application Deadline Passed",
-          message:
-            "Applications must be submitted at least 24 hours before the event. This gig is no longer accepting applications.",
-        });
-        setAlertVisible(true);
-        return;
-      }
-    }
-
     // Check if group already applied (by another member)
     if (groupAlreadyApplied) {
       setAlertConfig({
@@ -783,6 +756,34 @@ const ListingDetailsSheet = forwardRef<
       });
       setAlertVisible(true);
       return;
+    }
+
+    // Check slot availability before submitting
+    if (group.requirements?.total_slots_needed) {
+      try {
+        const { data: acceptedApps, error: countError } = await supabase
+          .from("gig_applications")
+          .select("id")
+          .eq("gig_id", listingId)
+          .eq("status", "accepted");
+        
+        if (!countError && acceptedApps) {
+          const acceptedCount = acceptedApps.length;
+          const totalSlots = group.requirements.total_slots_needed;
+          
+          if (acceptedCount >= totalSlots) {
+            setAlertConfig({
+              type: "error",
+              title: "Slots Full",
+              message: `All ${totalSlots} performer slot${totalSlots > 1 ? 's have' : ' has'} been filled for this gig. No more applications can be accepted.`,
+            });
+            setAlertVisible(true);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error("Error checking slot availability:", e);
+      }
     }
 
     // CONFIRMATION STEP
@@ -1410,6 +1411,34 @@ const ListingDetailsSheet = forwardRef<
           return b.booking_date === dateStr;
         });
 
+        // RECORDING STUDIO WHOLE-DAY LOGIC:
+        // For recording studios, if there are ANY bookings on this date, block the entire day
+        const isRecordingStudio = group?.studio_type === "Recording";
+        if (isRecordingStudio) {
+          // Also check cart bookings for recording studios
+          const cartBookingsForDate = (cartBookings || []).filter((b) => {
+            const cartDateStr = b.date.toISOString().split("T")[0];
+            return cartDateStr === dateStr;
+          });
+          
+          if (dayDbBookings.length > 0 || cartBookingsForDate.length > 0) {
+            // Date has existing bookings - block entirely for recording studio
+            marked[dateStr] = {
+              disabled: true,
+              disableTouchEvent: true,
+              textColor: isDark ? "#4B5563" : "#D1D5DB",
+            };
+            continue; // Skip to next date
+          } else {
+            // No bookings - date is available for whole-day recording booking
+            marked[dateStr] = {
+              marked: true,
+              dotColor: daySchedule.isOverride ? "#F59E0B" : colors.primary,
+            };
+            continue; // Skip the normal slot-based logic
+          }
+        }
+
         // 3. Mark slots as taken
         const blockedTimes = new Set<string>();
 
@@ -1582,6 +1611,39 @@ const ListingDetailsSheet = forwardRef<
         status: b.status,
       })),
     );
+
+    // RECORDING STUDIO WHOLE-DAY LOGIC:
+    // For recording studios, the entire day is booked as one unit
+    const isRecordingStudio = group?.studio_type === "Recording";
+    if (isRecordingStudio) {
+      // Also check cart bookings for recording studios
+      const cartBookingsForDate = bookings.filter((b) => {
+        const cartDateStr = b.date.toISOString().split("T")[0];
+        return cartDateStr === dateStr;
+      });
+      
+      if (dayBookings.length > 0 || cartBookingsForDate.length > 0) {
+        // Date has existing bookings - not available for recording studio
+        setIsRecordingWholeDayAvailable(false);
+        setRecordingDaySlot(null);
+        setAvailableSlots([]);
+        console.log("🎙️ Recording studio: Date has bookings, blocking entire day");
+        return;
+      } else {
+        // No bookings - date is available for whole-day recording booking
+        // Get the operating hours for this day
+        const operatingSlot = daySchedule.slots[0]; // Use first slot as operating hours
+        setIsRecordingWholeDayAvailable(true);
+        setRecordingDaySlot({ start: operatingSlot.start, end: operatingSlot.end });
+        setAvailableSlots(["whole-day"]); // Special marker for whole-day booking
+        console.log("🎙️ Recording studio: Date available for whole-day booking", operatingSlot);
+        return;
+      }
+    }
+
+    // Reset recording studio state for non-recording studios
+    setIsRecordingWholeDayAvailable(false);
+    setRecordingDaySlot(null);
 
     const blockedTimes = new Set<string>();
 
@@ -1956,9 +2018,32 @@ const ListingDetailsSheet = forwardRef<
             { color: colors.text, fontSize: 16, marginBottom: 0 },
           ]}
         >
-          Select Date & Time
+          {group?.studio_type === "Recording" ? "Select Recording Date" : "Select Date & Time"}
         </Text>
-        {duration > 0 && (
+        {group?.studio_type === "Recording" ? (
+          <View
+            style={[
+              styles.durationBadge,
+              {
+                backgroundColor: isDark
+                  ? "rgba(124, 58, 237, 0.15)"
+                  : "rgba(124, 58, 237, 0.1)",
+              },
+            ]}
+          >
+            <Ionicons name="mic" size={14} color={colors.primary} />
+            <Text
+              style={{
+                fontFamily: "Poppins_600SemiBold",
+                color: colors.primary,
+                marginLeft: 4,
+                fontSize: 12,
+              }}
+            >
+              Whole Day
+            </Text>
+          </View>
+        ) : duration > 0 ? (
           <View
             style={[
               styles.durationBadge,
@@ -1981,7 +2066,7 @@ const ListingDetailsSheet = forwardRef<
               {`${duration}h Session`}
             </Text>
           </View>
-        )}
+        ) : null}
       </View>
 
       {/* Show lead time notice if applicable */}
@@ -2091,6 +2176,141 @@ const ListingDetailsSheet = forwardRef<
             },
           ]}
         >
+          {/* RECORDING STUDIO: Whole-Day Booking UI */}
+          {group?.studio_type === "Recording" ? (
+            <View>
+              <Text
+                style={{
+                  fontFamily: "Poppins_500Medium",
+                  color: colors.textSecondary,
+                  fontSize: 13,
+                  marginBottom: 12,
+                }}
+              >
+                Recording Session for{" "}
+                {new Date(selectedDate).toLocaleDateString(undefined, {
+                  weekday: "long",
+                  month: "short",
+                  day: "numeric",
+                })}
+              </Text>
+              
+              {isRecordingWholeDayAvailable && recordingDaySlot ? (
+                <View>
+                  {/* Whole Day Booking Info */}
+                  <View
+                    style={{
+                      backgroundColor: isDark ? "rgba(124, 58, 237, 0.1)" : "rgba(124, 58, 237, 0.08)",
+                      borderRadius: 12,
+                      padding: 16,
+                      borderWidth: 2,
+                      borderColor: colors.primary,
+                      marginBottom: 16,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+                      <Ionicons name="calendar" size={20} color={colors.primary} />
+                      <Text
+                        style={{
+                          fontFamily: "Poppins_600SemiBold",
+                          fontSize: 16,
+                          color: colors.primary,
+                          marginLeft: 8,
+                        }}
+                      >
+                        Whole Day Recording Session
+                      </Text>
+                    </View>
+                    <Text
+                      style={{
+                        fontFamily: "Poppins_400Regular",
+                        fontSize: 13,
+                        color: colors.textSecondary,
+                        marginBottom: 8,
+                      }}
+                    >
+                      Recording studios are booked for the entire day to ensure uninterrupted sessions.
+                    </Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Ionicons name="time-outline" size={16} color={colors.text} />
+                      <Text
+                        style={{
+                          fontFamily: "Poppins_500Medium",
+                          fontSize: 14,
+                          color: colors.text,
+                        }}
+                      >
+                        {formatTime12(recordingDaySlot.start)} - {formatTime12(recordingDaySlot.end)}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  {/* Calculate duration for display */}
+                  {(() => {
+                    const startParts = recordingDaySlot.start.split(":").map(Number);
+                    const endParts = recordingDaySlot.end.split(":").map(Number);
+                    const startMinutes = startParts[0] * 60 + startParts[1];
+                    const endMinutes = endParts[0] * 60 + endParts[1];
+                    const durationHours = (endMinutes - startMinutes) / 60;
+                    const rate = parseInt(displayRate.replace(/,/g, "")) || 0;
+                    const totalCost = rate * durationHours;
+                    
+                    return (
+                      <View
+                        style={{
+                          backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                          borderRadius: 12,
+                          padding: 12,
+                          marginBottom: 16,
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Duration</Text>
+                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>{durationHours} hours</Text>
+                        </View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Rate</Text>
+                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>₱{displayRate}/hr</Text>
+                        </View>
+                        <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 8 }} />
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold" }}>Total</Text>
+                          <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 16 }}>₱{totalCost.toLocaleString()}</Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
+                </View>
+              ) : (
+                <View style={{ alignItems: "center", paddingVertical: 16 }}>
+                  <Ionicons name="calendar-outline" size={32} color={colors.textSecondary} style={{ marginBottom: 8 }} />
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_500Medium",
+                      fontSize: 14,
+                      textAlign: "center",
+                    }}
+                  >
+                    This date is not available
+                  </Text>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      fontSize: 12,
+                      textAlign: "center",
+                      marginTop: 4,
+                    }}
+                  >
+                    Recording studios require the full day. This date already has bookings.
+                  </Text>
+                </View>
+              )}
+            </View>
+          ) : (
+          /* REGULAR STUDIO: Time Slot Selection UI */
+          <View>
           <Text
             style={{
               fontFamily: "Poppins_500Medium",
@@ -2327,6 +2547,8 @@ const ListingDetailsSheet = forwardRef<
                 })}
               </View>
             </View>
+          )}
+          </View>
           )}
         </View>
       )}
@@ -3052,6 +3274,130 @@ const ListingDetailsSheet = forwardRef<
         ) &&
         (showAddBooking || bookings.length === 0) ? (
           <>
+            {/* RECORDING STUDIO: Simplified whole-day booking flow */}
+            {group?.studio_type === "Recording" ? (
+              <TouchableOpacity
+                style={[
+                  styles.secondaryBtn,
+                  {
+                    borderColor: !isRecordingWholeDayAvailable ? colors.border : colors.primary,
+                    backgroundColor: "transparent",
+                    marginBottom: 16,
+                    opacity: !isRecordingWholeDayAvailable || isCheckingAvailability ? 0.5 : 1,
+                  },
+                ]}
+                disabled={!isRecordingWholeDayAvailable || isCheckingAvailability}
+                activeOpacity={0.8}
+                onPress={async () => {
+                  if (selectedDate && recordingDaySlot) {
+                    setIsCheckingAvailability(true);
+                    try {
+                      const bookingDate = selectedDate;
+                      const startTime = recordingDaySlot.start;
+                      const endTimeStr = recordingDaySlot.end;
+
+                      // Check if we already have a booking for this date
+                      const existingBookingIndex = bookings.findIndex(
+                        (b) => b.date.toISOString().split("T")[0] === bookingDate,
+                      );
+
+                      if (existingBookingIndex >= 0) {
+                        alert("You already have a booking for this date.");
+                        setIsCheckingAvailability(false);
+                        return;
+                      }
+
+                      // Check availability for the whole day
+                      const { data: isAvailable, error: availError } =
+                        await supabase.rpc("is_slot_available", {
+                          p_studio_id: group.id,
+                          p_booking_date: bookingDate,
+                          p_start_time: startTime,
+                          p_end_time: endTimeStr,
+                          p_user_id: userId,
+                        });
+
+                      if (availError) {
+                        console.error("Availability check error:", availError);
+                        alert("Failed to check availability. Please try again.");
+                        setIsCheckingAvailability(false);
+                        return;
+                      }
+
+                      if (!isAvailable) {
+                        alert("This date is not available for booking.");
+                        setIsCheckingAvailability(false);
+                        return;
+                      }
+
+                      // Calculate pricing for whole day
+                      const { data: pricing, error: pricingError } =
+                        await supabase.rpc("calculate_booking_price", {
+                          p_studio_id: group.id,
+                          p_booking_date: bookingDate,
+                          p_start_time: startTime,
+                          p_end_time: endTimeStr,
+                        });
+
+                      if (pricingError || !pricing || pricing.length === 0) {
+                        console.error("Pricing error:", pricingError);
+                        alert("Failed to calculate price. Please try again.");
+                        setIsCheckingAvailability(false);
+                        return;
+                      }
+
+                      // Add whole-day booking
+                      const startDate = new Date(`${bookingDate}T${startTime}`);
+                      const endDate = new Date(`${bookingDate}T${endTimeStr}`);
+                      
+                      setBookings([
+                        ...bookings,
+                        {
+                          date: new Date(bookingDate),
+                          startTime: startDate,
+                          endTime: endDate,
+                          timeSlots: [{ start: startTime, end: endTimeStr }],
+                          pricing: pricing[0],
+                        },
+                      ]);
+
+                      setShowAddBooking(false);
+                      // Reset selection
+                      setSelectedDate("");
+                      setIsRecordingWholeDayAvailable(false);
+                      setRecordingDaySlot(null);
+                    } catch (e: any) {
+                      console.error("Error adding recording booking:", e);
+                      alert("An error occurred. Please try again.");
+                    } finally {
+                      setIsCheckingAvailability(false);
+                    }
+                  }
+                }}
+              >
+                {isCheckingAvailability ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="mic-outline"
+                      size={20}
+                      color={colors.primary}
+                    />
+                    <Text
+                      style={[
+                        styles.secondaryBtnText,
+                        { color: colors.primary, marginLeft: 8 },
+                      ]}
+                    >
+                      {bookings.length > 0 ? "Add Recording Day" : "Book Recording Session"}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : (
+            /* REGULAR STUDIO: Time slot booking flow */
+            <>
             {renderBookingControls()}
 
             <TouchableOpacity
@@ -3221,6 +3567,8 @@ const ListingDetailsSheet = forwardRef<
                 </>
               )}
             </TouchableOpacity>
+            </>
+            )}
           </>
         ) : !(
             hasExistingStudioBooking && existingStudioBookingStatus === "unpaid"
@@ -3237,7 +3585,7 @@ const ListingDetailsSheet = forwardRef<
             onPress={() => setShowAddBooking(true)}
           >
             <Ionicons
-              name="add-circle-outline"
+              name={group?.studio_type === "Recording" ? "mic-outline" : "add-circle-outline"}
               size={20}
               color={colors.primary}
             />
@@ -3247,7 +3595,7 @@ const ListingDetailsSheet = forwardRef<
                 { color: colors.primary, marginLeft: 8 },
               ]}
             >
-              Add Another Session
+              {group?.studio_type === "Recording" ? "Add Another Recording Day" : "Add Another Session"}
             </Text>
           </TouchableOpacity>
         ) : null}
@@ -3557,8 +3905,10 @@ const ListingDetailsSheet = forwardRef<
                     alert("An unexpected error occurred. Please try again.");
                   }
                 },
-                "Confirm Session Booking",
-                `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
+                group?.studio_type === "Recording" ? "Confirm Recording Booking" : "Confirm Session Booking",
+                group?.studio_type === "Recording" 
+                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording sessions occupy the full day. The studio owner will review and approve your booking request.`
+                  : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
               )
             }
           >
@@ -3575,8 +3925,12 @@ const ListingDetailsSheet = forwardRef<
                 ]}
               >
                 {bookings.length > 0
-                  ? `Book ${bookings.length} Session${bookings.length > 1 ? "s" : ""}`
-                  : "Add at least one session"}
+                  ? group?.studio_type === "Recording"
+                    ? `Book ${bookings.length} Recording Date${bookings.length > 1 ? "s" : ""}`
+                    : `Book ${bookings.length} Session${bookings.length > 1 ? "s" : ""}`
+                  : group?.studio_type === "Recording"
+                    ? "Select a recording date"
+                    : "Add at least one session"}
               </Text>
             )}
           </TouchableOpacity>

@@ -374,33 +374,89 @@ serve(async (req: Request) => {
                 insertPayload = filteredPayload;
             }
 
-            // SPAM PREVENTION: Check for blocking rule for Gig Applications
+            // SPAM PREVENTION & SLOT CHECKING: Check for blocking rules for Gig Applications
             if (type === 'gig_application') {
-                const { gig_id } = insertPayload;
+                const { gig_id, slot_type } = insertPayload;
 
-                // Limit tries for THIS specific gig
-                const thirtyDaysAgo = new Date();
-                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                // 1. Fetch gig settings for cooldown and slot tracking
+                const { data: gigData, error: gigError } = await supabaseClient
+                    .from('gigs')
+                    .select('reapplication_cooldown_days, requirements, slots_filled, total_slots_filled, status')
+                    .eq('id', gig_id)
+                    .single();
 
-                const { count, error: countError } = await supabaseClient
-                    .from('gig_applications')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('status', 'cancelled') // canceled or rejected? User said "limited tries", usually means re-applying after rejection/cancel.
-                    // But if restricted to "cancelled", it means user canceled. If 'rejected', maybe they can't apply again anyway?
-                    // Original code checked 'cancelled'. Let's stick to that but scope to gig_id.
-                    // Actually, if I was rejected, I probably shouldn't be able to apply again immediately? 
-                    // But user specifically said "limited tries".
-                    // Let's count both cancelled and rejected to be safe? Or just stick to current logic but scoped to gig.
-                    // Current logic: status = 'cancelled'.
-                    .eq('applicant_id', userId)
-                    .eq('gig_id', gig_id) // Changed from organizer_id to gig_id
-                    .gte('updated_at', thirtyDaysAgo.toISOString());
+                if (gigError) throw gigError;
 
-                if (countError) throw countError;
-
-                if (count !== null && count >= 3) { // Threshold: 3 tries per gig
-                    throw new Error('You have reached the maximum number of attempts for this gig.');
+                // 2. Check if gig is still open
+                if (gigData.status !== 'open') {
+                    throw new Error('This gig is no longer accepting applications.');
                 }
+
+                // 3. Check slot availability
+                const totalSlotsNeeded = gigData.requirements?.total_slots_needed || 999;
+                const totalSlotsFilled = gigData.total_slots_filled || 0;
+                
+                if (totalSlotsFilled >= totalSlotsNeeded) {
+                    throw new Error('All performer slots for this gig have been filled.');
+                }
+
+                // Check specific slot type availability if provided
+                if (slot_type && gigData.requirements?.slots?.[slot_type]) {
+                    const slotNeeded = gigData.requirements.slots[slot_type]?.needed || 0;
+                    const slotFilled = gigData.slots_filled?.[slot_type]?.accepted || 0;
+                    
+                    if (slotNeeded > 0 && slotFilled >= slotNeeded) {
+                        throw new Error(`All ${slot_type} slots have been filled. Try applying for a different slot type.`);
+                    }
+                }
+
+                // 4. Check if user already has a pending or accepted application for this gig
+                const { data: existingApp, error: existingError } = await supabaseClient
+                    .from('gig_applications')
+                    .select('id, status')
+                    .eq('applicant_id', userId)
+                    .eq('gig_id', gig_id)
+                    .in('status', ['pending', 'accepted'])
+                    .maybeSingle();
+
+                if (existingError) throw existingError;
+
+                if (existingApp) {
+                    if (existingApp.status === 'accepted') {
+                        throw new Error('You have already been accepted for this gig.');
+                    }
+                    throw new Error('You already have a pending application for this gig.');
+                }
+
+                // 5. Check cooldown for rejected applications
+                const cooldownDays = gigData.reapplication_cooldown_days ?? 30; // Default 30 days if not set
+                
+                if (cooldownDays > 0) {
+                    const { data: rejectedApp, error: rejectedError } = await supabaseClient
+                        .from('gig_applications')
+                        .select('id, rejected_at, created_at')
+                        .eq('applicant_id', userId)
+                        .eq('gig_id', gig_id)
+                        .eq('status', 'rejected')
+                        .order('rejected_at', { ascending: false, nullsFirst: false })
+                        .limit(1)
+                        .maybeSingle();
+
+                    if (rejectedError) throw rejectedError;
+
+                    if (rejectedApp) {
+                        const rejectionDate = rejectedApp.rejected_at || rejectedApp.created_at;
+                        const cooldownEnds = new Date(rejectionDate);
+                        cooldownEnds.setDate(cooldownEnds.getDate() + cooldownDays);
+                        
+                        if (new Date() < cooldownEnds) {
+                            const daysRemaining = Math.ceil((cooldownEnds.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                            throw new Error(`You cannot reapply to this gig yet. Please wait ${daysRemaining} more day(s).`);
+                        }
+                    }
+                }
+
+                console.log('✅ Application checks passed - user can apply');
             }
 
 
@@ -429,7 +485,8 @@ serve(async (req: Request) => {
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
                     'requirements', 'images', 'documents', 'status', 'latitude',
-                    'longitude', 'contract_url', 'business_permit_url'
+                    'longitude', 'contract_url', 'business_permit_url',
+                    'reapplication_cooldown_days'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validGigColumns) {
@@ -666,7 +723,8 @@ serve(async (req: Request) => {
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
                     'requirements', 'images', 'documents', 'status', 'latitude',
-                    'longitude', 'contract_url', 'business_permit_url'
+                    'longitude', 'contract_url', 'business_permit_url',
+                    'reapplication_cooldown_days'
                 ];
                 const filteredPayload: any = {};
                 for (const key of validGigColumns) {

@@ -784,6 +784,32 @@ serve(async (req: Request) => {
           ? payment.attributes.amount / 100
           : 0; // Convert from centavos
 
+        // ========================================
+        // DEDUPLICATION: Check current status before updating to prevent race conditions
+        // The webhook might have already processed this payment
+        // ========================================
+        const { data: currentBooking } = await supabaseAdmin
+          .from("studio_bookings")
+          .select("payment_status")
+          .eq("checkout_session_id", sessionId)
+          .single();
+
+        if (currentBooking?.payment_status === "paid") {
+          console.log("⏭️ check_status: Booking already paid by webhook, skipping duplicate notification");
+          return new Response(
+            JSON.stringify({
+              success: true,
+              payment_status: "paid",
+              payment_method: paymentMethod,
+              message: "Payment already completed",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 200,
+            },
+          );
+        }
+
         // Update booking to confirmed and paid
         const { error: updateError } = await supabaseAdmin
           .from("studio_bookings")
@@ -886,11 +912,16 @@ serve(async (req: Request) => {
         // Get booking details
         const { data: booking } = await supabaseAdmin
           .from("studio_bookings")
-          .select("checkout_session_id")
+          .select("checkout_session_id, payment_status")
           .eq("id", bookingId)
           .single();
 
-        if (booking?.checkout_session_id) {
+        // ========================================
+        // DEDUPLICATION: Skip if already paid (webhook may have processed it)
+        // ========================================
+        if (booking?.payment_status === "paid") {
+          console.log("⏭️ payment_success: Booking already paid, redirecting without duplicate notification");
+        } else if (booking?.checkout_session_id) {
           // Verify payment with PayMongo
           try {
             const sessionData = await paymongoRequest(
@@ -908,54 +939,67 @@ serve(async (req: Request) => {
                 ? payment.attributes.amount / 100
                 : 0; // Convert from centavos
 
-              // Update booking
-              await supabaseAdmin
+              // ========================================
+              // DEDUPLICATION: Double-check status before updating (race condition protection)
+              // ========================================
+              const { data: recheckBooking } = await supabaseAdmin
                 .from("studio_bookings")
-                .update({
-                  payment_status: "paid",
-                  payment_intent_id: paymentIntentId,
-                  payment_method: paymentMethod,
-                  paid_at: new Date().toISOString(),
-                  status: "confirmed",
-                })
-                .eq("id", bookingId);
-
-              // Credit the owner's wallet
-              await creditOwnerWallet(supabaseAdmin, bookingId, paymentAmount);
-
-              // Get full booking details for notifications
-              const { data: fullBooking } = await supabaseAdmin
-                .from("studio_bookings")
-                .select(
-                  "id, user_id, studio_id, booking_date, studio:studios(name, owner_id, images), profile:user_id(avatar_url)",
-                )
+                .select("payment_status")
                 .eq("id", bookingId)
                 .single();
 
-              if (fullBooking) {
-                const studioImage = fullBooking.studio?.images?.[0];
-                const userAvatar = fullBooking.profile?.avatar_url;
+              if (recheckBooking?.payment_status === "paid") {
+                console.log("⏭️ payment_success: Booking paid by webhook during verification, skipping");
+              } else {
+                // Update booking
+                await supabaseAdmin
+                  .from("studio_bookings")
+                  .update({
+                    payment_status: "paid",
+                    payment_intent_id: paymentIntentId,
+                    payment_method: paymentMethod,
+                    paid_at: new Date().toISOString(),
+                    status: "confirmed",
+                  })
+                  .eq("id", bookingId);
 
-                // Notify musician
-                await supabaseAdmin.from("notifications").insert({
-                  user_id: fullBooking.user_id,
-                  type: "success",
-                  title: "Payment Successful!",
-                  message: `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
-                  image: studioImage,
-                  meta: { booking_id: fullBooking.id },
-                });
+                // Credit the owner's wallet
+                await creditOwnerWallet(supabaseAdmin, bookingId, paymentAmount);
 
-                // Notify studio owner
-                if (fullBooking.studio?.owner_id) {
+                // Get full booking details for notifications
+                const { data: fullBooking } = await supabaseAdmin
+                  .from("studio_bookings")
+                  .select(
+                    "id, user_id, studio_id, booking_date, studio:studios(name, owner_id, images), profile:user_id(avatar_url)",
+                  )
+                  .eq("id", bookingId)
+                  .single();
+
+                if (fullBooking) {
+                  const studioImage = fullBooking.studio?.images?.[0];
+                  const userAvatar = fullBooking.profile?.avatar_url;
+
+                  // Notify musician
                   await supabaseAdmin.from("notifications").insert({
-                    user_id: fullBooking.studio.owner_id,
-                    type: "info",
-                    title: "Booking Payment Received",
-                    message: `Payment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}.`,
-                    image: userAvatar,
+                    user_id: fullBooking.user_id,
+                    type: "success",
+                    title: "Payment Successful!",
+                    message: `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
+                    image: studioImage,
                     meta: { booking_id: fullBooking.id },
                   });
+
+                  // Notify studio owner
+                  if (fullBooking.studio?.owner_id) {
+                    await supabaseAdmin.from("notifications").insert({
+                      user_id: fullBooking.studio.owner_id,
+                      type: "info",
+                      title: "Booking Payment Received",
+                      message: `Payment received for booking at ${fullBooking.studio?.name} on ${fullBooking.booking_date}.`,
+                      image: userAvatar,
+                      meta: { booking_id: fullBooking.id },
+                    });
+                  }
                 }
               }
             }
@@ -1184,6 +1228,21 @@ serve(async (req: Request) => {
       ) {
         if (!bookingId) return;
 
+        // ========================================
+        // DEDUPLICATION CHECK: Prevent duplicate notifications
+        // Check if booking is already paid before processing
+        // ========================================
+        const { data: existingBooking } = await supabaseAdmin
+          .from("studio_bookings")
+          .select("payment_status")
+          .eq("id", bookingId)
+          .single();
+
+        if (existingBooking?.payment_status === "paid") {
+          console.log("⏭️ Webhook: Booking already paid, skipping duplicate notification");
+          return;
+        }
+
         // Update booking
         const updateData: any = {
           payment_status: "paid",
@@ -1213,17 +1272,20 @@ serve(async (req: Request) => {
         const { data: booking } = await supabaseAdmin
           .from("studio_bookings")
           .select(
-            "id, user_id, studio_id, booking_date, studio:studios(name, owner_id)",
+            "id, user_id, studio_id, booking_date, studio:studios(name, owner_id, images)",
           )
           .eq("id", bookingId)
           .single();
 
         if (booking) {
+          const studioImage = booking.studio?.images?.[0] || null;
+          
           await supabaseAdmin.from("notifications").insert({
             user_id: booking.user_id,
             type: "success",
             title: "Payment Confirmed!",
             message: `Your booking at ${booking.studio?.name} is now confirmed.`,
+            image: studioImage,
             meta: { booking_id: booking.id },
           });
 
@@ -1233,6 +1295,7 @@ serve(async (req: Request) => {
               type: "info",
               title: "New Paid Booking",
               message: `Payment received for ${booking.studio?.name} on ${booking.booking_date}.`,
+              image: studioImage,
               meta: { booking_id: booking.id },
             });
           }
@@ -1406,7 +1469,7 @@ serve(async (req: Request) => {
           // Notify user about failed payment
           const { data: booking } = await supabaseAdmin
             .from("studio_bookings")
-            .select("user_id, studio:studios(name)")
+            .select("user_id, studio:studios(name, images)")
             .eq("id", bookingId)
             .single();
 
@@ -1416,6 +1479,7 @@ serve(async (req: Request) => {
               type: "warning",
               title: "Payment Failed",
               message: `Your payment for ${booking.studio?.name} failed. Please try again.`,
+              image: booking.studio?.images?.[0] || null,
               meta: { booking_id: bookingId },
             });
           }
@@ -1448,7 +1512,7 @@ serve(async (req: Request) => {
           // Notify user
           const { data: booking } = await supabaseAdmin
             .from("studio_bookings")
-            .select("user_id, studio:studios(name)")
+            .select("user_id, studio:studios(name, images)")
             .eq("id", bookingId)
             .single();
 
@@ -1458,6 +1522,7 @@ serve(async (req: Request) => {
               type: "success",
               title: "Refund Completed",
               message: `Your refund of ₱${refundAmount.toLocaleString()} for ${booking.studio?.name} has been processed.`,
+              image: booking.studio?.images?.[0] || null,
               meta: { booking_id: bookingId },
             });
           }
@@ -1476,7 +1541,7 @@ serve(async (req: Request) => {
           // Notify user that refund failed
           const { data: booking } = await supabaseAdmin
             .from("studio_bookings")
-            .select("user_id, studio:studios(name)")
+            .select("user_id, studio:studios(name, images)")
             .eq("id", bookingId)
             .single();
 
@@ -1486,6 +1551,7 @@ serve(async (req: Request) => {
               type: "warning",
               title: "Refund Failed",
               message: `Your refund request for ${booking.studio?.name} could not be processed. Please contact support.`,
+              image: booking.studio?.images?.[0] || null,
               meta: { booking_id: bookingId },
             });
           }

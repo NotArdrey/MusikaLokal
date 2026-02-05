@@ -4,25 +4,25 @@ import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Linking,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
 
-const DEFAULT_AVATAR =
-  "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&fit=crop";
+
 
 const ROLES = [
   "Vocalist",
@@ -101,7 +101,7 @@ export default function EditProfileScreen() {
   const [contactNumber, setContactNumber] = useState("");
   const [location, setLocation] = useState("");
   const [bio, setBio] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState(DEFAULT_AVATAR);
+  const [avatarUrl, setAvatarUrl] = useState<any>(DEFAULT_AVATAR);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
@@ -411,7 +411,9 @@ export default function EditProfileScreen() {
         <View style={styles.avatarContainer}>
           <View style={styles.avatarWrapper}>
             <Image
-              source={{ uri: avatarUrl }}
+              source={
+                typeof avatarUrl === "string" ? { uri: avatarUrl } : avatarUrl
+              }
               style={[styles.avatar, { borderColor: colors.primary }]}
             />
             <TouchableOpacity

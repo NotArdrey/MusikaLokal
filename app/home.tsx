@@ -3,17 +3,17 @@ import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Dimensions,
-  Image,
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    Image,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
@@ -330,6 +330,10 @@ export default function HomeScreen() {
           location: item.location || item.address || "",
           amenities: item.amenities || [],
           experience_level: item.requirements?.experience_level || null,
+          // Pass full requirements for gigs (includes slots data)
+          requirements: item.requirements || null,
+          // Event date for gigs
+          event_date: item.event_date || null,
           embedding: item.embedding, // Profiles might have interest_vector but listing card uses embedding
           created_at: item.created_at, // Added for New Arrivals
           genre: item.genres?.join(", ") || item.genre || "", // For solo artists

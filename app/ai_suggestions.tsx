@@ -7,6 +7,7 @@ import {
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -32,6 +33,7 @@ export default function AiSuggestionsScreen() {
 
     // State
     const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+    const [genreSearch, setGenreSearch] = useState('');
     const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>('beginner');
     const [purpose, setPurpose] = useState<SuggestionPurpose>('band');
     const [suggestions, setSuggestions] = useState<InstrumentSuggestion[]>([]);
@@ -220,6 +222,13 @@ export default function AiSuggestionsScreen() {
         );
     };
 
+    // Filter genres based on search
+    const filteredGenres = genreSearch.trim()
+        ? MUSIC_GENRES.filter(genre =>
+            genre.toLowerCase().includes(genreSearch.toLowerCase())
+        )
+        : MUSIC_GENRES;
+
     // Render genre chips
     const renderGenreChips = () => (
         <View style={styles.genreContainer}>
@@ -229,8 +238,45 @@ export default function AiSuggestionsScreen() {
             <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
                 {userGenres.length > 0 ? 'Pre-selected from your profile. Tap to adjust.' : 'Select one or more genres'}
             </Text>
+            
+            {/* Genre Search Input */}
+            <View style={[
+                styles.genreSearchContainer,
+                {
+                    backgroundColor: isDark ? '#374151' : '#F3F4F6',
+                    borderColor: colors.border,
+                }
+            ]}>
+                <Ionicons name="search" size={18} color={colors.textSecondary} />
+                <TextInput
+                    style={[styles.genreSearchInput, { color: colors.text }]}
+                    placeholder="Search genres..."
+                    placeholderTextColor={colors.textSecondary}
+                    value={genreSearch}
+                    onChangeText={setGenreSearch}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                />
+                {genreSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setGenreSearch('')}>
+                        <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                )}
+            </View>
+
+            {/* Selected genres count */}
+            {selectedGenres.length > 0 && (
+                <Text style={[styles.selectedCount, { color: colors.primary }]}>
+                    {selectedGenres.length} genre{selectedGenres.length !== 1 ? 's' : ''} selected
+                </Text>
+            )}
+
             <View style={styles.chipGrid}>
-                {MUSIC_GENRES.map(genre => {
+                {filteredGenres.length === 0 ? (
+                    <Text style={[styles.noResultsText, { color: colors.textSecondary }]}>
+                        No genres found for "{genreSearch}"
+                    </Text>
+                ) : filteredGenres.map(genre => {
                     const isSelected = selectedGenres.includes(genre);
                     const isFromProfile = userGenres.includes(genre);
                     return (
@@ -674,6 +720,34 @@ const styles = StyleSheet.create({
     },
     genreContainer: {
         marginBottom: 24,
+    },
+    genreSearchContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginBottom: 12,
+        gap: 8,
+    },
+    genreSearchInput: {
+        flex: 1,
+        fontSize: 14,
+        fontFamily: 'Poppins_400Regular',
+        padding: 0,
+        margin: 0,
+    },
+    selectedCount: {
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        marginBottom: 8,
+    },
+    noResultsText: {
+        fontSize: 13,
+        fontFamily: 'Poppins_400Regular',
+        fontStyle: 'italic',
+        paddingVertical: 12,
     },
     chipGrid: {
         flexDirection: 'row',

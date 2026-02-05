@@ -448,6 +448,40 @@ const ListingCard: React.FC<ListingCardProps> = ({
                     </Text>
                   </View>
                 )}
+              {/* Slots Needed Badge for Gigs */}
+              {item.type === "Gig" && item.requirements?.slots && (
+                <>
+                  {item.requirements.slots.solo?.needed > 0 && (
+                    <View style={[styles.tagBadge, { backgroundColor: "#EC4899" }]}>
+                      <Text style={styles.tagText}>
+                        {item.requirements.slots.solo.needed} Solo
+                      </Text>
+                    </View>
+                  )}
+                  {item.requirements.slots.duo?.needed > 0 && (
+                    <View style={[styles.tagBadge, { backgroundColor: "#8B5CF6" }]}>
+                      <Text style={styles.tagText}>
+                        {item.requirements.slots.duo.needed} Duo{item.requirements.slots.duo.needed > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+                  {item.requirements.slots.band?.needed > 0 && (
+                    <View style={[styles.tagBadge, { backgroundColor: "#3B82F6" }]}>
+                      <Text style={styles.tagText}>
+                        {item.requirements.slots.band.needed} Band{item.requirements.slots.band.needed > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+                </>
+              )}
+              {/* Total Slots Badge for Gigs without detailed slots */}
+              {item.type === "Gig" && item.requirements?.total_slots_needed > 0 && !item.requirements?.slots && (
+                <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
+                  <Text style={styles.tagText}>
+                    {item.requirements.total_slots_needed} Slot{item.requirements.total_slots_needed > 1 ? "s" : ""}
+                  </Text>
+                </View>
+              )}
             </View>
 
             <Text style={styles.immersiveTitle} numberOfLines={2}>

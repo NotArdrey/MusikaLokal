@@ -11,6 +11,7 @@ import {
     View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { DEFAULT_AVATAR } from '../constants/Images';
 import { useTheme } from '../context/ThemeContext';
 import { Conversation, useConversations } from '../hooks/useChat';
 import UserSearchModal from './UserSearchModal';
@@ -117,9 +118,10 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                                 style={styles.avatar}
                             />
                         ) : (
-                            <View style={[styles.avatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
-                                <Ionicons name="person" size={24} color="#FFF" />
-                            </View>
+                            <Image
+                                source={DEFAULT_AVATAR}
+                                style={styles.avatar}
+                            />
                         )
                     )}
                     {hasUnread && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
