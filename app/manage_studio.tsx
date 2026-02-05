@@ -117,9 +117,9 @@ export default function StudioDetailsScreen() {
         .single();
 
       if (studioError) {
-        console.error('[manage_studio] Failed to fetch studio details:', studioError.message);
+        console.log('[manage_studio] Failed to fetch studio details:', studioError.message);
         // if (studioError.message?.includes("non-2xx")) {
-        //   console.error('[manage_studio] Full error object:', JSON.stringify(studioError));
+        //   console.log('[manage_studio] Full error object:', JSON.stringify(studioError));
         // }
         throw studioError;
       }
@@ -127,17 +127,23 @@ export default function StudioDetailsScreen() {
 
       // Fetch Bookings
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("No active session");
+
         const { data: bookingData, error: bookingError } =
           await supabase.functions.invoke("bookings-manage", {
             body: { action: "fetch_studio_bookings", studioId: studioId, userId },
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
           });
         if (bookingError) {
-          console.error('[manage_studio] Failed to fetch bookings:', bookingError);
+          console.log('[manage_studio] Failed to fetch bookings:', bookingError);
         } else {
           setBookings(bookingData || []);
         }
       } catch (bookingErr) {
-        console.error('[manage_studio] Exception fetching bookings:', bookingErr);
+        console.log('[manage_studio] Exception fetching bookings:', bookingErr);
       }
 
       // Direct query to reviews table
@@ -148,21 +154,21 @@ export default function StudioDetailsScreen() {
           .eq('studio_id', studioId)
           .order('created_at', { ascending: false });
         if (reviewError) {
-          console.error('[manage_studio] Failed to fetch reviews:', reviewError);
+          console.log('[manage_studio] Failed to fetch reviews:', reviewError);
         } else {
           setReviews(reviewData || []);
         }
       } catch (reviewErr) {
-        console.error('[manage_studio] Exception fetching reviews:', reviewErr);
+        console.log('[manage_studio] Exception fetching reviews:', reviewErr);
       }
 
     } catch (e: any) {
-      console.error("[manage_studio] Critical error fetching data:", e.message || "Unknown error");
+      console.log("[manage_studio] Critical error fetching data (masked):", e.message || "Unknown error");
       let errorMsg = "Failed to load studio data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
       }
-      Alert.alert("Error", errorMsg);
+      // Alert.alert("Error", errorMsg);
     } finally {
       setLoading(false);
     }

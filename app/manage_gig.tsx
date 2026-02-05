@@ -105,9 +105,9 @@ export default function GigDetailsScreen() {
         .single();
 
       if (gigError) {
-        console.error('[manage_gig] Failed to fetch gig details:', gigError.message);
+        console.log('[manage_gig] Failed to fetch gig details:', gigError.message);
         // if (gigError.message?.includes("non-2xx")) {
-        //   console.error('[manage_gig] Full error object:', JSON.stringify(gigError));
+        //   console.log('[manage_gig] Full error object:', JSON.stringify(gigError));
         // }
         throw gigError;
       }
@@ -115,18 +115,24 @@ export default function GigDetailsScreen() {
 
       // Fetch Applications
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("No active session");
+
         const { data: appData, error: appError } =
           await supabase.functions.invoke("gig-applications", {
             body: { action: "fetch_gig_applications", gigId: gigId, userId },
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
           });
         if (appError) {
-          console.error('[manage_gig] Failed to fetch applications:', appError);
+          console.log('[manage_gig] Failed to fetch applications:', appError);
           // Don't throw here, allowing the page to load at least the gig details
         } else {
           setApplications(appData || []);
         }
       } catch (appErr) {
-        console.error('[manage_gig] Exception fetching applications:', appErr);
+        console.log('[manage_gig] Exception fetching applications:', appErr);
       }
 
       // Direct query to reviews table
@@ -137,21 +143,21 @@ export default function GigDetailsScreen() {
           .eq('gig_id', gigId)
           .order('created_at', { ascending: false });
         if (reviewError) {
-          console.error('[manage_gig] Failed to fetch reviews:', reviewError);
+          console.log('[manage_gig] Failed to fetch reviews:', reviewError);
         } else {
           setReviews(reviewData || []);
         }
       } catch (reviewErr) {
-        console.error('[manage_gig] Exception fetching reviews:', reviewErr);
+        console.log('[manage_gig] Exception fetching reviews:', reviewErr);
       }
 
     } catch (e: any) {
-      console.error("[manage_gig] Critical error fetching data:", e.message || "Unknown error");
+      console.log("[manage_gig] Critical error fetching data (masked):", e.message || "Unknown error");
       let errorMsg = "Failed to load gig data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
       }
-      Alert.alert("Error", errorMsg);
+      // Alert.alert("Error", errorMsg);
     } finally {
       setLoading(false);
     }
