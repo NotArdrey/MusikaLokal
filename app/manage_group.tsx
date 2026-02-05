@@ -98,9 +98,9 @@ export default function GroupDetailsScreen() {
         .single();
 
       if (groupError) {
-        console.error('[manage_group] Failed to fetch group details:', groupError.message);
+        console.log('[manage_group] Failed to fetch group details:', groupError.message);
         // if (groupError.message?.includes("non-2xx")) {
-        //   console.error('[manage_group] Full error object:', JSON.stringify(groupError));
+        //   console.log('[manage_group] Full error object:', JSON.stringify(groupError));
         // }
         throw groupError;
       }
@@ -108,6 +108,9 @@ export default function GroupDetailsScreen() {
 
       // Fetch Group Applications (Sent)
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error("No active session");
+
         const { data: appData, error: appError } =
           await supabase.functions.invoke("gig-applications", {
             body: {
@@ -115,14 +118,24 @@ export default function GroupDetailsScreen() {
               groupId: groupId,
               userId,
             },
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
           });
+
+        console.log('[manage_group] Debug appData:', JSON.stringify(appData, null, 2));
+
         if (appError) {
-          console.error('[manage_group] Failed to fetch applications:', appError);
+          console.log('[manage_group] Failed to fetch applications:', appError);
         } else {
-          setApplications(appData || []);
+          if (appData && !Array.isArray(appData) && appData.error) {
+            console.log('[manage_group] Edge Function returned error:', appData);
+          } else {
+            setApplications(appData || []);
+          }
         }
       } catch (appErr) {
-        console.error('[manage_group] Exception fetching applications:', appErr);
+        console.log('[manage_group] Exception fetching applications:', appErr);
       }
 
       // Direct query to reviews table
@@ -133,21 +146,21 @@ export default function GroupDetailsScreen() {
           .eq('group_id', groupId)
           .order('created_at', { ascending: false });
         if (reviewError) {
-          console.error('[manage_group] Failed to fetch reviews:', reviewError);
+          console.log('[manage_group] Failed to fetch reviews:', reviewError);
         } else {
           setReviews(reviewData || []);
         }
       } catch (reviewErr) {
-        console.error('[manage_group] Exception fetching reviews:', reviewErr);
+        console.log('[manage_group] Exception fetching reviews:', reviewErr);
       }
 
     } catch (e: any) {
-      console.error("[manage_group] Critical error fetching data:", e.message || "Unknown error");
+      console.log("[manage_group] Critical error fetching data (masked):", e.message || "Unknown error");
       let errorMsg = "Failed to load group data";
       if (e.message?.includes("non-2xx")) {
         errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
       }
-      Alert.alert("Error", errorMsg);
+      // Alert.alert("Error", errorMsg);
     } finally {
       setLoading(false);
     }
