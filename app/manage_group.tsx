@@ -2,14 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -52,12 +52,13 @@ export default function GroupDetailsScreen() {
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke(
-        "manage-profile",
-        {
-          body: { action: "fetch", userId: user.id },
-        },
-      );
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
 
       if (profile?.role !== "musician") {
         Alert.alert("Unauthorized", "Only musicians can access this page.");
@@ -88,11 +89,13 @@ export default function GroupDetailsScreen() {
 
       console.log(`[manage_group] Fetching data for groupId: ${groupId}, userId: ${userId}`);
 
-      // Fetch Group Details
-      const { data: groupData, error: groupError } =
-        await supabase.functions.invoke("listings-crud", {
-          body: { action: "fetch_one", type: "group", id: groupId, userId },
-        });
+      // Direct query to groups table
+      const { data: groupData, error: groupError } = await supabase
+        .from('groups')
+        .select('*')
+        .eq('id', groupId)
+        .eq('owner_id', userId)
+        .single();
 
       if (groupError) {
         console.error('[manage_group] Failed to fetch group details:', groupError);
@@ -122,12 +125,14 @@ export default function GroupDetailsScreen() {
         console.error('[manage_group] Exception fetching applications:', appErr);
       }
 
-      // Fetch Reviews
+      // Direct query to reviews table
       try {
-        const { data: reviewData, error: reviewError } =
-          await supabase.functions.invoke("listings-crud", {
-            body: { action: "fetch_reviews", type: "group", id: groupId, userId },
-          });
+        const { data: reviewData, error: reviewError } = await supabase
+          .from('reviews')
+          .select('*, reviewer:profiles!reviews_reviewer_id_fkey(id, full_name, avatar_url)')
+          .eq('entity_type', 'group')
+          .eq('entity_id', groupId)
+          .order('created_at', { ascending: false });
         if (reviewError) {
           console.error('[manage_group] Failed to fetch reviews:', reviewError);
         } else {

@@ -21,12 +21,19 @@ export default function MyStudioScreen() {
     const fetchStudios = async () => {
         if (!userId) return;
         try {
-            const { data, error } = await supabase.functions.invoke('listings-crud', {
-                body: { action: 'fetch_my_studios', userId }
-            });
+            // Direct query to studios_with_stats view
+            const { data, error } = await supabase
+                .from('studios_with_stats')
+                .select('*')
+                .eq('owner_id', userId)
+                .order('created_at', { ascending: false });
 
             if (error) throw error;
-            setStudios(data || []);
+            setStudios((data || []).map((item: any) => ({
+                ...item,
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
+            })));
         } catch (e) {
             console.log('Error fetching studios:', e);
         } finally {
@@ -56,9 +63,17 @@ export default function MyStudioScreen() {
     const handleDelete = async () => {
         if (!selectedId || !userId) return;
         try {
-            const { error } = await supabase.functions.invoke('listings-crud', {
-                body: { action: 'delete', type: 'studio', id: selectedId, userId }
-            });
+            // Delete related records first
+            await supabase.from('studio_settings').delete().eq('studio_id', selectedId);
+            await supabase.from('studio_operating_hours').delete().eq('studio_id', selectedId);
+            await supabase.from('studio_date_overrides').delete().eq('studio_id', selectedId);
+
+            // Then delete the studio
+            const { error } = await supabase
+                .from('studios')
+                .delete()
+                .eq('id', selectedId)
+                .eq('owner_id', userId);
 
             if (error) throw error;
             setStudios(studios.filter(s => s.id !== selectedId));

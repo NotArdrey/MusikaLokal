@@ -1,3 +1,6 @@
+[functions.paymongo]
+verify_jwt = false
+
 [functions.verification-redirect]
 verify_jwt = false
 

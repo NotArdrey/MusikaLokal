@@ -2,16 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Modal as RNModal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Modal as RNModal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -148,12 +148,13 @@ export default function EditGroupScreen() {
       // Store user ID for leadership transfer
       setCurrentUserId(user.id);
 
-      const { data: profile } = await supabase.functions.invoke(
-        "manage-profile",
-        {
-          body: { action: "fetch", userId: user.id },
-        },
-      );
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
 
       if (profile?.role !== "musician") {
         showAlert("error", "Unauthorized", "Only musicians can edit groups.");
@@ -194,17 +195,13 @@ export default function EditGroupScreen() {
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke(
-        "listings-crud",
-        {
-          body: {
-            action: "fetch_one",
-            type: "group",
-            id: groupId,
-            userId: user.id,
-          },
-        },
-      );
+      // Direct query to groups table
+      const { data, error } = await supabase
+        .from('groups')
+        .select('*')
+        .eq('id', groupId)
+        .eq('owner_id', user.id)
+        .single();
 
       if (error) throw error;
 
@@ -367,15 +364,22 @@ export default function EditGroupScreen() {
         group_type: groupType, // 'duo' or 'band'
       };
 
-      const { error } = await supabase.functions.invoke("listings-crud", {
-        body: {
-          action: "update",
-          type: "group",
-          id: groupId,
-          userId: user.id,
-          payload,
-        },
-      });
+      // Direct update to groups table
+      const { error } = await supabase
+        .from('groups')
+        .update({
+          name: payload.name,
+          genre: payload.genre,
+          description: payload.description,
+          location: payload.location,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          members: payload.members,
+          images: payload.images,
+          group_type: payload.group_type,
+        })
+        .eq('id', groupId)
+        .eq('owner_id', user.id);
 
       if (error) {
         console.error('❌ Update failed with error:', error);
@@ -563,22 +567,19 @@ export default function EditGroupScreen() {
         return;
       }
 
-      // Send notification to new leader
-      await supabase.functions.invoke("listings-crud", {
-        body: {
-          action: "create_notification",
-          userId: currentUserId,
-          targetUserId: selectedNewLeader.user_id,
-          type: "info",
-          title: "Leadership Transfer Request",
-          message: `You have been invited to become the leader of "${groupName}". Open to accept or decline.`,
-          meta: {
-            type: "leadership_transfer",
-            request_id: data.id,
-            group_id: groupId,
-            group_name: groupName,
-          },
+      // Direct insert to notifications table
+      await supabase.from('notifications').insert({
+        user_id: selectedNewLeader.user_id,
+        type: "info",
+        title: "Leadership Transfer Request",
+        message: `You have been invited to become the leader of "${groupName}". Open to accept or decline.`,
+        meta: {
+          type: "leadership_transfer",
+          request_id: data.id,
+          group_id: groupId,
+          group_name: groupName,
         },
+        read: false,
       });
 
       showAlert(

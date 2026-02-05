@@ -2,16 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Image,
-  Linking,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Image,
+    Linking,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -59,12 +59,13 @@ export default function GigDetailsScreen() {
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke(
-        "manage-profile",
-        {
-          body: { action: "fetch", userId: user.id },
-        },
-      );
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
 
       if (profile?.role !== "venue-owner") {
         Alert.alert("Unauthorized", "Only venue owners can access this page.");
@@ -95,11 +96,13 @@ export default function GigDetailsScreen() {
 
       console.log(`[manage_gig] Fetching data for gigId: ${gigId}, userId: ${userId}`);
 
-      // Fetch Gig Details
-      const { data: gigData, error: gigError } =
-        await supabase.functions.invoke("listings-crud", {
-          body: { action: "fetch_one", type: "gig", id: gigId, userId },
-        });
+      // Direct query to gigs table
+      const { data: gigData, error: gigError } = await supabase
+        .from('gigs')
+        .select('*')
+        .eq('id', gigId)
+        .eq('organizer_id', userId)
+        .single();
 
       if (gigError) {
         console.error('[manage_gig] Failed to fetch gig details:', gigError);
@@ -126,12 +129,14 @@ export default function GigDetailsScreen() {
         console.error('[manage_gig] Exception fetching applications:', appErr);
       }
 
-      // Fetch Reviews
+      // Direct query to reviews table
       try {
-        const { data: reviewData, error: reviewError } =
-          await supabase.functions.invoke("listings-crud", {
-            body: { action: "fetch_reviews", type: "gig", id: gigId, userId },
-          });
+        const { data: reviewData, error: reviewError } = await supabase
+          .from('reviews')
+          .select('*, reviewer:profiles!reviews_reviewer_id_fkey(id, full_name, avatar_url)')
+          .eq('entity_type', 'gig')
+          .eq('entity_id', gigId)
+          .order('created_at', { ascending: false });
         if (reviewError) {
           console.error('[manage_gig] Failed to fetch reviews:', reviewError);
         } else {

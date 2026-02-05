@@ -3,15 +3,15 @@ import * as ExpoLinking from "expo-linking";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Linking,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
@@ -43,28 +43,63 @@ export default function SubscriptionRequiredScreen() {
     fetchPlans();
   }, []);
 
-    const fetchPlans = async () => {
-        try {
-            const { data, error } = await supabase
-                .from('subscription_plans')
-                .select('*')
-                .eq('is_active', true)
-                .single();
+  const fetchPlans = async () => {
+    try {
+      // Refresh session first to ensure valid JWT
+      const { data: sessionData, error: sessionError } = await supabase.auth.refreshSession();
 
-      if (error) throw error;
-
-            if (data) {
-                setPlans([{
-                    ...data,
-                    features: data.features || []
-                }]);
-            }
-        } catch (error) {
-            console.error('Error fetching plan:', error);
-        } finally {
-            setLoading(false);
+      if (sessionError) {
+        console.error('Session refresh error:', sessionError);
+        // If session refresh fails, redirect to login
+        if (sessionError.message?.includes('JWT') || sessionError.message?.includes('token')) {
+          Alert.alert(
+            "Session Expired",
+            "Your session has expired. Please log in again.",
+            [{ text: "OK", onPress: () => router.replace("/") }]
+          );
+          return;
         }
-    };
+      }
+
+      const { data, error } = await supabase
+        .from('subscription_plans')
+        .select('*')
+        .eq('is_active', true)
+        .single();
+
+      if (error) {
+        // Handle Invalid JWT error specifically
+        if (error.message?.includes('JWT') || error.code === '401' || (error as any).code === 401) {
+          Alert.alert(
+            "Authentication Error",
+            "Your session is invalid. Please log in again.",
+            [{ text: "OK", onPress: () => router.replace("/") }]
+          );
+          return;
+        }
+        throw error;
+      }
+
+      if (data) {
+        setPlans([{
+          ...data,
+          features: data.features || []
+        }]);
+      }
+    } catch (error: any) {
+      console.error('Error fetching plan:', error);
+      // Handle JWT errors in catch block as well
+      if (error?.message?.includes('Invalid JWT') || error?.code === 401) {
+        Alert.alert(
+          "Authentication Error",
+          "Your session is invalid. Please log in again.",
+          [{ text: "OK", onPress: () => router.replace("/") }]
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubscribe = async (planId: string) => {
     if (!userId) {
@@ -76,6 +111,21 @@ export default function SubscriptionRequiredScreen() {
     setSubscribing(true);
 
     try {
+      // Refresh session first to ensure valid JWT for edge function
+      const { data: sessionData, error: sessionError } = await supabase.auth.refreshSession();
+
+      if (sessionError || !sessionData?.session) {
+        console.error('Session refresh error:', sessionError);
+        Alert.alert(
+          "Session Expired",
+          "Your session has expired. Please log in again.",
+          [{ text: "OK", onPress: () => router.replace("/") }]
+        );
+        setSubscribing(false);
+        setSelectedPlan(null);
+        return;
+      }
+
       const plan = plans.find((p) => p.id === planId);
       if (!plan) throw new Error("Plan not found");
 
@@ -225,13 +275,13 @@ export default function SubscriptionRequiredScreen() {
     setLoading(false);
   };
 
-    const getPlanColor = () => {
-        return colors.primary;
-    };
+  const getPlanColor = () => {
+    return colors.primary;
+  };
 
-    const getPlanIcon = () => {
-        return 'diamond-outline';
-    };
+  const getPlanIcon = () => {
+    return 'diamond-outline';
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -329,61 +379,61 @@ export default function SubscriptionRequiredScreen() {
           </View>
         </View>
 
-                {/* Subscription Section */}
-                <View style={styles.plansSection}>
-                    <Text style={[styles.plansTitle, { color: colors.text }]}>
-                        Get Started
-                    </Text>
-                    <Text style={[styles.plansSubtitle, { color: colors.textSecondary }]}>
-                        One simple subscription for full access
-                    </Text>
+        {/* Subscription Section */}
+        <View style={styles.plansSection}>
+          <Text style={[styles.plansTitle, { color: colors.text }]}>
+            Get Started
+          </Text>
+          <Text style={[styles.plansSubtitle, { color: colors.textSecondary }]}>
+            One simple subscription for full access
+          </Text>
 
-                    {loading ? (
-                        <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
-                    ) : plans.length > 0 ? (
-                        <View style={styles.plansList}>
-                            {(() => {
-                                const plan = plans[0];
-                                const planColor = getPlanColor();
+          {loading ? (
+            <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+          ) : plans.length > 0 ? (
+            <View style={styles.plansList}>
+              {(() => {
+                const plan = plans[0];
+                const planColor = getPlanColor();
 
-                                return (
-                                    <View
-                                        key={plan.id}
-                                        style={[
-                                            styles.planCard,
-                                            {
-                                                backgroundColor: colors.card,
-                                                borderColor: planColor,
-                                                borderWidth: 2,
-                                            }
-                                        ]}
-                                    >
-                                        <View style={styles.planHeader}>
-                                            <View style={[styles.planIconContainer, { backgroundColor: planColor + '20' }]}>
-                                                <Ionicons
-                                                    name={getPlanIcon() as any}
-                                                    size={24}
-                                                    color={planColor}
-                                                />
-                                            </View>
-                                            <View style={{ flex: 1 }}>
-                                                <Text style={[styles.planName, { color: colors.text }]}>
-                                                    {plan.name}
-                                                </Text>
-                                                <Text style={[styles.planDescription, { color: colors.textSecondary }]}>
-                                                    {plan.description}
-                                                </Text>
-                                            </View>
-                                        </View>
+                return (
+                  <View
+                    key={plan.id}
+                    style={[
+                      styles.planCard,
+                      {
+                        backgroundColor: colors.card,
+                        borderColor: planColor,
+                        borderWidth: 2,
+                      }
+                    ]}
+                  >
+                    <View style={styles.planHeader}>
+                      <View style={[styles.planIconContainer, { backgroundColor: planColor + '20' }]}>
+                        <Ionicons
+                          name={getPlanIcon() as any}
+                          size={24}
+                          color={planColor}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.planName, { color: colors.text }]}>
+                          {plan.name}
+                        </Text>
+                        <Text style={[styles.planDescription, { color: colors.textSecondary }]}>
+                          {plan.description}
+                        </Text>
+                      </View>
+                    </View>
 
-                                        <View style={styles.priceContainer}>
-                                            <Text style={[styles.price, { color: colors.text }]}>
-                                                ₱{plan.price.toLocaleString()}
-                                            </Text>
-                                            <Text style={[styles.period, { color: colors.textSecondary }]}>
-                                                /month
-                                            </Text>
-                                        </View>
+                    <View style={styles.priceContainer}>
+                      <Text style={[styles.price, { color: colors.text }]}>
+                        ₱{plan.price.toLocaleString()}
+                      </Text>
+                      <Text style={[styles.period, { color: colors.textSecondary }]}>
+                        /month
+                      </Text>
+                    </View>
 
                     <View style={styles.separator} />
 
@@ -404,43 +454,43 @@ export default function SubscriptionRequiredScreen() {
                       ))}
                     </View>
 
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.subscribeButton,
-                                                {
-                                                    backgroundColor: planColor,
-                                                    shadowColor: planColor,
-                                                    shadowOffset: { width: 0, height: 4 },
-                                                    shadowOpacity: 0.3,
-                                                    shadowRadius: 8,
-                                                    elevation: 5
-                                                },
-                                                subscribing && styles.buttonDisabled
-                                            ]}
-                                            onPress={() => handleSubscribe(plan.id)}
-                                            disabled={subscribing}
-                                        >
-                                            {subscribing ? (
-                                                <ActivityIndicator size="small" color="white" />
-                                            ) : (
-                                                <>
-                                                    <Text style={styles.subscribeButtonText}>
-                                                        Subscribe Now
-                                                    </Text>
-                                                    <Ionicons name="arrow-forward" size={18} color="white" />
-                                                </>
-                                            )}
-                                        </TouchableOpacity>
-                                    </View>
-                                );
-                            })()}
-                        </View>
-                    ) : (
-                        <Text style={[styles.plansSubtitle, { color: colors.textSecondary }]}>
-                            No subscription plan available. Please try again later.
-                        </Text>
-                    )}
-                </View>
+                    <TouchableOpacity
+                      style={[
+                        styles.subscribeButton,
+                        {
+                          backgroundColor: planColor,
+                          shadowColor: planColor,
+                          shadowOffset: { width: 0, height: 4 },
+                          shadowOpacity: 0.3,
+                          shadowRadius: 8,
+                          elevation: 5
+                        },
+                        subscribing && styles.buttonDisabled
+                      ]}
+                      onPress={() => handleSubscribe(plan.id)}
+                      disabled={subscribing}
+                    >
+                      {subscribing ? (
+                        <ActivityIndicator size="small" color="white" />
+                      ) : (
+                        <>
+                          <Text style={styles.subscribeButtonText}>
+                            Subscribe Now
+                          </Text>
+                          <Ionicons name="arrow-forward" size={18} color="white" />
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                );
+              })()}
+            </View>
+          ) : (
+            <Text style={[styles.plansSubtitle, { color: colors.textSecondary }]}>
+              No subscription plan available. Please try again later.
+            </Text>
+          )}
+        </View>
 
         {/* Refresh Button */}
         <TouchableOpacity
