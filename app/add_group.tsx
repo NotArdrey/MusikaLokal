@@ -2,15 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -404,9 +404,9 @@ export default function AddGroupScreen() {
       const orderedImages =
         images.length > 0 && images[thumbnailIndex]
           ? [
-              images[thumbnailIndex],
-              ...images.filter((_, i) => i !== thumbnailIndex),
-            ]
+            images[thumbnailIndex],
+            ...images.filter((_, i) => i !== thumbnailIndex),
+          ]
           : images;
 
       const payload = {
@@ -422,7 +422,7 @@ export default function AddGroupScreen() {
       };
 
       const { data, error } = await supabase.functions.invoke(
-        "manage-listings",
+        "listings-crud",
         {
           body: {
             action: "create",
@@ -433,7 +433,34 @@ export default function AddGroupScreen() {
         },
       );
 
-      if (error) throw error;
+      console.log("🔵 Response data:", JSON.stringify(data, null, 2));
+      console.log("🔵 Response error:", error);
+
+      if (error) {
+        console.error("❌ Error details:", JSON.stringify(error, null, 2));
+
+        // Try to parse error from data if available (Supabase Edge Functions often return error body in data)
+        let errorMsg = error.message || "Unknown error";
+        let errorDetails = "";
+        let errorHint = "";
+
+        if (data && typeof data === "object") {
+          errorMsg = (data as any).error || (data as any).message || errorMsg;
+          errorDetails = (data as any).details || "";
+          errorHint = (data as any).hint || "";
+        }
+
+        let alertMessage = `Failed to create group: ${errorMsg}`;
+        if (errorHint) alertMessage += `\n\nHint: ${errorHint}`;
+        if (errorDetails && typeof errorDetails === 'string') alertMessage += `\n\nDetails: ${errorDetails}`;
+
+        if (errorMsg.includes("non-2xx") || errorMsg === "Unknown error") {
+          alertMessage += `\n\nRaw: ${JSON.stringify(error)}\nData: ${JSON.stringify(data)}`;
+        }
+
+        Alert.alert("Error", alertMessage);
+        return;
+      }
 
       setNewGroupId(data.id);
       setModalVisible(true);
@@ -1200,7 +1227,7 @@ export default function AddGroupScreen() {
                           {
                             backgroundColor:
                               !newMemberName.trim() ||
-                              !newMemberInstrument.trim()
+                                !newMemberInstrument.trim()
                                 ? "#9CA3AF"
                                 : colors.primary,
                           },

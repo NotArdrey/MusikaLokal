@@ -133,7 +133,7 @@ export default function NotificationsScreen() {
                                 const userAvatar = profile?.avatar_url;
 
                                 // Notify old leader
-                                await supabase.functions.invoke('manage-listings', {
+                                await supabase.functions.invoke('listings-crud', {
                                     body: {
                                         action: 'create_notification',
                                         userId: user?.id,
@@ -166,7 +166,7 @@ export default function NotificationsScreen() {
                                         }));
 
                                     if (memberNotifications.length > 0) {
-                                        await supabase.functions.invoke('manage-listings', {
+                                        await supabase.functions.invoke('listings-crud', {
                                             body: {
                                                 action: 'create_notifications',
                                                 userId: user?.id,
@@ -238,7 +238,7 @@ export default function NotificationsScreen() {
                                 const groupImage = (request.groups as any)?.images?.[0];
                                 const userAvatar = profile?.avatar_url;
 
-                                await supabase.functions.invoke('manage-listings', {
+                                await supabase.functions.invoke('listings-crud', {
                                     body: {
                                         action: 'create_notification',
                                         userId: user?.id,

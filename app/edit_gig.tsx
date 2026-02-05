@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -126,7 +127,7 @@ export default function EditGigScreen() {
   const [soloSlotsNeeded, setSoloSlotsNeeded] = useState<number>(0);
   const [duoSlotsNeeded, setDuoSlotsNeeded] = useState<number>(0);
   const [bandSlotsNeeded, setBandSlotsNeeded] = useState<number>(0);
-  
+
   // Specific roles/instruments needed
   const [soloRolesNeeded, setSoloRolesNeeded] = useState<string[]>([]);
   const [newSoloRole, setNewSoloRole] = useState("");
@@ -134,7 +135,7 @@ export default function EditGigScreen() {
   const [newDuoRole, setNewDuoRole] = useState("");
   const [bandRolesNeeded, setBandRolesNeeded] = useState<string[]>([]);
   const [newBandRole, setNewBandRole] = useState("");
-  
+
   // Anti-spam settings
   const [reapplicationCooldownDays, setReapplicationCooldownDays] = useState<number>(30);
 
@@ -212,7 +213,7 @@ export default function EditGigScreen() {
       }
 
       const { data, error } = await supabase.functions.invoke(
-        "manage-listings",
+        "listings-crud",
         {
           body: {
             action: "fetch_one",
@@ -261,16 +262,16 @@ export default function EditGigScreen() {
       console.log('📦 images:', data.images);
 
       console.log('🔧 ===== SETTING STATE VALUES =====');
-      
+
       setGigName(data.name);
       console.log('🔧 setGigName:', data.name);
-      
+
       setDescription(data.description);
       console.log('🔧 setDescription:', data.description?.substring(0, 50));
-      
+
       setAddress(data.location);
       console.log('🔧 setAddress:', data.location);
-      
+
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
       setCost(data.budget?.toString() || "");
@@ -290,7 +291,7 @@ export default function EditGigScreen() {
           : [],
       );
       setExperienceLevel(data.requirements?.experience_level || "");
-      
+
       // Load detailed slot data
       const slots = data.requirements?.slots;
       if (slots) {
@@ -301,10 +302,10 @@ export default function EditGigScreen() {
         setBandSlotsNeeded(slots.band?.needed || 0);
         setBandRolesNeeded(Array.isArray(slots.band?.roles) ? slots.band.roles : []);
       }
-      
+
       // Load anti-spam settings
       setReapplicationCooldownDays(data.reapplication_cooldown_days ?? 30);
-      
+
       setContractUrl(data.contract_url || "");
       if (data.contract_url) {
         const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
@@ -319,11 +320,11 @@ export default function EditGigScreen() {
       }
       setImages(data.images || []);
       console.log('🔧 setImages:', data.images || []);
-      
+
       if (data.images && data.images.length > 0) {
         setThumbnailIndex(0);
       }
-      
+
       console.log('✅ ===== FETCH GIG DETAILS COMPLETED =====');
     } catch (e) {
       console.log("Error fetching gig details:", e);
@@ -460,7 +461,7 @@ export default function EditGigScreen() {
         ),
       );
 
-      const response = await supabase.functions.invoke("manage-listings", {
+      const response = await supabase.functions.invoke("listings-crud", {
         body: {
           action: "update",
           type: "gig",
@@ -475,7 +476,29 @@ export default function EditGigScreen() {
 
       if (response.error) {
         console.error('❌ Update failed with error:', response.error);
-        throw response.error;
+        const data = response.data;
+        const error = response.error;
+
+        let errorMsg = error.message || "Unknown error";
+        let errorDetails = "";
+        let errorHint = "";
+
+        if (data && typeof data === "object") {
+          errorMsg = (data as any).error || (data as any).message || errorMsg;
+          errorDetails = (data as any).details || "";
+          errorHint = (data as any).hint || "";
+        }
+
+        let alertMessage = `Failed to update gig: ${errorMsg}`;
+        if (errorHint) alertMessage += `\n\nHint: ${errorHint}`;
+        if (errorDetails && typeof errorDetails === 'string') alertMessage += `\n\nDetails: ${errorDetails}`;
+
+        if (errorMsg.includes("non-2xx") || errorMsg === "Unknown error") {
+          alertMessage += `\n\nRaw: ${JSON.stringify(error)}\nData: ${JSON.stringify(data)}`;
+        }
+
+        Alert.alert("Error", alertMessage);
+        return;
       }
 
       console.log("✅ Gig Updated successfully");
@@ -687,8 +710,8 @@ export default function EditGigScreen() {
       const arrayBuffer = await response.arrayBuffer();
       const bytes = new Uint8Array(arrayBuffer);
 
-      const contentType = fileName.toLowerCase().endsWith('.pdf') 
-        ? 'application/pdf' 
+      const contentType = fileName.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
         : `image/${fileName.split('.').pop()?.toLowerCase() || 'jpeg'}`;
 
       const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
@@ -742,8 +765,8 @@ export default function EditGigScreen() {
         return;
       }
 
-      const contentType = fileName.toLowerCase().endsWith('.pdf') 
-        ? 'application/pdf' 
+      const contentType = fileName.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
         : file.type || 'image/jpeg';
 
       const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
@@ -1531,8 +1554,8 @@ export default function EditGigScreen() {
                 </View>
                 <View style={{ marginTop: 8 }}>
                   <Text style={[styles.slotSubLabel, { color: colors.textSecondary, fontSize: 11 }]}>
-                    {reapplicationCooldownDays === 0 
-                      ? "Musicians can reapply immediately after rejection." 
+                    {reapplicationCooldownDays === 0
+                      ? "Musicians can reapply immediately after rejection."
                       : `Musicians must wait ${reapplicationCooldownDays} days after rejection before reapplying.`}
                   </Text>
                 </View>
@@ -1553,8 +1576,8 @@ export default function EditGigScreen() {
                           paddingHorizontal: 12,
                           paddingVertical: 6,
                           borderRadius: 16,
-                          backgroundColor: reapplicationCooldownDays === preset.value 
-                            ? colors.primary 
+                          backgroundColor: reapplicationCooldownDays === preset.value
+                            ? colors.primary
                             : isDark ? "#374151" : "#E5E7EB",
                         },
                       ]}

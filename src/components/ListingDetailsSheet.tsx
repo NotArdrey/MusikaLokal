@@ -238,7 +238,7 @@ const ListingDetailsSheet = forwardRef<
         );
         try {
           const { data: bookingData } = await supabase.functions.invoke(
-            "manage-listings",
+            "bookings-manage",
             {
               body: { action: "fetch_studio_bookings", studioId: listingId },
             },
@@ -627,7 +627,7 @@ const ListingDetailsSheet = forwardRef<
     if (!userId || !targetGigId) return;
     try {
       const { data, error } = await supabase.functions.invoke(
-        "manage-listings",
+        "gig-applications",
         {
           body: { action: "check_eligibility", userId, gigId: targetGigId },
         },
@@ -766,11 +766,11 @@ const ListingDetailsSheet = forwardRef<
           .select("id")
           .eq("gig_id", listingId)
           .eq("status", "accepted");
-        
+
         if (!countError && acceptedApps) {
           const acceptedCount = acceptedApps.length;
           const totalSlots = group.requirements.total_slots_needed;
-          
+
           if (acceptedCount >= totalSlots) {
             setAlertConfig({
               type: "error",
@@ -865,7 +865,7 @@ const ListingDetailsSheet = forwardRef<
       if (group?.organizer_id && data) {
         try {
           if (group.organizer_id !== userId) {
-            await supabase.functions.invoke("manage-listings", {
+            await supabase.functions.invoke("listings-crud", {
               body: {
                 action: "create_notification",
                 userId,
@@ -912,7 +912,7 @@ const ListingDetailsSheet = forwardRef<
               meta: { gig_id: listingId, application_id: data.id },
             }));
 
-            await supabase.functions.invoke("manage-listings", {
+            await supabase.functions.invoke("listings-crud", {
               body: {
                 action: "create_notifications",
                 userId,
@@ -1253,7 +1253,7 @@ const ListingDetailsSheet = forwardRef<
 
         // Fetch existing bookings for availability calculation
         const { data: bookingData } = await supabase.functions.invoke(
-          "manage-listings",
+          "bookings-manage",
           {
             body: { action: "fetch_studio_bookings", studioId: data.id },
           },
@@ -1420,7 +1420,7 @@ const ListingDetailsSheet = forwardRef<
             const cartDateStr = b.date.toISOString().split("T")[0];
             return cartDateStr === dateStr;
           });
-          
+
           if (dayDbBookings.length > 0 || cartBookingsForDate.length > 0) {
             // Date has existing bookings - block entirely for recording studio
             marked[dateStr] = {
@@ -1621,7 +1621,7 @@ const ListingDetailsSheet = forwardRef<
         const cartDateStr = b.date.toISOString().split("T")[0];
         return cartDateStr === dateStr;
       });
-      
+
       if (dayBookings.length > 0 || cartBookingsForDate.length > 0) {
         // Date has existing bookings - not available for recording studio
         setIsRecordingWholeDayAvailable(false);
@@ -2194,7 +2194,7 @@ const ListingDetailsSheet = forwardRef<
                   day: "numeric",
                 })}
               </Text>
-              
+
               {isRecordingWholeDayAvailable && recordingDaySlot ? (
                 <View>
                   {/* Whole Day Booking Info */}
@@ -2244,7 +2244,7 @@ const ListingDetailsSheet = forwardRef<
                       </Text>
                     </View>
                   </View>
-                  
+
                   {/* Calculate duration for display */}
                   {(() => {
                     const startParts = recordingDaySlot.start.split(":").map(Number);
@@ -2254,7 +2254,7 @@ const ListingDetailsSheet = forwardRef<
                     const durationHours = (endMinutes - startMinutes) / 60;
                     const rate = parseInt(displayRate.replace(/,/g, "")) || 0;
                     const totalCost = rate * durationHours;
-                    
+
                     return (
                       <View
                         style={{
@@ -2309,184 +2309,8 @@ const ListingDetailsSheet = forwardRef<
               )}
             </View>
           ) : (
-          /* REGULAR STUDIO: Time Slot Selection UI */
-          <View>
-          <Text
-            style={{
-              fontFamily: "Poppins_500Medium",
-              color: colors.textSecondary,
-              fontSize: 13,
-              marginBottom: 12,
-            }}
-          >
-            Available Slots for{" "}
-            {new Date(selectedDate).toLocaleDateString(undefined, {
-              weekday: "long",
-              month: "short",
-              day: "numeric",
-            })}
-          </Text>
-
-          {availableSlots.length > 0 ? (
+            /* REGULAR STUDIO: Time Slot Selection UI */
             <View>
-              {/* Helper to group slots */}
-              {(() => {
-                const grouped = {
-                  Morning: [] as string[],
-                  Afternoon: [] as string[],
-                  Evening: [] as string[],
-                };
-                availableSlots.forEach((slot) => {
-                  const hour = parseInt(slot.split(":")[0]);
-                  if (hour < 12) grouped.Morning.push(slot);
-                  else if (hour < 18) grouped.Afternoon.push(slot);
-                  else grouped.Evening.push(slot);
-                });
-
-                return (
-                  Object.keys(grouped) as Array<keyof typeof grouped>
-                ).map((period) => {
-                  if (grouped[period].length === 0) return null;
-                  return (
-                    <View key={period} style={{ marginBottom: 16 }}>
-                      <Text
-                        style={{
-                          fontFamily: "Poppins_600SemiBold",
-                          color: colors.textSecondary,
-                          fontSize: 12,
-                          marginBottom: 8,
-                          textTransform: "uppercase",
-                          letterSpacing: 0.5,
-                        }}
-                      >
-                        {period}
-                      </Text>
-                      <View style={styles.slotGrid}>
-                        {grouped[period].map((slot) => {
-                          const isSelected = selectedSlot === slot;
-                          // Check if this slot is part of the selected duration range
-                          const slotHour = parseInt(slot.split(":")[0]);
-                          const startHour = selectedSlot
-                            ? parseInt(selectedSlot.split(":")[0])
-                            : -1;
-                          const endHour = endTime ? endTime.getHours() : -1;
-                          const isInRange =
-                            selectedSlot &&
-                            endTime &&
-                            slotHour >= startHour &&
-                            slotHour < endHour;
-
-                          return (
-                            <TouchableOpacity
-                              key={slot}
-                              style={[
-                                styles.slotButton,
-                                {
-                                  backgroundColor: isSelected
-                                    ? isDark
-                                      ? "rgba(124, 58, 237, 0.15)"
-                                      : "rgba(124, 58, 237, 0.1)"
-                                    : isInRange
-                                      ? isDark
-                                        ? "rgba(124, 58, 237, 0.05)"
-                                        : "rgba(124, 58, 237, 0.05)"
-                                      : isDark
-                                        ? "#374151"
-                                        : "#F3F4F6",
-                                  borderColor: isSelected
-                                    ? colors.primary
-                                    : "transparent",
-                                  borderWidth: isSelected ? 2 : 0,
-                                },
-                              ]}
-                              onPress={() => {
-                                setSelectedSlot(slot);
-
-                                // 1. Update start date/time
-                                const [hours, minutes] = slot.split(":");
-                                const startDate = new Date(selectedDate);
-                                startDate.setHours(
-                                  parseInt(hours),
-                                  parseInt(minutes),
-                                );
-                                setDate(startDate);
-
-                                // 2. Calculate Valid Max Duration
-                                const availableHours = new Set(
-                                  availableSlots.map((s) =>
-                                    parseInt(s.split(":")[0]),
-                                  ),
-                                );
-                                let maxDur = 0;
-                                let currentH = parseInt(hours);
-
-                                // Check up to 12 hours ahead
-                                for (let i = 0; i < 12; i++) {
-                                  // Check if the slot *starts* at this hour is available
-                                  // (Except the first one, which we know is available since we clicked it)
-                                  if (i > 0 && !availableHours.has(currentH))
-                                    break;
-                                  maxDur++;
-                                  currentH++;
-                                  if (currentH >= 24) break;
-                                }
-
-                                // Store max available duration for this start time
-                                // We can re-use validEndTimes state to store valid DURATIONS (numbers) as strings if we want,
-                                // or just calculate valid durations on the fly.
-                                // Let's store valid duration HOURS in validEndTimes as strings like "1", "2", "3" to reuse state.
-                                const validDurs = [];
-                                for (let i = 1; i <= maxDur; i++)
-                                  validDurs.push(i.toString());
-                                setValidEndTimes(validDurs);
-
-                                // 3. Auto-select 1 hour if available
-                                if (maxDur >= 1) {
-                                  const endDate = new Date(startDate);
-                                  endDate.setHours(startDate.getHours() + 1);
-                                  setEndTime(endDate);
-                                }
-                              }}
-                            >
-                              <Text
-                                style={{
-                                  color: isSelected
-                                    ? colors.primary
-                                    : colors.text,
-                                  fontFamily: isSelected
-                                    ? "Poppins_600SemiBold"
-                                    : "Poppins_500Medium",
-                                  fontSize: 13,
-                                }}
-                              >
-                                {formatTime12(slot)}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    </View>
-                  );
-                });
-              })()}
-            </View>
-          ) : (
-            <View style={{ alignItems: "center", paddingVertical: 12 }}>
-              <Text
-                style={{
-                  color: colors.textSecondary,
-                  fontFamily: "Poppins_400Regular",
-                  fontSize: 13,
-                }}
-              >
-                No available slots for this date.
-              </Text>
-            </View>
-          )}
-
-          {/* Duration Selection (Chips) */}
-          {selectedSlot && validEndTimes.length > 0 && (
-            <View style={{ marginTop: 8 }}>
               <Text
                 style={{
                   fontFamily: "Poppins_500Medium",
@@ -2495,60 +2319,236 @@ const ListingDetailsSheet = forwardRef<
                   marginBottom: 12,
                 }}
               >
-                Duration
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {validEndTimes.map((durStr) => {
-                  const dur = parseInt(durStr);
-                  // Calculate if selected - safely check if date and endTime exist
-                  let currentDur = 0;
-                  if (date && endTime && date.getTime && endTime.getTime) {
-                    currentDur =
-                      (endTime.getTime() - date.getTime()) / (1000 * 60 * 60);
-                  }
-                  const isSelected = Math.abs(currentDur - dur) < 0.1;
-
-                  return (
-                    <TouchableOpacity
-                      key={durStr}
-                      style={[
-                        {
-                          paddingHorizontal: 16,
-                          paddingVertical: 8,
-                          borderRadius: 100,
-                          backgroundColor: isSelected
-                            ? colors.primary
-                            : isDark
-                              ? "#374151"
-                              : "#F3F4F6",
-                        },
-                      ]}
-                      onPress={() => {
-                        if (date) {
-                          const newEnd = new Date(date);
-                          newEnd.setHours(newEnd.getHours() + dur);
-                          setEndTime(newEnd);
-                        }
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: isSelected ? "#FFFFFF" : colors.text,
-                          fontFamily: isSelected
-                            ? "Poppins_600SemiBold"
-                            : "Poppins_500Medium",
-                          fontSize: 13,
-                        }}
-                      >
-                        {`${dur} hr${dur > 1 ? "s" : ""}`}
-                      </Text>
-                    </TouchableOpacity>
-                  );
+                Available Slots for{" "}
+                {new Date(selectedDate).toLocaleDateString(undefined, {
+                  weekday: "long",
+                  month: "short",
+                  day: "numeric",
                 })}
-              </View>
+              </Text>
+
+              {availableSlots.length > 0 ? (
+                <View>
+                  {/* Helper to group slots */}
+                  {(() => {
+                    const grouped = {
+                      Morning: [] as string[],
+                      Afternoon: [] as string[],
+                      Evening: [] as string[],
+                    };
+                    availableSlots.forEach((slot) => {
+                      const hour = parseInt(slot.split(":")[0]);
+                      if (hour < 12) grouped.Morning.push(slot);
+                      else if (hour < 18) grouped.Afternoon.push(slot);
+                      else grouped.Evening.push(slot);
+                    });
+
+                    return (
+                      Object.keys(grouped) as Array<keyof typeof grouped>
+                    ).map((period) => {
+                      if (grouped[period].length === 0) return null;
+                      return (
+                        <View key={period} style={{ marginBottom: 16 }}>
+                          <Text
+                            style={{
+                              fontFamily: "Poppins_600SemiBold",
+                              color: colors.textSecondary,
+                              fontSize: 12,
+                              marginBottom: 8,
+                              textTransform: "uppercase",
+                              letterSpacing: 0.5,
+                            }}
+                          >
+                            {period}
+                          </Text>
+                          <View style={styles.slotGrid}>
+                            {grouped[period].map((slot) => {
+                              const isSelected = selectedSlot === slot;
+                              // Check if this slot is part of the selected duration range
+                              const slotHour = parseInt(slot.split(":")[0]);
+                              const startHour = selectedSlot
+                                ? parseInt(selectedSlot.split(":")[0])
+                                : -1;
+                              const endHour = endTime ? endTime.getHours() : -1;
+                              const isInRange =
+                                selectedSlot &&
+                                endTime &&
+                                slotHour >= startHour &&
+                                slotHour < endHour;
+
+                              return (
+                                <TouchableOpacity
+                                  key={slot}
+                                  style={[
+                                    styles.slotButton,
+                                    {
+                                      backgroundColor: isSelected
+                                        ? isDark
+                                          ? "rgba(124, 58, 237, 0.15)"
+                                          : "rgba(124, 58, 237, 0.1)"
+                                        : isInRange
+                                          ? isDark
+                                            ? "rgba(124, 58, 237, 0.05)"
+                                            : "rgba(124, 58, 237, 0.05)"
+                                          : isDark
+                                            ? "#374151"
+                                            : "#F3F4F6",
+                                      borderColor: isSelected
+                                        ? colors.primary
+                                        : "transparent",
+                                      borderWidth: isSelected ? 2 : 0,
+                                    },
+                                  ]}
+                                  onPress={() => {
+                                    setSelectedSlot(slot);
+
+                                    // 1. Update start date/time
+                                    const [hours, minutes] = slot.split(":");
+                                    const startDate = new Date(selectedDate);
+                                    startDate.setHours(
+                                      parseInt(hours),
+                                      parseInt(minutes),
+                                    );
+                                    setDate(startDate);
+
+                                    // 2. Calculate Valid Max Duration
+                                    const availableHours = new Set(
+                                      availableSlots.map((s) =>
+                                        parseInt(s.split(":")[0]),
+                                      ),
+                                    );
+                                    let maxDur = 0;
+                                    let currentH = parseInt(hours);
+
+                                    // Check up to 12 hours ahead
+                                    for (let i = 0; i < 12; i++) {
+                                      // Check if the slot *starts* at this hour is available
+                                      // (Except the first one, which we know is available since we clicked it)
+                                      if (i > 0 && !availableHours.has(currentH))
+                                        break;
+                                      maxDur++;
+                                      currentH++;
+                                      if (currentH >= 24) break;
+                                    }
+
+                                    // Store max available duration for this start time
+                                    // We can re-use validEndTimes state to store valid DURATIONS (numbers) as strings if we want,
+                                    // or just calculate valid durations on the fly.
+                                    // Let's store valid duration HOURS in validEndTimes as strings like "1", "2", "3" to reuse state.
+                                    const validDurs = [];
+                                    for (let i = 1; i <= maxDur; i++)
+                                      validDurs.push(i.toString());
+                                    setValidEndTimes(validDurs);
+
+                                    // 3. Auto-select 1 hour if available
+                                    if (maxDur >= 1) {
+                                      const endDate = new Date(startDate);
+                                      endDate.setHours(startDate.getHours() + 1);
+                                      setEndTime(endDate);
+                                    }
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      color: isSelected
+                                        ? colors.primary
+                                        : colors.text,
+                                      fontFamily: isSelected
+                                        ? "Poppins_600SemiBold"
+                                        : "Poppins_500Medium",
+                                      fontSize: 13,
+                                    }}
+                                  >
+                                    {formatTime12(slot)}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      );
+                    });
+                  })()}
+                </View>
+              ) : (
+                <View style={{ alignItems: "center", paddingVertical: 12 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      fontSize: 13,
+                    }}
+                  >
+                    No available slots for this date.
+                  </Text>
+                </View>
+              )}
+
+              {/* Duration Selection (Chips) */}
+              {selectedSlot && validEndTimes.length > 0 && (
+                <View style={{ marginTop: 8 }}>
+                  <Text
+                    style={{
+                      fontFamily: "Poppins_500Medium",
+                      color: colors.textSecondary,
+                      fontSize: 13,
+                      marginBottom: 12,
+                    }}
+                  >
+                    Duration
+                  </Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    {validEndTimes.map((durStr) => {
+                      const dur = parseInt(durStr);
+                      // Calculate if selected - safely check if date and endTime exist
+                      let currentDur = 0;
+                      if (date && endTime && date.getTime && endTime.getTime) {
+                        currentDur =
+                          (endTime.getTime() - date.getTime()) / (1000 * 60 * 60);
+                      }
+                      const isSelected = Math.abs(currentDur - dur) < 0.1;
+
+                      return (
+                        <TouchableOpacity
+                          key={durStr}
+                          style={[
+                            {
+                              paddingHorizontal: 16,
+                              paddingVertical: 8,
+                              borderRadius: 100,
+                              backgroundColor: isSelected
+                                ? colors.primary
+                                : isDark
+                                  ? "#374151"
+                                  : "#F3F4F6",
+                            },
+                          ]}
+                          onPress={() => {
+                            if (date) {
+                              const newEnd = new Date(date);
+                              newEnd.setHours(newEnd.getHours() + dur);
+                              setEndTime(newEnd);
+                            }
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: isSelected ? "#FFFFFF" : colors.text,
+                              fontFamily: isSelected
+                                ? "Poppins_600SemiBold"
+                                : "Poppins_500Medium",
+                              fontSize: 13,
+                            }}
+                          >
+                            {`${dur} hr${dur > 1 ? "s" : ""}`}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
             </View>
-          )}
-          </View>
           )}
         </View>
       )}
@@ -3272,7 +3272,7 @@ const ListingDetailsSheet = forwardRef<
         {!(
           hasExistingStudioBooking && existingStudioBookingStatus === "unpaid"
         ) &&
-        (showAddBooking || bookings.length === 0) ? (
+          (showAddBooking || bookings.length === 0) ? (
           <>
             {/* RECORDING STUDIO: Simplified whole-day booking flow */}
             {group?.studio_type === "Recording" ? (
@@ -3349,7 +3349,7 @@ const ListingDetailsSheet = forwardRef<
                       // Add whole-day booking
                       const startDate = new Date(`${bookingDate}T${startTime}`);
                       const endDate = new Date(`${bookingDate}T${endTimeStr}`);
-                      
+
                       setBookings([
                         ...bookings,
                         {
@@ -3396,178 +3396,178 @@ const ListingDetailsSheet = forwardRef<
                 )}
               </TouchableOpacity>
             ) : (
-            /* REGULAR STUDIO: Time slot booking flow */
-            <>
-            {renderBookingControls()}
+              /* REGULAR STUDIO: Time slot booking flow */
+              <>
+                {renderBookingControls()}
 
-            <TouchableOpacity
-              style={[
-                styles.secondaryBtn,
-                {
-                  borderColor:
-                    !selectedSlot || !endTime ? colors.border : colors.primary,
-                  backgroundColor: "transparent",
-                  marginBottom: 16,
-                  opacity:
-                    !selectedSlot || !endTime || isCheckingAvailability
-                      ? 0.5
-                      : 1,
-                },
-              ]}
-              disabled={!selectedSlot || !endTime || isCheckingAvailability}
-              activeOpacity={0.8}
-              onPress={async () => {
-                if (date && endTime) {
-                  setIsCheckingAvailability(true);
-                  try {
-                    const bookingDate = date.toISOString().split("T")[0];
-                    const startTime = date.toTimeString().slice(0, 5);
-                    const endTime2 = endTime.toTimeString().slice(0, 5);
+                <TouchableOpacity
+                  style={[
+                    styles.secondaryBtn,
+                    {
+                      borderColor:
+                        !selectedSlot || !endTime ? colors.border : colors.primary,
+                      backgroundColor: "transparent",
+                      marginBottom: 16,
+                      opacity:
+                        !selectedSlot || !endTime || isCheckingAvailability
+                          ? 0.5
+                          : 1,
+                    },
+                  ]}
+                  disabled={!selectedSlot || !endTime || isCheckingAvailability}
+                  activeOpacity={0.8}
+                  onPress={async () => {
+                    if (date && endTime) {
+                      setIsCheckingAvailability(true);
+                      try {
+                        const bookingDate = date.toISOString().split("T")[0];
+                        const startTime = date.toTimeString().slice(0, 5);
+                        const endTime2 = endTime.toTimeString().slice(0, 5);
 
-                    // Build time slots array - current slot + any previously selected slots for same day
-                    const currentSlot = { start: startTime, end: endTime2 };
-                    const allSlots = [...selectedTimeSlots, currentSlot];
+                        // Build time slots array - current slot + any previously selected slots for same day
+                        const currentSlot = { start: startTime, end: endTime2 };
+                        const allSlots = [...selectedTimeSlots, currentSlot];
 
-                    // Check if we already have a booking for this date (merge slots)
-                    const existingBookingIndex = bookings.findIndex(
-                      (b) => b.date.toISOString().split("T")[0] === bookingDate,
-                    );
+                        // Check if we already have a booking for this date (merge slots)
+                        const existingBookingIndex = bookings.findIndex(
+                          (b) => b.date.toISOString().split("T")[0] === bookingDate,
+                        );
 
-                    // Check availability for the new slot
-                    const { data: isAvailable, error: availError } =
-                      await supabase.rpc("is_slot_available", {
-                        p_studio_id: group.id,
-                        p_booking_date: bookingDate,
-                        p_start_time: startTime,
-                        p_end_time: endTime2,
-                        p_user_id: userId,
-                      });
+                        // Check availability for the new slot
+                        const { data: isAvailable, error: availError } =
+                          await supabase.rpc("is_slot_available", {
+                            p_studio_id: group.id,
+                            p_booking_date: bookingDate,
+                            p_start_time: startTime,
+                            p_end_time: endTime2,
+                            p_user_id: userId,
+                          });
 
-                    if (availError) {
-                      console.error("Availability check error:", availError);
-                      alert("Failed to check availability. Please try again.");
-                      setIsCheckingAvailability(false);
-                      return;
+                        if (availError) {
+                          console.error("Availability check error:", availError);
+                          alert("Failed to check availability. Please try again.");
+                          setIsCheckingAvailability(false);
+                          return;
+                        }
+
+                        if (!isAvailable) {
+                          alert(
+                            "This time slot is not available. Please choose a different time.",
+                          );
+                          setIsCheckingAvailability(false);
+                          return;
+                        }
+
+                        // Calculate accurate pricing for all slots
+                        const { data: pricing, error: pricingError } =
+                          await supabase.rpc("calculate_booking_price", {
+                            p_studio_id: group.id,
+                            p_booking_date: bookingDate,
+                            p_start_time: startTime,
+                            p_end_time: endTime2,
+                          });
+
+                        if (pricingError || !pricing || pricing.length === 0) {
+                          console.error("Pricing error:", pricingError);
+                          alert("Failed to calculate price. Please try again.");
+                          setIsCheckingAvailability(false);
+                          return;
+                        }
+
+                        if (existingBookingIndex >= 0) {
+                          // Merge with existing booking for this date
+                          const existingBooking = bookings[existingBookingIndex];
+                          const mergedSlots = [
+                            ...(existingBooking.timeSlots || [
+                              {
+                                start: existingBooking.startTime
+                                  .toTimeString()
+                                  .slice(0, 5),
+                                end: existingBooking.endTime
+                                  .toTimeString()
+                                  .slice(0, 5),
+                              },
+                            ]),
+                            currentSlot,
+                          ];
+
+                          // Sort slots by start time
+                          mergedSlots.sort((a, b) =>
+                            a.start.localeCompare(b.start),
+                          );
+
+                          // Calculate total pricing for all merged slots
+                          const existingPrice =
+                            existingBooking.pricing?.final_price || 0;
+                          const newPrice = pricing[0]?.final_price || 0;
+                          const totalHours =
+                            (existingBooking.pricing?.hours || 0) +
+                            (pricing[0]?.hours || 0);
+
+                          const updatedBookings = [...bookings];
+                          updatedBookings[existingBookingIndex] = {
+                            ...existingBooking,
+                            timeSlots: mergedSlots,
+                            pricing: {
+                              ...pricing[0],
+                              final_price: existingPrice + newPrice,
+                              hours: totalHours,
+                            },
+                          };
+                          setBookings(updatedBookings);
+                          alert(
+                            `Added time slot to your booking for ${new Date(bookingDate).toLocaleDateString()}. You now have ${mergedSlots.length} slot(s) for this day.`,
+                          );
+                        } else {
+                          // Add as new booking with single slot
+                          setBookings([
+                            ...bookings,
+                            {
+                              date: new Date(date),
+                              startTime: new Date(date),
+                              endTime: new Date(endTime),
+                              timeSlots: [currentSlot],
+                              pricing: pricing[0],
+                            },
+                          ]);
+                        }
+
+                        setShowAddBooking(false);
+                        setSelectedTimeSlots([]);
+                        // Reset form
+                        setDate(null as any);
+                        setEndTime(null as any);
+                        setSelectedSlot(null);
+                      } catch (e: any) {
+                        console.error("Error adding booking:", e);
+                        alert("An error occurred. Please try again.");
+                      } finally {
+                        setIsCheckingAvailability(false);
+                      }
                     }
-
-                    if (!isAvailable) {
-                      alert(
-                        "This time slot is not available. Please choose a different time.",
-                      );
-                      setIsCheckingAvailability(false);
-                      return;
-                    }
-
-                    // Calculate accurate pricing for all slots
-                    const { data: pricing, error: pricingError } =
-                      await supabase.rpc("calculate_booking_price", {
-                        p_studio_id: group.id,
-                        p_booking_date: bookingDate,
-                        p_start_time: startTime,
-                        p_end_time: endTime2,
-                      });
-
-                    if (pricingError || !pricing || pricing.length === 0) {
-                      console.error("Pricing error:", pricingError);
-                      alert("Failed to calculate price. Please try again.");
-                      setIsCheckingAvailability(false);
-                      return;
-                    }
-
-                    if (existingBookingIndex >= 0) {
-                      // Merge with existing booking for this date
-                      const existingBooking = bookings[existingBookingIndex];
-                      const mergedSlots = [
-                        ...(existingBooking.timeSlots || [
-                          {
-                            start: existingBooking.startTime
-                              .toTimeString()
-                              .slice(0, 5),
-                            end: existingBooking.endTime
-                              .toTimeString()
-                              .slice(0, 5),
-                          },
-                        ]),
-                        currentSlot,
-                      ];
-
-                      // Sort slots by start time
-                      mergedSlots.sort((a, b) =>
-                        a.start.localeCompare(b.start),
-                      );
-
-                      // Calculate total pricing for all merged slots
-                      const existingPrice =
-                        existingBooking.pricing?.final_price || 0;
-                      const newPrice = pricing[0]?.final_price || 0;
-                      const totalHours =
-                        (existingBooking.pricing?.hours || 0) +
-                        (pricing[0]?.hours || 0);
-
-                      const updatedBookings = [...bookings];
-                      updatedBookings[existingBookingIndex] = {
-                        ...existingBooking,
-                        timeSlots: mergedSlots,
-                        pricing: {
-                          ...pricing[0],
-                          final_price: existingPrice + newPrice,
-                          hours: totalHours,
-                        },
-                      };
-                      setBookings(updatedBookings);
-                      alert(
-                        `Added time slot to your booking for ${new Date(bookingDate).toLocaleDateString()}. You now have ${mergedSlots.length} slot(s) for this day.`,
-                      );
-                    } else {
-                      // Add as new booking with single slot
-                      setBookings([
-                        ...bookings,
-                        {
-                          date: new Date(date),
-                          startTime: new Date(date),
-                          endTime: new Date(endTime),
-                          timeSlots: [currentSlot],
-                          pricing: pricing[0],
-                        },
-                      ]);
-                    }
-
-                    setShowAddBooking(false);
-                    setSelectedTimeSlots([]);
-                    // Reset form
-                    setDate(null as any);
-                    setEndTime(null as any);
-                    setSelectedSlot(null);
-                  } catch (e: any) {
-                    console.error("Error adding booking:", e);
-                    alert("An error occurred. Please try again.");
-                  } finally {
-                    setIsCheckingAvailability(false);
-                  }
-                }
-              }}
-            >
-              {isCheckingAvailability ? (
-                <ActivityIndicator size="small" color={colors.primary} />
-              ) : (
-                <>
-                  <Ionicons
-                    name="add-circle-outline"
-                    size={20}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.secondaryBtnText,
-                      { color: colors.primary, marginLeft: 8 },
-                    ]}
-                  >
-                    {bookings.length > 0 ? "Add Session" : "Add Booking"}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-            </>
+                  }}
+                >
+                  {isCheckingAvailability ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="add-circle-outline"
+                        size={20}
+                        color={colors.primary}
+                      />
+                      <Text
+                        style={[
+                          styles.secondaryBtnText,
+                          { color: colors.primary, marginLeft: 8 },
+                        ]}
+                      >
+                        {bookings.length > 0 ? "Add Session" : "Add Booking"}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
             )}
           </>
         ) : !(
@@ -3893,48 +3893,48 @@ const ListingDetailsSheet = forwardRef<
                           setModalVisible(false);
                           (ref as any)?.current?.dismiss();
 
-                        // Navigate to bookings page
-                        setTimeout(() => {
-                          router.push("/bookings" as any);
-                        }, 100);
+                          // Navigate to bookings page
+                          setTimeout(() => {
+                            router.push("/bookings" as any);
+                          }, 100);
+                        }
                       }
+                    } catch (e: any) {
+                      setLoading(false);
+                      console.error("Booking creation error:", e);
+                      alert("An unexpected error occurred. Please try again.");
                     }
-                  } catch (e: any) {
-                    setLoading(false);
-                    console.error("Booking creation error:", e);
-                    alert("An unexpected error occurred. Please try again.");
-                  }
-                },
-                group?.studio_type === "Recording" ? "Confirm Recording Booking" : "Confirm Session Booking",
-                group?.studio_type === "Recording" 
-                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording sessions occupy the full day. The studio owner will review and approve your booking request.`
-                  : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
-              )
-            }
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text
-                style={[
-                  styles.primaryBtnText,
-                  {
-                    color:
-                      bookings.length > 0 ? "#FFFFFF" : colors.textSecondary,
                   },
-                ]}
-              >
-                {bookings.length > 0
-                  ? group?.studio_type === "Recording"
-                    ? `Book ${bookings.length} Recording Date${bookings.length > 1 ? "s" : ""}`
-                    : `Book ${bookings.length} Session${bookings.length > 1 ? "s" : ""}`
-                  : group?.studio_type === "Recording"
-                    ? "Select a recording date"
-                    : "Add at least one session"}
-              </Text>
-            )}
-          </TouchableOpacity>
-        )}
+                  group?.studio_type === "Recording" ? "Confirm Recording Booking" : "Confirm Session Booking",
+                  group?.studio_type === "Recording"
+                    ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording sessions occupy the full day. The studio owner will review and approve your booking request.`
+                    : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
+                )
+              }
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text
+                  style={[
+                    styles.primaryBtnText,
+                    {
+                      color:
+                        bookings.length > 0 ? "#FFFFFF" : colors.textSecondary,
+                    },
+                  ]}
+                >
+                  {bookings.length > 0
+                    ? group?.studio_type === "Recording"
+                      ? `Book ${bookings.length} Recording Date${bookings.length > 1 ? "s" : ""}`
+                      : `Book ${bookings.length} Session${bookings.length > 1 ? "s" : ""}`
+                    : group?.studio_type === "Recording"
+                      ? "Select a recording date"
+                      : "Add at least one session"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
       </View>
     );
   };

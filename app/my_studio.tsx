@@ -21,7 +21,7 @@ export default function MyStudioScreen() {
     const fetchStudios = async () => {
         if (!userId) return;
         try {
-            const { data, error } = await supabase.functions.invoke('manage-listings', {
+            const { data, error } = await supabase.functions.invoke('listings-crud', {
                 body: { action: 'fetch_my_studios', userId }
             });
 
@@ -56,7 +56,7 @@ export default function MyStudioScreen() {
     const handleDelete = async () => {
         if (!selectedId || !userId) return;
         try {
-            const { error } = await supabase.functions.invoke('manage-listings', {
+            const { error } = await supabase.functions.invoke('listings-crud', {
                 body: { action: 'delete', type: 'studio', id: selectedId, userId }
             });
 

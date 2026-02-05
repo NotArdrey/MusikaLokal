@@ -140,7 +140,7 @@ export default function AddGigScreen() {
   const [soloSlotsNeeded, setSoloSlotsNeeded] = useState<number>(0);
   const [duoSlotsNeeded, setDuoSlotsNeeded] = useState<number>(0);
   const [bandSlotsNeeded, setBandSlotsNeeded] = useState<number>(0);
-  
+
   // Specific roles/instruments needed
   const [soloRolesNeeded, setSoloRolesNeeded] = useState<string[]>([]);
   const [newSoloRole, setNewSoloRole] = useState("");
@@ -148,7 +148,7 @@ export default function AddGigScreen() {
   const [newDuoRole, setNewDuoRole] = useState("");
   const [bandRolesNeeded, setBandRolesNeeded] = useState<string[]>([]);
   const [newBandRole, setNewBandRole] = useState("");
-  
+
   // Anti-spam settings
   const [reapplicationCooldownDays, setReapplicationCooldownDays] = useState<number>(30);
 
@@ -263,7 +263,7 @@ export default function AddGigScreen() {
         "Confirm Gig Creation",
         "Are you sure you want to create this gig? Please review all details before proceeding.",
         [
-          { text: "Cancel", style: "cancel", onPress: () => {} },
+          { text: "Cancel", style: "cancel", onPress: () => { } },
           { text: "Create", style: "default", onPress: () => createGig() },
         ],
       );
@@ -340,7 +340,7 @@ export default function AddGigScreen() {
       );
 
       const { data, error } = await supabase.functions.invoke(
-        "manage-listings",
+        "listings-crud",
         {
           body: {
             action: "create",
@@ -370,13 +370,20 @@ export default function AddGigScreen() {
             "Unknown function error";
           const errorDetails = (data as any).details || "";
           const errorHint = (data as any).hint || "";
+
           console.error("❌ Actual error from function:", errorMsg);
           console.error("❌ Error details:", errorDetails);
-          console.error("❌ Error hint:", errorHint);
-          Alert.alert(
-            "Error",
-            `Failed to create gig: ${errorMsg}${errorHint ? "\n\nHint: " + errorHint : ""}`,
-          );
+
+          let alertMessage = `Failed to create gig: ${errorMsg}`;
+          if (errorHint) alertMessage += `\n\nHint: ${errorHint}`;
+          if (errorDetails && typeof errorDetails === 'string') alertMessage += `\n\nDetails: ${errorDetails}`;
+
+          // Debug fallback: if generic error, dump the data
+          if (errorMsg === "Unknown function error" || errorMsg.includes("non-2xx")) {
+            alertMessage += `\n\nRaw Data: ${JSON.stringify(data)}`;
+          }
+
+          Alert.alert("Error", alertMessage);
           return;
         }
         throw error;
@@ -447,7 +454,7 @@ export default function AddGigScreen() {
       // For Supabase functions, the error body is sometimes returned in data even when there's an error
       if (error || (data && data.error)) {
         let errorMessage = "Could not start address verification. Please try again.";
-        
+
         // First check if data contains the error response (Supabase sometimes does this)
         if (data && data.error) {
           errorMessage = data.error;
@@ -459,7 +466,7 @@ export default function AddGigScreen() {
           console.log('Error object:', error);
           console.log('Error name:', error.name);
           console.log('Error message:', error.message);
-          
+
           // Try to get the response body from FunctionsHttpError
           try {
             // FunctionsHttpError has a context with the Response object
@@ -477,7 +484,7 @@ export default function AddGigScreen() {
             console.error('Error parsing error response:', parseErr);
           }
         }
-        
+
         throw new Error(errorMessage);
       }
 
@@ -784,8 +791,8 @@ export default function AddGigScreen() {
       const arrayBuffer = await response.arrayBuffer();
       const bytes = new Uint8Array(arrayBuffer);
 
-      const contentType = fileName.toLowerCase().endsWith('.pdf') 
-        ? 'application/pdf' 
+      const contentType = fileName.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
         : `image/${fileName.split('.').pop()?.toLowerCase() || 'jpeg'}`;
 
       const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
@@ -839,8 +846,8 @@ export default function AddGigScreen() {
         return;
       }
 
-      const contentType = fileName.toLowerCase().endsWith('.pdf') 
-        ? 'application/pdf' 
+      const contentType = fileName.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
         : file.type || 'image/jpeg';
 
       const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
@@ -2249,8 +2256,8 @@ export default function AddGigScreen() {
                   </View>
                   <View style={{ marginTop: 8 }}>
                     <Text style={[styles.slotSubLabel, { color: colors.textSecondary, fontSize: 11 }]}>
-                      {reapplicationCooldownDays === 0 
-                        ? "Musicians can reapply immediately after rejection." 
+                      {reapplicationCooldownDays === 0
+                        ? "Musicians can reapply immediately after rejection."
                         : `Musicians must wait ${reapplicationCooldownDays} days after rejection before reapplying.`}
                     </Text>
                   </View>
@@ -2271,8 +2278,8 @@ export default function AddGigScreen() {
                             paddingHorizontal: 12,
                             paddingVertical: 6,
                             borderRadius: 16,
-                            backgroundColor: reapplicationCooldownDays === preset.value 
-                              ? colors.primary 
+                            backgroundColor: reapplicationCooldownDays === preset.value
+                              ? colors.primary
                               : isDark ? "#374151" : "#E5E7EB",
                           },
                         ]}
@@ -2344,63 +2351,63 @@ export default function AddGigScreen() {
                 {(requiredGenres.length > 0 ||
                   requiredInstruments.length > 0 ||
                   experienceLevel) && (
-                  <>
-                    <View
-                      style={[
-                        styles.divider,
-                        { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
-                      ]}
-                    />
-                    <View>
-                      <Text style={styles.reviewLabel}>Needs</Text>
-                      {requiredGenres.length > 0 && (
-                        <View style={{ marginBottom: 8 }}>
-                          <Text
-                            style={[
-                              styles.requirementSubLabel,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            Genres:
-                          </Text>
-                          <Text style={{ color: colors.text }}>
-                            {requiredGenres.join(", ")}
-                          </Text>
-                        </View>
-                      )}
-                      {requiredInstruments.length > 0 && (
-                        <View style={{ marginBottom: 8 }}>
-                          <Text
-                            style={[
-                              styles.requirementSubLabel,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            Equipments:
-                          </Text>
-                          <Text style={{ color: colors.text }}>
-                            {requiredInstruments.join(", ")}
-                          </Text>
-                        </View>
-                      )}
-                      {experienceLevel && (
-                        <View>
-                          <Text
-                            style={[
-                              styles.requirementSubLabel,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            Experience Level:
-                          </Text>
-                          <Text style={{ color: colors.text }}>
-                            {experienceLevel}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  </>
-                )}
+                    <>
+                      <View
+                        style={[
+                          styles.divider,
+                          { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                        ]}
+                      />
+                      <View>
+                        <Text style={styles.reviewLabel}>Needs</Text>
+                        {requiredGenres.length > 0 && (
+                          <View style={{ marginBottom: 8 }}>
+                            <Text
+                              style={[
+                                styles.requirementSubLabel,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              Genres:
+                            </Text>
+                            <Text style={{ color: colors.text }}>
+                              {requiredGenres.join(", ")}
+                            </Text>
+                          </View>
+                        )}
+                        {requiredInstruments.length > 0 && (
+                          <View style={{ marginBottom: 8 }}>
+                            <Text
+                              style={[
+                                styles.requirementSubLabel,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              Equipments:
+                            </Text>
+                            <Text style={{ color: colors.text }}>
+                              {requiredInstruments.join(", ")}
+                            </Text>
+                          </View>
+                        )}
+                        {experienceLevel && (
+                          <View>
+                            <Text
+                              style={[
+                                styles.requirementSubLabel,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              Experience Level:
+                            </Text>
+                            <Text style={{ color: colors.text }}>
+                              {experienceLevel}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </>
+                  )}
 
                 {/* Slots Summary in Review */}
                 {(soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded) > 0 && (

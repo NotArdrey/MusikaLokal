@@ -2,16 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Linking,
-    Modal as RNModal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Linking,
+  Modal as RNModal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -31,7 +31,7 @@ export default function StudioDetailsScreen() {
   const [modalMessage, setModalMessage] = useState("");
   const [modalButtonText, setModalButtonText] = useState("");
   const [modalAction, setModalAction] = useState<() => Promise<void> | void>(
-    () => {},
+    () => { },
   );
   const [showReasonInput, setShowReasonInput] = useState(false);
   const [cancellationReason, setCancellationReason] = useState("");
@@ -105,37 +105,65 @@ export default function StudioDetailsScreen() {
         return;
       }
 
+      console.log(`[manage_studio] Fetching data for studioId: ${studioId}, userId: ${userId}`);
+
       // Fetch Studio Details
       const { data: studioData, error: studioError } =
-        await supabase.functions.invoke("manage-listings", {
+        await supabase.functions.invoke("listings-crud", {
           body: { action: "fetch_one", type: "studio", id: studioId, userId },
         });
-      if (studioError) throw studioError;
+
+      if (studioError) {
+        console.error('[manage_studio] Failed to fetch studio details:', studioError);
+        if (studioError.message?.includes("non-2xx")) {
+          console.error('[manage_studio] Full error object:', JSON.stringify(studioError));
+        }
+        throw studioError;
+      }
       setStudio(studioData);
 
       // Fetch Bookings
-      const { data: bookingData, error: bookingError } =
-        await supabase.functions.invoke("manage-listings", {
-          body: { action: "fetch_studio_bookings", studioId: studioId, userId },
-        });
-      if (bookingError) throw bookingError;
-      setBookings(bookingData || []);
+      try {
+        const { data: bookingData, error: bookingError } =
+          await supabase.functions.invoke("bookings-manage", {
+            body: { action: "fetch_studio_bookings", studioId: studioId, userId },
+          });
+        if (bookingError) {
+          console.error('[manage_studio] Failed to fetch bookings:', bookingError);
+        } else {
+          setBookings(bookingData || []);
+        }
+      } catch (bookingErr) {
+        console.error('[manage_studio] Exception fetching bookings:', bookingErr);
+      }
 
       // Fetch Reviews
-      const { data: reviewData, error: reviewError } =
-        await supabase.functions.invoke("manage-listings", {
-          body: {
-            action: "fetch_reviews",
-            type: "studio",
-            id: studioId,
-            userId,
-          },
-        });
-      if (reviewError) throw reviewError;
-      setReviews(reviewData || []);
-    } catch (e) {
-      console.log("Error fetching data:", e);
-      Alert.alert("Error", "Failed to load studio data");
+      try {
+        const { data: reviewData, error: reviewError } =
+          await supabase.functions.invoke("listings-crud", {
+            body: {
+              action: "fetch_reviews",
+              type: "studio",
+              id: studioId,
+              userId,
+            },
+          });
+        if (reviewError) {
+          console.error('[manage_studio] Failed to fetch reviews:', reviewError);
+        } else {
+          setReviews(reviewData || []);
+        }
+      } catch (reviewErr) {
+        console.error('[manage_studio] Exception fetching reviews:', reviewErr);
+      }
+
+    } catch (e: any) {
+      console.error("[manage_studio] Critical error fetching data:", e);
+      let errorMsg = "Failed to load studio data";
+      if (e.message?.includes("non-2xx")) {
+        errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
+      }
+      Alert.alert("Error", errorMsg);
     } finally {
       setLoading(false);
     }
@@ -161,7 +189,7 @@ export default function StudioDetailsScreen() {
         } = await supabase.auth.getUser();
         if (!user) return;
 
-        const { error } = await supabase.functions.invoke("manage-listings", {
+        const { error } = await supabase.functions.invoke("bookings-manage", {
           body: {
             action: "update_booking_status",
             bookingId,
@@ -254,7 +282,7 @@ export default function StudioDetailsScreen() {
 
       // If all slots are accepted, just confirm the booking
       if (acceptedSlots.length === slots.length) {
-        const { error } = await supabase.functions.invoke("manage-listings", {
+        const { error } = await supabase.functions.invoke("bookings-manage", {
           body: {
             action: "update_booking_status",
             bookingId: booking.id,
@@ -271,7 +299,7 @@ export default function StudioDetailsScreen() {
       }
       // If all slots are declined, just cancel the booking
       else if (declinedSlots.length === slots.length) {
-        const { error } = await supabase.functions.invoke("manage-listings", {
+        const { error } = await supabase.functions.invoke("bookings-manage", {
           body: {
             action: "update_booking_status",
             bookingId: booking.id,
@@ -290,7 +318,7 @@ export default function StudioDetailsScreen() {
       }
       // Partial approval - need to handle specially
       else {
-        const { error } = await supabase.functions.invoke("manage-listings", {
+        const { error } = await supabase.functions.invoke("bookings-manage", {
           body: {
             action: "partial_slot_approval",
             bookingId: booking.id,
@@ -790,11 +818,11 @@ export default function StudioDetailsScreen() {
                         >
                           {day.slots?.length
                             ? day.slots
-                                .map(
-                                  (slot: any) =>
-                                    `${formatTime(slot.start)} - ${formatTime(slot.end)}`,
-                                )
-                                .join(", ")
+                              .map(
+                                (slot: any) =>
+                                  `${formatTime(slot.start)} - ${formatTime(slot.end)}`,
+                              )
+                              .join(", ")
                             : "No slots"}
                         </Text>
                       </View>
@@ -835,11 +863,11 @@ export default function StudioDetailsScreen() {
                             >
                               {entry.slots?.length
                                 ? entry.slots
-                                    .map(
-                                      (slot: any) =>
-                                        `${formatTime(slot.start)} - ${formatTime(slot.end)}`,
-                                    )
-                                    .join(", ")
+                                  .map(
+                                    (slot: any) =>
+                                      `${formatTime(slot.start)} - ${formatTime(slot.end)}`,
+                                  )
+                                  .join(", ")
                                 : "No slots"}
                             </Text>
                           </View>
@@ -1140,13 +1168,13 @@ export default function StudioDetailsScreen() {
                                 const aTime = a.start_time.includes(":")
                                   ? a.start_time
                                   : new Date(a.start_time)
-                                      .toTimeString()
-                                      .slice(0, 5);
+                                    .toTimeString()
+                                    .slice(0, 5);
                                 const bTime = b.start_time.includes(":")
                                   ? b.start_time
                                   : new Date(b.start_time)
-                                      .toTimeString()
-                                      .slice(0, 5);
+                                    .toTimeString()
+                                    .slice(0, 5);
                                 return aTime.localeCompare(bTime);
                               })
                               .map((booking, index) => (
@@ -1195,23 +1223,23 @@ export default function StudioDetailsScreen() {
                                         }}
                                       >
                                         {booking.start_time &&
-                                        booking.start_time.includes(":")
+                                          booking.start_time.includes(":")
                                           ? (() => {
-                                              const [hours, minutes] =
-                                                booking.start_time.split(":");
-                                              const h = parseInt(hours);
-                                              const period =
-                                                h >= 12 ? "PM" : "AM";
-                                              const h12 = h % 12 || 12;
-                                              return `${h12}:${minutes} ${period}`;
-                                            })()
+                                            const [hours, minutes] =
+                                              booking.start_time.split(":");
+                                            const h = parseInt(hours);
+                                            const period =
+                                              h >= 12 ? "PM" : "AM";
+                                            const h12 = h % 12 || 12;
+                                            return `${h12}:${minutes} ${period}`;
+                                          })()
                                           : new Date(
-                                              booking.start_time,
-                                            ).toLocaleTimeString([], {
-                                              hour: "2-digit",
-                                              minute: "2-digit",
-                                              hour12: true,
-                                            })}
+                                            booking.start_time,
+                                          ).toLocaleTimeString([], {
+                                            hour: "2-digit",
+                                            minute: "2-digit",
+                                            hour12: true,
+                                          })}
                                       </Text>
                                     </View>
                                     <View>
@@ -1258,258 +1286,258 @@ export default function StudioDetailsScreen() {
                     )}
                   </View>
                 ) : // List View (Existing)
-                bookings.length === 0 ? (
-                  <Text
-                    style={{
-                      color: colors.textSecondary,
-                      textAlign: "center",
-                      marginTop: 20,
-                    }}
-                  >
-                    No bookings found.
-                  </Text>
-                ) : (
-                  bookings.map((booking) => (
-                    <View
-                      key={booking.id}
-                      style={[
-                        styles.bookingCard,
-                        { backgroundColor: colors.surface, marginBottom: 12 },
-                      ]}
+                  bookings.length === 0 ? (
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        textAlign: "center",
+                        marginTop: 20,
+                      }}
                     >
-                      <View style={styles.bookingHeader}>
-                        <Image
-                          source={{
-                            uri:
-                              booking.user?.avatar_url ||
-                              "https://i.pravatar.cc/100",
-                          }}
-                          style={styles.bookingImage}
-                        />
-                        <View style={{ flex: 1 }}>
-                          <Text
-                            style={[
-                              styles.bookingTitle,
-                              { color: colors.text },
-                            ]}
-                          >
-                            {booking.user?.full_name || "Unknown User"}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.bookingSubtitle,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            {booking.user?.email}
-                          </Text>
-                        </View>
-                        <View style={styles.bookingPriceContainer}>
-                          <Text
-                            style={[
-                              styles.bookingPrice,
-                              { color: colors.primary },
-                            ]}
-                          >
-                            ₱
-                            {(
-                              booking.total_price ||
-                              booking.final_price ||
-                              0
-                            ).toLocaleString()}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.bookingDuration,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            {booking.status}
-                          </Text>
-                        </View>
-                      </View>
-
+                      No bookings found.
+                    </Text>
+                  ) : (
+                    bookings.map((booking) => (
                       <View
+                        key={booking.id}
                         style={[
-                          styles.bookingDateContainer,
-                          {
-                            backgroundColor: isDark
-                              ? "rgba(30, 41, 59, 0.5)"
-                              : "#F9FAFB",
-                          },
+                          styles.bookingCard,
+                          { backgroundColor: colors.surface, marginBottom: 12 },
                         ]}
                       >
-                        <Ionicons
-                          name="calendar-outline"
-                          size={16}
-                          color={colors.primary}
-                        />
-                        <Text
-                          style={[styles.bookingDate, { color: colors.text }]}
-                        >
-                          {booking.raw_date
-                            ? new Date(booking.raw_date).toLocaleDateString()
-                            : booking.booking_date
-                              ? new Date(
-                                  booking.booking_date,
-                                ).toLocaleDateString()
-                              : new Date(
-                                  booking.start_time,
-                                ).toLocaleDateString()}
-                        </Text>
-                      </View>
-
-                      {/* Display time slots */}
-                      {booking.time_slots &&
-                      Array.isArray(booking.time_slots) &&
-                      booking.time_slots.length > 1 ? (
-                        // Multi-slot booking - show all slots
-                        <View style={{ marginTop: 12, gap: 8 }}>
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_500Medium",
-                              fontSize: 12,
-                              color: colors.textSecondary,
-                              marginBottom: 4,
+                        <View style={styles.bookingHeader}>
+                          <Image
+                            source={{
+                              uri:
+                                booking.user?.avatar_url ||
+                                "https://i.pravatar.cc/100",
                             }}
-                          >
-                            {booking.time_slots.length} TIME SLOTS REQUESTED
-                          </Text>
-                          {booking.time_slots.map(
-                            (slot: any, index: number) => (
-                              <View
-                                key={index}
-                                style={{
-                                  flexDirection: "row",
-                                  alignItems: "center",
-                                  backgroundColor: isDark
-                                    ? "#374151"
-                                    : "#F3F4F6",
-                                  padding: 10,
-                                  borderRadius: 8,
-                                  gap: 8,
-                                }}
-                              >
-                                <Ionicons
-                                  name="time-outline"
-                                  size={16}
-                                  color={colors.primary}
-                                />
-                                <Text
-                                  style={{
-                                    fontFamily: "Poppins_500Medium",
-                                    color: colors.text,
-                                    flex: 1,
-                                  }}
-                                >
-                                  {formatTime(slot.start)} -{" "}
-                                  {formatTime(slot.end)}
-                                </Text>
-                              </View>
-                            ),
-                          )}
+                            style={styles.bookingImage}
+                          />
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={[
+                                styles.bookingTitle,
+                                { color: colors.text },
+                              ]}
+                            >
+                              {booking.user?.full_name || "Unknown User"}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.bookingSubtitle,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              {booking.user?.email}
+                            </Text>
+                          </View>
+                          <View style={styles.bookingPriceContainer}>
+                            <Text
+                              style={[
+                                styles.bookingPrice,
+                                { color: colors.primary },
+                              ]}
+                            >
+                              ₱
+                              {(
+                                booking.total_price ||
+                                booking.final_price ||
+                                0
+                              ).toLocaleString()}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.bookingDuration,
+                                { color: colors.textSecondary },
+                              ]}
+                            >
+                              {booking.status}
+                            </Text>
+                          </View>
                         </View>
-                      ) : (
-                        // Single slot - show regular time display
+
                         <View
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            marginTop: 8,
-                            gap: 8,
-                          }}
+                          style={[
+                            styles.bookingDateContainer,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(30, 41, 59, 0.5)"
+                                : "#F9FAFB",
+                            },
+                          ]}
                         >
                           <Ionicons
-                            name="time-outline"
+                            name="calendar-outline"
                             size={16}
                             color={colors.primary}
                           />
                           <Text
                             style={[styles.bookingDate, { color: colors.text }]}
                           >
-                            {formatTime(booking.start_time)} -{" "}
-                            {formatTime(booking.end_time)}
+                            {booking.raw_date
+                              ? new Date(booking.raw_date).toLocaleDateString()
+                              : booking.booking_date
+                                ? new Date(
+                                  booking.booking_date,
+                                ).toLocaleDateString()
+                                : new Date(
+                                  booking.start_time,
+                                ).toLocaleDateString()}
                           </Text>
                         </View>
-                      )}
 
-                      {/* Action buttons if pending */}
-                      {booking.status === "pending" && (
-                        <View style={{ marginTop: 16 }}>
-                          {/* If multi-slot, show partial approval option */}
-                          {booking.time_slots &&
-                            Array.isArray(booking.time_slots) &&
-                            booking.time_slots.length > 1 && (
-                              <TouchableOpacity
-                                onPress={() => openPartialApproval(booking)}
-                                style={[
-                                  styles.partialApprovalButton,
-                                  {
-                                    borderColor: colors.primary,
-                                    marginBottom: 12,
-                                  },
-                                ]}
-                              >
-                                <Ionicons
-                                  name="options-outline"
-                                  size={16}
-                                  color={colors.primary}
-                                />
-                                <Text
+                        {/* Display time slots */}
+                        {booking.time_slots &&
+                          Array.isArray(booking.time_slots) &&
+                          booking.time_slots.length > 1 ? (
+                          // Multi-slot booking - show all slots
+                          <View style={{ marginTop: 12, gap: 8 }}>
+                            <Text
+                              style={{
+                                fontFamily: "Poppins_500Medium",
+                                fontSize: 12,
+                                color: colors.textSecondary,
+                                marginBottom: 4,
+                              }}
+                            >
+                              {booking.time_slots.length} TIME SLOTS REQUESTED
+                            </Text>
+                            {booking.time_slots.map(
+                              (slot: any, index: number) => (
+                                <View
+                                  key={index}
                                   style={{
-                                    fontFamily: "Poppins_500Medium",
-                                    color: colors.primary,
-                                    marginLeft: 8,
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    backgroundColor: isDark
+                                      ? "#374151"
+                                      : "#F3F4F6",
+                                    padding: 10,
+                                    borderRadius: 8,
+                                    gap: 8,
                                   }}
                                 >
-                                  Approve/Decline Individual Slots
+                                  <Ionicons
+                                    name="time-outline"
+                                    size={16}
+                                    color={colors.primary}
+                                  />
+                                  <Text
+                                    style={{
+                                      fontFamily: "Poppins_500Medium",
+                                      color: colors.text,
+                                      flex: 1,
+                                    }}
+                                  >
+                                    {formatTime(slot.start)} -{" "}
+                                    {formatTime(slot.end)}
+                                  </Text>
+                                </View>
+                              ),
+                            )}
+                          </View>
+                        ) : (
+                          // Single slot - show regular time display
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "center",
+                              marginTop: 8,
+                              gap: 8,
+                            }}
+                          >
+                            <Ionicons
+                              name="time-outline"
+                              size={16}
+                              color={colors.primary}
+                            />
+                            <Text
+                              style={[styles.bookingDate, { color: colors.text }]}
+                            >
+                              {formatTime(booking.start_time)} -{" "}
+                              {formatTime(booking.end_time)}
+                            </Text>
+                          </View>
+                        )}
+
+                        {/* Action buttons if pending */}
+                        {booking.status === "pending" && (
+                          <View style={{ marginTop: 16 }}>
+                            {/* If multi-slot, show partial approval option */}
+                            {booking.time_slots &&
+                              Array.isArray(booking.time_slots) &&
+                              booking.time_slots.length > 1 && (
+                                <TouchableOpacity
+                                  onPress={() => openPartialApproval(booking)}
+                                  style={[
+                                    styles.partialApprovalButton,
+                                    {
+                                      borderColor: colors.primary,
+                                      marginBottom: 12,
+                                    },
+                                  ]}
+                                >
+                                  <Ionicons
+                                    name="options-outline"
+                                    size={16}
+                                    color={colors.primary}
+                                  />
+                                  <Text
+                                    style={{
+                                      fontFamily: "Poppins_500Medium",
+                                      color: colors.primary,
+                                      marginLeft: 8,
+                                    }}
+                                  >
+                                    Approve/Decline Individual Slots
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+
+                            <View style={styles.actionButtons}>
+                              <TouchableOpacity
+                                onPress={() =>
+                                  confirmAction(booking.id, "cancelled")
+                                }
+                                style={[
+                                  styles.declineButton,
+                                  { borderColor: colors.border },
+                                ]}
+                              >
+                                <Text
+                                  style={{
+                                    fontFamily: "Poppins_600SemiBold",
+                                    color: colors.text,
+                                  }}
+                                >
+                                  Decline All
                                 </Text>
                               </TouchableOpacity>
-                            )}
-
-                          <View style={styles.actionButtons}>
-                            <TouchableOpacity
-                              onPress={() =>
-                                confirmAction(booking.id, "cancelled")
-                              }
-                              style={[
-                                styles.declineButton,
-                                { borderColor: colors.border },
-                              ]}
-                            >
-                              <Text
-                                style={{
-                                  fontFamily: "Poppins_600SemiBold",
-                                  color: colors.text,
-                                }}
+                              <TouchableOpacity
+                                onPress={() =>
+                                  confirmAction(booking.id, "confirmed")
+                                }
+                                style={[
+                                  styles.acceptButton,
+                                  { backgroundColor: colors.primary },
+                                ]}
                               >
-                                Decline All
-                              </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              onPress={() =>
-                                confirmAction(booking.id, "confirmed")
-                              }
-                              style={[
-                                styles.acceptButton,
-                                { backgroundColor: colors.primary },
-                              ]}
-                            >
-                              <Text
-                                style={{
-                                  fontFamily: "Poppins_600SemiBold",
-                                  color: "#FFF",
-                                }}
-                              >
-                                Accept All
-                              </Text>
-                            </TouchableOpacity>
+                                <Text
+                                  style={{
+                                    fontFamily: "Poppins_600SemiBold",
+                                    color: "#FFF",
+                                  }}
+                                >
+                                  Accept All
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
                           </View>
-                        </View>
-                      )}
-                    </View>
-                  ))
-                )}
+                        )}
+                      </View>
+                    ))
+                  )}
               </View>
             )}
 

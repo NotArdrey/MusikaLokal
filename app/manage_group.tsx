@@ -2,14 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -86,36 +86,64 @@ export default function GroupDetailsScreen() {
         return;
       }
 
+      console.log(`[manage_group] Fetching data for groupId: ${groupId}, userId: ${userId}`);
+
       // Fetch Group Details
       const { data: groupData, error: groupError } =
-        await supabase.functions.invoke("manage-listings", {
+        await supabase.functions.invoke("listings-crud", {
           body: { action: "fetch_one", type: "group", id: groupId, userId },
         });
-      if (groupError) throw groupError;
+
+      if (groupError) {
+        console.error('[manage_group] Failed to fetch group details:', groupError);
+        if (groupError.message?.includes("non-2xx")) {
+          console.error('[manage_group] Full error object:', JSON.stringify(groupError));
+        }
+        throw groupError;
+      }
       setGroup(groupData);
 
       // Fetch Group Applications (Sent)
-      const { data: appData, error: appError } =
-        await supabase.functions.invoke("manage-listings", {
-          body: {
-            action: "fetch_group_applications",
-            groupId: groupId,
-            userId,
-          },
-        });
-      if (appError) throw appError;
-      setApplications(appData || []);
+      try {
+        const { data: appData, error: appError } =
+          await supabase.functions.invoke("gig-applications", {
+            body: {
+              action: "fetch_group_applications",
+              groupId: groupId,
+              userId,
+            },
+          });
+        if (appError) {
+          console.error('[manage_group] Failed to fetch applications:', appError);
+        } else {
+          setApplications(appData || []);
+        }
+      } catch (appErr) {
+        console.error('[manage_group] Exception fetching applications:', appErr);
+      }
 
       // Fetch Reviews
-      const { data: reviewData, error: reviewError } =
-        await supabase.functions.invoke("manage-listings", {
-          body: { action: "fetch_reviews", type: "group", id: groupId, userId },
-        });
-      if (reviewError) throw reviewError;
-      setReviews(reviewData || []);
-    } catch (e) {
-      console.log("Error fetching data:", e);
-      Alert.alert("Error", "Failed to load group data");
+      try {
+        const { data: reviewData, error: reviewError } =
+          await supabase.functions.invoke("listings-crud", {
+            body: { action: "fetch_reviews", type: "group", id: groupId, userId },
+          });
+        if (reviewError) {
+          console.error('[manage_group] Failed to fetch reviews:', reviewError);
+        } else {
+          setReviews(reviewData || []);
+        }
+      } catch (reviewErr) {
+        console.error('[manage_group] Exception fetching reviews:', reviewErr);
+      }
+
+    } catch (e: any) {
+      console.error("[manage_group] Critical error fetching data:", e);
+      let errorMsg = "Failed to load group data";
+      if (e.message?.includes("non-2xx")) {
+        errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
+      }
+      Alert.alert("Error", errorMsg);
     } finally {
       setLoading(false);
     }

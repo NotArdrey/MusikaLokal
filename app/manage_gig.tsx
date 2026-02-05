@@ -2,16 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Image,
-    Linking,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import Header from "../src/components/header";
@@ -33,7 +33,7 @@ export default function GigDetailsScreen() {
   const [modalMessage, setModalMessage] = useState("");
   const [modalButtonText, setModalButtonText] = useState("");
   const [modalAction, setModalAction] = useState<() => Promise<void> | void>(
-    () => {},
+    () => { },
   );
 
   const [authorized, setAuthorized] = useState(false);
@@ -93,32 +93,61 @@ export default function GigDetailsScreen() {
         return;
       }
 
+      console.log(`[manage_gig] Fetching data for gigId: ${gigId}, userId: ${userId}`);
+
       // Fetch Gig Details
       const { data: gigData, error: gigError } =
-        await supabase.functions.invoke("manage-listings", {
+        await supabase.functions.invoke("listings-crud", {
           body: { action: "fetch_one", type: "gig", id: gigId, userId },
         });
-      if (gigError) throw gigError;
+
+      if (gigError) {
+        console.error('[manage_gig] Failed to fetch gig details:', gigError);
+        if (gigError.message?.includes("non-2xx")) {
+          console.error('[manage_gig] Full error object:', JSON.stringify(gigError));
+        }
+        throw gigError;
+      }
       setGig(gigData);
 
       // Fetch Applications
-      const { data: appData, error: appError } =
-        await supabase.functions.invoke("manage-listings", {
-          body: { action: "fetch_gig_applications", gigId: gigId, userId },
-        });
-      if (appError) throw appError;
-      setApplications(appData || []);
+      try {
+        const { data: appData, error: appError } =
+          await supabase.functions.invoke("gig-applications", {
+            body: { action: "fetch_gig_applications", gigId: gigId, userId },
+          });
+        if (appError) {
+          console.error('[manage_gig] Failed to fetch applications:', appError);
+          // Don't throw here, allowing the page to load at least the gig details
+        } else {
+          setApplications(appData || []);
+        }
+      } catch (appErr) {
+        console.error('[manage_gig] Exception fetching applications:', appErr);
+      }
 
       // Fetch Reviews
-      const { data: reviewData, error: reviewError } =
-        await supabase.functions.invoke("manage-listings", {
-          body: { action: "fetch_reviews", type: "gig", id: gigId, userId },
-        });
-      if (reviewError) throw reviewError;
-      setReviews(reviewData || []);
-    } catch (e) {
-      console.log("Error fetching data:", e);
-      Alert.alert("Error", "Failed to load gig data");
+      try {
+        const { data: reviewData, error: reviewError } =
+          await supabase.functions.invoke("listings-crud", {
+            body: { action: "fetch_reviews", type: "gig", id: gigId, userId },
+          });
+        if (reviewError) {
+          console.error('[manage_gig] Failed to fetch reviews:', reviewError);
+        } else {
+          setReviews(reviewData || []);
+        }
+      } catch (reviewErr) {
+        console.error('[manage_gig] Exception fetching reviews:', reviewErr);
+      }
+
+    } catch (e: any) {
+      console.error("[manage_gig] Critical error fetching data:", e);
+      let errorMsg = "Failed to load gig data";
+      if (e.message?.includes("non-2xx")) {
+        errorMsg += `\n\nServer Error (500). Please check edge function logs.`;
+      }
+      Alert.alert("Error", errorMsg);
     } finally {
       setLoading(false);
     }
@@ -139,7 +168,7 @@ export default function GigDetailsScreen() {
         } = await supabase.auth.getUser();
         if (!user) return;
 
-        const { error } = await supabase.functions.invoke("manage-listings", {
+        const { error } = await supabase.functions.invoke("gig-applications", {
           body: {
             action: "update_application_status",
             applicationId,
@@ -249,7 +278,7 @@ export default function GigDetailsScreen() {
                 ? new Date(gig.event_date).toLocaleDateString()
                 : "Date TBA"}
               {gig?.requirements?.event_start_time &&
-              gig?.requirements?.event_end_time
+                gig?.requirements?.event_end_time
                 ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                 : ""}
               {" • "}
@@ -760,7 +789,7 @@ export default function GigDetailsScreen() {
                                     app.status === "pending"
                                       ? colors.primary
                                       : app.status === "accepted" ||
-                                          app.status === "approved"
+                                        app.status === "approved"
                                         ? "#10B981"
                                         : "#EF4444",
                                 },
@@ -774,13 +803,13 @@ export default function GigDetailsScreen() {
                                     app.status === "pending"
                                       ? colors.primary
                                       : app.status === "accepted" ||
-                                          app.status === "approved"
+                                        app.status === "approved"
                                         ? "#10B981"
                                         : "#EF4444",
                                 }}
                               >
                                 {app.status === "accepted" ||
-                                app.status === "approved"
+                                  app.status === "approved"
                                   ? "Accepted"
                                   : app.status === "rejected"
                                     ? "Declined"

@@ -3,20 +3,20 @@ import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import ConflictResolutionModal, {
-    ConflictingBooking,
-    ConflictResolution,
+  ConflictingBooking,
+  ConflictResolution,
 } from "../src/components/ConflictResolutionModal";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -358,7 +358,7 @@ export default function EditStudioScreen() {
       });
 
       const { data, error } = await supabase.functions.invoke(
-        "manage-listings",
+        "listings-crud",
         {
           body: {
             action: "fetch_one",
@@ -776,9 +776,9 @@ export default function EditStudioScreen() {
             day,
             slots: dayData?.slots
               ? dayData.slots.map((slot: any) => ({
-                  start: convertTo12Hour(slot.start),
-                  end: convertTo12Hour(slot.end),
-                }))
+                start: convertTo12Hour(slot.start),
+                end: convertTo12Hour(slot.end),
+              }))
               : [],
           };
         });
@@ -1387,9 +1387,9 @@ export default function EditStudioScreen() {
       const orderedImages =
         selectedImages.length > 0 && selectedImages[thumbnailIndex]
           ? [
-              selectedImages[thumbnailIndex],
-              ...selectedImages.filter((_, i) => i !== thumbnailIndex),
-            ]
+            selectedImages[thumbnailIndex],
+            ...selectedImages.filter((_, i) => i !== thumbnailIndex),
+          ]
           : selectedImages;
 
       const payload = {
@@ -1460,7 +1460,7 @@ export default function EditStudioScreen() {
         ),
       );
 
-      const response = await supabase.functions.invoke("manage-listings", {
+      const response = await supabase.functions.invoke("listings-crud", {
         body: {
           action: "update",
           type: "studio",
@@ -1510,6 +1510,8 @@ export default function EditStudioScreen() {
               errorDetails = JSON.parse(errorBody);
               errorMessage =
                 errorDetails.error || errorDetails.message || errorMessage;
+              if (errorDetails.hint) errorMessage += `\n\nHint: ${errorDetails.hint}`;
+              if (errorDetails.details) errorMessage += `\n\nDetails: ${errorDetails.details}`;
               console.error("❌ Server error message:", errorMessage);
               console.error("❌ Server error details:", errorDetails.details);
               console.error("❌ Server error code:", errorDetails.code);
@@ -1520,6 +1522,8 @@ export default function EditStudioScreen() {
           } else if (response.data && typeof response.data === "object") {
             errorMessage =
               response.data.error || response.data.message || errorMessage;
+            if (response.data.hint) errorMessage += `\n\nHint: ${response.data.hint}`;
+            if (response.data.details) errorMessage += `\n\nDetails: ${response.data.details}`;
             console.error("❌ Server error message:", errorMessage);
             console.error("❌ Server error details:", response.data.details);
           } else if (response.error.message) {
@@ -1716,8 +1720,8 @@ export default function EditStudioScreen() {
       const arrayBuffer = await response.arrayBuffer();
       const bytes = new Uint8Array(arrayBuffer);
 
-      const contentType = fileName.toLowerCase().endsWith('.pdf') 
-        ? 'application/pdf' 
+      const contentType = fileName.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
         : `image/${fileName.split('.').pop()?.toLowerCase() || 'jpeg'}`;
 
       const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
@@ -1771,8 +1775,8 @@ export default function EditStudioScreen() {
         return;
       }
 
-      const contentType = fileName.toLowerCase().endsWith('.pdf') 
-        ? 'application/pdf' 
+      const contentType = fileName.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
         : file.type || 'image/jpeg';
 
       const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
@@ -2924,380 +2928,380 @@ export default function EditStudioScreen() {
               {Object.keys(selectedDates).filter(
                 (d) => selectedDates[d]?.selected,
               ).length > 0 && (
-                <View
-                  style={{
-                    paddingHorizontal: 12,
-                    paddingBottom: 12,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color={colors.primary}
-                  />
-                  <Text
+                  <View
                     style={{
-                      color: colors.text,
-                      fontFamily: "Poppins_500Medium",
-                      fontSize: 13,
+                      paddingHorizontal: 12,
+                      paddingBottom: 12,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
                     }}
                   >
-                    {
-                      Object.keys(selectedDates).filter(
-                        (d) => selectedDates[d]?.selected,
-                      ).length
-                    }{" "}
-                    date(s) selected
-                  </Text>
-                </View>
-              )}
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color={colors.primary}
+                    />
+                    <Text
+                      style={{
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 13,
+                      }}
+                    >
+                      {
+                        Object.keys(selectedDates).filter(
+                          (d) => selectedDates[d]?.selected,
+                        ).length
+                      }{" "}
+                      date(s) selected
+                    </Text>
+                  </View>
+                )}
             </View>
 
             {/* Selected Dates with Time Slots */}
             {Object.entries(selectedDates).filter(([_, data]) => data.selected)
               .length > 0 && (
-              <View style={{ marginTop: 16 }}>
-                <Text
-                  style={{
-                    color: colors.textSecondary,
-                    fontSize: 12,
-                    fontFamily: "Poppins_600SemiBold",
-                    marginBottom: 8,
-                  }}
-                >
-                  SELECTED DATES (OVERRIDES WEEKLY SCHEDULE)
-                </Text>
-                {Object.entries(selectedDates)
-                  .filter(([_, data]) => data.selected)
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([dateStr, data]) => {
-                    const date = new Date(dateStr + "T00:00:00");
-                    const dayName = date.toLocaleDateString("en-US", {
-                      weekday: "long",
-                    });
-                    const weeklySchedule = availability.find(
-                      (a) => a.day === dayName,
-                    );
-                    const hasConflict =
-                      weeklySchedule && weeklySchedule.slots.length > 0;
+                <View style={{ marginTop: 16 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontSize: 12,
+                      fontFamily: "Poppins_600SemiBold",
+                      marginBottom: 8,
+                    }}
+                  >
+                    SELECTED DATES (OVERRIDES WEEKLY SCHEDULE)
+                  </Text>
+                  {Object.entries(selectedDates)
+                    .filter(([_, data]) => data.selected)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([dateStr, data]) => {
+                      const date = new Date(dateStr + "T00:00:00");
+                      const dayName = date.toLocaleDateString("en-US", {
+                        weekday: "long",
+                      });
+                      const weeklySchedule = availability.find(
+                        (a) => a.day === dayName,
+                      );
+                      const hasConflict =
+                        weeklySchedule && weeklySchedule.slots.length > 0;
 
-                    const toggleAmPm = (timeStr: string) => {
-                      const [time, period] = timeStr.split(" ");
-                      return `${time} ${period === "AM" ? "PM" : "AM"}`;
-                    };
+                      const toggleAmPm = (timeStr: string) => {
+                        const [time, period] = timeStr.split(" ");
+                        return `${time} ${period === "AM" ? "PM" : "AM"}`;
+                      };
 
-                    return (
-                      <View
-                        key={dateStr}
-                        style={[
-                          styles.selectedDateCard,
-                          {
-                            backgroundColor: isDark ? "#374151" : "#FFF",
-                            borderColor: hasConflict
-                              ? "#F59E0B"
-                              : colors.border,
-                          },
-                        ]}
-                      >
+                      return (
                         <View
-                          style={{
-                            flexDirection: "row",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                          }}
+                          key={dateStr}
+                          style={[
+                            styles.selectedDateCard,
+                            {
+                              backgroundColor: isDark ? "#374151" : "#FFF",
+                              borderColor: hasConflict
+                                ? "#F59E0B"
+                                : colors.border,
+                            },
+                          ]}
                         >
                           <View
                             style={{
                               flexDirection: "row",
+                              justifyContent: "space-between",
                               alignItems: "center",
-                              gap: 8,
                             }}
                           >
-                            <Text
+                            <View
                               style={{
-                                color: colors.text,
-                                fontFamily: "Poppins_600SemiBold",
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 8,
                               }}
                             >
-                              {date.toLocaleDateString("en-US", {
-                                weekday: "short",
-                                month: "short",
-                                day: "numeric",
-                              })}
-                            </Text>
-                            {hasConflict && (
-                              <View
+                              <Text
                                 style={{
-                                  backgroundColor: "#F59E0B20",
-                                  paddingHorizontal: 6,
-                                  paddingVertical: 2,
-                                  borderRadius: 4,
+                                  color: colors.text,
+                                  fontFamily: "Poppins_600SemiBold",
                                 }}
                               >
+                                {date.toLocaleDateString("en-US", {
+                                  weekday: "short",
+                                  month: "short",
+                                  day: "numeric",
+                                })}
+                              </Text>
+                              {hasConflict && (
+                                <View
+                                  style={{
+                                    backgroundColor: "#F59E0B20",
+                                    paddingHorizontal: 6,
+                                    paddingVertical: 2,
+                                    borderRadius: 4,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      color: "#F59E0B",
+                                      fontSize: 10,
+                                      fontFamily: "Poppins_500Medium",
+                                    }}
+                                  >
+                                    Override
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <TouchableOpacity
+                              onPress={() => {
+                                const newDates = { ...selectedDates };
+                                delete newDates[dateStr];
+                                setSelectedDates(newDates);
+                              }}
+                            >
+                              <Ionicons
+                                name="close-circle"
+                                size={20}
+                                color="#EF4444"
+                              />
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Editable Time Slots for Specific Date */}
+                          {data.slots.map((slot, slotIndex) => (
+                            <View
+                              key={slotIndex}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 8,
+                                marginTop: 12,
+                              }}
+                            >
+                              <View style={{ flex: 1 }}>
                                 <Text
                                   style={{
-                                    color: "#F59E0B",
-                                    fontSize: 10,
-                                    fontFamily: "Poppins_500Medium",
+                                    color: colors.textSecondary,
+                                    fontSize: 11,
+                                    marginBottom: 4,
+                                    fontFamily: "Poppins_600SemiBold",
                                   }}
                                 >
-                                  Override
+                                  START
                                 </Text>
-                              </View>
-                            )}
-                          </View>
-                          <TouchableOpacity
-                            onPress={() => {
-                              const newDates = { ...selectedDates };
-                              delete newDates[dateStr];
-                              setSelectedDates(newDates);
-                            }}
-                          >
-                            <Ionicons
-                              name="close-circle"
-                              size={20}
-                              color="#EF4444"
-                            />
-                          </TouchableOpacity>
-                        </View>
-
-                        {/* Editable Time Slots for Specific Date */}
-                        {data.slots.map((slot, slotIndex) => (
-                          <View
-                            key={slotIndex}
-                            style={{
-                              flexDirection: "row",
-                              alignItems: "center",
-                              gap: 8,
-                              marginTop: 12,
-                            }}
-                          >
-                            <View style={{ flex: 1 }}>
-                              <Text
-                                style={{
-                                  color: colors.textSecondary,
-                                  fontSize: 11,
-                                  marginBottom: 4,
-                                  fontFamily: "Poppins_600SemiBold",
-                                }}
-                              >
-                                START
-                              </Text>
-                              <View
-                                style={{
-                                  flexDirection: "row",
-                                  alignItems: "center",
-                                  gap: 4,
-                                }}
-                              >
-                                <TextInput
-                                  value={slot.start.split(" ")[0]}
-                                  onChangeText={(text) => {
-                                    const formatted = formatTimeInput(text);
-                                    const newDates = { ...selectedDates };
-                                    const period =
-                                      slot.start.split(" ")[1] || "AM";
-                                    newDates[dateStr].slots[slotIndex].start =
-                                      `${formatted} ${period}`;
-                                    setSelectedDates(newDates);
+                                <View
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: 4,
                                   }}
-                                  placeholder="09:00"
-                                  keyboardType="numeric"
-                                  maxLength={5}
-                                  style={[
-                                    styles.timeInput,
-                                    {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "white",
-                                      borderColor: colors.border,
-                                      color: colors.text,
-                                      flex: 1,
-                                    },
-                                  ]}
-                                />
-                                <TouchableOpacity
-                                  onPress={() => {
-                                    const newDates = { ...selectedDates };
-                                    newDates[dateStr].slots[slotIndex].start =
-                                      toggleAmPm(slot.start);
-                                    setSelectedDates(newDates);
-                                  }}
-                                  style={[
-                                    styles.ampmBtn,
-                                    {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "#E5E7EB",
-                                    },
-                                  ]}
                                 >
-                                  <Text
-                                    style={{
-                                      fontSize: 12,
-                                      fontFamily: "Poppins_600SemiBold",
-                                      color: colors.text,
+                                  <TextInput
+                                    value={slot.start.split(" ")[0]}
+                                    onChangeText={(text) => {
+                                      const formatted = formatTimeInput(text);
+                                      const newDates = { ...selectedDates };
+                                      const period =
+                                        slot.start.split(" ")[1] || "AM";
+                                      newDates[dateStr].slots[slotIndex].start =
+                                        `${formatted} ${period}`;
+                                      setSelectedDates(newDates);
                                     }}
-                                  >
-                                    {slot.start.split(" ")[1] || "AM"}
-                                  </Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                            <Ionicons
-                              name="arrow-forward"
-                              size={20}
-                              color={colors.textSecondary}
-                              style={{ marginTop: 20 }}
-                            />
-                            <View style={{ flex: 1 }}>
-                              <Text
-                                style={{
-                                  color: colors.textSecondary,
-                                  fontSize: 11,
-                                  marginBottom: 4,
-                                  fontFamily: "Poppins_600SemiBold",
-                                }}
-                              >
-                                END
-                              </Text>
-                              <View
-                                style={{
-                                  flexDirection: "row",
-                                  alignItems: "center",
-                                  gap: 4,
-                                }}
-                              >
-                                <TextInput
-                                  value={slot.end.split(" ")[0]}
-                                  onChangeText={(text) => {
-                                    const formatted = formatTimeInput(text);
-                                    const newDates = { ...selectedDates };
-                                    const period =
-                                      slot.end.split(" ")[1] || "PM";
-                                    newDates[dateStr].slots[slotIndex].end =
-                                      `${formatted} ${period}`;
-                                    setSelectedDates(newDates);
-                                  }}
-                                  placeholder="05:00"
-                                  keyboardType="numeric"
-                                  maxLength={5}
-                                  style={[
-                                    styles.timeInput,
-                                    {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "white",
-                                      borderColor: colors.border,
-                                      color: colors.text,
-                                      flex: 1,
-                                    },
-                                  ]}
-                                />
-                                <TouchableOpacity
-                                  onPress={() => {
-                                    const newDates = { ...selectedDates };
-                                    newDates[dateStr].slots[slotIndex].end =
-                                      toggleAmPm(slot.end);
-                                    setSelectedDates(newDates);
-                                  }}
-                                  style={[
-                                    styles.ampmBtn,
-                                    {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "#E5E7EB",
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={{
-                                      fontSize: 12,
-                                      fontFamily: "Poppins_600SemiBold",
-                                      color: colors.text,
+                                    placeholder="09:00"
+                                    keyboardType="numeric"
+                                    maxLength={5}
+                                    style={[
+                                      styles.timeInput,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "white",
+                                        borderColor: colors.border,
+                                        color: colors.text,
+                                        flex: 1,
+                                      },
+                                    ]}
+                                  />
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      const newDates = { ...selectedDates };
+                                      newDates[dateStr].slots[slotIndex].start =
+                                        toggleAmPm(slot.start);
+                                      setSelectedDates(newDates);
                                     }}
+                                    style={[
+                                      styles.ampmBtn,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "#E5E7EB",
+                                      },
+                                    ]}
                                   >
-                                    {slot.end.split(" ")[1] || "PM"}
-                                  </Text>
-                                </TouchableOpacity>
+                                    <Text
+                                      style={{
+                                        fontSize: 12,
+                                        fontFamily: "Poppins_600SemiBold",
+                                        color: colors.text,
+                                      }}
+                                    >
+                                      {slot.start.split(" ")[1] || "AM"}
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
                               </View>
-                            </View>
-                            {data.slots.length > 1 && (
-                              <TouchableOpacity
-                                onPress={() => {
-                                  const newDates = { ...selectedDates };
-                                  newDates[dateStr].slots.splice(slotIndex, 1);
-                                  setSelectedDates(newDates);
-                                }}
+                              <Ionicons
+                                name="arrow-forward"
+                                size={20}
+                                color={colors.textSecondary}
                                 style={{ marginTop: 20 }}
-                              >
-                                <Ionicons
-                                  name="trash-outline"
-                                  size={20}
-                                  color="#EF4444"
-                                />
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        ))}
+                              />
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={{
+                                    color: colors.textSecondary,
+                                    fontSize: 11,
+                                    marginBottom: 4,
+                                    fontFamily: "Poppins_600SemiBold",
+                                  }}
+                                >
+                                  END
+                                </Text>
+                                <View
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: 4,
+                                  }}
+                                >
+                                  <TextInput
+                                    value={slot.end.split(" ")[0]}
+                                    onChangeText={(text) => {
+                                      const formatted = formatTimeInput(text);
+                                      const newDates = { ...selectedDates };
+                                      const period =
+                                        slot.end.split(" ")[1] || "PM";
+                                      newDates[dateStr].slots[slotIndex].end =
+                                        `${formatted} ${period}`;
+                                      setSelectedDates(newDates);
+                                    }}
+                                    placeholder="05:00"
+                                    keyboardType="numeric"
+                                    maxLength={5}
+                                    style={[
+                                      styles.timeInput,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "white",
+                                        borderColor: colors.border,
+                                        color: colors.text,
+                                        flex: 1,
+                                      },
+                                    ]}
+                                  />
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      const newDates = { ...selectedDates };
+                                      newDates[dateStr].slots[slotIndex].end =
+                                        toggleAmPm(slot.end);
+                                      setSelectedDates(newDates);
+                                    }}
+                                    style={[
+                                      styles.ampmBtn,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "#E5E7EB",
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={{
+                                        fontSize: 12,
+                                        fontFamily: "Poppins_600SemiBold",
+                                        color: colors.text,
+                                      }}
+                                    >
+                                      {slot.end.split(" ")[1] || "PM"}
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                              {data.slots.length > 1 && (
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    const newDates = { ...selectedDates };
+                                    newDates[dateStr].slots.splice(slotIndex, 1);
+                                    setSelectedDates(newDates);
+                                  }}
+                                  style={{ marginTop: 20 }}
+                                >
+                                  <Ionicons
+                                    name="trash-outline"
+                                    size={20}
+                                    color="#EF4444"
+                                  />
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          ))}
 
-                        {/* Add Slot Button for Specific Date */}
-                        {data.slots.length < 3 && (
-                          <TouchableOpacity
-                            onPress={() => {
-                              const newDates = { ...selectedDates };
-                              newDates[dateStr].slots.push({
-                                start: "06:00 PM",
-                                end: "09:00 PM",
-                              });
-                              setSelectedDates(newDates);
-                            }}
-                            style={{
-                              marginTop: 12,
-                              flexDirection: "row",
-                              alignItems: "center",
-                              gap: 4,
-                            }}
-                          >
-                            <Ionicons
-                              name="add-circle-outline"
-                              size={16}
-                              color={colors.primary}
-                            />
-                            <Text
+                          {/* Add Slot Button for Specific Date */}
+                          {data.slots.length < 3 && (
+                            <TouchableOpacity
+                              onPress={() => {
+                                const newDates = { ...selectedDates };
+                                newDates[dateStr].slots.push({
+                                  start: "06:00 PM",
+                                  end: "09:00 PM",
+                                });
+                                setSelectedDates(newDates);
+                              }}
                               style={{
-                                color: colors.primary,
-                                fontSize: 12,
-                                fontFamily: "Poppins_500Medium",
+                                marginTop: 12,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 4,
                               }}
                             >
-                              Add Time Slot
-                            </Text>
-                          </TouchableOpacity>
-                        )}
+                              <Ionicons
+                                name="add-circle-outline"
+                                size={16}
+                                color={colors.primary}
+                              />
+                              <Text
+                                style={{
+                                  color: colors.primary,
+                                  fontSize: 12,
+                                  fontFamily: "Poppins_500Medium",
+                                }}
+                              >
+                                Add Time Slot
+                              </Text>
+                            </TouchableOpacity>
+                          )}
 
-                        {hasConflict && (
-                          <Text
-                            style={{
-                              color: "#F59E0B",
-                              fontSize: 11,
-                              fontFamily: "Poppins_400Regular",
-                              marginTop: 8,
-                            }}
-                          >
-                            ⚠️ This overrides weekly {dayName} schedule (
-                            {weeklySchedule.slots[0]?.start} -{" "}
-                            {weeklySchedule.slots[0]?.end})
-                          </Text>
-                        )}
-                      </View>
-                    );
-                  })}
-              </View>
-            )}
+                          {hasConflict && (
+                            <Text
+                              style={{
+                                color: "#F59E0B",
+                                fontSize: 11,
+                                fontFamily: "Poppins_400Regular",
+                                marginTop: 8,
+                              }}
+                            >
+                              ⚠️ This overrides weekly {dayName} schedule (
+                              {weeklySchedule.slots[0]?.start} -{" "}
+                              {weeklySchedule.slots[0]?.end})
+                            </Text>
+                          )}
+                        </View>
+                      );
+                    })}
+                </View>
+              )}
           </View>
 
           {/* Weekly Schedule Section */}
@@ -3923,10 +3927,10 @@ export default function EditStudioScreen() {
                       equipment.map((e) =>
                         e.id === editingEquipment.id
                           ? {
-                              ...e,
-                              ...equipmentForm,
-                              quantity: parseInt(equipmentForm.quantity) || 1,
-                            }
+                            ...e,
+                            ...equipmentForm,
+                            quantity: parseInt(equipmentForm.quantity) || 1,
+                          }
                           : e,
                       ),
                     );

@@ -2,15 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    Modal as RNModal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal as RNModal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -194,7 +195,7 @@ export default function EditGroupScreen() {
       }
 
       const { data, error } = await supabase.functions.invoke(
-        "manage-listings",
+        "listings-crud",
         {
           body: {
             action: "fetch_one",
@@ -349,9 +350,9 @@ export default function EditGroupScreen() {
       const orderedImages =
         images.length > 0 && images[thumbnailIndex]
           ? [
-              images[thumbnailIndex],
-              ...images.filter((_, i) => i !== thumbnailIndex),
-            ]
+            images[thumbnailIndex],
+            ...images.filter((_, i) => i !== thumbnailIndex),
+          ]
           : images;
 
       const payload = {
@@ -366,7 +367,7 @@ export default function EditGroupScreen() {
         group_type: groupType, // 'duo' or 'band'
       };
 
-      const { error } = await supabase.functions.invoke("manage-listings", {
+      const { error } = await supabase.functions.invoke("listings-crud", {
         body: {
           action: "update",
           type: "group",
@@ -376,7 +377,23 @@ export default function EditGroupScreen() {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Update failed with error:', error);
+        // Note: invoke returns { data, error } but here only error was destructured. 
+        // We can't access data unless we change destructuring, but error usually contains info.
+
+        let errorMsg = error.message || "Unknown error";
+        let alertMessage = `Failed to update group: ${errorMsg}`;
+
+        // If it's a FunctionsHttpError, context might have details, 
+        // but simply dumping stringified error is a safe bet for "similar all error"
+        if (errorMsg.includes("non-2xx")) {
+          alertMessage += `\n\nRaw: ${JSON.stringify(error)}`;
+        }
+
+        Alert.alert("Error", alertMessage);
+        return;
+      }
 
       console.log("✅ Group Updated");
       showAlert("success", "Success", "Group updated successfully!", [
@@ -547,7 +564,7 @@ export default function EditGroupScreen() {
       }
 
       // Send notification to new leader
-      await supabase.functions.invoke("manage-listings", {
+      await supabase.functions.invoke("listings-crud", {
         body: {
           action: "create_notification",
           userId: currentUserId,

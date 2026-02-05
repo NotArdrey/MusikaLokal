@@ -21,7 +21,7 @@ export default function MyGroupScreen() {
     const fetchGroups = async () => {
         if (!userId) return;
         try {
-            const { data, error } = await supabase.functions.invoke('manage-listings', {
+            const { data, error } = await supabase.functions.invoke('listings-crud', {
                 body: { action: 'fetch_my_groups', userId }
             });
 
@@ -56,7 +56,7 @@ export default function MyGroupScreen() {
     const handleDelete = async () => {
         if (!selectedId || !userId) return;
         try {
-            const { error } = await supabase.functions.invoke('manage-listings', {
+            const { error } = await supabase.functions.invoke('listings-crud', {
                 body: { action: 'delete', type: 'group', id: selectedId, userId }
             });
 
@@ -121,12 +121,12 @@ export default function MyGroupScreen() {
                                             </TouchableOpacity>
 
                                             <TouchableOpacity
-                                                onPress={() => router.push({ 
-                                                    pathname: '/chat', 
-                                                    params: { 
-                                                        isGroupChat: 'true', 
-                                                        groupChatId: group.id 
-                                                    } 
+                                                onPress={() => router.push({
+                                                    pathname: '/chat',
+                                                    params: {
+                                                        isGroupChat: 'true',
+                                                        groupChatId: group.id
+                                                    }
                                                 })}
                                                 style={[styles.editBtn, { borderColor: colors.border }]}
                                             >
