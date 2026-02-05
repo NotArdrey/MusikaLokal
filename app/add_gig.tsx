@@ -174,12 +174,13 @@ export default function AddGigScreen() {
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke(
-        "manage-profile",
-        {
-          body: { action: "fetch", userId: user.id },
-        },
-      );
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
 
       if (profile?.role !== "venue-owner") {
         Alert.alert("Unauthorized", "Only venue owners can create gigs.");
@@ -339,54 +340,38 @@ export default function AddGigScreen() {
         ),
       );
 
-      const { data, error } = await supabase.functions.invoke(
-        "listings-crud",
-        {
-          body: {
-            action: "create",
-            type: "gig",
-            userId: session.user.id,
-            payload,
-          },
-        },
-      );
+      // Direct insert into gigs table
+      const { data, error } = await supabase
+        .from('gigs')
+        .insert({
+          organizer_id: session.user.id,
+          name: payload.name,
+          description: payload.description,
+          location: payload.location,
+          budget: payload.budget,
+          status: payload.status,
+          images: payload.images,
+          contract_url: payload.contract_url,
+          business_permit_url: payload.business_permit_url,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          event_date: payload.event_date,
+          reapplication_cooldown_days: payload.reapplication_cooldown_days,
+          requirements: payload.requirements,
+        })
+        .select()
+        .single();
 
       console.log("🔵 Response data:", JSON.stringify(data, null, 2));
       console.log("🔵 Response error:", error);
 
-      // When there's a FunctionsHttpError, the actual error details are in the data field
       if (error) {
         console.error("❌ Error details:", JSON.stringify(error, null, 2));
-        console.error(
-          "❌ Function response data:",
-          JSON.stringify(data, null, 2),
-        );
-
-        // The actual error message from the Edge Function is in data
-        if (data && typeof data === "object") {
-          const errorMsg =
-            (data as any).error ||
-            (data as any).message ||
-            "Unknown function error";
-          const errorDetails = (data as any).details || "";
-          const errorHint = (data as any).hint || "";
-
-          console.error("❌ Actual error from function:", errorMsg);
-          console.error("❌ Error details:", errorDetails);
-
-          let alertMessage = `Failed to create gig: ${errorMsg}`;
-          if (errorHint) alertMessage += `\n\nHint: ${errorHint}`;
-          if (errorDetails && typeof errorDetails === 'string') alertMessage += `\n\nDetails: ${errorDetails}`;
-
-          // Debug fallback: if generic error, dump the data
-          if (errorMsg === "Unknown function error" || errorMsg.includes("non-2xx")) {
-            alertMessage += `\n\nRaw Data: ${JSON.stringify(data)}`;
-          }
-
-          Alert.alert("Error", alertMessage);
-          return;
-        }
-        throw error;
+        let alertMessage = `Failed to create gig: ${error.message}`;
+        if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
+        if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
+        Alert.alert("Error", alertMessage);
+        return;
       }
 
       setNewGigId(data.id);

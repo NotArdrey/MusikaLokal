@@ -166,12 +166,13 @@ export default function EditGigScreen() {
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke(
-        "manage-profile",
-        {
-          body: { action: "fetch", userId: user.id },
-        },
-      );
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
 
       if (profile?.role !== "venue-owner") {
         showAlert("error", "Unauthorized", "Only venue owners can edit gigs.");
@@ -212,19 +213,15 @@ export default function EditGigScreen() {
         return;
       }
 
-      const { data, error } = await supabase.functions.invoke(
-        "listings-crud",
-        {
-          body: {
-            action: "fetch_one",
-            type: "gig",
-            id: gigId,
-            userId: user.id,
-          },
-        },
-      );
+      // Direct query to gigs table
+      const { data, error } = await supabase
+        .from('gigs')
+        .select('*')
+        .eq('id', gigId)
+        .eq('organizer_id', user.id)
+        .single();
 
-      console.log('📥 ===== EDGE FUNCTION RESPONSE =====');
+      console.log('📥 ===== DATABASE QUERY RESPONSE =====');
       console.log('📥 Error object:', error);
       console.log('📥 Data object:', data);
       console.log('📥 Data type:', typeof data);
@@ -461,41 +458,37 @@ export default function EditGigScreen() {
         ),
       );
 
-      const response = await supabase.functions.invoke("listings-crud", {
-        body: {
-          action: "update",
-          type: "gig",
-          id: gigId,
-          userId: user.id,
-          payload,
-        },
-      });
+      // Direct update to gigs table
+      const { data: responseData, error: updateError } = await supabase
+        .from('gigs')
+        .update({
+          name: payload.name,
+          description: payload.description,
+          location: payload.location,
+          budget: payload.budget,
+          images: payload.images,
+          contract_url: payload.contract_url,
+          business_permit_url: payload.business_permit_url,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          event_date: payload.event_date,
+          reapplication_cooldown_days: payload.reapplication_cooldown_days,
+          requirements: payload.requirements,
+        })
+        .eq('id', gigId)
+        .eq('organizer_id', user.id)
+        .select()
+        .single();
 
-      console.log('📥 Update response data:', JSON.stringify(response.data, null, 2));
-      console.log('📥 Update response error:', response.error);
+      console.log('📥 Update response data:', JSON.stringify(responseData, null, 2));
+      console.log('📥 Update response error:', updateError);
 
-      if (response.error) {
-        console.error('❌ Update failed with error:', response.error);
-        const data = response.data;
-        const error = response.error;
+      if (updateError) {
+        console.error('❌ Update failed with error:', updateError);
 
-        let errorMsg = error.message || "Unknown error";
-        let errorDetails = "";
-        let errorHint = "";
-
-        if (data && typeof data === "object") {
-          errorMsg = (data as any).error || (data as any).message || errorMsg;
-          errorDetails = (data as any).details || "";
-          errorHint = (data as any).hint || "";
-        }
-
-        let alertMessage = `Failed to update gig: ${errorMsg}`;
-        if (errorHint) alertMessage += `\n\nHint: ${errorHint}`;
-        if (errorDetails && typeof errorDetails === 'string') alertMessage += `\n\nDetails: ${errorDetails}`;
-
-        if (errorMsg.includes("non-2xx") || errorMsg === "Unknown error") {
-          alertMessage += `\n\nRaw: ${JSON.stringify(error)}\nData: ${JSON.stringify(data)}`;
-        }
+        let alertMessage = `Failed to update gig: ${updateError.message}`;
+        if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
+        if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
 
         Alert.alert("Error", alertMessage);
         return;

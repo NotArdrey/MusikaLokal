@@ -71,12 +71,13 @@ export default function StudioDetailsScreen() {
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke(
-        "manage-profile",
-        {
-          body: { action: "fetch", userId: user.id },
-        },
-      );
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
 
       if (profile?.role !== "studio-owner") {
         Alert.alert("Unauthorized", "Only studio owners can access this page.");
@@ -107,11 +108,13 @@ export default function StudioDetailsScreen() {
 
       console.log(`[manage_studio] Fetching data for studioId: ${studioId}, userId: ${userId}`);
 
-      // Fetch Studio Details
-      const { data: studioData, error: studioError } =
-        await supabase.functions.invoke("listings-crud", {
-          body: { action: "fetch_one", type: "studio", id: studioId, userId },
-        });
+      // Direct query to studios table
+      const { data: studioData, error: studioError } = await supabase
+        .from('studios')
+        .select('*')
+        .eq('id', studioId)
+        .eq('owner_id', userId)
+        .single();
 
       if (studioError) {
         console.error('[manage_studio] Failed to fetch studio details:', studioError);
@@ -137,17 +140,14 @@ export default function StudioDetailsScreen() {
         console.error('[manage_studio] Exception fetching bookings:', bookingErr);
       }
 
-      // Fetch Reviews
+      // Direct query to reviews table
       try {
-        const { data: reviewData, error: reviewError } =
-          await supabase.functions.invoke("listings-crud", {
-            body: {
-              action: "fetch_reviews",
-              type: "studio",
-              id: studioId,
-              userId,
-            },
-          });
+        const { data: reviewData, error: reviewError } = await supabase
+          .from('reviews')
+          .select('*, reviewer:profiles!reviews_reviewer_id_fkey(id, full_name, avatar_url)')
+          .eq('entity_type', 'studio')
+          .eq('entity_id', studioId)
+          .order('created_at', { ascending: false });
         if (reviewError) {
           console.error('[manage_studio] Failed to fetch reviews:', reviewError);
         } else {

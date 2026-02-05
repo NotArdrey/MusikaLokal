@@ -21,12 +21,19 @@ export default function MyGroupScreen() {
     const fetchGroups = async () => {
         if (!userId) return;
         try {
-            const { data, error } = await supabase.functions.invoke('listings-crud', {
-                body: { action: 'fetch_my_groups', userId }
-            });
+            // Direct query to groups_with_stats view
+            const { data, error } = await supabase
+                .from('groups_with_stats')
+                .select('*')
+                .eq('owner_id', userId)
+                .order('created_at', { ascending: false });
 
             if (error) throw error;
-            setGroups(data || []);
+            setGroups((data || []).map((item: any) => ({
+                ...item,
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
+            })));
         } catch (e) {
             console.log('Error fetching groups:', e);
         } finally {
@@ -56,9 +63,18 @@ export default function MyGroupScreen() {
     const handleDelete = async () => {
         if (!selectedId || !userId) return;
         try {
-            const { error } = await supabase.functions.invoke('listings-crud', {
-                body: { action: 'delete', type: 'group', id: selectedId, userId }
-            });
+            // First delete from group_members
+            await supabase
+                .from('group_members')
+                .delete()
+                .eq('group_id', selectedId);
+
+            // Then delete from groups table
+            const { error } = await supabase
+                .from('groups')
+                .delete()
+                .eq('id', selectedId)
+                .eq('owner_id', userId);
 
             if (error) throw error;
             setGroups(groups.filter(g => g.id !== selectedId));

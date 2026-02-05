@@ -218,12 +218,13 @@ export default function AddGroupScreen() {
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke(
-        "manage-profile",
-        {
-          body: { action: "fetch", userId: user.id },
-        },
-      );
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
 
       if (profile?.role !== "musician") {
         Alert.alert("Unauthorized", "Only musicians can create groups.");
@@ -421,17 +422,23 @@ export default function AddGroupScreen() {
         group_type: groupType, // 'duo' or 'band'
       };
 
-      const { data, error } = await supabase.functions.invoke(
-        "listings-crud",
-        {
-          body: {
-            action: "create",
-            type: "group",
-            userId: session.user.id,
-            payload,
-          },
-        },
-      );
+      // Direct insert into groups table
+      const { data, error } = await supabase
+        .from('groups')
+        .insert({
+          owner_id: session.user.id,
+          name: payload.name,
+          location: payload.location,
+          genre: payload.genre,
+          description: payload.description,
+          members: payload.members,
+          images: payload.images,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          group_type: payload.group_type,
+        })
+        .select()
+        .single();
 
       console.log("🔵 Response data:", JSON.stringify(data, null, 2));
       console.log("🔵 Response error:", error);
@@ -439,27 +446,38 @@ export default function AddGroupScreen() {
       if (error) {
         console.error("❌ Error details:", JSON.stringify(error, null, 2));
 
-        // Try to parse error from data if available (Supabase Edge Functions often return error body in data)
-        let errorMsg = error.message || "Unknown error";
-        let errorDetails = "";
-        let errorHint = "";
-
-        if (data && typeof data === "object") {
-          errorMsg = (data as any).error || (data as any).message || errorMsg;
-          errorDetails = (data as any).details || "";
-          errorHint = (data as any).hint || "";
-        }
-
-        let alertMessage = `Failed to create group: ${errorMsg}`;
-        if (errorHint) alertMessage += `\n\nHint: ${errorHint}`;
-        if (errorDetails && typeof errorDetails === 'string') alertMessage += `\n\nDetails: ${errorDetails}`;
-
-        if (errorMsg.includes("non-2xx") || errorMsg === "Unknown error") {
-          alertMessage += `\n\nRaw: ${JSON.stringify(error)}\nData: ${JSON.stringify(data)}`;
-        }
+        let alertMessage = `Failed to create group: ${error.message}`;
+        if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
+        if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
 
         Alert.alert("Error", alertMessage);
         return;
+      }
+
+      // Add owner to group_members
+      const { error: memberError } = await supabase
+        .from('group_members')
+        .insert({
+          group_id: data.id,
+          user_id: session.user.id,
+          role: 'owner'
+        });
+
+      if (memberError) {
+        console.error("Error adding owner to group_members:", memberError);
+      }
+
+      // Add additional members if they have user_ids
+      const additionalMembers = (payload.members || [])
+        .filter((m: any) => m.user_id && m.user_id !== session.user.id)
+        .map((m: any) => ({
+          group_id: data.id,
+          user_id: m.user_id,
+          role: 'member'
+        }));
+
+      if (additionalMembers.length > 0) {
+        await supabase.from('group_members').insert(additionalMembers);
       }
 
       setNewGroupId(data.id);

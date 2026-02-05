@@ -281,12 +281,13 @@ export default function EditStudioScreen() {
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke(
-        "manage-profile",
-        {
-          body: { action: "fetch", userId: user.id },
-        },
-      );
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
 
       if (profile?.role !== "studio-owner") {
         showAlert(
@@ -357,17 +358,13 @@ export default function EditStudioScreen() {
         userId: user.id,
       });
 
-      const { data, error } = await supabase.functions.invoke(
-        "listings-crud",
-        {
-          body: {
-            action: "fetch_one",
-            type: "studio",
-            id: studioId,
-            userId: user.id,
-          },
-        },
-      );
+      // Direct query to studios table
+      const { data, error } = await supabase
+        .from('studios')
+        .select('*')
+        .eq('id', studioId)
+        .eq('owner_id', user.id)
+        .single();
 
       console.log("� ===== EDGE FUNCTION RESPONSE =====");
       console.log("📥 Response timestamp:", new Date().toISOString());
@@ -1460,82 +1457,117 @@ export default function EditStudioScreen() {
         ),
       );
 
-      const response = await supabase.functions.invoke("listings-crud", {
-        body: {
-          action: "update",
-          type: "studio",
-          id: studioId,
-          userId: user.id,
-          payload,
-        },
-      });
+      // Direct update to studios table
+      const { data: studioData, error: updateError } = await supabase
+        .from('studios')
+        .update({
+          name: payload.name,
+          type: payload.type,
+          description: payload.description,
+          address: payload.address,
+          hourly_rate: payload.hourly_rate,
+          rehearsal_rate: payload.rehearsal_rate,
+          recording_rate: payload.recording_rate,
+          pax: payload.pax,
+          amenities: payload.amenities,
+          instruments: payload.instruments,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          images: payload.images,
+          contract_url: payload.contract_url,
+          business_permit_url: payload.business_permit_url,
+          availability: payload.availability,
+        })
+        .eq('id', studioId)
+        .eq('owner_id', user.id)
+        .select()
+        .single();
 
-      console.log("🔵 Response data:", response.data);
-      console.log("🔵 Response error:", response.error);
+      console.log("🔵 Response data:", studioData);
+      console.log("🔵 Response error:", updateError);
 
-      if (response.error) {
-        console.error(
-          "❌ Error details:",
-          JSON.stringify(response.error, null, 2),
-        );
-
-        // Try to read the actual error message from the response body
-        let errorMessage = "Unknown error occurred";
-        let errorDetails = null;
-
-        try {
-          // Check if there's a response context with body
-          if (response.error.context && response.error.context._bodyBlob) {
-            console.log("🔍 Attempting to read error response body...");
-            // Try to read the body as text
-            const errorResponse = await fetch(response.error.context.url, {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                action: "update",
-                type: "studio",
-                id: studioId,
-                userId: user.id,
-                payload,
-              }),
-            });
-
-            const errorBody = await errorResponse.text();
-            console.log("🔍 Raw error response:", errorBody);
-
-            try {
-              errorDetails = JSON.parse(errorBody);
-              errorMessage =
-                errorDetails.error || errorDetails.message || errorMessage;
-              if (errorDetails.hint) errorMessage += `\n\nHint: ${errorDetails.hint}`;
-              if (errorDetails.details) errorMessage += `\n\nDetails: ${errorDetails.details}`;
-              console.error("❌ Server error message:", errorMessage);
-              console.error("❌ Server error details:", errorDetails.details);
-              console.error("❌ Server error code:", errorDetails.code);
-              console.error("❌ Server error hint:", errorDetails.hint);
-            } catch (parseError) {
-              errorMessage = errorBody || errorMessage;
-            }
-          } else if (response.data && typeof response.data === "object") {
-            errorMessage =
-              response.data.error || response.data.message || errorMessage;
-            if (response.data.hint) errorMessage += `\n\nHint: ${response.data.hint}`;
-            if (response.data.details) errorMessage += `\n\nDetails: ${response.data.details}`;
-            console.error("❌ Server error message:", errorMessage);
-            console.error("❌ Server error details:", response.data.details);
-          } else if (response.error.message) {
-            errorMessage = response.error.message;
-          }
-        } catch (readError) {
-          console.error("❌ Failed to read error body:", readError);
-        }
-
-        console.error("❌ Final error message:", errorMessage);
-        throw new Error(errorMessage);
+      if (updateError) {
+        console.error("❌ Error details:", JSON.stringify(updateError, null, 2));
+        let alertMessage = `Failed to update studio: ${updateError.message}`;
+        if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
+        if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
+        throw new Error(alertMessage);
       }
+
+      // Update studio settings
+      await supabase
+        .from('studio_settings')
+        .upsert({
+          studio_id: studioId,
+          lead_time_hours: payload.booking_settings.lead_time_hours || 24,
+          weekend_multiplier: payload.booking_settings.weekend_multiplier || 1.0,
+          peak_season_multiplier: payload.booking_settings.peak_season_multiplier || 1.0,
+          peak_season_dates: payload.booking_settings.peak_season_dates || [],
+          off_peak_multiplier: payload.booking_settings.off_peak_multiplier || 1.0,
+          off_peak_dates: payload.booking_settings.off_peak_dates || [],
+        }, { onConflict: 'studio_id' });
+
+      // Update operating hours
+      await supabase.from('studio_operating_hours').delete().eq('studio_id', studioId);
+
+      const dayMap: { [key: string]: number } = {
+        'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+      };
+      let operatingHours: any[] = [];
+
+      if (payload.availability && Array.isArray(payload.availability) && payload.availability.length > 0) {
+        for (const daySchedule of payload.availability) {
+          const dayIndex = dayMap[daySchedule.day];
+          if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+            daySchedule.slots.forEach((slot: any, slotIndex: number) => {
+              operatingHours.push({
+                studio_id: studioId,
+                day_of_week: dayIndex,
+                is_open: true,
+                open_time: slot.start,
+                close_time: slot.end,
+                slot_order: slotIndex
+              });
+            });
+          }
+        }
+      }
+
+      if (operatingHours.length === 0) {
+        for (let day = 0; day <= 6; day++) {
+          operatingHours.push({
+            studio_id: studioId,
+            day_of_week: day,
+            is_open: true,
+            open_time: '09:00',
+            close_time: '22:00'
+          });
+        }
+      }
+
+      await supabase.from('studio_operating_hours').insert(operatingHours);
+
+      // Update calendar date overrides
+      await supabase.from('studio_date_overrides').delete().eq('studio_id', studioId);
+
+      if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
+        const dateOverrides = payload.calendar_availability
+          .filter((entry: any) => entry.date && entry.slots && entry.slots.length > 0)
+          .map((entry: any) => ({
+            studio_id: studioId,
+            override_date: entry.date,
+            is_open: true,
+            open_time: entry.slots[0].start,
+            close_time: entry.slots[0].end,
+            reason: 'Custom schedule'
+          }));
+
+        if (dateOverrides.length > 0) {
+          await supabase.from('studio_date_overrides').insert(dateOverrides);
+        }
+      }
+
+      const response = { data: studioData, error: null };
 
       // Check if data indicates an error
       if (!response.data) {

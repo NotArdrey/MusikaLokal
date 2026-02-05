@@ -21,12 +21,19 @@ export default function MyVenueScreen() {
     const fetchGigs = async () => {
         if (!userId) return;
         try {
-            const { data, error } = await supabase.functions.invoke('listings-crud', {
-                body: { action: 'fetch_my_gigs', userId }
-            });
+            // Direct query to gigs_with_stats view
+            const { data, error } = await supabase
+                .from('gigs_with_stats')
+                .select('*')
+                .eq('organizer_id', userId)
+                .order('created_at', { ascending: false });
 
             if (error) throw error;
-            setGigs(data || []);
+            setGigs((data || []).map((item: any) => ({
+                ...item,
+                rating: item.rating || 0,
+                review_count: item.review_count || 0
+            })));
         } catch (e) {
             console.log('Error fetching gigs:', e);
         } finally {
@@ -56,9 +63,12 @@ export default function MyVenueScreen() {
     const handleDelete = async () => {
         if (!selectedId || !userId) return;
         try {
-            const { error } = await supabase.functions.invoke('listings-crud', {
-                body: { action: 'delete', type: 'gig', id: selectedId, userId }
-            });
+            // Direct delete from gigs table
+            const { error } = await supabase
+                .from('gigs')
+                .delete()
+                .eq('id', selectedId)
+                .eq('organizer_id', userId);
 
             if (error) throw error;
             setGigs(gigs.filter(g => g.id !== selectedId));

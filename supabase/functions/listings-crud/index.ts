@@ -1,5 +1,7 @@
 // @ts-ignore
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -22,7 +24,7 @@ function decodeJwtPayload(token: string): { sub?: string; email?: string } | nul
     }
 }
 
-Deno.serve(async (req: Request) => {
+serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
     }

@@ -291,12 +291,13 @@ export default function AddStudioScreen() {
         return;
       }
 
-      const { data: profile } = await supabase.functions.invoke(
-        "manage-profile",
-        {
-          body: { action: "fetch", userId: user.id },
-        },
-      );
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
 
       if (profile?.role !== "studio-owner") {
         Alert.alert("Unauthorized", "Only studio owners can create studios.");
@@ -560,54 +561,116 @@ export default function AddStudioScreen() {
         ),
       );
 
-      const { data, error } = await supabase.functions.invoke(
-        "listings-crud",
-        {
-          body: {
-            action: "create",
-            type: "studio",
-            userId: session.user.id,
-            payload,
-          },
-        },
-      );
+      // Direct insert into studios table
+      const { data, error } = await supabase
+        .from('studios')
+        .insert({
+          owner_id: session.user.id,
+          name: payload.name,
+          type: payload.type,
+          description: payload.description,
+          address: payload.address,
+          hourly_rate: payload.hourly_rate,
+          rehearsal_rate: payload.rehearsal_rate,
+          recording_rate: payload.recording_rate,
+          pax: payload.pax,
+          amenities: payload.amenities,
+          instruments: payload.instruments,
+          images: payload.images,
+          contract_url: payload.contract_url,
+          business_permit_url: payload.business_permit_url,
+          availability: payload.availability,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+        })
+        .select()
+        .single();
 
       console.log("🔵 Response data:", JSON.stringify(data, null, 2));
       console.log("🔵 Response error:", error);
 
       if (error) {
         console.error("❌ Error details:", JSON.stringify(error, null, 2));
-        console.error(
-          "❌ Function response data:",
-          JSON.stringify(data, null, 2),
-        );
 
-        if (data && typeof data === "object") {
-          const errorMsg =
-            (data as any).error ||
-            (data as any).message ||
-            "Unknown function error";
-          const errorDetails = (data as any).details || "";
-          const errorHint = (data as any).hint || "";
+        let alertMessage = `Failed to create studio: ${error.message}`;
+        if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
+        if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
 
-          console.error("❌ Actual error from function:", errorMsg);
-          console.error("❌ Error details:", errorDetails);
-
-          let alertMessage = `Failed to create studio: ${errorMsg}`;
-          if (errorHint) alertMessage += `\n\nHint: ${errorHint}`;
-          if (errorDetails && typeof errorDetails === 'string') alertMessage += `\n\nDetails: ${errorDetails}`;
-
-          if (errorMsg === "Unknown function error" || errorMsg.includes("non-2xx")) {
-            alertMessage += `\n\nRaw Data: ${JSON.stringify(data)}`;
-          }
-
-          Alert.alert("Error", alertMessage);
-          return;
-        }
-
-        // If data is null/undefined but error exists (e.g. network error not returning body)
-        Alert.alert("Error", `Failed to create studio: ${error.message || "Unknown error"}\n\nRaw: ${JSON.stringify(error)}`);
+        Alert.alert("Error", alertMessage);
         return;
+      }
+
+      const studioId = data.id;
+
+      // Insert studio settings
+      const bookingSettings = payload.booking_settings || {};
+      await supabase.from('studio_settings').insert({
+        studio_id: studioId,
+        buffer_minutes: 30,
+        bulk_discount_threshold_hours: 10,
+        bulk_discount_percentage: 0,
+        lead_time_hours: parseInt(bookingSettings.lead_time_hours) || 24,
+        weekend_multiplier: parseFloat(bookingSettings.weekend_multiplier) || 1.0,
+        peak_season_multiplier: parseFloat(bookingSettings.peak_season_multiplier) || 1.0,
+        peak_season_dates: bookingSettings.peak_season_dates || [],
+        off_peak_multiplier: parseFloat(bookingSettings.off_peak_multiplier) || 1.0,
+        off_peak_dates: bookingSettings.off_peak_dates || [],
+      });
+
+      // Insert operating hours
+      const dayMap: { [key: string]: number } = {
+        'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+      };
+      let operatingHours: any[] = [];
+
+      if (payload.availability && Array.isArray(payload.availability) && payload.availability.length > 0) {
+        for (const daySchedule of payload.availability) {
+          const dayIndex = dayMap[daySchedule.day];
+          if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+            daySchedule.slots.forEach((slot: any, slotIndex: number) => {
+              operatingHours.push({
+                studio_id: studioId,
+                day_of_week: dayIndex,
+                is_open: true,
+                open_time: slot.start,
+                close_time: slot.end,
+                slot_order: slotIndex
+              });
+            });
+          }
+        }
+      }
+
+      if (operatingHours.length === 0) {
+        for (let day = 0; day <= 6; day++) {
+          operatingHours.push({
+            studio_id: studioId,
+            day_of_week: day,
+            is_open: true,
+            open_time: '09:00',
+            close_time: '22:00'
+          });
+        }
+      }
+
+      await supabase.from('studio_operating_hours').insert(operatingHours);
+
+      // Insert calendar date overrides if any
+      if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
+        const dateOverrides = payload.calendar_availability
+          .filter((entry: any) => entry.date && entry.slots && entry.slots.length > 0)
+          .map((entry: any) => ({
+            studio_id: studioId,
+            override_date: entry.date,
+            is_open: true,
+            open_time: entry.slots[0].start,
+            close_time: entry.slots[0].end,
+            reason: 'Custom schedule'
+          }));
+
+        if (dateOverrides.length > 0) {
+          await supabase.from('studio_date_overrides').insert(dateOverrides);
+        }
       }
 
       console.log("✅ Studio Created successfully:", data);
