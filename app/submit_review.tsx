@@ -53,6 +53,9 @@ export default function SubmitReviewScreen() {
     try {
       setSubmitting(true);
 
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("No active session");
+
       const reviewPayload: any = {
         action: 'create_review',
         userId,
@@ -69,7 +72,10 @@ export default function SubmitReviewScreen() {
       if (params.targetUserId) reviewPayload.targetUserId = params.targetUserId;
 
       const { data, error } = await supabase.functions.invoke('manage-bookings', {
-        body: reviewPayload
+        body: reviewPayload,
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
       if (error) throw error;
@@ -85,7 +91,7 @@ export default function SubmitReviewScreen() {
         { text: 'OK', onPress: () => router.back() }
       ]);
     } catch (e: any) {
-      console.error('Review submission error:', e);
+      console.log('Review submission error:', e);
       Alert.alert('Error', 'Failed to submit review. Please try again.');
     } finally {
       setSubmitting(false);
