@@ -289,6 +289,30 @@ export default function HomeScreen() {
         if (sError) console.log("Error fetching studios:", sError);
         studios = sData || [];
         console.log("🏠 Studios fetched:", studios.length);
+
+        // Fetch date overrides to calculate has_special_dates for each studio
+        if (studios.length > 0) {
+          const studioIds = studios.map((s: any) => s.id);
+          const today = new Date().toISOString().split("T")[0];
+          const { data: dateOverrides, error: overridesError } = await supabase
+            .from("studio_date_overrides")
+            .select("studio_id")
+            .in("studio_id", studioIds)
+            .gte("override_date", today);
+
+          if (!overridesError && dateOverrides) {
+            const studioDateOverridesMap: { [key: string]: boolean } = {};
+            dateOverrides.forEach((override: any) => {
+              studioDateOverridesMap[override.studio_id] = true;
+            });
+            // Augment studios with has_special_dates flag
+            studios = studios.map((studio: any) => ({
+              ...studio,
+              has_special_dates: studioDateOverridesMap[studio.id] || false,
+            }));
+            console.log("🏠 Studios augmented with date overrides");
+          }
+        }
         const { data: gigData, error: gigError } = await supabase
           .from("gigs_with_stats")
           .select("*")

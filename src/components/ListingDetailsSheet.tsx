@@ -231,8 +231,8 @@ const ListingDetailsSheet = forwardRef<
       previousSheetIndex.current = index;
       setSheetIndex(index);
 
-      // Refresh studio bookings when sheet becomes visible (reopened or returned from payment)
-      // This ensures calendar availability is up-to-date with newly created bookings
+      // Refresh studio data when sheet becomes visible (reopened or returned from payment)
+      // This ensures calendar availability is up-to-date with edited operating hours and date overrides
       if (
         wasHidden &&
         isNowVisible &&
@@ -241,9 +241,60 @@ const ListingDetailsSheet = forwardRef<
         (group.type === "Studio" || group.type === "Venue")
       ) {
         console.log(
-          "📅 Sheet opened - refreshing studio bookings for availability...",
+          "📅 Sheet opened - refreshing studio availability and bookings...",
         );
         try {
+          // Fetch fresh operating hours from database
+          const { data: operatingHours, error: hoursError } = await supabase
+            .from("studio_operating_hours")
+            .select("*")
+            .eq("studio_id", listingId)
+            .order("slot_order", { ascending: true });
+
+          // Fetch fresh date overrides from database
+          const { data: dateOverrides, error: overridesError } = await supabase
+            .from("studio_date_overrides")
+            .select("*")
+            .eq("studio_id", listingId);
+
+          let freshAvailability = group.availability;
+          let freshDateOverrides = group.dateOverrides;
+
+          if (!hoursError && operatingHours) {
+            console.log("📅 Fresh operating hours fetched:", operatingHours.length);
+            const dayNames = [
+              "Sunday",
+              "Monday",
+              "Tuesday",
+              "Wednesday",
+              "Thursday",
+              "Friday",
+              "Saturday",
+            ];
+            freshAvailability = dayNames.map((dayName, idx) => {
+              const dayHours = operatingHours.filter(
+                (h: any) => h.day_of_week === idx && h.is_open,
+              );
+              return {
+                day: dayName,
+                slots: dayHours.map((h: any) => ({
+                  start: h.open_time,
+                  end: h.close_time,
+                })),
+              };
+            });
+            // Update group state with fresh availability
+            setGroup((prev: any) => prev ? { ...prev, availability: freshAvailability } : prev);
+          }
+
+          if (!overridesError && dateOverrides) {
+            console.log("📅 Fresh date overrides fetched:", dateOverrides.length);
+            freshDateOverrides = dateOverrides;
+            // Update group state with fresh date overrides
+            setGroup((prev: any) => prev ? { ...prev, dateOverrides: freshDateOverrides } : prev);
+          }
+
+          // Fetch fresh bookings
           const { data: bookingData } = await supabase.functions.invoke(
             "bookings-manage",
             {
@@ -253,17 +304,17 @@ const ListingDetailsSheet = forwardRef<
           const fetchedBookings = Array.isArray(bookingData) ? bookingData : [];
           setExistingBookings(fetchedBookings);
 
-          // Re-process availability with fresh booking data
-          if (group.availability) {
+          // Re-process availability with fresh data
+          if (freshAvailability) {
             processAvailability(
-              group.availability,
+              freshAvailability,
               fetchedBookings,
-              group.dateOverrides,
+              freshDateOverrides,
               bookings,
             );
           }
         } catch (e) {
-          console.error("Error refreshing studio bookings:", e);
+          console.error("Error refreshing studio data:", e);
         }
       }
     },
