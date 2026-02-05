@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import * as ImagePicker from "expo-image-picker";
 import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -486,75 +485,7 @@ export default function BookingsScreen() {
     setModalVisible(true);
   };
 
-  // Upload Proof handler
-  const handleUploadProof = async (item: any) => {
-    try {
-      // Request permission
-      const { status } =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert(
-          "Permission Required",
-          "Please allow access to your photo library to upload proof.",
-        );
-        return;
-      }
 
-      // Pick image
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: "images",
-        allowsEditing: true,
-        quality: 0.8,
-      });
-
-      if (result.canceled) return;
-
-      const image = result.assets[0];
-
-      // Upload to Supabase Storage
-      const fileName = `proof_${item.id}_${Date.now()}.jpg`;
-      const filePath = `booking-proofs/${fileName}`;
-
-      // Read file as base64
-      const response = await fetch(image.uri);
-      const blob = await response.blob();
-
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("uploads")
-        .upload(filePath, blob, {
-          contentType: "image/jpeg",
-          upsert: true,
-        });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from("uploads")
-        .getPublicUrl(filePath);
-      const proofUrl = urlData.publicUrl;
-
-      // Update booking with proof URL
-      const { error: updateError } = await supabase.functions.invoke(
-        "manage-bookings",
-        {
-          body: {
-            action: "upload_proof",
-            bookingId: item.id,
-            proofUrl,
-          },
-        },
-      );
-
-      if (updateError) throw updateError;
-
-      Alert.alert("Success", "Proof uploaded successfully!");
-      if (userId) fetchBookings(userId);
-    } catch (e: any) {
-      console.error("Upload proof error:", e);
-      Alert.alert("Error", "Failed to upload proof. Please try again.");
-    }
-  };
 
   // Leave Review handler with proper params
   const handleLeaveReview = (item: any) => {
@@ -2461,23 +2392,6 @@ export default function BookingsScreen() {
                               </Text>
                             </TouchableOpacity>
                           </View>
-                        ) : activeTab === "Ongoing" ? (
-                          <TouchableOpacity
-                            onPress={() => handleUploadProof(item)}
-                            style={[
-                              styles.actionButton,
-                              { backgroundColor: colors.primary },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.actionButtonText,
-                                { color: "white" },
-                              ]}
-                            >
-                              Upload Proof
-                            </Text>
-                          </TouchableOpacity>
                         ) : activeTab === "Review" ? (
                           <TouchableOpacity
                             onPress={() => handleLeaveReview(item)}

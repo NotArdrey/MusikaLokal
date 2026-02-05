@@ -1161,24 +1161,7 @@ serve(async (req: Request) => {
       });
     }
 
-    // 5. UPLOAD PROOF
-    if (action === "upload_proof") {
-      const { bookingId, proofUrl } = params;
 
-      const { data, error } = await supabaseClient
-        .from("studio_bookings")
-        .update({ proof_url: proofUrl })
-        .eq("id", bookingId)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      return new Response(JSON.stringify(data), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
-      });
-    }
 
     // 6. CHECK REVIEW STATUS (to know if user already reviewed)
     if (action === "check_review_status") {
