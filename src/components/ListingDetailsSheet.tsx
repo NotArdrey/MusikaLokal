@@ -735,6 +735,17 @@ const ListingDetailsSheet = forwardRef<
       return;
     }
 
+    // Validate Pitch Message
+    if (!pitchMessage.trim()) {
+      setAlertConfig({
+        type: "error",
+        title: "Pitch Required",
+        message: "Please tell the organizer why you are a good fit for this gig.",
+      });
+      setAlertVisible(true);
+      return;
+    }
+
     // Validate CV
     if (!cvFile && !cvUrl) {
       // Check if new file selected OR existing CV exists (though logic resets cvUrl on load, but good to be safe)
@@ -4477,52 +4488,11 @@ const ListingDetailsSheet = forwardRef<
                 !selectedGroupId)) && { opacity: 0.5 },
           ]}
           onPress={() => {
-            console.log("🟡 SUBMIT APPLICATION BUTTON PRESSED");
-            console.log("pitchMessage:", pitchMessage);
-            console.log("pitchMessage.trim():", pitchMessage.trim());
-            console.log("isSubmittingApplication:", isSubmittingApplication);
-            console.log("hasExistingApplication:", hasExistingApplication);
-            console.log("groupAlreadyApplied:", groupAlreadyApplied);
-            console.log("selectedGroupId:", selectedGroupId);
-            console.log("userId:", userId);
-            console.log("listingId:", listingId);
-
-            if (groupAlreadyApplied) {
-              setAlertConfig({
-                type: "warning",
-                title: "Group Already Applied",
-                message: `This group has already applied via ${groupApplicationBy}. Only one application per group is allowed.`,
-              });
-              setAlertVisible(true);
-              return;
-            }
-
-            if (isBlocked) {
-              setAlertConfig({
-                type: "error",
-                title: "Restricted",
-                message: blockReason || "You are blocked from applying.",
-              });
-              setAlertVisible(true);
-              return;
-            }
-
-            if (!pitchMessage.trim()) {
-              console.log("❌ Pitch message is empty, returning");
-              return;
-            }
-
-            console.log("✅ Validation passed, calling handleConfirm...");
-            handleConfirm(
-              handleSubmitApplication,
-              "Confirm Application",
-              "Are you sure you want to submit this application?",
-            );
+            console.log("🟡 SUBMIT APPLICATION BUTTON PRESSED - Validating...");
+            handleSubmitApplication();
           }}
           disabled={
             isSubmittingApplication ||
-            !pitchMessage.trim() ||
-            !videoUrl ||
             hasExistingApplication ||
             isBlocked ||
             groupAlreadyApplied ||
