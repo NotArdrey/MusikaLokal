@@ -326,7 +326,8 @@ export default function HomeScreen() {
           // Studio-specific pricing fields
           rehearsal_rate: item.rehearsal_rate?.toString(),
           recording_rate: item.recording_rate?.toString(),
-          studio_type: item.studio_type || null,
+          // For studios, item.type contains the studio type ("Rehearsal", "Recording", "Both")
+          studio_type: type === "Studio" ? item.type : null,
           location: item.location || item.address || "",
           amenities: item.amenities || [],
           experience_level: item.requirements?.experience_level || null,

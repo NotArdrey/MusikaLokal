@@ -1178,6 +1178,8 @@ const ListingDetailsSheet = forwardRef<
             "0",
           review_count: data.review_count || 0,
           rating: data.rating || 0,
+          // For studios, data.type contains the studio type ("Rehearsal", "Recording", "Both")
+          studio_type: type === "Studio" ? data.type : null,
         };
 
         // If studio or venue, fetch availability from operating hours
@@ -1760,6 +1762,7 @@ const ListingDetailsSheet = forwardRef<
   };
 
   // Refresh available slots and calendar when bookings cart changes (to block already-selected times)
+  // Also refresh when session type changes for studios offering Both
   useEffect(() => {
     if (group?.availability) {
       // Re-process calendar marked dates to reflect cart changes
@@ -1775,7 +1778,7 @@ const ListingDetailsSheet = forwardRef<
         fetchAvailableSlots(selectedDate);
       }
     }
-  }, [bookings.length, selectedTimeSlots.length]);
+  }, [bookings.length, selectedTimeSlots.length, selectedSessionType]);
 
   const toggleFavorite = async () => {
     const nextState = !isFavorited;
@@ -2250,6 +2253,10 @@ const ListingDetailsSheet = forwardRef<
           },
         }}
         onDayPress={(day) => {
+          // Don't allow selecting disabled dates
+          if (markedDates[day.dateString]?.disabled) {
+            return;
+          }
           setSelectedDate(day.dateString);
           setSelectedSlot(null);
           setValidEndTimes([]);
@@ -3396,6 +3403,9 @@ const ListingDetailsSheet = forwardRef<
         ) &&
           (showAddBooking || bookings.length === 0) ? (
           <>
+            {/* Always show booking controls (session type selector + calendar) */}
+            {renderBookingControls()}
+
             {/* RECORDING STUDIO: Simplified whole-day booking flow */}
             {isRecordingMode ? (
               <TouchableOpacity
@@ -3520,8 +3530,6 @@ const ListingDetailsSheet = forwardRef<
             ) : (
               /* REGULAR STUDIO: Time slot booking flow */
               <>
-                {renderBookingControls()}
-
                 <TouchableOpacity
                   style={[
                     styles.secondaryBtn,
