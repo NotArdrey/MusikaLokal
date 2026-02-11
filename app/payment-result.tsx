@@ -35,14 +35,45 @@ export default function PaymentResultScreen() {
           }
 
           // If subscription payment was successful, refresh the auth context
-          // The Edge Function already handled activating the subscription with admin privileges
+          // The Edge Function already handled activating the subscription with admin privileges.
+          // However, there might be a slight delay. We'll poll a few times to ensure we get the latest status.
           if (isSuccess) {
-            console.log('✅ Subscription payment successful - refreshing subscription status');
+            console.log('✅ Subscription payment successful - polling for active status...');
 
-            // Refresh subscription status in AuthContext
-            // This will fetch the updated status that the Edge Function set
-            if (checkSubscription) {
-              await checkSubscription();
+            // Polling loop
+            const maxRetries = 5;
+            let retries = 0;
+            let isActive = false;
+
+            while (retries < maxRetries && !isActive) {
+              console.log(`🔄 Polling subscription status (Attempt ${retries + 1}/${maxRetries})...`);
+
+              if (checkSubscription) {
+                await checkSubscription();
+              }
+
+              // Check if it's updated in the database directly to be sure
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('subscription_status')
+                .eq('id', (await supabase.auth.getUser()).data.user?.id)
+                .single();
+
+              if (profile?.subscription_status === 'active') {
+                console.log('✅ Polling confirmed active subscription!');
+                isActive = true;
+                // Force one last update to context
+                if (checkSubscription) await checkSubscription();
+                break;
+              }
+
+              // Wait 1.5 seconds before next retry
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              retries++;
+            }
+
+            if (!isActive) {
+              console.log('⚠️ Polling finished but status might still be pending. User can refresh manually.');
             }
           }
         } catch (e) {
@@ -109,8 +140,8 @@ export default function PaymentResultScreen() {
                     ? 'Downpayment Received! 🎉'
                     : 'Payment Successful! 🎉';
                   const notificationMessage = isDownpayment
-                    ? `Your downpayment for ${data.studio?.name || 'the studio'} has been received. Remaining balance: ₱${data.remaining_balance?.toLocaleString() || 0}`
-                    : `Your booking at ${data.studio?.name || 'the studio'} has been confirmed.`;
+                    ? `Your downpayment for ${Array.isArray(data.studio) ? data.studio[0]?.name : data.studio?.name || 'the studio'} has been received. Remaining balance: ₱${data.remaining_balance?.toLocaleString() || 0}`
+                    : `Your booking at ${Array.isArray(data.studio) ? data.studio[0]?.name : data.studio?.name || 'the studio'} has been confirmed.`;
 
                   await supabase.from('notifications').insert({
                     user_id: user.id,

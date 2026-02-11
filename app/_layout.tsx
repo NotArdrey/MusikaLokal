@@ -1,10 +1,10 @@
 import {
-    Poppins_300Light,
-    Poppins_400Regular,
-    Poppins_500Medium,
-    Poppins_600SemiBold,
-    Poppins_700Bold,
-    useFonts,
+  Poppins_300Light,
+  Poppins_400Regular,
+  Poppins_500Medium,
+  Poppins_600SemiBold,
+  Poppins_700Bold,
+  useFonts,
 } from "@expo-google-fonts/poppins";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import * as Linking from "expo-linking";
@@ -76,9 +76,15 @@ function RootContent() {
         "privacy_policy",
         "terms_and_conditions",
       ];
-      const currentScreen = segments[0] || "";
+      // segments array can be empty on initial load or root
+      const currentScreen = segments.length > 0 ? segments[segments.length - 1] : "index";
 
-      if (!allowedScreens.includes(currentScreen)) {
+      console.log(`🔒 Layout Check: Screen=${currentScreen}, Segments=${JSON.stringify(segments)}, SubRequired=${subscriptionRequired}`);
+
+      // Check if any part of the path is in allowed screens (better for nested routes)
+      const isAllowed = allowedScreens.some(screen => segments.includes(screen)) || allowedScreens.includes(currentScreen);
+
+      if (!isAllowed) {
         console.log(
           "🔒 Subscription required, redirecting to subscription page",
         );
@@ -155,8 +161,8 @@ function RootContent() {
         // Navigate to payment result screen
         router.replace({
           pathname: "/payment-result",
-          params: { 
-            status, 
+          params: {
+            status,
             booking_id: bookingId,
             type,
             plan_id: planId

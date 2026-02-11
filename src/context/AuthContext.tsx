@@ -1,11 +1,11 @@
 import { Session } from "@supabase/supabase-js";
 import { router } from "expo-router";
 import React, {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useState,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
 } from "react";
 import { Alert } from "react-native";
 import { supabase } from "../../lib/supabase";
@@ -131,8 +131,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       // Only studio-owner and venue-owner need subscription
-      const needsSubscription =
-        profile?.role === "studio-owner" || profile?.role === "venue-owner";
+      // UPDATE: User requested to remove subscription requirement for everyone.
+      const needsSubscription = false;
+      // was: profile?.role === "studio-owner" || profile?.role === "venue-owner";
 
       if (needsSubscription) {
         const status = profile?.subscription_status;
