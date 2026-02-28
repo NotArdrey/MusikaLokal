@@ -8,6 +8,55 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
+const replaceProfileSkills = async (client: any, profileId: string, skills: string[]) => {
+    const { error: deleteError } = await client.from('profile_skills').delete().eq('profile_id', profileId)
+    if (deleteError) throw deleteError
+
+    const payload = (skills || [])
+        .map((skill) => (skill ?? '').trim())
+        .filter((skill) => skill.length > 0)
+        .map((skill) => ({ profile_id: profileId, skill }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('profile_skills').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceProfileGenres = async (client: any, profileId: string, genres: string[]) => {
+    const { error: deleteError } = await client.from('profile_genres').delete().eq('profile_id', profileId)
+    if (deleteError) throw deleteError
+
+    const payload = (genres || [])
+        .map((genre) => (genre ?? '').trim())
+        .filter((genre) => genre.length > 0)
+        .map((genre) => ({ profile_id: profileId, genre }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('profile_genres').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceProfilePortfolioUrls = async (client: any, profileId: string, portfolioUrls: string[]) => {
+    const { error: deleteError } = await client.from('profile_portfolio_urls').delete().eq('profile_id', profileId)
+    if (deleteError) throw deleteError
+
+    const payload = (portfolioUrls || [])
+        .map((portfolioUrl) => (portfolioUrl ?? '').trim())
+        .filter((portfolioUrl) => portfolioUrl.length > 0)
+        .map((portfolioUrl, index) => ({
+            profile_id: profileId,
+            portfolio_url: portfolioUrl,
+            sort_order: index,
+        }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('profile_portfolio_urls').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
 serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -58,9 +107,19 @@ serve(async (req: Request) => {
                 })
             }
 
+            const { data: contactData, error: contactError } = await supabaseClient
+                .from('profiles')
+                .select('contact_number, address')
+                .eq('id', userId)
+                .maybeSingle()
+
+            if (contactError) throw contactError
+
             // Map computed fields to expected names for frontend compatibility
             const mappedProfile = {
                 ...profile,
+                contact_number: contactData?.contact_number ?? null,
+                address: contactData?.address ?? null,
                 // View columns are already named 'rating' and 'review_count'
                 // No mapping needed, kept for backwards compatibility
             }
@@ -78,12 +137,9 @@ serve(async (req: Request) => {
             const updateData: any = {}
             if (full_name !== undefined) updateData.full_name = full_name
             if (bio !== undefined) updateData.bio = bio
-            if (skills !== undefined) updateData.skills = skills
-            if (genres !== undefined) updateData.genres = genres
             if (avatar_url !== undefined) updateData.avatar_url = avatar_url
             if (location !== undefined) updateData.location = location
             if (location !== undefined) updateData.location = location
-            if (portfolio_urls !== undefined) updateData.portfolio_urls = portfolio_urls
             if (params.contact_number !== undefined) updateData.contact_number = params.contact_number
             if (params.address !== undefined) updateData.address = params.address
 
@@ -96,6 +152,18 @@ serve(async (req: Request) => {
 
             if (error) throw error
 
+            if (skills !== undefined) {
+                await replaceProfileSkills(supabaseClient, userId, skills)
+            }
+
+            if (genres !== undefined) {
+                await replaceProfileGenres(supabaseClient, userId, genres)
+            }
+
+            if (portfolio_urls !== undefined) {
+                await replaceProfilePortfolioUrls(supabaseClient, userId, portfolio_urls)
+            }
+
             return new Response(JSON.stringify(data), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,
@@ -106,22 +174,27 @@ serve(async (req: Request) => {
         if (action === 'add_media') {
             const { userId, mediaUrl } = params
 
-            // First fetch current portfolio
-            const { data: profile, error: fetchError } = await supabaseClient
-                .from('profiles')
-                .select('portfolio_urls')
-                .eq('id', userId)
-                .single()
+            const { data: lastPortfolioRow, error: fetchError } = await supabaseClient
+                .from('profile_portfolio_urls')
+                .select('sort_order')
+                .eq('profile_id', userId)
+                .order('sort_order', { ascending: false })
+                .limit(1)
+                .maybeSingle()
 
             if (fetchError) throw fetchError
 
-            const currentUrls = profile?.portfolio_urls || []
-            const updatedUrls = [...currentUrls, mediaUrl]
+            const nextSortOrder = lastPortfolioRow?.sort_order !== undefined && lastPortfolioRow?.sort_order !== null
+                ? Number(lastPortfolioRow.sort_order) + 1
+                : 0
 
             const { data, error } = await supabaseClient
-                .from('profiles')
-                .update({ portfolio_urls: updatedUrls })
-                .eq('id', userId)
+                .from('profile_portfolio_urls')
+                .insert({
+                    profile_id: userId,
+                    portfolio_url: mediaUrl,
+                    sort_order: nextSortOrder,
+                })
                 .select()
                 .single()
 
@@ -136,6 +209,8 @@ serve(async (req: Request) => {
         // 4. CREATE PROFILE (Bypass RLS for signup)
         if (action === 'create') {
             const { userId, email, full_name, role, is_verified, verification_status, didit_session_id, display_name } = params
+
+            const resolvedFullName = full_name ?? display_name ?? null
 
             // Validate required parameters
             if (!userId || !email || !role) {
@@ -170,12 +245,11 @@ serve(async (req: Request) => {
                 .upsert({
                     id: userId,
                     email,
-                    full_name,
+                    full_name: resolvedFullName,
                     role,
                     is_verified,
                     verification_status,
                     didit_session_id,
-                    display_name // Save display_name correctly
                 })
                 .select()
                 .single()

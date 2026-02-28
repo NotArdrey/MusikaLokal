@@ -51,5 +51,6 @@
         "copilot/oswe-vscode-prime"
       ]
     }
-  }
+  },
+  "clangd.checkUpdates": true
 }

@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
+    BackHandler,
     Image,
     Platform,
     ScrollView,
@@ -22,8 +24,30 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
+import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
+
+// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
+  const b64 = base64.replace(/=/g, "");
+  const bufLen = Math.floor(b64.length * 0.75);
+  const bytes = new Uint8Array(bufLen);
+  let p = 0;
+  for (let i = 0; i < b64.length; i += 4) {
+    const e1 = lookup[b64.charCodeAt(i)];
+    const e2 = lookup[b64.charCodeAt(i + 1)];
+    const e3 = lookup[b64.charCodeAt(i + 2)];
+    const e4 = lookup[b64.charCodeAt(i + 3)];
+    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
+    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+  }
+  return bytes;
+};
 
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
@@ -118,6 +142,20 @@ export default function EditStudioScreen() {
     setAlertVisible(true);
   };
 
+  const handleAttemptLeave = useCallback(() => {
+    if (saving) return;
+
+    showAlert(
+      "warning",
+      "Leave edit studio?",
+      "Your current edits won't be saved unless you tap Save Changes.",
+      [
+        { text: "Stay", style: "cancel" },
+        { text: "Leave", style: "destructive", onPress: () => router.back() },
+      ],
+    );
+  }, [saving]);
+
   const [amenities, setAmenities] = useState<string[]>([]);
   const [newAmenity, setNewAmenity] = useState("");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
@@ -187,6 +225,15 @@ export default function EditStudioScreen() {
     ConflictingBooking[]
   >([]);
   const [pendingSavePayload, setPendingSavePayload] = useState<any>(null);
+  const originalAvailabilityRef = useRef<
+    { day: string; slots: { start: string; end: string }[] }[]
+  >(daysOfWeek.map((day) => ({ day, slots: [] })));
+  const originalSelectedDatesRef = useRef<{
+    [date: string]: {
+      selected: boolean;
+      slots: { start: string; end: string }[];
+    };
+  }>({});
 
   // Predefined instruments with images
   const INSTRUMENT_OPTIONS = [
@@ -317,6 +364,18 @@ export default function EditStudioScreen() {
     }
   }, [id, authorized]);
 
+  useEffect(() => {
+    const backSubscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        handleAttemptLeave();
+        return true;
+      },
+    );
+
+    return () => backSubscription.remove();
+  }, [handleAttemptLeave]);
+
   const fetchStudioDetails = async () => {
     console.log("🔄 ===== FETCH STUDIO DETAILS STARTED =====");
     console.log("🔄 Timestamp:", new Date().toISOString());
@@ -358,32 +417,131 @@ export default function EditStudioScreen() {
         userId: user.id,
       });
 
-      // Direct query to studios table
-      const { data, error } = await supabase
+      // Base query + normalized child tables merge
+      const { data: baseData, error: baseError } = await supabase
         .from('studios')
         .select('*')
         .eq('id', studioId)
         .eq('owner_id', user.id)
         .single();
 
+      const [
+        { data: studioTypesData, error: studioTypesError },
+        { data: studioAmenitiesData, error: studioAmenitiesError },
+        { data: studioInstrumentsData, error: studioInstrumentsError },
+        { data: studioMediaData, error: studioMediaError },
+        { data: studioSettingsData, error: studioSettingsError },
+        { data: operatingHoursData, error: operatingHoursError },
+      ] = await Promise.all([
+        supabase
+          .from('studio_types')
+          .select('studio_type')
+          .eq('studio_id', studioId),
+        supabase
+          .from('studio_amenities')
+          .select('amenity')
+          .eq('studio_id', studioId),
+        supabase
+          .from('studio_instruments')
+          .select('instrument_name, image_url')
+          .eq('studio_id', studioId),
+        supabase
+          .from('studio_media')
+          .select('media_url, sort_order, created_at')
+          .eq('studio_id', studioId)
+          .eq('media_type', 'image')
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('studio_settings')
+          .select(
+            'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates',
+          )
+          .eq('studio_id', studioId)
+          .maybeSingle(),
+        supabase
+          .from('studio_operating_hours')
+          .select('day_of_week, is_open, open_time, close_time, slot_order')
+          .eq('studio_id', studioId)
+          .eq('is_open', true)
+          .order('day_of_week', { ascending: true })
+          .order('slot_order', { ascending: true }),
+      ]);
+
       console.log("� ===== EDGE FUNCTION RESPONSE =====");
       console.log("📥 Response timestamp:", new Date().toISOString());
-      console.log("📥 Error object:", error);
-      console.log("📥 Data object:", data);
-      console.log("📥 Data type:", typeof data);
-      console.log("📥 Data is null?:", data === null);
-      console.log("📥 Data is undefined?:", data === undefined);
-      console.log("📥 Data is array?:", Array.isArray(data));
-      console.log("📥 Data keys:", data ? Object.keys(data) : "NO DATA");
-      console.log("📥 Data stringified:", JSON.stringify(data, null, 2));
+      console.log("📥 Error object:", baseError);
+      console.log("📥 Data object:", baseData);
+      console.log("📥 Data type:", typeof baseData);
+      console.log("📥 Data is null?:", baseData === null);
+      console.log("📥 Data is undefined?:", baseData === undefined);
+      console.log("📥 Data is array?:", Array.isArray(baseData));
+      console.log("📥 Data keys:", baseData ? Object.keys(baseData) : "NO DATA");
+      console.log("📥 Data stringified:", JSON.stringify(baseData, null, 2));
 
-      if (error) {
-        console.error("❌ Edge function returned error:", error);
-        throw error;
+      if (baseError) {
+        console.error("❌ Base studio query returned error:", baseError);
+        throw baseError;
       }
 
+      if (studioTypesError) throw studioTypesError;
+      if (studioAmenitiesError) throw studioAmenitiesError;
+      if (studioInstrumentsError) throw studioInstrumentsError;
+      if (studioMediaError) throw studioMediaError;
+      if (studioSettingsError) throw studioSettingsError;
+      if (operatingHoursError) throw operatingHoursError;
+
+      const dayIndexToName = [
+        'Sunday',
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+      ];
+
+      const availabilityByDay: Record<string, { start: string; end: string }[]> =
+        dayIndexToName.reduce((acc, day) => {
+          acc[day] = [];
+          return acc;
+        }, {} as Record<string, { start: string; end: string }[]>);
+
+      (operatingHoursData || []).forEach((row: any) => {
+        const dayName = dayIndexToName[row.day_of_week];
+        if (!dayName || !row.open_time || !row.close_time) return;
+        availabilityByDay[dayName].push({
+          start: row.open_time,
+          end: row.close_time,
+        });
+      });
+
+      const normalizedTypes = (studioTypesData || [])
+        .map((row: any) => row.studio_type)
+        .filter(Boolean);
+
+      const normalizedInstruments = (studioInstrumentsData || []).map(
+        (row: any) => ({
+          name: row.instrument_name,
+          image: row.image_url || '',
+        }),
+      );
+
+      const normalizedAmenities = (studioAmenitiesData || [])
+        .map((row: any) => row.amenity)
+        .filter(Boolean);
+
+      const normalizedImages = (studioMediaData || [])
+        .map((row: any) => row.media_url)
+        .filter(Boolean);
+
+      const normalizedAvailability = dayIndexToName.map((day) => ({
+        day,
+        slots: availabilityByDay[day] || [],
+      }));
+
       // If no data returned, user doesn't own this studio
-      if (!data) {
+      if (!baseData) {
         console.error("❌ No data returned from edge function");
         showAlert(
           "error",
@@ -393,6 +551,27 @@ export default function EditStudioScreen() {
         router.replace("/home");
         return;
       }
+
+      const data = {
+        ...baseData,
+        amenities: normalizedAmenities,
+        images: normalizedImages,
+        instruments: normalizedInstruments,
+        availability: normalizedAvailability,
+        calendar_availability: [],
+        types: normalizedTypes,
+        type:
+          normalizedTypes.length > 1
+            ? "Both"
+            : normalizedTypes[0] || "Both",
+        lead_time_hours: studioSettingsData?.lead_time_hours ?? 24,
+        weekend_multiplier: studioSettingsData?.weekend_multiplier ?? 1.0,
+        peak_season_multiplier:
+          studioSettingsData?.peak_season_multiplier ?? 1.0,
+        peak_season_dates: studioSettingsData?.peak_season_dates ?? [],
+        off_peak_multiplier: studioSettingsData?.off_peak_multiplier ?? 1.0,
+        off_peak_dates: studioSettingsData?.off_peak_dates ?? [],
+      } as any;
 
       console.log("✅ ===== DATA VALIDATION PASSED =====");
       console.log(
@@ -718,19 +897,25 @@ export default function EditStudioScreen() {
           };
         } = {};
         dateOverrides.forEach((override: any) => {
-          if (override.override_date && override.is_open) {
+          if (override.override_date) {
             calendarDates[override.override_date] = {
               selected: true,
-              slots: [
-                {
-                  start: convertTo12Hour(override.open_time),
-                  end: convertTo12Hour(override.close_time),
-                },
-              ],
+              slots:
+                override.is_open && override.open_time && override.close_time
+                  ? [
+                    {
+                      start: convertTo12Hour(override.open_time),
+                      end: convertTo12Hour(override.close_time),
+                    },
+                  ]
+                  : [],
             };
           }
         });
         setSelectedDates(calendarDates);
+        originalSelectedDatesRef.current = JSON.parse(
+          JSON.stringify(calendarDates),
+        );
         console.log("📅 Loaded date overrides:", calendarDates);
       } else if (
         data.calendar_availability &&
@@ -747,11 +932,20 @@ export default function EditStudioScreen() {
           if (item.date) {
             calendarDates[item.date] = {
               selected: true,
-              slots: item.slots || [{ start: "09:00 AM", end: "05:00 PM" }],
+              slots:
+                item.is_open === false
+                  ? []
+                  : item.slots || [{ start: "09:00 AM", end: "05:00 PM" }],
             };
           }
         });
         setSelectedDates(calendarDates);
+        originalSelectedDatesRef.current = JSON.parse(
+          JSON.stringify(calendarDates),
+        );
+      } else {
+        setSelectedDates({});
+        originalSelectedDatesRef.current = {};
       }
 
       // Load availability
@@ -781,10 +975,20 @@ export default function EditStudioScreen() {
         });
         console.log("📅 Loaded availability:", loadedAvailability);
         setAvailability(loadedAvailability);
+        originalAvailabilityRef.current = JSON.parse(
+          JSON.stringify(loadedAvailability),
+        );
       } else {
         console.log("📅 No availability data, using default empty schedule");
         // Initialize with empty schedule if no availability data
-        setAvailability(daysOfWeek.map((day) => ({ day, slots: [] })));
+        const defaultAvailability = daysOfWeek.map((day) => ({
+          day,
+          slots: [],
+        }));
+        setAvailability(defaultAvailability);
+        originalAvailabilityRef.current = JSON.parse(
+          JSON.stringify(defaultAvailability),
+        );
       }
 
       // Load preset instruments
@@ -837,6 +1041,95 @@ export default function EditStudioScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const parseTimeToMinutes = (timeValue: string): number | null => {
+    const normalized = timeValue.trim().toUpperCase();
+    const match = normalized.match(/^(\d{1,2}):(\d{2})\s?(AM|PM)$/);
+    if (!match) return null;
+
+    let hour = parseInt(match[1], 10);
+    const minute = parseInt(match[2], 10);
+    const period = match[3];
+
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+
+    if (hour === 12) hour = 0;
+    if (period === "PM") hour += 12;
+
+    return hour * 60 + minute;
+  };
+
+  const validateSlots = (
+    label: string,
+    slots: { start: string; end: string }[],
+  ): string | null => {
+    const normalizedSlots: { slotNumber: number; start: number; end: number }[] =
+      [];
+
+    for (let index = 0; index < slots.length; index++) {
+      const slot = slots[index];
+      const slotNumber = index + 1;
+      const start = parseTimeToMinutes(slot.start);
+      const end = parseTimeToMinutes(slot.end);
+
+      if (start === null || end === null) {
+        return `${label} has an invalid time format on slot ${slotNumber}. Use HH:MM AM/PM.`;
+      }
+
+      if (end <= start) {
+        return `${label} has an invalid time range on slot ${slotNumber}. End time must be after start time.`;
+      }
+
+      normalizedSlots.push({ slotNumber, start, end });
+    }
+
+    const sortedSlots = [...normalizedSlots].sort((a, b) => a.start - b.start);
+    for (let index = 1; index < sortedSlots.length; index++) {
+      const previousSlot = sortedSlots[index - 1];
+      const currentSlot = sortedSlots[index];
+      if (currentSlot.start < previousSlot.end) {
+        return `${label} has overlapping time slots (${previousSlot.slotNumber} and ${currentSlot.slotNumber}).`;
+      }
+    }
+
+    return null;
+  };
+
+  const validateScheduleConflicts = (): boolean => {
+    for (const daySchedule of availability) {
+      if (!daySchedule.slots.length) continue;
+      const dayError = validateSlots(daySchedule.day, daySchedule.slots);
+      if (dayError) {
+        showAlert("error", "Schedule Conflict", dayError);
+        return false;
+      }
+    }
+
+    for (const [dateStr, dateData] of Object.entries(selectedDates)) {
+      if (!dateData.selected) continue;
+
+      // Empty slots means this specific date is explicitly closed.
+      if (!dateData.slots.length) {
+        continue;
+      }
+
+      const displayDate = new Date(`${dateStr}T00:00:00`).toLocaleDateString(
+        "en-US",
+        {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        },
+      );
+      const dateError = validateSlots(displayDate, dateData.slots);
+      if (dateError) {
+        showAlert("error", "Schedule Conflict", dateError);
+        return false;
+      }
+    }
+
+    return true;
   };
 
   const validateForm = (): boolean => {
@@ -893,6 +1186,9 @@ export default function EditStudioScreen() {
         return false;
       }
     }
+    if (!validateScheduleConflicts()) {
+      return false;
+    }
     if (selectedImages.length === 0) {
       showAlert(
         "error",
@@ -902,6 +1198,256 @@ export default function EditStudioScreen() {
       return false;
     }
     return true;
+  };
+
+  const convertTo24HourForSchedule = (time12: string): string => {
+    const [time, modifier] = time12.split(" ");
+    if (!modifier) return time;
+    let [hours, minutes] = time.split(":");
+    if (hours === "12") {
+      hours = "00";
+    }
+    if (modifier === "PM") {
+      hours = String(parseInt(hours, 10) + 12);
+    }
+    return `${hours.padStart(2, "0")}:${minutes}`;
+  };
+
+  const getDayOfWeekName = (dateStr: string): string => {
+    const date = new Date(dateStr);
+    const days = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+    return days[date.getDay()];
+  };
+
+  const getEditedAvailableSlotsForDate = (
+    dateStr: string,
+  ): { start: string; end: string }[] => {
+    if (selectedDates[dateStr]?.selected) {
+      if (!selectedDates[dateStr].slots.length) {
+        return [];
+      }
+      return selectedDates[dateStr].slots.map((slot) => ({
+        start: convertTo24HourForSchedule(slot.start),
+        end: convertTo24HourForSchedule(slot.end),
+      }));
+    }
+
+    const dayName = getDayOfWeekName(dateStr);
+    const daySchedule = availability.find((a) => a.day === dayName);
+    if (!daySchedule || !daySchedule.slots.length) {
+      return [];
+    }
+
+    return daySchedule.slots.map((slot) => ({
+      start: convertTo24HourForSchedule(slot.start),
+      end: convertTo24HourForSchedule(slot.end),
+    }));
+  };
+
+  const bookingFitsInSlots = (
+    bookingStart: string,
+    bookingEnd: string,
+    slots: { start: string; end: string }[],
+  ): boolean => {
+    const toMinutes = (time: string) => {
+      const [h, m] = time.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    const bStart = toMinutes(bookingStart);
+    const bEnd = toMinutes(bookingEnd);
+
+    return slots.some((slot) => {
+      const sStart = toMinutes(slot.start);
+      const sEnd = toMinutes(slot.end);
+      return bStart >= sStart && bEnd <= sEnd;
+    });
+  };
+
+  const findScheduleConflictsForEditedState = async (studioId: string) => {
+    const today = new Date().toISOString().split("T")[0];
+
+    const { data: existingBookings, error: bookingsError } = await supabase
+      .from("studio_bookings")
+      .select(
+        `
+          id,
+          booking_date,
+          start_time,
+          end_time,
+          status,
+          user_id,
+          profiles:user_id (
+            full_name,
+            email
+          )
+        `,
+      )
+      .eq("studio_id", studioId)
+      .in("status", ["pending", "confirmed", "pending_relocation"])
+      .gte("booking_date", today);
+
+    if (bookingsError) {
+      throw new Error(
+        `Failed to check booking conflicts: ${bookingsError.message}`,
+      );
+    }
+
+    const conflicts: ConflictingBooking[] = [];
+
+    if (existingBookings && existingBookings.length > 0) {
+      for (const booking of existingBookings) {
+        const bookingDate = booking.booking_date;
+        const bookingStart = booking.start_time.substring(0, 5);
+        const bookingEnd = booking.end_time.substring(0, 5);
+        const availableSlots = getEditedAvailableSlotsForDate(bookingDate);
+
+        const bookingFits = bookingFitsInSlots(
+          bookingStart,
+          bookingEnd,
+          availableSlots,
+        );
+
+        if (!bookingFits) {
+          const profile = booking.profiles as any;
+          const conflict: ConflictingBooking = {
+            id: booking.id,
+            booking_date: bookingDate,
+            start_time: booking.start_time,
+            end_time: booking.end_time,
+            status: booking.status,
+            user_id: booking.user_id,
+            user_name: profile?.full_name || "Unknown",
+            user_email: profile?.email || "",
+            conflictType:
+              availableSlots.length === 0 ? "date_removed" : "time_overlap",
+            newAvailableSlot: null,
+          };
+
+          const nextSlot = await findNextAvailableSlot(
+            studioId,
+            bookingDate,
+            bookingStart,
+            bookingEnd,
+          );
+          conflict.newAvailableSlot = nextSlot;
+          conflicts.push(conflict);
+        }
+      }
+    }
+
+    const { data: activeHolds, error: holdsError } = await supabase
+      .from("booking_holds")
+      .select("id, user_id, booking_date, start_time, end_time, expires_at")
+      .eq("studio_id", studioId)
+      .gte("booking_date", today)
+      .gt("expires_at", new Date().toISOString());
+
+    if (holdsError) {
+      throw new Error(
+        `Failed to check active booking holds: ${holdsError.message}`,
+      );
+    }
+
+    const conflictingHoldCount = (activeHolds || []).filter((hold: any) => {
+      const holdStart = hold.start_time.substring(0, 5);
+      const holdEnd = hold.end_time.substring(0, 5);
+      const availableSlots = getEditedAvailableSlotsForDate(hold.booking_date);
+      return !bookingFitsInSlots(holdStart, holdEnd, availableSlots);
+    }).length;
+
+    return { conflicts, conflictingHoldCount };
+  };
+
+  const getScheduleSlotsForDate = (
+    dateStr: string,
+    weeklySchedule: { day: string; slots: { start: string; end: string }[] }[],
+    dateOverrides: {
+      [date: string]: {
+        selected: boolean;
+        slots: { start: string; end: string }[];
+      };
+    },
+  ): { start: string; end: string }[] => {
+    if (dateOverrides[dateStr]?.selected) {
+      return (dateOverrides[dateStr].slots || []).map((slot) => ({
+        start: convertTo24HourForSchedule(slot.start),
+        end: convertTo24HourForSchedule(slot.end),
+      }));
+    }
+
+    const dayName = getDayOfWeekName(dateStr);
+    const daySchedule = weeklySchedule.find((a) => a.day === dayName);
+    if (!daySchedule || !daySchedule.slots.length) {
+      return [];
+    }
+
+    return daySchedule.slots.map((slot) => ({
+      start: convertTo24HourForSchedule(slot.start),
+      end: convertTo24HourForSchedule(slot.end),
+    }));
+  };
+
+  const oldSlotsCoveredByNewSlots = (
+    oldSlots: { start: string; end: string }[],
+    newSlots: { start: string; end: string }[],
+  ): boolean => {
+    const toMinutes = (time: string) => {
+      const [h, m] = time.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    return oldSlots.every((oldSlot) => {
+      const oldStart = toMinutes(oldSlot.start);
+      const oldEnd = toMinutes(oldSlot.end);
+      return newSlots.some((newSlot) => {
+        const newStart = toMinutes(newSlot.start);
+        const newEnd = toMinutes(newSlot.end);
+        return newStart <= oldStart && newEnd >= oldEnd;
+      });
+    });
+  };
+
+  const detectNearTermScheduleReduction = (
+    lockHours: number,
+  ): { blocked: boolean; affectedDate?: string } => {
+    const now = new Date();
+    const horizon = new Date(now.getTime() + lockHours * 60 * 60 * 1000);
+    const iterDate = new Date(now);
+    const datesToCheck = new Set<string>();
+
+    while (iterDate <= horizon) {
+      datesToCheck.add(iterDate.toISOString().split("T")[0]);
+      iterDate.setDate(iterDate.getDate() + 1);
+    }
+
+    for (const dateStr of datesToCheck) {
+      const oldSlots = getScheduleSlotsForDate(
+        dateStr,
+        originalAvailabilityRef.current,
+        originalSelectedDatesRef.current,
+      );
+      const newSlots = getScheduleSlotsForDate(dateStr, availability, selectedDates);
+
+      if (!oldSlots.length) {
+        continue;
+      }
+
+      const stillCovered = oldSlotsCoveredByNewSlots(oldSlots, newSlots);
+      if (!stillCovered) {
+        return { blocked: true, affectedDate: dateStr };
+      }
+    }
+
+    return { blocked: false };
   };
 
   const performSave = async () => {
@@ -925,163 +1471,39 @@ export default function EditStudioScreen() {
         return;
       }
 
-      // Helper function to convert 12-hour to 24-hour format for comparison
-      const convertTo24Hour = (time12: string): string => {
-        const [time, modifier] = time12.split(" ");
-        if (!modifier) return time; // Already 24h or invalid
-        let [hours, minutes] = time.split(":");
-        if (hours === "12") {
-          hours = "00";
-        }
-        if (modifier === "PM") {
-          hours = String(parseInt(hours, 10) + 12);
-        }
-        return `${hours.padStart(2, "0")}:${minutes}`;
-      };
-
-      // Helper to check if times overlap
-      const timesOverlap = (
-        bookingStart: string,
-        bookingEnd: string,
-        slotStart: string,
-        slotEnd: string,
-      ): boolean => {
-        // Convert all to minutes for easier comparison
-        const toMinutes = (time: string) => {
-          const [h, m] = time.split(":").map(Number);
-          return h * 60 + m;
-        };
-        const bStart = toMinutes(bookingStart);
-        const bEnd = toMinutes(bookingEnd);
-        const sStart = toMinutes(slotStart);
-        const sEnd = toMinutes(slotEnd);
-        // Booking is within slot if booking times fall within slot times
-        return bStart >= sStart && bEnd <= sEnd;
-      };
+      const reductionCheck = detectNearTermScheduleReduction(48);
+      if (reductionCheck.blocked) {
+        showAlert(
+          "warning",
+          "Schedule Change Locked",
+          `You can't reduce or close availability within the next 48 hours. First affected date: ${reductionCheck.affectedDate}.`,
+        );
+        setSaving(false);
+        return;
+      }
 
       // Check for booking conflicts before saving
       console.log("🔍 Checking for booking conflicts...");
-      const { data: existingBookings, error: bookingsError } = await supabase
-        .from("studio_bookings")
-        .select(
-          `
-          id, 
-          booking_date, 
-          start_time, 
-          end_time, 
-          status,
-          user_id,
-          profiles:user_id (
-            full_name,
-            email
-          )
-        `,
-        )
-        .eq("studio_id", studioId)
-        .in("status", ["pending", "confirmed"])
-        .gte("booking_date", new Date().toISOString().split("T")[0]);
 
-      if (!bookingsError && existingBookings && existingBookings.length > 0) {
-        console.log("📅 Found existing bookings:", existingBookings.length);
+      const { conflicts, conflictingHoldCount } =
+        await findScheduleConflictsForEditedState(studioId);
 
-        // Build new availability map (combining weekly schedule and date overrides)
-        const newAvailabilityMap: {
-          [date: string]: { start: string; end: string }[];
-        } = {};
+      if (conflicts.length > 0) {
+        console.log("⚠️ Found conflicts:", conflicts.length);
+        setConflictingBookings(conflicts);
+        setConflictModalVisible(true);
+        setSaving(false);
+        return;
+      }
 
-        // Add date-specific overrides
-        Object.entries(selectedDates)
-          .filter(([_, data]) => data.selected && data.slots.length > 0)
-          .forEach(([dateStr, data]) => {
-            newAvailabilityMap[dateStr] = data.slots.map((slot) => ({
-              start: convertTo24Hour(slot.start),
-              end: convertTo24Hour(slot.end),
-            }));
-          });
-
-        // For dates that aren't overridden, check weekly schedule
-        const getDayOfWeek = (dateStr: string): string => {
-          const date = new Date(dateStr);
-          const days = [
-            "Sunday",
-            "Monday",
-            "Tuesday",
-            "Wednesday",
-            "Thursday",
-            "Friday",
-            "Saturday",
-          ];
-          return days[date.getDay()];
-        };
-
-        // Check each booking for conflicts
-        const conflicts: ConflictingBooking[] = [];
-
-        for (const booking of existingBookings) {
-          const bookingDate = booking.booking_date;
-          const bookingStart = booking.start_time.substring(0, 5); // HH:MM
-          const bookingEnd = booking.end_time.substring(0, 5);
-
-          let availableSlots: { start: string; end: string }[] = [];
-
-          // Check if this date has a specific override
-          if (newAvailabilityMap[bookingDate]) {
-            availableSlots = newAvailabilityMap[bookingDate];
-          } else {
-            // Check weekly schedule
-            const dayName = getDayOfWeek(bookingDate);
-            const daySchedule = availability.find((a) => a.day === dayName);
-            if (daySchedule && daySchedule.slots.length > 0) {
-              availableSlots = daySchedule.slots.map((slot) => ({
-                start: convertTo24Hour(slot.start),
-                end: convertTo24Hour(slot.end),
-              }));
-            }
-          }
-
-          // Check if booking fits within any available slot
-          const bookingFits = availableSlots.some((slot) =>
-            timesOverlap(bookingStart, bookingEnd, slot.start, slot.end),
-          );
-
-          if (!bookingFits) {
-            // This booking conflicts with the new schedule
-            const profile = booking.profiles as any;
-            const conflict: ConflictingBooking = {
-              id: booking.id,
-              booking_date: bookingDate,
-              start_time: booking.start_time,
-              end_time: booking.end_time,
-              status: booking.status,
-              user_id: booking.user_id,
-              user_name: profile?.full_name || "Unknown",
-              user_email: profile?.email || "",
-              conflictType:
-                availableSlots.length === 0 ? "date_removed" : "time_overlap",
-              newAvailableSlot: null, // Will be calculated
-            };
-
-            // Find next available slot for this booking
-            const nextSlot = await findNextAvailableSlot(
-              studioId,
-              bookingDate,
-              bookingStart,
-              bookingEnd,
-            );
-            conflict.newAvailableSlot = nextSlot;
-
-            conflicts.push(conflict);
-          }
-        }
-
-        if (conflicts.length > 0) {
-          console.log("⚠️ Found conflicts:", conflicts.length);
-          // Store conflicts and show the resolution modal
-          setConflictingBookings(conflicts);
-          setConflictModalVisible(true);
-          setSaving(false);
-          return;
-        }
+      if (conflictingHoldCount > 0) {
+        showAlert(
+          "warning",
+          "Active Checkout Holds",
+          `${conflictingHoldCount} active checkout hold(s) conflict with your edited schedule. Please try again in a moment after those holds expire.`,
+        );
+        setSaving(false);
+        return;
       }
 
       await executeSave();
@@ -1174,7 +1596,7 @@ export default function EditStudioScreen() {
         .select("start_time, end_time")
         .eq("studio_id", studioId)
         .eq("booking_date", dateStr)
-        .in("status", ["pending", "confirmed"]);
+        .in("status", ["pending", "confirmed", "pending_relocation"]);
 
       // Find a slot that can fit the booking
       for (const slot of availableSlots) {
@@ -1279,13 +1701,110 @@ export default function EditStudioScreen() {
             });
           }
         } else if (resolution.action === "move" && resolution.newSlot) {
-          // Move the booking to the new slot
+          const targetSlots = getEditedAvailableSlotsForDate(
+            resolution.newSlot.date,
+          );
+          const moveFitsEditedSchedule = bookingFitsInSlots(
+            resolution.newSlot.start_time,
+            resolution.newSlot.end_time,
+            targetSlots,
+          );
+
+          if (!moveFitsEditedSchedule) {
+            throw new Error(
+              "Selected move slot no longer fits the edited schedule. Please pick a different slot.",
+            );
+          }
+
+          const { data: overlappingBookings, error: overlapBookingsError } =
+            await supabase
+              .from("studio_bookings")
+              .select("id, start_time, end_time")
+              .eq("studio_id", studioId)
+              .eq("booking_date", resolution.newSlot.date)
+              .in("status", ["pending", "confirmed", "pending_relocation"])
+              .neq("id", resolution.bookingId);
+
+          if (overlapBookingsError) {
+            throw new Error(
+              `Failed to validate move target: ${overlapBookingsError.message}`,
+            );
+          }
+
+          const toMinutes = (time: string) => {
+            const [h, m] = time.substring(0, 5).split(":").map(Number);
+            return h * 60 + m;
+          };
+
+          const moveStartMinutes = toMinutes(resolution.newSlot.start_time);
+          const moveEndMinutes = toMinutes(resolution.newSlot.end_time);
+
+          const hasBookingOverlap = (overlappingBookings || []).some(
+            (booking: any) => {
+              const existingStart = toMinutes(booking.start_time);
+              const existingEnd = toMinutes(booking.end_time);
+              return !(
+                moveEndMinutes <= existingStart ||
+                moveStartMinutes >= existingEnd
+              );
+            },
+          );
+
+          if (hasBookingOverlap) {
+            throw new Error(
+              "Selected move slot is no longer available because of another booking.",
+            );
+          }
+
+          const { data: overlappingHolds, error: overlapHoldsError } =
+            await supabase
+              .from("booking_holds")
+              .select("id, user_id, start_time, end_time")
+              .eq("studio_id", studioId)
+              .eq("booking_date", resolution.newSlot.date)
+              .gt("expires_at", new Date().toISOString());
+
+          if (overlapHoldsError) {
+            throw new Error(
+              `Failed to validate temporary holds for move: ${overlapHoldsError.message}`,
+            );
+          }
+
+          const movedBooking = conflictingBookings.find(
+            (c) => c.id === resolution.bookingId,
+          );
+          const movedBookingUserId = movedBooking?.user_id;
+
+          const hasHoldOverlap = (overlappingHolds || []).some((hold: any) => {
+            if (movedBookingUserId && hold.user_id === movedBookingUserId) {
+              return false;
+            }
+            const holdStart = toMinutes(hold.start_time);
+            const holdEnd = toMinutes(hold.end_time);
+            return !(moveEndMinutes <= holdStart || moveStartMinutes >= holdEnd);
+          });
+
+          if (hasHoldOverlap) {
+            throw new Error(
+              "Selected move slot is currently reserved in another user's checkout hold.",
+            );
+          }
+
+          const relocationExpiresAt = new Date(
+            Date.now() + 24 * 60 * 60 * 1000,
+          ).toISOString();
+
+          // Convert move into musician approval flow (pending relocation).
           const { error } = await supabase
             .from("studio_bookings")
             .update({
-              booking_date: resolution.newSlot.date,
-              start_time: resolution.newSlot.start_time,
-              end_time: resolution.newSlot.end_time,
+              status: "pending_relocation",
+              relocation_requested_at: new Date().toISOString(),
+              relocation_proposed_date: resolution.newSlot.date,
+              relocation_proposed_start_time: resolution.newSlot.start_time,
+              relocation_proposed_end_time: resolution.newSlot.end_time,
+              relocation_expires_at: relocationExpiresAt,
+              notes: `Pending relocation requested by studio owner. Proposed slot: ${resolution.newSlot.date} ${resolution.newSlot.start_time}-${resolution.newSlot.end_time}. Expires: ${relocationExpiresAt}`,
             })
             .eq("id", resolution.bookingId);
 
@@ -1301,10 +1820,20 @@ export default function EditStudioScreen() {
           if (conflict) {
             await supabase.from("notifications").insert({
               user_id: conflict.user_id,
-              type: "info",
-              title: "Booking Rescheduled",
-              message: `Your booking at ${studioName} has been moved to ${new Date(resolution.newSlot.date).toLocaleDateString()} at ${resolution.newSlot.start_time} due to schedule changes.`,
-              meta: { bookingId: resolution.bookingId, studioId },
+              type: "warning",
+              title: "Booking Relocation Request",
+              message: `Your booking at ${studioName} needs relocation to ${new Date(resolution.newSlot.date).toLocaleDateString()} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
+              meta: {
+                bookingId: resolution.bookingId,
+                studioId,
+                relocation: {
+                  status: "pending_relocation",
+                  proposed_date: resolution.newSlot.date,
+                  proposed_start_time: resolution.newSlot.start_time,
+                  proposed_end_time: resolution.newSlot.end_time,
+                  expires_at: relocationExpiresAt,
+                },
+              },
             });
           }
         }
@@ -1345,6 +1874,30 @@ export default function EditStudioScreen() {
         return;
       }
 
+      // Final preflight: re-check right before writing to reduce stale-state races.
+      const { conflicts: latestConflicts, conflictingHoldCount } =
+        await findScheduleConflictsForEditedState(studioId);
+
+      if (latestConflicts.length > 0) {
+        setConflictingBookings(latestConflicts);
+        setConflictModalVisible(true);
+        showAlert(
+          "warning",
+          "New Booking Detected",
+          "A booking changed while you were editing. Please resolve the new conflicts before saving.",
+        );
+        return;
+      }
+
+      if (conflictingHoldCount > 0) {
+        showAlert(
+          "warning",
+          "Active Checkout Holds",
+          `${conflictingHoldCount} active checkout hold(s) conflict with your edited schedule. Please try again shortly.`,
+        );
+        return;
+      }
+
       // Helper function to convert 12-hour to 24-hour format
       const convertTo24Hour = (time12: string): string => {
         const [time, modifier] = time12.split(" ");
@@ -1361,9 +1914,10 @@ export default function EditStudioScreen() {
 
       // Convert calendar-based availability to the payload format
       const calendarAvailability = Object.entries(selectedDates)
-        .filter(([_, data]) => data.selected && data.slots.length > 0)
+        .filter(([_, data]) => data.selected)
         .map(([date, data]) => ({
           date,
+          is_open: data.slots.length > 0,
           slots: data.slots.map((slot) => ({
             start: convertTo24Hour(slot.start),
             end: convertTo24Hour(slot.end),
@@ -1462,21 +2016,16 @@ export default function EditStudioScreen() {
         .from('studios')
         .update({
           name: payload.name,
-          type: payload.type,
           description: payload.description,
           address: payload.address,
           hourly_rate: payload.hourly_rate,
           rehearsal_rate: payload.rehearsal_rate,
           recording_rate: payload.recording_rate,
           pax: payload.pax,
-          amenities: payload.amenities,
-          instruments: payload.instruments,
           latitude: payload.latitude,
           longitude: payload.longitude,
-          images: payload.images,
           contract_url: payload.contract_url,
           business_permit_url: payload.business_permit_url,
-          availability: payload.availability,
         })
         .eq('id', studioId)
         .eq('owner_id', user.id)
@@ -1492,6 +2041,75 @@ export default function EditStudioScreen() {
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
         if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
         throw new Error(alertMessage);
+      }
+
+      await supabase.from('studio_types').delete().eq('studio_id', studioId);
+      const normalizedTypes =
+        payload.type === 'Both'
+          ? ['Rehearsal', 'Recording']
+          : payload.type
+            ? [payload.type]
+            : [];
+      if (normalizedTypes.length > 0) {
+        const { error: typeError } = await supabase
+          .from('studio_types')
+          .insert(
+            normalizedTypes.map((studio_type: string) => ({
+              studio_id: studioId,
+              studio_type,
+            })),
+          );
+        if (typeError) {
+          throw new Error(`Failed to sync studio types: ${typeError.message}`);
+        }
+      }
+
+      await supabase.from('studio_amenities').delete().eq('studio_id', studioId);
+      if ((payload.amenities || []).length > 0) {
+        const { error: amenitiesError } = await supabase
+          .from('studio_amenities')
+          .insert(
+            payload.amenities.map((amenity: string) => ({
+              studio_id: studioId,
+              amenity,
+            })),
+          );
+        if (amenitiesError) {
+          throw new Error(`Failed to sync studio amenities: ${amenitiesError.message}`);
+        }
+      }
+
+      await supabase.from('studio_instruments').delete().eq('studio_id', studioId);
+      if ((payload.instruments || []).length > 0) {
+        const { error: instrumentsError } = await supabase
+          .from('studio_instruments')
+          .insert(
+            payload.instruments.map((item: any) => ({
+              studio_id: studioId,
+              instrument_name: item.name,
+              image_url: item.image || null,
+            })),
+          );
+        if (instrumentsError) {
+          throw new Error(`Failed to sync studio instruments: ${instrumentsError.message}`);
+        }
+      }
+
+      await supabase.from('studio_media').delete().eq('studio_id', studioId).eq('media_type', 'image');
+      if ((payload.images || []).length > 0) {
+        const { error: mediaError } = await supabase
+          .from('studio_media')
+          .insert(
+            payload.images.map((media_url: string, index: number) => ({
+              studio_id: studioId,
+              media_type: 'image',
+              media_url,
+              sort_order: index,
+            })),
+          );
+        if (mediaError) {
+          throw new Error(`Failed to sync studio images: ${mediaError.message}`);
+        }
       }
 
       // Update studio settings
@@ -1552,15 +2170,18 @@ export default function EditStudioScreen() {
 
       if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
         const dateOverrides = payload.calendar_availability
-          .filter((entry: any) => entry.date && entry.slots && entry.slots.length > 0)
-          .map((entry: any) => ({
-            studio_id: studioId,
-            override_date: entry.date,
-            is_open: true,
-            open_time: entry.slots[0].start,
-            close_time: entry.slots[0].end,
-            reason: 'Custom schedule'
-          }));
+          .filter((entry: any) => entry.date)
+          .map((entry: any) => {
+            const hasSlots = Array.isArray(entry.slots) && entry.slots.length > 0;
+            return {
+              studio_id: studioId,
+              override_date: entry.date,
+              is_open: hasSlots,
+              open_time: hasSlots ? entry.slots[0].start : null,
+              close_time: hasSlots ? entry.slots[0].end : null,
+              reason: hasSlots ? 'Custom schedule' : 'Closed override'
+            };
+          });
 
         if (dateOverrides.length > 0) {
           await supabase.from('studio_date_overrides').insert(dateOverrides);
@@ -1673,13 +2294,13 @@ export default function EditStudioScreen() {
         return;
       }
 
-      const response = await fetch(fileUri);
-      const arrayBuffer = await response.arrayBuffer();
+      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = base64ToUint8Array(base64);
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
         .from("documents")
-        .upload(filePath, arrayBuffer, {
+        .upload(filePath, bytes, {
           contentType: "application/pdf",
           upsert: false,
         });
@@ -1748,9 +2369,8 @@ export default function EditStudioScreen() {
         return;
       }
 
-      const response = await fetch(fileUri);
-      const arrayBuffer = await response.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
+      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = base64ToUint8Array(base64);
 
       const contentType = fileName.toLowerCase().endsWith('.pdf')
         ? 'application/pdf'
@@ -1997,6 +2617,7 @@ export default function EditStudioScreen() {
               fontFamily: "Poppins_400Regular",
               color: colors.text,
               height: multiline ? 120 : "auto",
+              textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
             },
           ]}
@@ -2079,7 +2700,7 @@ export default function EditStudioScreen() {
         />
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Edit Studio" />
+        <Header title="Edit Studio" onBackPress={handleAttemptLeave} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -2096,7 +2717,7 @@ export default function EditStudioScreen() {
             </Text>
             <View style={{ flexDirection: "row", gap: 12 }}>
               {(["Rehearsal", "Recording", "Both"] as const).map((type) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={type}
                   onPress={() => setStudioType(type)}
                   style={{
@@ -2137,7 +2758,7 @@ export default function EditStudioScreen() {
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Location
             </Text>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={() => setLocationPickerVisible(true)}
               style={[
                 styles.inputWrapper,
@@ -2238,7 +2859,7 @@ export default function EditStudioScreen() {
                       fontFamily: "Poppins_600SemiBold",
                       fontSize: 16,
                       minWidth: 80,
-                      textAlign: "right",
+                      textAlign: "center",
                       paddingVertical: 16,
                     }}
                   />
@@ -2309,7 +2930,7 @@ export default function EditStudioScreen() {
                       fontFamily: "Poppins_600SemiBold",
                       fontSize: 16,
                       minWidth: 80,
-                      textAlign: "right",
+                      textAlign: "center",
                       paddingVertical: 16,
                     }}
                   />
@@ -2366,6 +2987,7 @@ export default function EditStudioScreen() {
                   color: colors.text,
                   fontFamily: "Poppins_500Medium",
                   fontSize: 16,
+                  textAlign: "center",
                   paddingVertical: 16,
                 }}
               />
@@ -2431,7 +3053,7 @@ export default function EditStudioScreen() {
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={removeContract}
                   style={styles.removeContractBtn}
                 >
@@ -2442,7 +3064,7 @@ export default function EditStudioScreen() {
               <TouchableOpacity
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
-                activeOpacity={0.8}
+                activeOpacity={1}
                 style={[
                   styles.uploadContractBtn,
                   {
@@ -2528,7 +3150,7 @@ export default function EditStudioScreen() {
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={removeBusinessPermit}
                   style={styles.removeContractBtn}
                 >
@@ -2539,7 +3161,7 @@ export default function EditStudioScreen() {
               <TouchableOpacity
                 onPress={handleBusinessPermitUpload}
                 disabled={uploadingBusinessPermit}
-                activeOpacity={0.8}
+                activeOpacity={1}
                 style={[
                   styles.uploadContractBtn,
                   {
@@ -2596,7 +3218,7 @@ export default function EditStudioScreen() {
                 ]}
               />
             </View>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={addAmenity}
               style={[
                 styles.addAmenityButton,
@@ -2619,7 +3241,7 @@ export default function EditStudioScreen() {
                 <Text style={[styles.amenityText, { color: colors.text }]}>
                   {item}
                 </Text>
-                <TouchableOpacity onPress={() => removeAmenity(index)}>
+                <TouchableOpacity activeOpacity={1} onPress={() => removeAmenity(index)}>
                   <Ionicons
                     name="close-circle"
                     size={16}
@@ -2642,7 +3264,7 @@ export default function EditStudioScreen() {
           </Text>
 
           {/* Add Equipment Button */}
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             onPress={() => {
               setEditingEquipment(null);
               setEquipmentForm({
@@ -2741,7 +3363,7 @@ export default function EditStudioScreen() {
                       )}
                     </View>
                     <View style={{ flexDirection: "row", gap: 8 }}>
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() => {
                           setEditingEquipment(item);
                           setEquipmentForm({
@@ -2759,7 +3381,7 @@ export default function EditStudioScreen() {
                           color={colors.primary}
                         />
                       </TouchableOpacity>
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() =>
                           setEquipment(
                             equipment.filter((e) => e.id !== item.id),
@@ -2804,7 +3426,7 @@ export default function EditStudioScreen() {
                 (i) => i.name === instrument.name,
               );
               return (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={instrument.name}
                   onPress={() => toggleInstrument(instrument)}
                   style={[
@@ -3085,7 +3707,7 @@ export default function EditStudioScreen() {
                                 </View>
                               )}
                             </View>
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                               onPress={() => {
                                 const newDates = { ...selectedDates };
                                 delete newDates[dateStr];
@@ -3155,7 +3777,7 @@ export default function EditStudioScreen() {
                                       },
                                     ]}
                                   />
-                                  <TouchableOpacity
+                                  <TouchableOpacity activeOpacity={1}
                                     onPress={() => {
                                       const newDates = { ...selectedDates };
                                       newDates[dateStr].slots[slotIndex].start =
@@ -3233,7 +3855,7 @@ export default function EditStudioScreen() {
                                       },
                                     ]}
                                   />
-                                  <TouchableOpacity
+                                  <TouchableOpacity activeOpacity={1}
                                     onPress={() => {
                                       const newDates = { ...selectedDates };
                                       newDates[dateStr].slots[slotIndex].end =
@@ -3262,7 +3884,7 @@ export default function EditStudioScreen() {
                                 </View>
                               </View>
                               {data.slots.length > 1 && (
-                                <TouchableOpacity
+                                <TouchableOpacity activeOpacity={1}
                                   onPress={() => {
                                     const newDates = { ...selectedDates };
                                     newDates[dateStr].slots.splice(slotIndex, 1);
@@ -3282,7 +3904,7 @@ export default function EditStudioScreen() {
 
                           {/* Add Slot Button for Specific Date */}
                           {data.slots.length < 3 && (
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                               onPress={() => {
                                 const newDates = { ...selectedDates };
                                 newDates[dateStr].slots.push({
@@ -3384,7 +4006,7 @@ export default function EditStudioScreen() {
                 <Text style={[styles.dayLabel, { color: colors.text }]}>
                   {daySchedule.day}
                 </Text>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={() => {
                     const newAvailability = [...availability];
                     if (newAvailability[dayIndex].slots.length === 0) {
@@ -3481,7 +4103,7 @@ export default function EditStudioScreen() {
                             },
                           ]}
                         />
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                           onPress={() => {
                             const newAvailability = [...availability];
                             newAvailability[dayIndex].slots[slotIndex].start =
@@ -3552,7 +4174,7 @@ export default function EditStudioScreen() {
                             },
                           ]}
                         />
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                           onPress={() => {
                             const newAvailability = [...availability];
                             newAvailability[dayIndex].slots[slotIndex].end =
@@ -3577,7 +4199,7 @@ export default function EditStudioScreen() {
                       </View>
                     </View>
                     {daySchedule.slots.length > 1 && (
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() => {
                           const newAvailability = [...availability];
                           newAvailability[dayIndex].slots.splice(slotIndex, 1);
@@ -3597,7 +4219,7 @@ export default function EditStudioScreen() {
               })}
 
               {daySchedule.slots.length > 0 && daySchedule.slots.length < 3 && (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={() => {
                     const newAvailability = [...availability];
                     newAvailability[dayIndex].slots.push({
@@ -3657,7 +4279,7 @@ export default function EditStudioScreen() {
               ]}
               onPress={handleSave}
               disabled={saving}
-              activeOpacity={0.8}
+              activeOpacity={1}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -3666,9 +4288,9 @@ export default function EditStudioScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.cancelButton, { borderColor: colors.border }]}
-              onPress={() => router.back()}
+              onPress={handleAttemptLeave}
             >
               <Text
                 style={{
@@ -3684,6 +4306,13 @@ export default function EditStudioScreen() {
 
         <Navbar />
       </View>
+
+      <Modal
+        visible={saving}
+        loading
+        loadingMessage="Saving changes..."
+        onClose={() => { }}
+      />
 
       <CustomAlert
         visible={alertVisible}
@@ -3763,7 +4392,7 @@ export default function EditStudioScreen() {
               >
                 {editingEquipment ? "Edit Equipment" : "Add Equipment"}
               </Text>
-              <TouchableOpacity onPress={() => setShowEquipmentModal(false)}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowEquipmentModal(false)}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -3888,7 +4517,7 @@ export default function EditStudioScreen() {
                       source={{ uri: equipmentForm.image }}
                       style={{ width: "100%", height: 150, borderRadius: 12 }}
                     />
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() =>
                         setEquipmentForm({ ...equipmentForm, image: "" })
                       }
@@ -3908,7 +4537,7 @@ export default function EditStudioScreen() {
                   <TouchableOpacity
                     onPress={pickEquipmentImage}
                     disabled={uploadingEquipmentImage}
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     style={{
                       backgroundColor: colors.inputBackground,
                       borderRadius: 12,
@@ -3944,7 +4573,7 @@ export default function EditStudioScreen() {
               </View>
 
               {/* Submit Button */}
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => {
                   if (!equipmentForm.name.trim()) {
                     showAlert(
@@ -4047,6 +4676,7 @@ const styles = StyleSheet.create({
   },
   input: {
     padding: 16,
+    textAlign: "left",
     textAlignVertical: "center",
   },
   addAmenityContainer: {

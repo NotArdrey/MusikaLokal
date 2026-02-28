@@ -1,22 +1,24 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Dimensions,
-    Image,
-    RefreshControl,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Dimensions,
+  InteractionManager,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
+import CachedImage from "../src/components/CachedImage";
 import CustomAlert from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import ListingCard from "../src/components/ListingCard";
@@ -47,13 +49,88 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor; // Reduced factor from 0.5 to 0.3 for less aggressive scaling
 };
 
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../src/context/AuthContext";
+
+const debugLog = (..._args: unknown[]) => {};
+
+const getTypeBadgeColor = (type: string) => {
+  switch (type) {
+    case "Studio":
+      return "#7C3AED";
+    case "Gig":
+      return "#10B981";
+    case "Group":
+      return "#3B82F6";
+    case "Artist":
+      return "#EC4899";
+    default:
+      return "#7C3AED";
+  }
+};
+
+const AutoCardImage = ({
+  image,
+  images,
+  style,
+  width,
+  height,
+  quality = 72,
+  cacheVersion,
+  intervalMs = 3200,
+}: {
+  image?: string | null;
+  images?: string[];
+  style: any;
+  width?: number;
+  height?: number;
+  quality?: number;
+  cacheVersion?: string | number | Date;
+  intervalMs?: number;
+}) => {
+  const imageList = useMemo(() => {
+    const raw = [
+      ...(Array.isArray(images) ? images : []),
+      ...(image ? [image] : []),
+    ].filter((uri) => typeof uri === "string" && uri.length > 0);
+
+    return Array.from(new Set(raw));
+  }, [image, images]);
+
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    setActiveIndex(0);
+    if (imageList.length <= 1) return;
+
+    const timer = setInterval(() => {
+      setActiveIndex((prev) => (prev + 1) % imageList.length);
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [imageList, intervalMs]);
+
+  if (imageList.length === 0) {
+    return null;
+  }
+
+  return (
+    <CachedImage
+      uri={imageList[activeIndex]}
+      style={style}
+      width={width}
+      height={height}
+      quality={quality}
+      cacheVersion={cacheVersion}
+    />
+  );
+};
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
-  const { userRole, userId } = useAuth();
+  const { userRole, userId, isGuest } = useAuth();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ reopenListingId?: string }>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [featured, setFeatured] = useState<any[]>([]);
@@ -76,9 +153,13 @@ export default function HomeScreen() {
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const recentlyViewedSheetRef =
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
+  const restoreSearchAfterDetailsCloseRef = React.useRef(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
   );
+  const [pendingReopenListingId, setPendingReopenListingId] = useState<
+    string | null
+  >(null);
 
   // Alert State
   const [alertVisible, setAlertVisible] = useState(false);
@@ -92,41 +173,112 @@ export default function HomeScreen() {
   // Scroll State for Sticky Header
   const [isScrolled, setIsScrolled] = useState(false);
 
+  const presentModalWithRetry = useCallback((modalRef: { current: any }) => {
+    let attempts = 0;
+    const maxAttempts = 6;
+
+    const presentWhenReady = () => {
+      if (modalRef.current) {
+        modalRef.current.present();
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < maxAttempts) {
+        requestAnimationFrame(presentWhenReady);
+      }
+    };
+
+    requestAnimationFrame(presentWhenReady);
+  }, []);
+
   // Safe handler for opening search sheet - prevents reanimated timing issues
   const openSearchSheet = useCallback(() => {
-    requestAnimationFrame(() => {
-      if (searchSheetRef.current) {
-        searchSheetRef.current.present();
-      }
-    });
-  }, []);
+    presentModalWithRetry(searchSheetRef as any);
+  }, [presentModalWithRetry]);
 
   // Safe handler for opening details sheet
   const openDetailsSheet = useCallback(() => {
+    presentModalWithRetry(bottomSheetRef as any);
+  }, [presentModalWithRetry]);
+
+  const openListingDetails = useCallback(
+    (
+      listingId: string,
+      options?: {
+        restoreSearchOnClose?: boolean;
+      },
+    ) => {
+      restoreSearchAfterDetailsCloseRef.current =
+        options?.restoreSearchOnClose === true;
+      setSelectedListingId(listingId);
+      openDetailsSheet();
+    },
+    [openDetailsSheet],
+  );
+
+  const handleListingDetailsDismiss = useCallback(() => {
+    if (!restoreSearchAfterDetailsCloseRef.current) {
+      return;
+    }
+
+    restoreSearchAfterDetailsCloseRef.current = false;
+
     requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        openSearchSheet();
+      });
+    });
+  }, [openSearchSheet]);
+
+  useEffect(() => {
+    if (!pendingReopenListingId) return;
+    if (selectedListingId !== pendingReopenListingId) return;
+
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const presentWhenReady = () => {
       if (bottomSheetRef.current) {
         bottomSheetRef.current.present();
+        setPendingReopenListingId(null);
+        return;
       }
+
+      attempts += 1;
+      if (attempts < maxAttempts) {
+        setTimeout(presentWhenReady, 60);
+      } else {
+        setPendingReopenListingId(null);
+      }
+    };
+
+    const interactionTask = InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          presentWhenReady();
+        });
+      });
     });
-  }, []);
+
+    return () => {
+      interactionTask.cancel();
+    };
+  }, [pendingReopenListingId, selectedListingId]);
 
   // Safe handler for opening recently viewed sheet
   const openRecentlyViewedSheet = useCallback(() => {
-    requestAnimationFrame(() => {
-      if (recentlyViewedSheetRef.current) {
-        recentlyViewedSheetRef.current.present();
-      }
-    });
-  }, []);
+    presentModalWithRetry(recentlyViewedSheetRef as any);
+  }, [presentModalWithRetry]);
 
   // Effect to update featured/discover when AI recommendations become available
   useEffect(() => {
     if (aiModeEnabled && aiRecommendations.length > 0) {
-      console.log("🤖 Switching to AI recommendations");
+      debugLog("🤖 Switching to AI recommendations");
       setFeatured(aiRecommendations.slice(0, 10));
       setDiscover(aiRecommendations.slice(10, 20));
     } else if (!aiModeEnabled && randomRecommendations.length > 0) {
-      console.log("🎲 Switching to random recommendations");
+      debugLog("🎲 Switching to random recommendations");
       setFeatured(randomRecommendations.slice(0, 10));
       setDiscover(randomRecommendations.slice(10, 20));
     }
@@ -134,21 +286,47 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      console.log("👁️ useFocusEffect triggered, userRole:", userRole);
+      debugLog("👁️ useFocusEffect triggered, userRole:", userRole);
       // Fetch data silently on focus if data already exists
       const isFirstLoad = featured.length === 0 && discover.length === 0;
-      console.log("🏠 isFirstLoad:", isFirstLoad);
+      debugLog("🏠 isFirstLoad:", isFirstLoad);
       fetchHomeData(isFirstLoad);
       fetchUserProfile();
       fetchRecentlyViewed();
       fetchUpcomingEvents(); // Fetch upcoming events for musicians
       setTimeBasedGreeting();
-    }, [userRole, userId]),
+
+      const reopenListingId = Array.isArray(params.reopenListingId)
+        ? params.reopenListingId[0]
+        : params.reopenListingId;
+
+      if (reopenListingId && reopenListingId.length > 0) {
+        setSelectedListingId(reopenListingId);
+        setPendingReopenListingId(reopenListingId);
+        setTimeout(() => {
+          router.setParams({ reopenListingId: undefined as any });
+        }, 250);
+      }
+
+      const restorePendingReopen = async () => {
+        const storedListingId = await AsyncStorage.getItem(
+          "pending_reopen_listing_id",
+        );
+
+        if (storedListingId && storedListingId.length > 0) {
+          setSelectedListingId(storedListingId);
+          setPendingReopenListingId(storedListingId);
+          await AsyncStorage.removeItem("pending_reopen_listing_id");
+        }
+      };
+
+      void restorePendingReopen();
+    }, [userRole, userId, isGuest, params.reopenListingId]),
   );
 
   // Handler for realtime updates - defined before useEffect that uses it
   const handleRealtimeUpdate = useCallback(() => {
-    console.log("Realtime update received - refreshing home data...");
+    debugLog("Realtime update received - refreshing home data...");
     // Debounce or just call it? Basic call for now.
     // False to silent refresh
     fetchHomeData(false);
@@ -190,7 +368,7 @@ export default function HomeScreen() {
       fetchUpcomingEvents(),
     ]);
     setRefreshing(false);
-  }, [userRole, userId]);
+  }, [userRole, userId, isGuest]);
 
   const setTimeBasedGreeting = () => {
     const hour = new Date().getHours();
@@ -200,6 +378,28 @@ export default function HomeScreen() {
   };
 
   const [hasGroups, setHasGroups] = useState(false);
+
+  const topItems = useMemo(
+    () => [...featured, ...discover].slice(0, 12),
+    [featured, discover],
+  );
+
+  const uniqueSmartFeedItems = useMemo(() => {
+    const allItems = [...featured, ...discover];
+    return allItems.filter(
+      (item, index, self) => index === self.findIndex((t) => t.id === item.id),
+    );
+  }, [featured, discover]);
+
+  const aiPreviewItems = useMemo(
+    () => aiRecommendations.slice(0, 4),
+    [aiRecommendations],
+  );
+
+  const hasAiSimilarityMatches = useMemo(
+    () => aiRecommendations.some((i: any) => i.similarity > 0.1),
+    [aiRecommendations],
+  );
 
   const fetchUserProfile = async () => {
     try {
@@ -235,12 +435,12 @@ export default function HomeScreen() {
         .eq("owner_id", user.id);
       setHasGroups(count ? count > 0 : false);
     } catch (e) {
-      console.log("Error fetching user profile:", e);
+      debugLog("Error fetching user profile:", e);
     }
   };
 
   const fetchHomeData = async (showLoading = true) => {
-    console.log("🏠 fetchHomeData called, showLoading:", showLoading);
+    debugLog("🏠 fetchHomeData called, showLoading:", showLoading);
     if (showLoading) setLoading(true);
     try {
       // Fetch based on Role
@@ -251,7 +451,31 @@ export default function HomeScreen() {
       let soloArtists: any[] = [];
 
       const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
-      console.log("🏠 User role:", userRole, "isOwner:", isOwner);
+      debugLog("🏠 User role:", userRole, "isOwner:", isOwner);
+
+      const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
+        const eventDate = gig?.event_date ? new Date(gig.event_date) : null;
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        if (gig?.status === "closed" || gig?.status === "cancelled") {
+          return "done";
+        }
+
+        if (!eventDate || isNaN(eventDate.getTime())) {
+          return "upcoming";
+        }
+
+        if (eventDate < todayStart) {
+          return "done";
+        }
+
+        if (eventDate.toDateString() === now.toDateString()) {
+          return "active";
+        }
+
+        return "upcoming";
+      };
 
       // Always fetch groups (musicians)
       const { data: gData, error: gError } = await supabase
@@ -259,36 +483,121 @@ export default function HomeScreen() {
         .select("*")
         .order("created_at", { ascending: false })
         .limit(20);
-      if (gError) console.log("❌ Error fetching groups:", gError);
+      if (gError) debugLog("❌ Error fetching groups:", gError);
       groups = gData || [];
-      console.log("🏠 Groups fetched:", groups.length);
+      debugLog("🏠 Groups fetched:", groups.length);
 
       // Fetch Solo Artists (Musicians who haven't created a group, or just all musicians)
       // We assume 'musician' role in profiles
       const { data: pData, error: pError } = await supabase
         .from("profiles")
         .select(
-          "id, full_name, avatar_url, address, created_at, role, skills, genres",
+          "id, full_name, avatar_url, address, created_at, role, skills, genres, show_gig_statuses",
         )
         .eq("role", "musician")
         .limit(20);
-      if (pError) console.log("❌ Error fetching profiles:", pError);
+      if (pError) debugLog("❌ Error fetching profiles:", pError);
 
       // Filter out profiles that might be owners of the groups already fetched?
       // For now, just show them as Solo Artists.
       soloArtists = pData || [];
-      console.log("🏠 Solo artists fetched:", soloArtists.length);
+      debugLog("🏠 Solo artists fetched:", soloArtists.length);
+
+      const groupOwnerPreferenceMap = new Map<string, boolean>();
+      const groupOpenApplicationsMap = new Map<string, boolean>();
+      const groupGigCountsMap = new Map<string, { active: number; upcoming: number; done: number }>();
+      const soloGigCountsMap = new Map<string, { active: number; upcoming: number; done: number }>();
+
+      const groupOwnerIds = Array.from(
+        new Set((groups || []).map((group: any) => group.owner_id).filter(Boolean)),
+      );
+
+      if (groupOwnerIds.length > 0) {
+        const { data: ownerPrefs } = await supabase
+          .from("profiles")
+          .select("id, show_gig_statuses")
+          .in("id", groupOwnerIds);
+
+        (ownerPrefs || []).forEach((row: any) => {
+          groupOwnerPreferenceMap.set(row.id, row.show_gig_statuses !== false);
+        });
+      }
+
+      const groupIds = Array.from(
+        new Set((groups || []).map((group: any) => group.id).filter(Boolean)),
+      );
+
+      if (groupIds.length > 0) {
+        const { data: groupVisibilityRows } = await supabase
+          .from("groups")
+          .select("id, open_group_applications")
+          .in("id", groupIds);
+
+        (groupVisibilityRows || []).forEach((row: any) => {
+          groupOpenApplicationsMap.set(row.id, row.open_group_applications !== false);
+        });
+      }
+
+      if (groupIds.length > 0) {
+        const { data: groupApplications } = await supabase
+          .from("gig_applications")
+          .select("group_id, gigs(event_date,status)")
+          .eq("status", "accepted")
+          .in("group_id", groupIds);
+
+        (groupApplications || []).forEach((application: any) => {
+          const groupId = application.group_id;
+          if (!groupId) return;
+
+          const existing = groupGigCountsMap.get(groupId) || {
+            active: 0,
+            upcoming: 0,
+            done: 0,
+          };
+
+          const bucket = classifyGigBucket(application.gigs);
+          existing[bucket] += 1;
+          groupGigCountsMap.set(groupId, existing);
+        });
+      }
+
+      const soloArtistIds = Array.from(
+        new Set((soloArtists || []).map((artist: any) => artist.id).filter(Boolean)),
+      );
+      if (soloArtistIds.length > 0) {
+        const { data: soloApplications } = await supabase
+          .from("gig_applications")
+          .select("applicant_id, gigs(event_date,status)")
+          .eq("status", "accepted")
+          .is("group_id", null)
+          .in("applicant_id", soloArtistIds);
+
+        (soloApplications || []).forEach((application: any) => {
+          const applicantId = application.applicant_id;
+          if (!applicantId) return;
+
+          const existing = soloGigCountsMap.get(applicantId) || {
+            active: 0,
+            upcoming: 0,
+            done: 0,
+          };
+
+          const bucket = classifyGigBucket(application.gigs);
+          existing[bucket] += 1;
+          soloGigCountsMap.set(applicantId, existing);
+        });
+      }
 
       // Musicians and Guests can see studios and gigs, but owners cannot
-      if (!isOwner) {
+      if (!isOwner && !isGuest) {
         const { data: sData, error: sError } = await supabase
           .from("studios_with_stats")
           .select("*")
           .order("created_at", { ascending: false })
           .limit(20);
-        if (sError) console.log("Error fetching studios:", sError);
+        if (sError) debugLog("Error fetching studios:", sError);
         studios = sData || [];
-        console.log("🏠 Studios fetched:", studios.length);
+        debugLog("🏠 Studios fetched:", studios.length);
 
         // Fetch date overrides to calculate has_special_dates for each studio
         if (studios.length > 0) {
@@ -310,7 +619,7 @@ export default function HomeScreen() {
               ...studio,
               has_special_dates: studioDateOverridesMap[studio.id] || false,
             }));
-            console.log("🏠 Studios augmented with date overrides");
+            debugLog("🏠 Studios augmented with date overrides");
           }
         }
         const { data: gigData, error: gigError } = await supabase
@@ -319,13 +628,13 @@ export default function HomeScreen() {
           .eq("status", "open") // Only show open gigs to musicians
           .order("created_at", { ascending: false })
           .limit(20);
-        if (gigError) console.log("Error fetching gigs:", gigError);
+        if (gigError) debugLog("Error fetching gigs:", gigError);
         gigs = gigData || [];
-        console.log(
+        debugLog(
           `📱 Fetched ${gigs.length} open gigs for role: ${userRole}`,
         );
       } else {
-        console.log(
+        debugLog(
           `📱 Skipping gigs fetch - user is owner (role: ${userRole})`,
         );
       }
@@ -340,6 +649,7 @@ export default function HomeScreen() {
           images: item.images || (item.avatar_url ? [item.avatar_url] : []),
           rating: item.rating || 0, // Solo artists might not have ratings yet
           review_count: item.review_count || 0,
+          completion_rate: item.completion_rate,
           // Explicitly pass rate fields
           hourly_rate: item.hourly_rate?.toString(),
           budget: item.budget?.toString(),
@@ -361,11 +671,41 @@ export default function HomeScreen() {
           event_date: item.event_date || null,
           embedding: item.embedding, // Profiles might have interest_vector but listing card uses embedding
           created_at: item.created_at, // Added for New Arrivals
+          updated_at: item.updated_at,
           genre: item.genres?.join(", ") || item.genre || "", // For solo artists
+          group_type: item.group_type || null,
           // Owner/Organizer IDs for chat functionality
           // For profiles (solo artists), the id IS the owner
           owner_id: item.owner_id || (type === "Artist" ? item.id : null),
           organizer_id: item.organizer_id || null,
+          active_gigs:
+            type === "Group"
+              ? groupGigCountsMap.get(item.id)?.active || 0
+              : type === "Artist"
+                ? soloGigCountsMap.get(item.id)?.active || 0
+                : 0,
+          upcoming_gigs:
+            type === "Group"
+              ? groupGigCountsMap.get(item.id)?.upcoming || 0
+              : type === "Artist"
+                ? soloGigCountsMap.get(item.id)?.upcoming || 0
+                : 0,
+          done_gigs:
+            type === "Group"
+              ? groupGigCountsMap.get(item.id)?.done || 0
+              : type === "Artist"
+                ? soloGigCountsMap.get(item.id)?.done || 0
+                : 0,
+          show_gig_statuses:
+            type === "Group"
+              ? groupOwnerPreferenceMap.get(item.owner_id) !== false
+              : type === "Artist"
+                ? item.show_gig_statuses !== false
+                : true,
+          open_group_applications:
+            type === "Group"
+              ? groupOpenApplicationsMap.get(item.id) ?? item.open_group_applications !== false
+              : undefined,
           // Seasonal pricing fields for studios
           has_seasonal_pricing: item.has_seasonal_pricing || false,
           has_special_dates: item.has_special_dates || false,
@@ -380,13 +720,10 @@ export default function HomeScreen() {
       const allGigs = normalize(gigs, "Gig");
       const allSoloArtists = normalize(soloArtists, "Artist"); // Use 'Artist' for solo
 
-      const allItemsList = [
-        ...allGroups,
-        ...allSoloArtists,
-        ...allStudios,
-        ...allGigs,
-      ];
-      console.log(
+      const allItemsList = isGuest
+        ? [...allGroups, ...allSoloArtists]
+        : [...allGroups, ...allSoloArtists, ...allStudios, ...allGigs];
+      debugLog(
         `📊 Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Solo: ${allSoloArtists.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`,
       );
 
@@ -397,7 +734,7 @@ export default function HomeScreen() {
         return dateB - dateA; // Newest first
       });
 
-      console.log(
+      debugLog(
         "🆕 Setting New Arrivals:",
         sortedByDate.length,
         "items available",
@@ -411,7 +748,7 @@ export default function HomeScreen() {
       // === AI RECOMMENDATIONS - Fetch from RPC if user is logged in ===
       if (userId) {
         try {
-          console.log("🤖 Fetching AI recommendations for user:", userId);
+          debugLog("🤖 Fetching AI recommendations for user:", userId);
           const { data: aiData, error: aiError } = await supabase.rpc(
             "get_ai_recommendations",
             {
@@ -421,7 +758,7 @@ export default function HomeScreen() {
           );
 
           if (aiError) {
-            console.log("⚠️ AI recommendations error:", aiError);
+            debugLog("⚠️ AI recommendations error:", aiError);
             setAiRecommendations([]);
           } else if (aiData && aiData.length > 0) {
             // Normalize AI recommendations
@@ -443,16 +780,17 @@ export default function HomeScreen() {
               genre: item.genre || "",
               embedding: item.embedding,
               created_at: item.created_at,
+              updated_at: item.updated_at,
               owner_id: item.owner_id,
               organizer_id: item.organizer_id,
               similarity: item.similarity, // AI similarity score
             }));
-            console.log(
+            debugLog(
               "🤖 AI recommendations loaded:",
               normalizedAi.length,
               "items",
             );
-            console.log(
+            debugLog(
               "🤖 Top 3 AI matches:",
               normalizedAi.slice(0, 3).map((i: any) => ({
                 name: i.name,
@@ -461,17 +799,17 @@ export default function HomeScreen() {
             );
             setAiRecommendations(normalizedAi);
           } else {
-            console.log(
+            debugLog(
               "🤖 No AI recommendations - user has no interest vector yet",
             );
             setAiRecommendations([]);
           }
         } catch (aiErr) {
-          console.log("🤖 AI fetch error:", aiErr);
+          debugLog("🤖 AI fetch error:", aiErr);
           setAiRecommendations([]);
         }
       } else {
-        console.log("🤖 No user logged in - skipping AI recommendations");
+        debugLog("🤖 No user logged in - skipping AI recommendations");
         setAiRecommendations([]);
       }
 
@@ -481,30 +819,27 @@ export default function HomeScreen() {
       setFeatured(shuffled.slice(0, 10));
       setDiscover(shuffled.slice(10, 20));
 
-      console.log("✅ Home data loaded successfully");
+      debugLog("✅ Home data loaded successfully");
     } catch (e) {
-      console.log("❌ Error fetching home feed:", e);
+      debugLog("❌ Error fetching home feed:", e);
     } finally {
       setLoading(false);
     }
   };
 
   const handleCardPress = async (item: any) => {
-    console.log("=== handleCardPress called ===");
-    console.log("Item:", item);
-    console.log("Item ID:", item.id);
+    debugLog("=== handleCardPress called ===");
+    debugLog("Item:", item);
+    debugLog("Item ID:", item.id);
 
-    setSelectedListingId(item.id);
-    console.log("selectedListingId set to:", item.id);
+    openListingDetails(item.id);
+    debugLog("selectedListingId set to:", item.id);
+    debugLog("openDetailsSheet called");
 
-    // Use safe handler with requestAnimationFrame for proper timing
-    setTimeout(() => {
-      openDetailsSheet();
-      console.log("openDetailsSheet called");
-    }, 100);
-
-    // Save to recently viewed
-    await saveToRecentlyViewed(item);
+    // Defer storage work so sheet animation stays smooth
+    InteractionManager.runAfterInteractions(() => {
+      void saveToRecentlyViewed(item);
+    });
   };
 
   // Handle chat action - navigate to chat screen with recipient
@@ -530,7 +865,7 @@ export default function HomeScreen() {
     // Determine the owner/organizer ID based on item type
     const recipientId = item.owner_id || item.organizer_id;
     if (!recipientId) {
-      console.log("No owner/organizer found for item:", item);
+      debugLog("No owner/organizer found for item:", item);
       return;
     }
 
@@ -549,18 +884,24 @@ export default function HomeScreen() {
 
   const saveToRecentlyViewed = async (item: any) => {
     try {
-      console.log("💾 saveToRecentlyViewed called with:", item.name, item.type);
+      debugLog("💾 saveToRecentlyViewed called with:", item.name, item.type);
       const AsyncStorage =
         require("@react-native-async-storage/async-storage").default;
       const existingJson = await AsyncStorage.getItem("recently_viewed_items");
       let items = existingJson ? JSON.parse(existingJson) : [];
-      console.log("💾 Existing items count:", items.length);
+      debugLog("💾 Existing items count:", items.length);
 
       // Remove if already exists to avoid duplicates
       items = items.filter((i: any) => i.id !== item.id);
 
       // Add to front
       items.unshift(item);
+
+      if (isGuest) {
+        items = items.filter(
+          (entry: any) => entry.type === "Group" || entry.type === "Artist",
+        );
+      }
 
       // Keep only last 10
       items = items.slice(0, 10);
@@ -569,13 +910,13 @@ export default function HomeScreen() {
         "recently_viewed_items",
         JSON.stringify(items),
       );
-      console.log("💾 Saved! New count:", items.length);
+      debugLog("💾 Saved! New count:", items.length);
 
       // Update state
       setRecentlyViewed(items);
-      console.log("💾 State updated with", items.length, "items");
+      debugLog("💾 State updated with", items.length, "items");
     } catch (e) {
-      console.log("Error saving to recently viewed:", e);
+      debugLog("Error saving to recently viewed:", e);
     }
   };
 
@@ -584,21 +925,109 @@ export default function HomeScreen() {
       const AsyncStorage =
         require("@react-native-async-storage/async-storage").default;
       const existingJson = await AsyncStorage.getItem("recently_viewed_items");
-      console.log(
+      debugLog(
         "📚 Recently viewed from storage:",
         existingJson ? "Found" : "Empty",
       );
       if (existingJson) {
         const items = JSON.parse(existingJson);
-        console.log("📚 Recently viewed items count:", items.length);
-        setRecentlyViewed(items.slice(0, 5)); // Show first 5
+        const guestFilteredItems = isGuest
+          ? items.filter(
+            (item: any) => item.type === "Group" || item.type === "Artist",
+          )
+          : items;
+        debugLog("📚 Recently viewed items count:", guestFilteredItems.length);
+        setRecentlyViewed(guestFilteredItems.slice(0, 5)); // Show first 5
       } else {
-        console.log("📚 No recently viewed items in storage");
+        debugLog("📚 No recently viewed items in storage");
         setRecentlyViewed([]);
       }
     } catch (e) {
-      console.log("Error fetching recently viewed:", e);
+      debugLog("Error fetching recently viewed:", e);
     }
+  };
+
+  const parseLocalDate = (value: string | Date | null | undefined) => {
+    if (!value) return null;
+    if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+
+    if (typeof value === "string") {
+      const dateOnlyMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (dateOnlyMatch) {
+        const year = parseInt(dateOnlyMatch[1], 10);
+        const month = parseInt(dateOnlyMatch[2], 10);
+        const day = parseInt(dateOnlyMatch[3], 10);
+        const localDate = new Date(year, month - 1, day);
+        return isNaN(localDate.getTime()) ? null : localDate;
+      }
+    }
+
+    const parsed = new Date(value);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const extractTimeParts = (timeValue: string | null | undefined) => {
+    if (!timeValue || typeof timeValue !== "string") return null;
+
+    const isoDate = new Date(timeValue);
+    if (!isNaN(isoDate.getTime()) && timeValue.includes("T")) {
+      return { hours: isoDate.getHours(), minutes: isoDate.getMinutes() };
+    }
+
+    const meridiemMatch = timeValue.match(
+      /^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i,
+    );
+    if (meridiemMatch) {
+      let hours = parseInt(meridiemMatch[1], 10);
+      const minutes = parseInt(meridiemMatch[2], 10);
+      const period = meridiemMatch[3].toUpperCase();
+      if (period === "PM" && hours !== 12) hours += 12;
+      if (period === "AM" && hours === 12) hours = 0;
+      if (isNaN(hours) || isNaN(minutes)) return null;
+      return { hours, minutes };
+    }
+
+    const twentyFourMatch = timeValue.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (twentyFourMatch) {
+      const hours = parseInt(twentyFourMatch[1], 10);
+      const minutes = parseInt(twentyFourMatch[2], 10);
+      if (isNaN(hours) || isNaN(minutes)) return null;
+      return { hours, minutes };
+    }
+
+    return null;
+  };
+
+  const formatTimeForDisplay = (timeValue: string | null | undefined) => {
+    const parts = extractTimeParts(timeValue);
+    if (!parts) return null;
+
+    const period = parts.hours >= 12 ? "PM" : "AM";
+    const h12 = parts.hours % 12 || 12;
+    const paddedMinutes = String(parts.minutes).padStart(2, "0");
+    return `${h12}:${paddedMinutes} ${period}`;
+  };
+
+  const getEventDateTime = (
+    dateValue: string | Date | null | undefined,
+    endTimeValue?: string | null,
+    startTimeValue?: string | null,
+  ) => {
+    const baseDate = parseLocalDate(dateValue);
+    if (!baseDate) return null;
+
+    const combined = new Date(baseDate);
+    const timeParts =
+      extractTimeParts(endTimeValue || undefined) ||
+      extractTimeParts(startTimeValue || undefined);
+
+    if (timeParts) {
+      combined.setHours(timeParts.hours, timeParts.minutes, 0, 0);
+    } else {
+      combined.setHours(23, 59, 59, 999);
+    }
+
+    return combined;
   };
 
   // Fetch Upcoming Events for Musicians (accepted gigs & confirmed studio bookings)
@@ -616,35 +1045,99 @@ export default function HomeScreen() {
       // 1. Fetch accepted gig applications
       const { data: gigApps, error: gigError } = await supabase
         .from("gig_applications")
-        .select(
-          "*, gig:gig_id(id, name, event_date, images, location, budget, requirements)",
-        )
+        .select("id, gig_id, status")
         .eq("applicant_id", userId)
         .eq("status", "accepted");
 
       if (gigError) {
-        console.log("Error fetching gig applications:", gigError);
+        debugLog("Error fetching gig applications:", gigError);
       } else if (gigApps) {
+        const gigIds = Array.from(
+          new Set(
+            gigApps
+              .map((app: any) => app.gig_id)
+              .filter((id: any) => typeof id === "string" && id.length > 0),
+          ),
+        );
+
+        let gigById: Record<string, any> = {};
+        if (gigIds.length > 0) {
+          const { data: baseGigs, error: baseGigsError } = await supabase
+            .from("gigs")
+            .select("id, name, event_date, location, budget")
+            .in("id", gigIds);
+
+          const { data: legacyGigs, error: legacyGigsError } = await supabase
+            .from("gigs_legacy_projection")
+            .select("id, images, requirements")
+            .in("id", gigIds);
+
+          if (baseGigsError) {
+            debugLog("Error fetching base gigs for upcoming events:", baseGigsError);
+          }
+          if (legacyGigsError) {
+            debugLog(
+              "Error fetching gig legacy projection for upcoming events:",
+              legacyGigsError,
+            );
+          }
+
+          const baseGigMap = new Map(
+            (baseGigs || []).map((gig: any) => [gig.id, gig]),
+          );
+          const legacyGigMap = new Map(
+            (legacyGigs || []).map((gig: any) => [gig.id, gig]),
+          );
+
+          gigIds.forEach((id: string) => {
+            const baseGig = baseGigMap.get(id);
+            if (!baseGig) return;
+
+            const legacyGig = legacyGigMap.get(id) || {};
+            gigById[id] = {
+              ...baseGig,
+              images: Array.isArray(legacyGig.images) ? legacyGig.images : [],
+              requirements: legacyGig.requirements || {},
+            };
+          });
+        }
+
         gigApps.forEach((app: any) => {
-          const gig = app.gig;
+          const gig = app.gig_id ? gigById[app.gig_id] : null;
           if (!gig?.event_date) return;
 
-          const eventDate = new Date(gig.event_date);
-          if (eventDate >= now) {
+          const eventDate = parseLocalDate(gig.event_date);
+          const eventDateTime = getEventDateTime(
+            gig.event_date,
+            gig.requirements?.event_end_time,
+            gig.requirements?.event_start_time,
+          );
+          if (!eventDate || !eventDateTime) return;
+
+          if (eventDateTime >= now) {
+            const formattedStartTime = formatTimeForDisplay(
+              gig.requirements?.event_start_time,
+            );
+            const formattedEndTime = formatTimeForDisplay(
+              gig.requirements?.event_end_time,
+            );
+
             events.push({
               id: app.id,
               type: "Gig",
               name: gig.name,
               date: gig.event_date,
+              sortTimestamp: eventDateTime.getTime(),
               formattedDate: eventDate.toLocaleDateString("en-US", {
                 month: "short",
                 day: "numeric",
                 year: "numeric",
               }),
               time:
-                gig.requirements?.event_start_time &&
-                gig.requirements?.event_end_time
-                  ? `${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
+                formattedStartTime && formattedEndTime
+                  ? `${formattedStartTime} - ${formattedEndTime}`
+                  : formattedStartTime
+                    ? formattedStartTime
                   : "Time TBA",
               location: gig.location || "Location TBA",
               image: gig.images?.[0] || null,
@@ -659,32 +1152,111 @@ export default function HomeScreen() {
       // 2. Fetch confirmed studio bookings
       const { data: studioBookings, error: studioError } = await supabase
         .from("studio_bookings")
-        .select("*, studio:studio_id(id, name, images, address)")
+        .select(
+          "id, studio_id, booking_date, start_time, end_time, final_price, total_price, status",
+        )
         .eq("user_id", userId)
         .in("status", ["confirmed", "pending"]);
 
       if (studioError) {
-        console.log("Error fetching studio bookings:", studioError);
+        debugLog("Error fetching studio bookings:", studioError);
       } else if (studioBookings) {
+        const seenStudioBookingSlots = new Set<string>();
+        const studioIds = Array.from(
+          new Set(
+            studioBookings
+              .map((booking: any) => booking.studio_id)
+              .filter((id: any) => typeof id === "string" && id.length > 0),
+          ),
+        );
+
+        let studioById: Record<string, any> = {};
+        if (studioIds.length > 0) {
+          const { data: baseStudios, error: baseStudiosError } = await supabase
+            .from("studios")
+            .select("id, name, address")
+            .in("id", studioIds);
+
+          const { data: legacyStudios, error: legacyStudiosError } = await supabase
+            .from("studios_legacy_projection")
+            .select("id, images")
+            .in("id", studioIds);
+
+          if (baseStudiosError) {
+            debugLog(
+              "Error fetching base studios for upcoming events:",
+              baseStudiosError,
+            );
+          }
+          if (legacyStudiosError) {
+            debugLog(
+              "Error fetching studio legacy projection for upcoming events:",
+              legacyStudiosError,
+            );
+          }
+
+          const baseStudioMap = new Map(
+            (baseStudios || []).map((studio: any) => [studio.id, studio]),
+          );
+          const legacyStudioMap = new Map(
+            (legacyStudios || []).map((studio: any) => [studio.id, studio]),
+          );
+
+          studioIds.forEach((id: string) => {
+            const baseStudio = baseStudioMap.get(id);
+            if (!baseStudio) return;
+
+            const legacyStudio = legacyStudioMap.get(id) || {};
+            studioById[id] = {
+              ...baseStudio,
+              images: Array.isArray(legacyStudio.images)
+                ? legacyStudio.images
+                : [],
+            };
+          });
+        }
+
         studioBookings.forEach((booking: any) => {
-          const studio = booking.studio;
+          const studio = booking.studio_id ? studioById[booking.studio_id] : null;
           if (!booking.booking_date) return;
 
-          const bookingDate = new Date(booking.booking_date);
-          if (bookingDate >= now) {
+          const bookingDate = parseLocalDate(booking.booking_date);
+          const bookingDateTime = getEventDateTime(
+            booking.booking_date,
+            booking.end_time,
+            booking.start_time,
+          );
+          if (!bookingDate || !bookingDateTime) return;
+
+          if (bookingDateTime >= now) {
+            const formattedStartTime = formatTimeForDisplay(booking.start_time);
+            const formattedEndTime = formatTimeForDisplay(booking.end_time);
+            const bookingSlotKey = [
+              booking.studio_id || "unknown-studio",
+              bookingDate.toISOString().split("T")[0],
+              formattedStartTime || booking.start_time || "TBA",
+              formattedEndTime || booking.end_time || "TBA",
+            ].join("|");
+
+            if (seenStudioBookingSlots.has(bookingSlotKey)) return;
+            seenStudioBookingSlots.add(bookingSlotKey);
+
             events.push({
               id: booking.id,
               type: "Studio",
               name: studio?.name || "Studio Booking",
               date: booking.booking_date,
+              sortTimestamp: bookingDateTime.getTime(),
               formattedDate: bookingDate.toLocaleDateString("en-US", {
                 month: "short",
                 day: "numeric",
                 year: "numeric",
               }),
               time:
-                booking.start_time && booking.end_time
-                  ? `${booking.start_time} - ${booking.end_time}`
+                formattedStartTime && formattedEndTime
+                  ? `${formattedStartTime} - ${formattedEndTime}`
+                  : formattedStartTime
+                    ? formattedStartTime
                   : "Time TBA",
               location: studio?.address || "Address TBA",
               image: studio?.images?.[0] || null,
@@ -698,13 +1270,15 @@ export default function HomeScreen() {
 
       // Sort by date (closest first)
       events.sort(
-        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+        (a, b) =>
+          (a.sortTimestamp || new Date(a.date).getTime()) -
+          (b.sortTimestamp || new Date(b.date).getTime()),
       );
 
       setUpcomingEvents(events.slice(0, 5)); // Show max 5 upcoming events
-      console.log(`📅 Fetched ${events.length} upcoming events for musician`);
+      debugLog(`📅 Fetched ${events.length} upcoming events for musician`);
     } catch (e) {
-      console.log("Error fetching upcoming events:", e);
+      debugLog("Error fetching upcoming events:", e);
     }
   };
 
@@ -728,10 +1302,13 @@ export default function HomeScreen() {
 
     return (
       <View style={styles.heroContainer}>
-        <Image
-          source={{ uri: heroImage }}
+        <CachedImage
+          uri={heroImage}
           style={styles.heroImage}
-          resizeMode="cover"
+          width={1080}
+          height={640}
+          quality={70}
+          cacheVersion="home-hero-v1"
         />
         <LinearGradient
           colors={[
@@ -753,7 +1330,7 @@ export default function HomeScreen() {
 
           {/* Glassmorphism Search Pill */}
           <BlurView intensity={60} tint="light" style={styles.searchPill}>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={styles.searchTouch}
               onPress={openSearchSheet}
             >
@@ -780,7 +1357,6 @@ export default function HomeScreen() {
 
   // 2. Promotional Carousel & Top Picks (Redesigned as "Relevant")
   const renderHighlightsSection = () => {
-    const topItems = [...featured, ...discover].slice(0, 12);
     if (topItems.length === 0) return null;
 
     return (
@@ -811,7 +1387,7 @@ export default function HomeScreen() {
                 : "Random selection"}
             </Text>
           </View>
-          <TouchableOpacity onPress={openSearchSheet}>
+          <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
             <Text
               style={{
                 color: colors.primary,
@@ -829,14 +1405,18 @@ export default function HomeScreen() {
           <View style={styles.bentoGrid}>
             {/* Main Highlight (Large) */}
             <TouchableOpacity
-              activeOpacity={0.9}
+              activeOpacity={1}
               onPress={() => handleCardPress(topItems[0])}
               style={styles.bentoTouchableLarge}
             >
               <View style={styles.bentoLarge}>
-                <Image
-                  source={{ uri: topItems[0].image }}
+                <AutoCardImage
+                  image={topItems[0].image}
+                  images={topItems[0].images}
                   style={styles.bentoImage}
+                  width={720}
+                  height={560}
+                  cacheVersion={topItems[0].updated_at || topItems[0].created_at || topItems[0].id}
                 />
                 <LinearGradient
                   colors={["transparent", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.8)"]}
@@ -884,14 +1464,18 @@ export default function HomeScreen() {
               {topItems.slice(1, 3).map((item, index) => (
                 <TouchableOpacity
                   key={item.id}
-                  activeOpacity={0.9}
+                  activeOpacity={1}
                   onPress={() => handleCardPress(item)}
                   style={styles.bentoTouchableSmall}
                 >
                   <View style={styles.bentoSmall}>
-                    <Image
-                      source={{ uri: item.image }}
+                    <AutoCardImage
+                      image={item.image}
+                      images={item.images}
                       style={styles.bentoImage}
+                      width={480}
+                      height={280}
+                      cacheVersion={item.updated_at || item.created_at || item.id}
                     />
                     <LinearGradient
                       colors={["transparent", "rgba(0,0,0,0.7)"]}
@@ -955,9 +1539,7 @@ export default function HomeScreen() {
       return;
     }
 
-    setSelectedListingId(item.id);
-    // Use safe handler with requestAnimationFrame
-    setTimeout(() => openDetailsSheet(), 50);
+    openListingDetails(item.id);
     // The ListingDetailsSheet will show the "Connect" tab for Groups
     // allowing venue/studio owners to send booking requests
   };
@@ -973,6 +1555,7 @@ export default function HomeScreen() {
         onChat={handleChat}
         variant="horizontal"
         hasGroups={hasGroups}
+        showGigSummary={false}
         style={{ width: 280 }}
       />
     );
@@ -984,22 +1567,6 @@ export default function HomeScreen() {
     if (newArrivals.length === 0) {
       return null;
     }
-
-    // Helper to get type badge color
-    const getTypeBadgeColor = (type: string) => {
-      switch (type) {
-        case "Studio":
-          return "#7C3AED";
-        case "Gig":
-          return "#10B981";
-        case "Group":
-          return "#3B82F6";
-        case "Artist":
-          return "#EC4899";
-        default:
-          return "#7C3AED";
-      }
-    };
 
     // Helper to get price label - skip Groups, handle Studio-specific pricing
     const getPriceLabel = (item: any) => {
@@ -1073,7 +1640,7 @@ export default function HomeScreen() {
               Fresh on MusikaLokal
             </Text>
           </View>
-          <TouchableOpacity onPress={openSearchSheet}>
+          <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
             <Text
               style={{
                 color: colors.primary,
@@ -1097,22 +1664,28 @@ export default function HomeScreen() {
           decelerationRate="fast"
           snapToInterval={280 + 16}
         >
-          {newArrivals.map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              activeOpacity={0.9}
-              onPress={() => handleCardPress(item)}
-              style={[
-                styles.newArrivalCard,
-                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
-              ]}
-            >
+          {newArrivals.map((item) => {
+            const priceLabel = getPriceLabel(item);
+            return (
+              <TouchableOpacity
+                key={item.id}
+                activeOpacity={1}
+                onPress={() => handleCardPress(item)}
+                style={[
+                  styles.newArrivalCard,
+                  { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                ]}
+              >
               {/* Image Section */}
               <View style={styles.newArrivalImageContainer}>
-                {item.image ? (
-                  <Image
-                    source={{ uri: item.image }}
+                {((item.images && item.images.length > 0) || item.image) ? (
+                  <AutoCardImage
+                    image={item.image}
+                    images={item.images}
                     style={styles.newArrivalImage}
+                    width={560}
+                    height={280}
+                    cacheVersion={item.updated_at || item.created_at || item.id}
                   />
                 ) : (
                   <View
@@ -1195,16 +1768,17 @@ export default function HomeScreen() {
                 </View>
 
                 {/* Price */}
-                {getPriceLabel(item) && (
+                {priceLabel && (
                   <Text
                     style={[styles.newArrivalPrice, { color: colors.primary }]}
                   >
-                    {getPriceLabel(item)}
+                    {priceLabel}
                   </Text>
                 )}
               </View>
-            </TouchableOpacity>
-          ))}
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
     );
@@ -1241,7 +1815,7 @@ export default function HomeScreen() {
               Your scheduled gigs & bookings
             </Text>
           </View>
-          <TouchableOpacity onPress={() => router.push("/bookings")}>
+          <TouchableOpacity activeOpacity={1} onPress={() => router.push("/bookings")}>
             <Text
               style={{
                 color: colors.primary,
@@ -1268,15 +1842,14 @@ export default function HomeScreen() {
           {upcomingEvents.map((event, index) => (
             <TouchableOpacity
               key={`${event.type}-${event.id}`}
-              activeOpacity={0.9}
+              activeOpacity={1}
               onPress={() => {
                 // Navigate to appropriate detail screen
                 if (event.type === "Gig" && event.gigId) {
                   // For now, just go to bookings since musicians can't view gig details directly
                   router.push("/bookings");
                 } else if (event.type === "Studio" && event.studioId) {
-                  setSelectedListingId(event.studioId);
-                  setTimeout(() => openDetailsSheet(), 100);
+                  openListingDetails(event.studioId);
                 }
               }}
               style={[
@@ -1287,9 +1860,12 @@ export default function HomeScreen() {
               {/* Event Image */}
               <View style={styles.upcomingEventImageContainer}>
                 {event.image ? (
-                  <Image
-                    source={{ uri: event.image }}
+                  <CachedImage
+                    uri={event.image}
                     style={styles.upcomingEventImage}
+                    width={560}
+                    height={240}
+                    cacheVersion={event.updated_at || event.date || event.id}
                   />
                 ) : (
                   <View
@@ -1446,10 +2022,7 @@ export default function HomeScreen() {
 
   // 4. For You - Smart Feed (Merged Featured + Discover with variety)
   const renderSmartFeed = () => {
-    const allItems = [...featured, ...discover];
-    const uniqueItems = allItems.filter(
-      (item, index, self) => index === self.findIndex((t) => t.id === item.id),
-    );
+    const uniqueItems = uniqueSmartFeedItems;
 
     if (uniqueItems.length === 0) {
       return (
@@ -1510,7 +2083,7 @@ export default function HomeScreen() {
                 : "Random suggestions for comparison"}
             </Text>
           </View>
-          <TouchableOpacity onPress={openSearchSheet}>
+          <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
             <Text
               style={{
                 color: colors.primary,
@@ -1527,7 +2100,7 @@ export default function HomeScreen() {
         {uniqueItems[0] && (
           <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
             <TouchableOpacity
-              activeOpacity={0.95}
+              activeOpacity={1}
               onPress={() => handleCardPress(uniqueItems[0])}
               style={[
                 styles.featuredCard,
@@ -1538,9 +2111,13 @@ export default function HomeScreen() {
                 },
               ]}
             >
-              <Image
-                source={{ uri: uniqueItems[0].image }}
+              <AutoCardImage
+                image={uniqueItems[0].image}
+                images={uniqueItems[0].images}
                 style={styles.featuredImage}
+                width={1080}
+                height={720}
+                cacheVersion={uniqueItems[0].updated_at || uniqueItems[0].created_at || uniqueItems[0].id}
               />
               <LinearGradient
                 colors={["transparent", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.9)"]}
@@ -1616,7 +2193,7 @@ export default function HomeScreen() {
           {uniqueItems.slice(1, 11).map((item, index) => (
             <TouchableOpacity
               key={item.id}
-              activeOpacity={0.9}
+              activeOpacity={1}
               onPress={() => handleCardPress(item)}
               style={[
                 styles.forYouCard,
@@ -1625,10 +2202,14 @@ export default function HomeScreen() {
             >
               {/* Image Section */}
               <View style={styles.forYouImageContainer}>
-                {item.image ? (
-                  <Image
-                    source={{ uri: item.image }}
+                {((item.images && item.images.length > 0) || item.image) ? (
+                  <AutoCardImage
+                    image={item.image}
+                    images={item.images}
                     style={styles.forYouImage}
+                    width={560}
+                    height={280}
+                    cacheVersion={item.updated_at || item.created_at || item.id}
                   />
                 ) : (
                   <View
@@ -1940,12 +2521,12 @@ export default function HomeScreen() {
                   letterSpacing: 0.5,
                 }}
               >
-                {aiRecommendations.some((i: any) => i.similarity > 0.1)
+                {hasAiSimilarityMatches
                   ? "Top Matches by AI Similarity"
                   : "📊 Sorted by Popularity (No embeddings yet)"}
               </Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                {aiRecommendations.slice(0, 4).map((item, idx) => (
+                {aiPreviewItems.map((item) => (
                   <View
                     key={item.id}
                     style={{
@@ -2038,25 +2619,7 @@ export default function HomeScreen() {
         {renderSmartFeed()}
 
         {/* Recently Viewed Section - Custom Cards */}
-        {recentlyViewed.length > 0 &&
-          (() => {
-            // Helper to get type badge color
-            const getTypeBadgeColor = (type: string) => {
-              switch (type) {
-                case "Studio":
-                  return "#7C3AED";
-                case "Gig":
-                  return "#10B981";
-                case "Group":
-                  return "#3B82F6";
-                case "Artist":
-                  return "#EC4899";
-                default:
-                  return "#7C3AED";
-              }
-            };
-
-            return (
+        {recentlyViewed.length > 0 && (
               <View style={styles.sectionContainer}>
                 <View
                   style={{
@@ -2070,7 +2633,7 @@ export default function HomeScreen() {
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>
                     Recently Viewed
                   </Text>
-                  <TouchableOpacity onPress={openRecentlyViewedSheet}>
+                  <TouchableOpacity activeOpacity={1} onPress={openRecentlyViewedSheet}>
                     <Text
                       style={{
                         color: colors.primary,
@@ -2096,7 +2659,7 @@ export default function HomeScreen() {
                   {recentlyViewed.map((item) => (
                     <TouchableOpacity
                       key={item.id}
-                      activeOpacity={0.9}
+                      activeOpacity={1}
                       onPress={() => handleCardPress(item)}
                       style={[
                         styles.recentlyViewedCard,
@@ -2105,10 +2668,14 @@ export default function HomeScreen() {
                     >
                       {/* Image Section */}
                       <View style={styles.recentlyViewedImageContainer}>
-                        {item.image ? (
-                          <Image
-                            source={{ uri: item.image }}
+                        {((item.images && item.images.length > 0) || item.image) ? (
+                          <AutoCardImage
+                            image={item.image}
+                            images={item.images}
                             style={styles.recentlyViewedImage}
+                            width={480}
+                            height={200}
+                            cacheVersion={item.updated_at || item.created_at || item.id}
                           />
                         ) : (
                           <View
@@ -2196,38 +2763,35 @@ export default function HomeScreen() {
                   ))}
                 </ScrollView>
               </View>
-            );
-          })()}
+            )}
       </ScrollView>
 
       <Navbar />
 
-      <ListingDetailsSheet ref={bottomSheetRef} listingId={selectedListingId} />
+      <ListingDetailsSheet
+        ref={bottomSheetRef}
+        listingId={selectedListingId}
+        onDismiss={handleListingDetailsDismiss}
+      />
       <SearchBottomSheet
         ref={searchSheetRef}
         onClose={() => {}}
         onItemPress={(id) => {
-          console.log("=== SearchBottomSheet onItemPress ===");
-          console.log("Item ID from search:", id);
-          setSelectedListingId(id);
-          setTimeout(() => {
-            openDetailsSheet();
-            console.log("openDetailsSheet called from search");
-          }, 150);
+          debugLog("=== SearchBottomSheet onItemPress ===");
+          debugLog("Item ID from search:", id);
+          openListingDetails(id, { restoreSearchOnClose: true });
+          debugLog("openDetailsSheet called from search");
         }}
         onChat={handleChat}
       />
       <RecentlyViewedSheet
         ref={recentlyViewedSheetRef}
-        onClose={() => recentlyViewedSheetRef.current?.dismiss()}
+        onClose={() => {}}
         onItemPress={(id) => {
-          console.log("=== RecentlyViewedSheet onItemPress ===");
-          console.log("Item ID from recently viewed:", id);
-          setSelectedListingId(id);
-          setTimeout(() => {
-            openDetailsSheet();
-            console.log("openDetailsSheet called from recently viewed");
-          }, 150);
+          debugLog("=== RecentlyViewedSheet onItemPress ===");
+          debugLog("Item ID from recently viewed:", id);
+          openListingDetails(id);
+          debugLog("openDetailsSheet called from recently viewed");
         }}
         onChat={handleChat}
       />
@@ -2826,3 +3390,4 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 });
+

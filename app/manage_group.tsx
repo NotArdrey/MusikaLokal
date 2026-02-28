@@ -2,21 +2,23 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { getGroupMembersLabel, isGroupLeaderMember } from "../src/utils/groupMembers";
 
 import { useLocalSearchParams } from "expo-router";
 
@@ -24,23 +26,76 @@ export default function GroupDetailsScreen() {
   const { colors, isDark } = useTheme();
   const { isSystemLocked, showLockAlert } = useAuth();
   const { id } = useLocalSearchParams();
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("About");
   const [modalVisible, setModalVisible] = useState(false);
   const [modalTitle, setModalTitle] = useState("");
   const [modalMessage, setModalMessage] = useState("");
   const [modalButtonText, setModalButtonText] = useState("");
+  const [modalAction, setModalAction] = useState<(() => Promise<void>) | null>(null);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [showGigStatuses, setShowGigStatuses] = useState(true);
+  const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
+  const [openGroupApplications, setOpenGroupApplications] = useState(true);
+  const [updatingGroupApplications, setUpdatingGroupApplications] = useState(false);
 
   const [group, setGroup] = useState<any>(null);
+  const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: any[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   // Role-based access control
   useEffect(() => {
     checkAuthorization();
   }, []);
+
+  useEffect(() => {
+    if (!authorized || !currentUserId || !id) return;
+    fetchData(currentUserId);
+  }, [authorized, currentUserId, id]);
+
+  useEffect(() => {
+    if (!authorized || !currentUserId) return;
+    fetchVisibilityPreference(currentUserId);
+  }, [authorized, currentUserId]);
+
+  const fetchVisibilityPreference = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("show_gig_statuses")
+        .eq("id", userId)
+        .single();
+
+      if (error) throw error;
+      setShowGigStatuses(data?.show_gig_statuses !== false);
+    } catch (e) {
+      console.log("[manage_group] Failed to fetch visibility preference:", e);
+    }
+  };
 
   const checkAuthorization = async () => {
     try {
@@ -61,13 +116,13 @@ export default function GroupDetailsScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "musician") {
-        Alert.alert("Unauthorized", "Only musicians can access this page.");
+        showAlert("error", "Unauthorized", "Only musicians can access this page.");
         router.replace("/home");
         return;
       }
 
+      setCurrentUserId(user.id);
       setAuthorized(true);
-      if (id) fetchData(user.id);
     } catch (e) {
       console.error("Authorization check failed:", e);
       router.replace("/home");
@@ -78,24 +133,42 @@ export default function GroupDetailsScreen() {
 
   const fetchData = async (userId: string) => {
     setLoading(true);
+    setGroup(null);
+    setGroupMembers([]);
+    setApplications([]);
+    setReviews([]);
     try {
       // Ensure id is a string, not an array
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
-        Alert.alert("Error", "Invalid group ID");
+        showAlert("error", "Error", "Invalid group ID");
         router.replace("/home");
         return;
       }
 
       console.log(`[manage_group] Fetching data for groupId: ${groupId}, userId: ${userId}`);
 
-      // Direct query to groups table
+      // Base query + legacy projection merge
       const { data: groupData, error: groupError } = await supabase
         .from('groups')
         .select('*')
         .eq('id', groupId)
         .eq('owner_id', userId)
         .single();
+
+      const { data: legacyGroup, error: legacyGroupError } = await supabase
+        .from('groups_legacy_projection')
+        .select('members, images')
+        .eq('id', groupId)
+        .single();
+
+      const { data: groupMediaRows, error: groupMediaError } = await supabase
+        .from('group_media')
+        .select('media_url, sort_order, created_at')
+        .eq('group_id', groupId)
+        .eq('media_type', 'image')
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true });
 
       if (groupError) {
         console.log('[manage_group] Failed to fetch group details:', groupError.message);
@@ -104,7 +177,62 @@ export default function GroupDetailsScreen() {
         // }
         throw groupError;
       }
-      setGroup(groupData);
+      if (legacyGroupError) {
+        throw legacyGroupError;
+      }
+
+      if (groupMediaError) {
+        console.log('[manage_group] Failed to fetch group_media, using legacy images fallback:', groupMediaError);
+      }
+
+      const mediaImages = (groupMediaRows || [])
+        .map((row: any) => row.media_url)
+        .filter((url: any) => typeof url === 'string' && url.trim().length > 0);
+
+      setGroup({
+        ...groupData,
+        members: legacyGroup?.members || [],
+        images:
+          mediaImages.length > 0
+            ? mediaImages
+            : (Array.isArray(legacyGroup?.images) ? legacyGroup.images : []),
+      });
+      setOpenGroupApplications(groupData?.open_group_applications !== false);
+
+      try {
+        const { data: memberRows, error: memberError } = await supabase
+          .from("group_members")
+          .select("user_id, role, profiles:user_id(full_name, avatar_url)")
+          .eq("group_id", groupId);
+
+        if (memberError) {
+          console.log("[manage_group] Failed to fetch group_members:", memberError);
+          setGroupMembers([]);
+        } else {
+          const legacyMembers = Array.isArray(legacyGroup?.members)
+            ? legacyGroup.members
+            : [];
+          const mappedMembers = (memberRows || []).map((row: any) => ({
+            user_id: row.user_id,
+            name: row.profiles?.full_name || "Member",
+            avatar_url: row.profiles?.avatar_url,
+            instrument:
+              legacyMembers.find(
+                (member: any) => member?.user_id && member.user_id === row.user_id,
+              )?.instrument || "",
+            role:
+              row.role === "owner" || row.user_id === groupData?.owner_id
+                ? "Leader"
+                : "Member",
+            membershipState: "active",
+            source: "group_members",
+          }));
+          setGroupMembers(mappedMembers);
+        }
+      } catch (memberErr) {
+        console.log("[manage_group] Exception fetching group_members:", memberErr);
+        setGroupMembers([]);
+      }
 
       // Fetch Group Applications (Sent)
       try {
@@ -166,20 +294,131 @@ export default function GroupDetailsScreen() {
     }
   };
 
-  const handleAction = (action: string) => {
-    if (action === "accept") {
-      setModalTitle("Accept Invitation");
-      setModalMessage("Are you sure you want to accept this invitation?");
-      setModalButtonText("Accept");
-    } else {
-      setModalTitle("Decline Invitation");
-      setModalMessage("Are you sure you want to decline this invitation?");
-      setModalButtonText("Decline");
-    }
+  const confirmLeaderDecision = (app: any, decision: "approved" | "rejected") => {
+    setModalTitle(
+      decision === "approved" ? "Approve Member Application" : "Reject Member Application",
+    );
+    setModalMessage(
+      decision === "approved"
+        ? `Approve ${app.applicant?.full_name || "this member"}'s application to ${app.gig?.name || "this gig"}?`
+        : `Reject ${app.applicant?.full_name || "this member"}'s application to ${app.gig?.name || "this gig"}?`,
+    );
+    setModalButtonText(decision === "approved" ? "Approve" : "Reject");
+    setModalAction(() => async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+
+        const { data, error } = await supabase.functions.invoke("gig-applications", {
+          body: {
+            action: "update_leader_approval",
+            applicationId: app.id,
+            decision,
+            userId: user.id,
+          },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+
+        setApplications((prev) =>
+          prev.map((a) => (a.id === app.id ? { ...a, ...data } : a)),
+        );
+        setModalVisible(false);
+      } catch (e: any) {
+        showAlert("error", "Update Failed", e?.message || "Failed to update leader decision.");
+      }
+    });
     setModalVisible(true);
   };
 
+  const handleToggleGigVisibility = async (value: boolean) => {
+    if (!currentUserId || updatingGigVisibility) return;
+
+    const previous = showGigStatuses;
+    setShowGigStatuses(value);
+    setUpdatingGigVisibility(true);
+
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ show_gig_statuses: value })
+        .eq("id", currentUserId);
+
+      if (error) throw error;
+
+      showAlert(
+        "success",
+        "Visibility Updated",
+        value
+          ? "Your Active, Upcoming, and Done gigs are now visible to users."
+          : "Your Active, Upcoming, and Done gigs are now hidden from users.",
+      );
+    } catch (e: any) {
+      setShowGigStatuses(previous);
+      showAlert(
+        "error",
+        "Update Failed",
+        e?.message || "Could not update gig visibility.",
+      );
+    } finally {
+      setUpdatingGigVisibility(false);
+    }
+  };
+
+  const handleToggleGroupApplications = async (value: boolean) => {
+    if (!currentUserId || !group?.id || updatingGroupApplications) return;
+
+    const previous = openGroupApplications;
+    setOpenGroupApplications(value);
+    setUpdatingGroupApplications(true);
+
+    try {
+      const { error } = await supabase
+        .from("groups")
+        .update({ open_group_applications: value })
+        .eq("id", group.id)
+        .eq("owner_id", currentUserId);
+
+      if (error) throw error;
+
+      setGroup((prev: any) =>
+        prev ? { ...prev, open_group_applications: value } : prev,
+      );
+
+      showAlert(
+        "success",
+        "Applications Setting Updated",
+        value
+          ? "Your group is now open for member applications."
+          : "Your group is now closed for member applications.",
+      );
+    } catch (e: any) {
+      setOpenGroupApplications(previous);
+      showAlert(
+        "error",
+        "Update Failed",
+        e?.message || "Could not update group applications setting.",
+      );
+    } finally {
+      setUpdatingGroupApplications(false);
+    }
+  };
+
   const tabs = ["About", "Applications", "Review"];
+  const hasSyncedMembers = groupMembers.length > 0;
+  const displayMembers = hasSyncedMembers ? groupMembers : group?.members || [];
+  const displayMemberCount = hasSyncedMembers
+    ? groupMembers.length
+    : group?.members?.length || 0;
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -208,6 +447,29 @@ export default function GroupDetailsScreen() {
   // Don't render if not authorized
   if (!authorized) {
     return null;
+  }
+
+  if (loading && !group) {
+    return (
+      <View
+        style={[
+          styles.flex1,
+          styles.centerContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text
+          style={{
+            marginTop: 16,
+            color: colors.textSecondary,
+            fontFamily: "Poppins_400Regular",
+          }}
+        >
+          Loading group details...
+        </Text>
+      </View>
+    );
   }
 
   return (
@@ -259,7 +521,7 @@ export default function GroupDetailsScreen() {
             ]}
           >
             {tabs.map((tab) => (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 key={tab}
                 onPress={() => setActiveTab(tab)}
                 style={[
@@ -310,6 +572,68 @@ export default function GroupDetailsScreen() {
                   </Text>
                 </View>
 
+                <View
+                  style={[
+                    styles.visibilityCard,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.visibilityTextWrap}>
+                    <Text style={[styles.visibilityTitle, { color: colors.text }]}>
+                      Show gig status publicly
+                    </Text>
+                    <Text
+                      style={[
+                        styles.visibilitySubtitle,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Controls Active, Upcoming, and Done badges on your group and musician cards.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={showGigStatuses}
+                    onValueChange={handleToggleGigVisibility}
+                    disabled={updatingGigVisibility}
+                    trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: colors.primary + "66" }}
+                    thumbColor={showGigStatuses ? colors.primary : "#9CA3AF"}
+                  />
+                </View>
+
+                <View
+                  style={[
+                    styles.visibilityCard,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={styles.visibilityTextWrap}>
+                    <Text style={[styles.visibilityTitle, { color: colors.text }]}>
+                      Open applications to this group
+                    </Text>
+                    <Text
+                      style={[
+                        styles.visibilitySubtitle,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Shows an Open Applications badge on your group cards in Home and Discover.
+                    </Text>
+                  </View>
+                  <Switch
+                    value={openGroupApplications}
+                    onValueChange={handleToggleGroupApplications}
+                    disabled={updatingGroupApplications}
+                    trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: colors.primary + "66" }}
+                    thumbColor={openGroupApplications ? colors.primary : "#9CA3AF"}
+                  />
+                </View>
+
                 <View style={{ flexDirection: "row", gap: 16 }}>
                   <View
                     style={[
@@ -323,10 +647,10 @@ export default function GroupDetailsScreen() {
                         { color: colors.textSecondary },
                       ]}
                     >
-                      Members
+                        {getGroupMembersLabel(group?.group_type)}
                     </Text>
                     <Text style={[styles.infoValue, { color: colors.text }]}>
-                      {group?.members?.length || 0}
+                      {displayMemberCount}
                     </Text>
                   </View>
                   <View
@@ -390,10 +714,20 @@ export default function GroupDetailsScreen() {
                       { color: colors.text, marginBottom: 12 },
                     ]}
                   >
-                    Members & Roles
+                    {getGroupMembersLabel(group?.group_type)} & Roles
                   </Text>
-                  {group?.members && group.members.length > 0 ? (
-                    group.members.map((member: any, index: number) => {
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      fontSize: 12,
+                      marginBottom: 10,
+                    }}
+                  >
+                    Source: {hasSyncedMembers ? "group_members (synced)" : "groups.members (legacy fallback)"}
+                  </Text>
+                  {displayMembers && displayMembers.length > 0 ? (
+                    displayMembers.map((member: any, index: number) => {
                       const memberName =
                         typeof member === "string"
                           ? member
@@ -403,7 +737,16 @@ export default function GroupDetailsScreen() {
                           ? ""
                           : member?.instrument || "";
                       const memberRole =
-                        typeof member === "string" ? "" : member?.role || "";
+                        typeof member === "string"
+                          ? ""
+                          : isGroupLeaderMember(member, group?.owner_id)
+                            ? "Leader"
+                            : member?.role || "";
+                      const membershipState =
+                        typeof member === "string"
+                          ? ""
+                          : member?.membershipState ||
+                            (member?.source === "group_members" ? "active" : "legacy");
                       return (
                         <View
                           key={index}
@@ -432,6 +775,29 @@ export default function GroupDetailsScreen() {
                                 {memberInstrument && memberRole ? " • " : ""}
                                 {memberRole}
                               </Text>
+                            )}
+                            {!!membershipState && (
+                              <View style={{ marginTop: 6, alignSelf: "flex-start" }}>
+                                <Text
+                                  style={[
+                                    styles.memberState,
+                                    {
+                                      color:
+                                        membershipState === "active"
+                                          ? "#10B981"
+                                          : colors.textSecondary,
+                                      borderColor:
+                                        membershipState === "active"
+                                          ? "#10B981"
+                                          : colors.border,
+                                    },
+                                  ]}
+                                >
+                                  {membershipState === "active"
+                                    ? "Active Member"
+                                    : "Legacy Member"}
+                                </Text>
+                              </View>
                             )}
                           </View>
                         </View>
@@ -487,56 +853,66 @@ export default function GroupDetailsScreen() {
                     No applications sent yet.
                   </Text>
                 ) : (
-                  applications.map((app) => (
-                    <View
-                      key={app.id}
-                      style={[
-                        styles.setupCard,
-                        { backgroundColor: colors.surface, marginBottom: 12 },
-                      ]}
-                    >
+                  applications.map((app) => {
+                    const rawStatus = String(app?.status || "pending");
+                    const normalizedStatus = rawStatus.toLowerCase();
+                    const statusColor =
+                      normalizedStatus === "approved" ||
+                      normalizedStatus === "accepted"
+                        ? "green"
+                        : normalizedStatus === "pending" ||
+                            normalizedStatus === "applied"
+                          ? "orange"
+                          : "red";
+
+                    return (
                       <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          marginBottom: 8,
-                        }}
+                        key={app.id}
+                        style={[
+                          styles.setupCard,
+                          { backgroundColor: colors.surface, marginBottom: 12 },
+                        ]}
                       >
-                        <Text
-                          style={[styles.setupTitle, { color: colors.text }]}
-                        >
-                          {app.gig?.name || "Unknown Gig"}
-                        </Text>
-                        <Text
+                        <View
                           style={{
-                            color:
-                              app.status === "approved"
-                                ? "green"
-                                : app.status === "pending"
-                                  ? "orange"
-                                  : "red",
-                            fontWeight: "bold",
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            marginBottom: 8,
                           }}
                         >
-                          {app.status.toUpperCase()}
+                          <Text
+                            style={[styles.setupTitle, { color: colors.text }]}
+                          >
+                            {app.gig?.name || "Unknown Gig"}
+                          </Text>
+                          <Text
+                            style={{
+                              color: statusColor,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {rawStatus.toUpperCase()}
+                          </Text>
+                        </View>
+                        <Text
+                          style={{ color: colors.textSecondary, marginBottom: 4 }}
+                        >
+                          {app.gig?.location || "Location N/A"}
+                        </Text>
+                        <Text
+                          style={{ color: colors.textSecondary, marginBottom: 8 }}
+                        >
+                          Payout: ₱{Number(app.gig?.budget || 0).toLocaleString()}
+                        </Text>
+                        <Text style={{ color: colors.textSecondary }}>
+                          Applied on:{" "}
+                          {app.created_at
+                            ? new Date(app.created_at).toLocaleDateString()
+                            : "N/A"}
                         </Text>
                       </View>
-                      <Text
-                        style={{ color: colors.textSecondary, marginBottom: 4 }}
-                      >
-                        {app.gig?.location}
-                      </Text>
-                      <Text
-                        style={{ color: colors.textSecondary, marginBottom: 8 }}
-                      >
-                        Payout: ₱{(app.gig?.budget || 0).toLocaleString()}
-                      </Text>
-                      <Text style={{ color: colors.textSecondary }}>
-                        Applied on:{" "}
-                        {new Date(app.created_at).toLocaleDateString()}
-                      </Text>
-                    </View>
-                  ))
+                    );
+                  })
                 )}
               </View>
             )}
@@ -646,6 +1022,19 @@ export default function GroupDetailsScreen() {
         title={modalTitle}
         message={modalMessage}
         buttonText={modalButtonText}
+        onConfirm={() => {
+          if (modalAction) {
+            modalAction();
+          }
+        }}
+      />
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
       />
     </>
   );
@@ -660,7 +1049,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   scrollContent: {
-    paddingBottom: 150,
+    paddingBottom: 180,
   },
   headerContainer: {
     paddingHorizontal: 24,
@@ -732,6 +1121,28 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontFamily: "Poppins_400Regular",
   },
+  visibilityCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  visibilityTextWrap: {
+    flex: 1,
+  },
+  visibilityTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 14,
+  },
+  visibilitySubtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    marginTop: 2,
+  },
   infoCard: {
     flex: 1,
     padding: 16,
@@ -776,6 +1187,16 @@ const styles = StyleSheet.create({
   availabilitySubtitle: {
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
+  },
+  memberState: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 10,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
   },
   toggleSwitch: {
     width: 48,
@@ -831,6 +1252,18 @@ const styles = StyleSheet.create({
     height: 112,
     borderRadius: 12,
     marginRight: 12,
+  },
+  actionBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionBtnText: {
+    color: "#FFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
   },
   invitationCard: {
     padding: 16,

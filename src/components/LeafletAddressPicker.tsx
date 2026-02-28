@@ -175,7 +175,7 @@ export default function LeafletAddressPicker({
 
     return (
         <>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 style={[
                     styles.pickerButton,
                     {
@@ -184,7 +184,7 @@ export default function LeafletAddressPicker({
                     },
                 ]}
                 onPress={() => setModalVisible(true)}
-                activeOpacity={0.7}
+                activeOpacity={1}
             >
                 <Ionicons
                     name="location-outline"
@@ -212,7 +212,7 @@ export default function LeafletAddressPicker({
                 <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
                     {/* Header */}
                     <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             onPress={() => setModalVisible(false)}
                             style={styles.closeBtn}
                         >
@@ -221,7 +221,7 @@ export default function LeafletAddressPicker({
                         <Text style={[styles.modalTitle, { color: colors.text }]}>
                             Select Address
                         </Text>
-                        <TouchableOpacity onPress={handleConfirm} style={styles.confirmBtn}>
+                        <TouchableOpacity activeOpacity={1} onPress={handleConfirm} style={styles.confirmBtn}>
                             <Text style={[styles.confirmText, { color: colors.primary }]}>
                                 Confirm
                             </Text>
@@ -248,7 +248,7 @@ export default function LeafletAddressPicker({
                             />
                             {searching && <ActivityIndicator size="small" color={colors.primary} />}
                         </View>
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             style={[styles.locationBtn, { backgroundColor: colors.primary }]}
                             onPress={handleGetCurrentLocation}
                             disabled={gettingLocation}

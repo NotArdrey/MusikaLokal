@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -28,6 +29,27 @@ export default function SubmitReviewScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: any[]
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   // Determine what we're reviewing based on params
   const entityName = params.entityName || 'this booking';
@@ -40,13 +62,14 @@ export default function SubmitReviewScreen() {
     : `How was your booking with ${entityName}?`;
 
   const handleSubmitReview = async () => {
+    if (submitting) return;
     if (!userId || !isAuthenticated) {
-      Alert.alert('Error', 'You must be logged in to submit a review.');
+      showAlert('error', 'Error', 'You must be logged in to submit a review.');
       return;
     }
 
     if (selectedValue === 0) {
-      Alert.alert('Error', 'Please select a rating.');
+      showAlert('error', 'Error', 'Please select a rating.');
       return;
     }
 
@@ -81,18 +104,18 @@ export default function SubmitReviewScreen() {
       if (error) throw error;
 
       if (data?.error) {
-        Alert.alert('Error', data.error);
+        showAlert('error', 'Error', data.error);
         return;
       }
 
       // Success - close modal and go back
       setModalVisible(false);
-      Alert.alert('Success', 'Your review has been submitted!', [
+      showAlert('success', 'Success', 'Your review has been submitted!', [
         { text: 'OK', onPress: () => router.back() }
       ]);
     } catch (e: any) {
       console.log('Review submission error:', e);
-      Alert.alert('Error', 'Failed to submit review. Please try again.');
+      showAlert('error', 'Error', 'Failed to submit review. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -122,7 +145,7 @@ export default function SubmitReviewScreen() {
                 <TouchableOpacity
                   key={item}
                   onPress={() => setSelectedValue(item)}
-                  activeOpacity={0.7}
+                  activeOpacity={1}
                 >
                   <Ionicons
                     name={item <= selectedValue ? "star" : "star-outline"}
@@ -161,7 +184,7 @@ export default function SubmitReviewScreen() {
                 if (selectedValue > 0 && !submitting) setModalVisible(true)
               }}
               disabled={selectedValue === 0 || submitting}
-              activeOpacity={0.8}
+              activeOpacity={1}
             >
               <Text style={styles.submitButtonText}>
                 {submitting ? 'Submitting...' : 'Submit Review'}
@@ -173,7 +196,7 @@ export default function SubmitReviewScreen() {
         <View style={styles.navbar}>
           <Navbar />
         </View>
-      </View>
+      </View >
 
       <Modal
         visible={modalVisible}
@@ -182,6 +205,22 @@ export default function SubmitReviewScreen() {
         message={`Are you sure you want to submit this ${selectedValue}-star review?`}
         buttonText={submitting ? "Submitting..." : "Submit"}
         onConfirm={handleSubmitReview}
+      />
+
+      <Modal
+        visible={submitting}
+        loading
+        loadingMessage="Submitting review..."
+        onClose={() => { }}
+      />
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
       />
     </>
   );

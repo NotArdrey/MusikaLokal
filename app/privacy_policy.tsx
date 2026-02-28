@@ -1,17 +1,25 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function PrivacyPolicyScreen() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title="Privacy Policy" />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: 190 + insets.bottom },
+        ]}
+      >
         <View style={styles.contentContainer}>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
             Musika Lokal respects your privacy and is committed to protecting your personal data. When you sign up, we may collect your name, email, phone number, password, and verification details such as uploaded ID, face scan, or profile photo. We also collect information related to wallet transactions, booking history, and derived performance metrics such as your booking completion rate and average response time. We also collect device usage data such as IP address and location if enabled.
@@ -47,7 +55,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 150,
+    paddingBottom: 24,
     paddingHorizontal: 24,
   },
   contentContainer: {

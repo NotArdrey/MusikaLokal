@@ -173,7 +173,7 @@ export default function ConflictResolutionModal({
             </Text>
             <View style={styles.quickActionsButtons}>
               {moveableCount > 0 && (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[styles.quickActionBtn, { backgroundColor: colors.primary + '20' }]}
                   onPress={handleMoveAll}
                 >
@@ -183,7 +183,7 @@ export default function ConflictResolutionModal({
                   </Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.quickActionBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}
                 onPress={handleCancelAll}
               >
@@ -251,7 +251,7 @@ export default function ConflictResolutionModal({
                 {/* Action Options */}
                 <View style={styles.actionOptions}>
                   {conflict.newAvailableSlot && (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       style={[
                         styles.actionOption,
                         {
@@ -308,7 +308,7 @@ export default function ConflictResolutionModal({
                     </TouchableOpacity>
                   )}
 
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     style={[
                       styles.actionOption,
                       {
@@ -366,7 +366,7 @@ export default function ConflictResolutionModal({
 
           {/* Footer Actions */}
           <View style={[styles.footer, { borderTopColor: colors.border }]}>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.cancelBtn, { borderColor: colors.border }]}
               onPress={onClose}
               disabled={isResolving}
@@ -376,7 +376,7 @@ export default function ConflictResolutionModal({
               </Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[
                 styles.resolveBtn,
                 {

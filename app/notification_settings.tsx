@@ -1,16 +1,90 @@
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function NotificationSettingsScreen() {
   const { colors, isDark } = useTheme();
+  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
   const [bookingConfirmed, setBookingConfirmed] = useState(true);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(true);
   const [uploadRequired, setUploadRequired] = useState(false);
   const [eventReminder, setEventReminder] = useState(true);
   const [leaveReview, setLeaveReview] = useState(false);
+
+  React.useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+          setLoading(false);
+          return;
+        }
+
+        setUserId(user.id);
+
+        const { data, error } = await supabase
+          .from('notification_preferences')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error loading notification preferences:', error);
+          setLoading(false);
+          return;
+        }
+
+        if (!data) {
+          const { error: insertError } = await supabase
+            .from('notification_preferences')
+            .insert({ user_id: user.id });
+
+          if (insertError) {
+            console.error('Error creating default notification preferences:', insertError);
+          }
+        } else {
+          setBookingConfirmed(data.booking_confirmed ?? true);
+          setAwaitingConfirmation(data.awaiting_confirmation ?? true);
+          setUploadRequired(data.upload_required ?? false);
+          setEventReminder(data.event_reminder ?? true);
+          setLeaveReview(data.leave_review ?? false);
+        }
+      } catch (e) {
+        console.error('Error initializing notification settings:', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPreferences();
+  }, []);
+
+  const savePreference = async (field: string, value: boolean) => {
+    if (!userId) return;
+
+    const { error } = await supabase
+      .from('notification_preferences')
+      .upsert({ user_id: userId, [field]: value }, { onConflict: 'user_id' });
+
+    if (error) {
+      console.error(`Error saving ${field}:`, error);
+    }
+  };
+
+  const handleToggle = (
+    setter: (value: boolean) => void,
+    field: string,
+  ) => (value: boolean) => {
+    setter(value);
+    void savePreference(field, value);
+  };
 
   const renderToggle = (label: string, description: string, value: boolean, onValueChange: (val: boolean) => void) => (
     <View
@@ -44,35 +118,43 @@ export default function NotificationSettingsScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <View style={styles.contentContainer}>
+          {loading ? (
+            <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 24 }}>
+              Loading notification settings...
+            </Text>
+          ) : (
+            <>
           {renderToggle(
             "Booking Confirmed",
             "Receive updates when your booking at a venue or studio is confirmed.",
             bookingConfirmed,
-            setBookingConfirmed
+            handleToggle(setBookingConfirmed, 'booking_confirmed')
           )}
           {renderToggle(
             "Awaiting Confirmation",
             "Get notified when your booking is pending approval from the host.",
             awaitingConfirmation,
-            setAwaitingConfirmation
+            handleToggle(setAwaitingConfirmation, 'awaiting_confirmation')
           )}
           {renderToggle(
             "Upload Required",
             "Reminders to upload necessary documents or proof for your events.",
             uploadRequired,
-            setUploadRequired
+            handleToggle(setUploadRequired, 'upload_required')
           )}
           {renderToggle(
             "Event Reminder",
             "Receive reminders before your scheduled events or sessions start.",
             eventReminder,
-            setEventReminder
+            handleToggle(setEventReminder, 'event_reminder')
           )}
           {renderToggle(
             "Leave a Review",
             "Get prompts to rate and review your experience after a booking.",
             leaveReview,
-            setLeaveReview
+            handleToggle(setLeaveReview, 'leave_review')
+          )}
+            </>
           )}
         </View>
       </ScrollView>

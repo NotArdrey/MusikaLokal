@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -97,6 +98,37 @@ export default function WalletScreen() {
   const [maxRefundableAmount, setMaxRefundableAmount] = useState(0);
   const [withdrawalMethod, setWithdrawalMethod] = useState<'payout' | 'refund'>('payout');
   const [checkingRefundEligibility, setCheckingRefundEligibility] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
+
+  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+    const lowerTitle = (title || '').toLowerCase();
+    let type: AlertType = 'info';
+    if (lowerTitle.includes('error') || lowerTitle.includes('failed') || lowerTitle.includes('invalid') || lowerTitle.includes('missing') || lowerTitle.includes('insufficient')) {
+      type = 'error';
+    } else if (lowerTitle.includes('success')) {
+      type = 'success';
+    } else if (lowerTitle.includes('warning')) {
+      type = 'warning';
+    }
+    showAlert(type, title || 'Notice', message || '', buttons);
+  };
+
+  const Alert = { alert: showAlertNative };
 
   const fetchWallet = async () => {
     try {
@@ -338,8 +370,9 @@ export default function WalletScreen() {
 
   // Handle actual withdrawal request
   const handleWithdraw = async () => {
+    if (withdrawing) return;
     const amount = parseFloat(withdrawAmount);
-    
+
     if (!amount || amount < 100) {
       Alert.alert('Invalid Amount', 'Minimum withdrawal amount is ₱100');
       return;
@@ -377,11 +410,13 @@ export default function WalletScreen() {
         Alert.alert(
           'Withdrawal Successful! 💸',
           data?.message || 'The amount will be refunded to your original payment method.',
-          [{ text: 'OK', onPress: () => {
-            setWithdrawModalVisible(false);
-            setWithdrawAmount('');
-            fetchWallet(); // Refresh to update balance
-          }}]
+          [{
+            text: 'OK', onPress: () => {
+              setWithdrawModalVisible(false);
+              setWithdrawAmount('');
+              fetchWallet(); // Refresh to update balance
+            }
+          }]
         );
       } catch (e: any) {
         Alert.alert('Error', e?.message || 'Failed to process withdrawal');
@@ -418,11 +453,13 @@ export default function WalletScreen() {
       Alert.alert(
         'Withdrawal Submitted! ✓',
         data?.message || 'Your payout will be processed within 1-3 business days.',
-        [{ text: 'OK', onPress: () => {
-          setWithdrawModalVisible(false);
-          setWithdrawAmount('');
-          fetchWallet(); // Refresh to update balance
-        }}]
+        [{
+          text: 'OK', onPress: () => {
+            setWithdrawModalVisible(false);
+            setWithdrawAmount('');
+            fetchWallet(); // Refresh to update balance
+          }
+        }]
       );
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to process withdrawal');
@@ -433,6 +470,7 @@ export default function WalletScreen() {
 
   // Add payout method
   const handleAddPayoutMethod = async () => {
+    if (addingPayoutMethod) return;
     if (!newAccountName.trim() || !newAccountNumber.trim()) {
       Alert.alert('Missing Information', 'Please fill in all required fields');
       return;
@@ -579,6 +617,7 @@ export default function WalletScreen() {
 
   // Subscribe to a plan
   const handleSubscribe = async (plan: SubscriptionPlan) => {
+    if (subscribing) return;
     try {
       setSubscribing(true);
       setSelectedPlan(plan);
@@ -670,6 +709,11 @@ export default function WalletScreen() {
   // Check if user is studio/venue owner
   const isOwner = userRole === 'studio-owner' || userRole === 'venue-owner';
 
+  const pendingWithdrawals = useMemo(
+    () => withdrawals.filter((w) => w.status === 'pending' || w.status === 'processing'),
+    [withdrawals],
+  );
+
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -711,7 +755,7 @@ export default function WalletScreen() {
 
             {/* Action Buttons */}
             <View style={styles.actionButtonsRow}>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={openWithdrawModal}
                 style={[
                   styles.actionButton,
@@ -721,7 +765,7 @@ export default function WalletScreen() {
                 <Ionicons name="arrow-down-circle-outline" size={20} color={colors.primary} />
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Withdraw</Text>
               </TouchableOpacity>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[
                   styles.actionButton,
                   { backgroundColor: colors.surface, borderColor: colors.border }
@@ -774,7 +818,7 @@ export default function WalletScreen() {
                         Balance: ₱{booking.remaining_balance?.toLocaleString()}
                       </Text>
                     </View>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => handlePayBalance(booking)}
                       disabled={payingBookingId === booking.id}
                       style={styles.payNowBtn}
@@ -833,14 +877,14 @@ export default function WalletScreen() {
 
                   <View style={styles.subscriptionActions}>
                     {!subscription.cancel_at_period_end && (
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() => setCancelSubscriptionModalVisible(true)}
                         style={styles.cancelSubBtn}
                       >
                         <Text style={styles.cancelSubText}>Cancel Subscription</Text>
                       </TouchableOpacity>
                     )}
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => setSubscriptionModalVisible(true)}
                       style={styles.manageSubBtn}
                     >
@@ -859,7 +903,7 @@ export default function WalletScreen() {
                     <Text style={[styles.noSubDesc, { color: colors.textSecondary }]}>
                       Subscribe to list your {userRole === 'studio-owner' ? 'studios' : 'venues'} and access powerful tools
                     </Text>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => setSubscriptionModalVisible(true)}
                       style={[styles.subscribeBtn, { backgroundColor: colors.primary }]}
                     >
@@ -873,11 +917,11 @@ export default function WalletScreen() {
           )}
 
           {/* Pending Withdrawals Section */}
-          {withdrawals.filter(w => w.status === 'pending' || w.status === 'processing').length > 0 && (
+          {pendingWithdrawals.length > 0 && (
             <View style={styles.historySection}>
               <Text style={[styles.historyTitle, { color: colors.text }]}>Pending Withdrawals</Text>
               <View style={[styles.historyContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                {withdrawals.filter(w => w.status === 'pending' || w.status === 'processing').map((withdrawal, index, arr) => (
+                {pendingWithdrawals.map((withdrawal, index, arr) => (
                   <View
                     key={withdrawal.id}
                     style={[
@@ -910,7 +954,7 @@ export default function WalletScreen() {
                         -₱{withdrawal.amount.toLocaleString()}
                       </Text>
                       {withdrawal.status === 'pending' && (
-                        <TouchableOpacity onPress={() => handleCancelWithdrawal(withdrawal.id)}>
+                        <TouchableOpacity activeOpacity={1} onPress={() => handleCancelWithdrawal(withdrawal.id)}>
                           <Text style={styles.cancelWithdrawalText}>Cancel</Text>
                         </TouchableOpacity>
                       )}
@@ -985,7 +1029,7 @@ export default function WalletScreen() {
         transparent={true}
         onRequestClose={() => setWithdrawModalVisible(false)}
       >
-        <KeyboardAvoidingView 
+        <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalOverlay}
         >
@@ -998,7 +1042,7 @@ export default function WalletScreen() {
                   Available: ₱{balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </Text>
               </View>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => setWithdrawModalVisible(false)}
                 style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
               >
@@ -1029,14 +1073,14 @@ export default function WalletScreen() {
               {/* Quick Amount Buttons */}
               <View style={styles.quickAmounts}>
                 {[100, 500, 1000, balance].map((amount, idx) => (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     key={idx}
                     onPress={() => setWithdrawAmount(amount.toString())}
                     style={[
                       styles.quickAmountBtn,
-                      { 
+                      {
                         backgroundColor: parseFloat(withdrawAmount) === amount ? colors.primary : colors.surface,
-                        borderColor: colors.border 
+                        borderColor: colors.border
                       }
                     ]}
                   >
@@ -1055,7 +1099,7 @@ export default function WalletScreen() {
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Withdrawal Method</Text>
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
                   {/* Payout Method Option */}
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     onPress={() => setWithdrawalMethod('payout')}
                     style={[
                       styles.methodOption,
@@ -1067,13 +1111,13 @@ export default function WalletScreen() {
                       }
                     ]}
                   >
-                    <Ionicons 
-                      name="wallet-outline" 
-                      size={24} 
-                      color={withdrawalMethod === 'payout' ? colors.primary : colors.textSecondary} 
+                    <Ionicons
+                      name="wallet-outline"
+                      size={24}
+                      color={withdrawalMethod === 'payout' ? colors.primary : colors.textSecondary}
                     />
                     <Text style={[
-                      styles.methodOptionTitle, 
+                      styles.methodOptionTitle,
                       { color: withdrawalMethod === 'payout' ? colors.primary : colors.text }
                     ]}>
                       Payout
@@ -1087,7 +1131,7 @@ export default function WalletScreen() {
                   </TouchableOpacity>
 
                   {/* Refund Method Option */}
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     onPress={() => hasRefundEligiblePayments && setWithdrawalMethod('refund')}
                     disabled={!hasRefundEligiblePayments && !checkingRefundEligibility}
                     style={[
@@ -1104,14 +1148,14 @@ export default function WalletScreen() {
                     {checkingRefundEligibility ? (
                       <ActivityIndicator size="small" color={colors.primary} />
                     ) : (
-                      <Ionicons 
-                        name="refresh-outline" 
-                        size={24} 
-                        color={withdrawalMethod === 'refund' ? colors.primary : colors.textSecondary} 
+                      <Ionicons
+                        name="refresh-outline"
+                        size={24}
+                        color={withdrawalMethod === 'refund' ? colors.primary : colors.textSecondary}
                       />
                     )}
                     <Text style={[
-                      styles.methodOptionTitle, 
+                      styles.methodOptionTitle,
                       { color: withdrawalMethod === 'refund' ? colors.primary : colors.text }
                     ]}>
                       Refund
@@ -1133,61 +1177,61 @@ export default function WalletScreen() {
 
               {/* Payout Method Section - Only show if payout method is selected */}
               {withdrawalMethod === 'payout' && (
-              <View style={styles.inputSection}>
-                <View style={styles.payoutMethodHeader}>
-                  <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Method</Text>
-                  <TouchableOpacity onPress={() => setAddPayoutModalVisible(true)}>
-                    <Text style={[styles.addMethodLink, { color: colors.primary }]}>+ Add New</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {loadingPayoutMethods ? (
-                  <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 20 }} />
-                ) : payoutMethods.length === 0 ? (
-                  <TouchableOpacity
-                    onPress={() => setAddPayoutModalVisible(true)}
-                    style={[styles.addPayoutBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                  >
-                    <Ionicons name="add-circle-outline" size={24} color={colors.primary} />
-                    <Text style={[styles.addPayoutText, { color: colors.primary }]}>Add Payout Method</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <View style={styles.payoutMethodsList}>
-                    {payoutMethods.map((method) => (
-                      <TouchableOpacity
-                        key={method.id}
-                        onPress={() => setSelectedPayoutMethod(method)}
-                        style={[
-                          styles.payoutMethodCard,
-                          {
-                            backgroundColor: colors.surface,
-                            borderColor: selectedPayoutMethod?.id === method.id ? colors.primary : colors.border,
-                            borderWidth: selectedPayoutMethod?.id === method.id ? 2 : 1
-                          }
-                        ]}
-                      >
-                        <View style={styles.payoutMethodLeft}>
-                          <View style={[styles.payoutIconBox, { backgroundColor: isDark ? colors.primaryLight : '#EEF2FF' }]}>
-                            <Ionicons name={getPayoutIcon(method.type) as any} size={20} color={colors.primary} />
-                          </View>
-                          <View>
-                            <Text style={[styles.payoutMethodName, { color: colors.text }]}>
-                              {getPayoutLabel(method.type)}
-                              {method.bank_name ? ` - ${method.bank_name}` : ''}
-                            </Text>
-                            <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]}>
-                              {method.account_name} • ****{method.account_number.slice(-4)}
-                            </Text>
-                          </View>
-                        </View>
-                        {selectedPayoutMethod?.id === method.id && (
-                          <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
-                        )}
-                      </TouchableOpacity>
-                    ))}
+                <View style={styles.inputSection}>
+                  <View style={styles.payoutMethodHeader}>
+                    <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Method</Text>
+                    <TouchableOpacity activeOpacity={1} onPress={() => setAddPayoutModalVisible(true)}>
+                      <Text style={[styles.addMethodLink, { color: colors.primary }]}>+ Add New</Text>
+                    </TouchableOpacity>
                   </View>
-                )}
-              </View>
+
+                  {loadingPayoutMethods ? (
+                    <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 20 }} />
+                  ) : payoutMethods.length === 0 ? (
+                    <TouchableOpacity activeOpacity={1}
+                      onPress={() => setAddPayoutModalVisible(true)}
+                      style={[styles.addPayoutBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    >
+                      <Ionicons name="add-circle-outline" size={24} color={colors.primary} />
+                      <Text style={[styles.addPayoutText, { color: colors.primary }]}>Add Payout Method</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.payoutMethodsList}>
+                      {payoutMethods.map((method) => (
+                        <TouchableOpacity activeOpacity={1}
+                          key={method.id}
+                          onPress={() => setSelectedPayoutMethod(method)}
+                          style={[
+                            styles.payoutMethodCard,
+                            {
+                              backgroundColor: colors.surface,
+                              borderColor: selectedPayoutMethod?.id === method.id ? colors.primary : colors.border,
+                              borderWidth: selectedPayoutMethod?.id === method.id ? 2 : 1
+                            }
+                          ]}
+                        >
+                          <View style={styles.payoutMethodLeft}>
+                            <View style={[styles.payoutIconBox, { backgroundColor: isDark ? colors.primaryLight : '#EEF2FF' }]}>
+                              <Ionicons name={getPayoutIcon(method.type) as any} size={20} color={colors.primary} />
+                            </View>
+                            <View>
+                              <Text style={[styles.payoutMethodName, { color: colors.text }]}>
+                                {getPayoutLabel(method.type)}
+                                {method.bank_name ? ` - ${method.bank_name}` : ''}
+                              </Text>
+                              <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]}>
+                                {method.account_name} • ****{method.account_number.slice(-4)}
+                              </Text>
+                            </View>
+                          </View>
+                          {selectedPayoutMethod?.id === method.id && (
+                            <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </View>
               )}
 
               {/* Refund Info Section - Only show if refund method is selected */}
@@ -1223,7 +1267,7 @@ export default function WalletScreen() {
               <View style={[styles.noteCard, { backgroundColor: isDark ? colors.surface : '#FEF3C7' }]}>
                 <Ionicons name="time-outline" size={20} color="#D97706" />
                 <Text style={[styles.noteText, { color: isDark ? colors.textSecondary : '#92400E' }]}>
-                  {withdrawalMethod === 'refund' 
+                  {withdrawalMethod === 'refund'
                     ? 'Refunds are typically processed within 5-7 business days depending on your payment provider.'
                     : 'Withdrawals are processed within 1-3 business days. You\'ll be notified once the transfer is complete.'
                   }
@@ -1232,11 +1276,11 @@ export default function WalletScreen() {
             </ScrollView>
 
             {/* Submit Button */}
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={handleWithdraw}
               disabled={
-                withdrawing || 
-                !withdrawAmount || 
+                withdrawing ||
+                !withdrawAmount ||
                 parseFloat(withdrawAmount) < 100 ||
                 (withdrawalMethod === 'payout' && !selectedPayoutMethod) ||
                 (withdrawalMethod === 'refund' && (!hasRefundEligiblePayments || parseFloat(withdrawAmount) > maxRefundableAmount))
@@ -1245,12 +1289,12 @@ export default function WalletScreen() {
                 styles.withdrawSubmitBtn,
                 {
                   backgroundColor: (
-                    !withdrawAmount || 
+                    !withdrawAmount ||
                     parseFloat(withdrawAmount) < 100 ||
                     (withdrawalMethod === 'payout' && !selectedPayoutMethod) ||
                     (withdrawalMethod === 'refund' && (!hasRefundEligiblePayments || parseFloat(withdrawAmount) > maxRefundableAmount))
-                  ) 
-                    ? colors.border 
+                  )
+                    ? colors.border
                     : colors.primary,
                   opacity: withdrawing ? 0.7 : 1
                 }
@@ -1278,14 +1322,14 @@ export default function WalletScreen() {
         transparent={true}
         onRequestClose={() => setAddPayoutModalVisible(false)}
       >
-        <KeyboardAvoidingView 
+        <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalOverlay}
         >
           <View style={[styles.addPayoutModal, { backgroundColor: colors.background }]}>
             <View style={styles.withdrawModalHeader}>
               <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Add Payout Method</Text>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => setAddPayoutModalVisible(false)}
                 style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
               >
@@ -1299,7 +1343,7 @@ export default function WalletScreen() {
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Payout Type</Text>
                 <View style={styles.payoutTypeGrid}>
                   {(['gcash', 'maya', 'bank', 'paypal'] as const).map((type) => (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={type}
                       onPress={() => setNewPayoutType(type)}
                       style={[
@@ -1310,10 +1354,10 @@ export default function WalletScreen() {
                         }
                       ]}
                     >
-                      <Ionicons 
-                        name={getPayoutIcon(type) as any} 
-                        size={24} 
-                        color={newPayoutType === type ? 'white' : colors.text} 
+                      <Ionicons
+                        name={getPayoutIcon(type) as any}
+                        size={24}
+                        color={newPayoutType === type ? 'white' : colors.text}
                       />
                       <Text style={[
                         styles.payoutTypeBtnText,
@@ -1355,14 +1399,14 @@ export default function WalletScreen() {
               {/* Account Number */}
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>
-                  {newPayoutType === 'gcash' || newPayoutType === 'maya' ? 'Mobile Number' : 
-                   newPayoutType === 'paypal' ? 'PayPal Email' : 'Account Number'}
+                  {newPayoutType === 'gcash' || newPayoutType === 'maya' ? 'Mobile Number' :
+                    newPayoutType === 'paypal' ? 'PayPal Email' : 'Account Number'}
                 </Text>
                 <TextInput
                   style={[styles.textInput, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.text }]}
                   placeholder={
                     newPayoutType === 'gcash' || newPayoutType === 'maya' ? '09XX XXX XXXX' :
-                    newPayoutType === 'paypal' ? 'email@example.com' : 'XXXX XXXX XXXX'
+                      newPayoutType === 'paypal' ? 'email@example.com' : 'XXXX XXXX XXXX'
                   }
                   placeholderTextColor={colors.textSecondary}
                   keyboardType={newPayoutType === 'paypal' ? 'email-address' : 'default'}
@@ -1373,7 +1417,7 @@ export default function WalletScreen() {
             </ScrollView>
 
             {/* Add Button */}
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={handleAddPayoutMethod}
               disabled={addingPayoutMethod}
               style={[styles.withdrawSubmitBtn, { backgroundColor: colors.primary, opacity: addingPayoutMethod ? 0.7 : 1 }]}
@@ -1416,7 +1460,7 @@ export default function WalletScreen() {
                 <Text style={[styles.plansModalTitle, { color: colors.text }]}>Subscribe</Text>
                 <Text style={[styles.plansModalSubtitle, { color: colors.textSecondary }]}>Get full access to MusikaLokal</Text>
               </View>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => setSubscriptionModalVisible(false)}
                 style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
               >
@@ -1476,7 +1520,7 @@ export default function WalletScreen() {
                       ))}
                     </View>
 
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => handleSubscribe(plan)}
                       disabled={subscribing || isCurrentPlan}
                       style={[
@@ -1502,6 +1546,36 @@ export default function WalletScreen() {
           </View>
         </View>
       </RNModal>
+
+      <CustomModal
+        visible={withdrawing}
+        loading
+        loadingMessage="Processing withdrawal..."
+        onClose={() => { }}
+      />
+
+      <CustomModal
+        visible={addingPayoutMethod}
+        loading
+        loadingMessage="Adding payout method..."
+        onClose={() => { }}
+      />
+
+      <CustomModal
+        visible={subscribing}
+        loading
+        loadingMessage="Setting up subscription..."
+        onClose={() => { }}
+      />
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
     </>
   );
 }

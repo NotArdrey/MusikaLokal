@@ -38,6 +38,30 @@ serve(async (req: Request) => {
 
             if (entityError) throw entityError
 
+            if (type === 'group') {
+                const { data: mediaRows, error: mediaError } = await supabaseClient
+                    .from('group_media')
+                    .select('media_url, sort_order, created_at')
+                    .eq('group_id', id)
+                    .eq('media_type', 'image')
+                    .order('sort_order', { ascending: true })
+                    .order('created_at', { ascending: true })
+
+                if (!mediaError) {
+                    const mediaImages = (mediaRows || [])
+                        .map((row: any) => row.media_url)
+                        .filter((url: any) => typeof url === 'string' && url.trim().length > 0)
+
+                    if (mediaImages.length > 0) {
+                        entity.images = mediaImages
+                    } else if (!Array.isArray(entity.images)) {
+                        entity.images = []
+                    }
+                } else if (!Array.isArray(entity.images)) {
+                    entity.images = []
+                }
+            }
+
             // Check Ownership
             let isOwner = false
             if (type === 'gig') {

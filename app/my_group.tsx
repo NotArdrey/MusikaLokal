@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { Alert, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import CachedImage from '../src/components/CachedImage';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
@@ -14,9 +16,28 @@ export default function MyGroupScreen() {
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [selectedName, setSelectedName] = useState('');
+    const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
     const [groups, setGroups] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: AlertType;
+        title: string;
+        message: string;
+        buttons?: any[];
+    }>({
+        type: 'info',
+        title: '',
+        message: '',
+    });
+
+    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+        setAlertConfig({ type, title, message, buttons });
+        setAlertVisible(true);
+    };
 
     const fetchGroups = async () => {
         if (!userId) return;
@@ -29,11 +50,45 @@ export default function MyGroupScreen() {
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            setGroups((data || []).map((item: any) => ({
-                ...item,
-                rating: item.rating || 0,
-                review_count: item.review_count || 0
-            })));
+
+            const groupRows = data || [];
+            const groupIds = groupRows.map((item: any) => item.id).filter(Boolean);
+
+            let mediaByGroupId = new Map<string, string[]>();
+            if (groupIds.length > 0) {
+                const { data: mediaRows, error: mediaError } = await supabase
+                    .from('group_media')
+                    .select('group_id, media_url, sort_order, created_at')
+                    .in('group_id', groupIds)
+                    .eq('media_type', 'image')
+                    .order('group_id', { ascending: true })
+                    .order('sort_order', { ascending: true })
+                    .order('created_at', { ascending: true });
+
+                if (mediaError) {
+                    console.log('Error fetching group_media, using groups_with_stats images fallback:', mediaError);
+                }
+
+                for (const row of mediaRows || []) {
+                    const groupId = row.group_id as string;
+                    const url = row.media_url as string;
+                    if (!groupId || typeof url !== 'string' || url.trim().length === 0) continue;
+                    if (!mediaByGroupId.has(groupId)) mediaByGroupId.set(groupId, []);
+                    mediaByGroupId.get(groupId)!.push(url);
+                }
+            }
+
+            setGroups(groupRows.map((item: any) => {
+                const mediaImages = mediaByGroupId.get(item.id) || [];
+                return {
+                    ...item,
+                    images: mediaImages.length > 0
+                        ? mediaImages
+                        : (Array.isArray(item.images) ? item.images : []),
+                    rating: item.rating || 0,
+                    review_count: item.review_count || 0
+                };
+            }));
         } catch (e) {
             console.log('Error fetching groups:', e);
         } finally {
@@ -55,33 +110,77 @@ export default function MyGroupScreen() {
         fetchGroups();
     };
 
-    const confirmDelete = (id: string) => {
+    const closeDeleteModal = () => {
+        setModalVisible(false);
+        setSelectedId(null);
+        setSelectedName('');
+        setDeleteConfirmationText('');
+    };
+
+    const confirmDelete = (id: string, name: string) => {
         setSelectedId(id);
+        setSelectedName(name || '');
+        setDeleteConfirmationText('');
         setModalVisible(true);
     };
 
-    const handleDelete = async () => {
-        if (!selectedId || !userId) return;
-        try {
-            // First delete from group_members
-            await supabase
-                .from('group_members')
-                .delete()
-                .eq('group_id', selectedId);
+    const isDeleteConfirmed = deleteConfirmationText.trim() === selectedName.trim();
 
-            // Then delete from groups table
-            const { error } = await supabase
-                .from('groups')
-                .delete()
-                .eq('id', selectedId)
-                .eq('owner_id', userId);
+    const handleDelete = async () => {
+        if (!selectedId || !userId || deleting) return;
+        if (!isDeleteConfirmed) {
+            showAlert('warning', 'Confirmation Needed', `Please type "${selectedName}" exactly to confirm deletion.`);
+            return;
+        }
+        setDeleting(true);
+        try {
+            const { data, error } = await supabase.rpc('delete_group_safely', {
+                p_group_id: selectedId,
+                p_reason: 'Deleted from My Group screen by owner',
+            });
 
             if (error) throw error;
-            setGroups(groups.filter(g => g.id !== selectedId));
-            setModalVisible(false);
+
+            const result: any = data;
+            if (!result?.success) {
+                if (result?.code === 'ACTIVE_ACCEPTED_APPLICATIONS_EXIST') {
+                    showAlert(
+                        'warning',
+                        'Delete Blocked',
+                        `This group still has ${result.accepted_application_count || 0} accepted application(s)${(result.pending_application_count || 0) > 0 ? ` and ${result.pending_application_count} pending application(s)` : ''}. Resolve accepted applications first before deleting.`
+                    );
+                    closeDeleteModal();
+                    return;
+                }
+
+                if (result?.code === 'PENDING_LEADERSHIP_TRANSFER_EXISTS') {
+                    showAlert(
+                        'warning',
+                        'Delete Blocked',
+                        `This group has ${result.pending_transfer_count || 0} pending leadership transfer request(s). Cancel pending transfer request(s) first before deleting.`
+                    );
+                    closeDeleteModal();
+                    return;
+                }
+
+                if (result?.code === 'GROUP_NOT_FOUND') {
+                    showAlert('warning', 'Not Found', 'Group was not found. It may have already been removed.');
+                    setGroups(prev => prev.filter(g => g.id !== selectedId));
+                    closeDeleteModal();
+                    return;
+                }
+
+                throw new Error(result?.message || 'Delete failed');
+            }
+
+            setGroups(prev => prev.filter(g => g.id !== selectedId));
+            closeDeleteModal();
+            showAlert('success', 'Group Deleted', 'Group deleted successfully.');
         } catch (e) {
             console.log('Error deleting group:', e);
-            Alert.alert('Error', 'Failed to delete group');
+            showAlert('error', 'Error', 'Failed to delete group');
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -96,7 +195,7 @@ export default function MyGroupScreen() {
                     style={styles.flex1}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
-                    {loading ? (
+                        {loading ? (
                         <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading groups...</Text>
                     ) : groups.length === 0 ? (
                         <View style={styles.emptyState}>
@@ -110,10 +209,13 @@ export default function MyGroupScreen() {
                                 shadowColor: colors.primary,
                             }]}>
                                 <View style={styles.imageWrapper}>
-                                    <Image
-                                        source={{ uri: (group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop' }}
+                                    <CachedImage
+                                        uri={(group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop'}
                                         style={styles.cardImage}
-                                        resizeMode="cover"
+                                        width={800}
+                                        height={384}
+                                        quality={72}
+                                        cacheVersion={group.updated_at || group.created_at || group.id}
                                     />
                                     <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
                                         <Text style={[styles.activeText, { color: colors.primary }]}>Active</Text>
@@ -128,7 +230,7 @@ export default function MyGroupScreen() {
 
                                     <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                         <View style={styles.actionLeft}>
-                                            <TouchableOpacity
+                                            <TouchableOpacity activeOpacity={1}
                                                 onPress={() => router.push({ pathname: '/manage_group', params: { id: group.id } })}
                                                 style={[styles.manageBtn, { backgroundColor: colors.primary }]}
                                             >
@@ -136,7 +238,7 @@ export default function MyGroupScreen() {
                                                 <Text style={styles.manageBtnText}>Manage</Text>
                                             </TouchableOpacity>
 
-                                            <TouchableOpacity
+                                            <TouchableOpacity activeOpacity={1}
                                                 onPress={() => router.push({
                                                     pathname: '/chat',
                                                     params: {
@@ -149,7 +251,7 @@ export default function MyGroupScreen() {
                                                 <Ionicons name="chatbubbles-outline" size={20} color={colors.text} />
                                             </TouchableOpacity>
 
-                                            <TouchableOpacity
+                                            <TouchableOpacity activeOpacity={1}
                                                 onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
                                                 style={[styles.editBtn, { borderColor: colors.border }]}
                                             >
@@ -157,8 +259,8 @@ export default function MyGroupScreen() {
                                             </TouchableOpacity>
                                         </View>
 
-                                        <TouchableOpacity
-                                            onPress={() => confirmDelete(group.id)}
+                                        <TouchableOpacity activeOpacity={1}
+                                            onPress={() => confirmDelete(group.id, group.name)}
                                             style={styles.deleteBtn}
                                         >
                                             <Ionicons name="trash-outline" size={20} color="#EF4444" />
@@ -174,11 +276,26 @@ export default function MyGroupScreen() {
             </View>
             <Modal
                 visible={modalVisible}
-                onClose={() => setModalVisible(false)}
+                onClose={closeDeleteModal}
                 title="Delete Group"
-                message="Are you sure you want to delete this group?"
-                buttonText="Delete"
+                message={`Type "${selectedName}" to confirm deleting this group.`}
+                buttonText={deleting ? 'Deleting...' : 'Delete'}
                 onConfirm={handleDelete}
+                danger
+                showInput
+                inputMultiline={false}
+                inputPlaceholder="Type group name"
+                inputValue={deleteConfirmationText}
+                onInputChange={setDeleteConfirmationText}
+                confirmDisabled={!isDeleteConfirmed || deleting}
+            />
+            <CustomAlert
+                visible={alertVisible}
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
             />
         </>
     );
@@ -190,7 +307,7 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         paddingHorizontal: 24,
-        paddingBottom: 150,
+        paddingBottom: 180,
         paddingTop: 16,
     },
     loadingText: {

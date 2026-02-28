@@ -81,6 +81,28 @@ export default function PaymentResultScreen() {
         }
       } else if (params.booking_id) {
         try {
+          if (isSuccess) {
+            const maxRetries = 4;
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              const { data: checkData, error: checkError } = await supabase.functions.invoke('paymongo', {
+                body: {
+                  action: 'check_payment',
+                  booking_id: params.booking_id
+                }
+              });
+
+              if (checkError) {
+                console.error('Error checking payment status:', checkError);
+              }
+
+              if (checkData?.payment_status === 'paid' || checkData?.payment_status === 'partial') {
+                break;
+              }
+
+              await new Promise(resolve => setTimeout(resolve, 1200 * attempt));
+            }
+          }
+
           const { data, error } = await supabase
             .from('studio_bookings')
             .select(`
@@ -98,73 +120,6 @@ export default function PaymentResultScreen() {
 
           if (data && !error) {
             setBookingDetails(data);
-
-            // If payment was successful, update the booking status
-            if (isSuccess && data.payment_status !== 'paid' && data.payment_status !== 'partial') {
-              console.log('💳 Confirming booking payment...');
-
-              // Determine payment status based on payment type
-              const isDownpayment = data.payment_type === 'downpayment' && data.remaining_balance > 0;
-              const newPaymentStatus = isDownpayment ? 'partial' : 'paid';
-
-              console.log('💰 Payment type:', data.payment_type, 'Remaining:', data.remaining_balance, 'Status:', newPaymentStatus);
-
-              // Update booking status directly in database
-              const updateData: any = {
-                payment_status: newPaymentStatus,
-                paid_at: new Date().toISOString(),
-                status: 'confirmed',
-              };
-
-              // If it's a full/balance payment, clear remaining balance
-              if (!isDownpayment) {
-                updateData.remaining_balance = 0;
-              }
-
-              const { error: updateError } = await supabase
-                .from('studio_bookings')
-                .update(updateData)
-                .eq('id', params.booking_id);
-
-              if (updateError) {
-                console.error('Error confirming booking:', JSON.stringify(updateError, null, 2));
-              } else {
-                console.log('✅ Booking payment confirmed successfully!', { status: newPaymentStatus });
-
-                // Get current user for notification
-                const { data: { user } } = await supabase.auth.getUser();
-
-                // Send confirmation notification with appropriate message
-                if (user) {
-                  const notificationTitle = isDownpayment
-                    ? 'Downpayment Received! 🎉'
-                    : 'Payment Successful! 🎉';
-                  const notificationMessage = isDownpayment
-                    ? `Your downpayment for ${Array.isArray(data.studio) ? data.studio[0]?.name : data.studio?.name || 'the studio'} has been received. Remaining balance: ₱${data.remaining_balance?.toLocaleString() || 0}`
-                    : `Your booking at ${Array.isArray(data.studio) ? data.studio[0]?.name : data.studio?.name || 'the studio'} has been confirmed.`;
-
-                  await supabase.from('notifications').insert({
-                    user_id: user.id,
-                    type: 'success',
-                    title: notificationTitle,
-                    message: notificationMessage,
-                    read: false,
-                    meta: {
-                      booking_id: params.booking_id,
-                      type: 'booking_confirmation'
-                    }
-                  });
-                }
-
-                // Update local state to reflect changes
-                setBookingDetails({
-                  ...data,
-                  payment_status: newPaymentStatus,
-                  status: 'confirmed',
-                  remaining_balance: isDownpayment ? data.remaining_balance : 0
-                });
-              }
-            }
           }
         } catch (e) {
           console.error('Error fetching booking:', e);
@@ -174,7 +129,7 @@ export default function PaymentResultScreen() {
     };
 
     fetchDetails();
-  }, [params.booking_id, params.plan_id, isSubscription]);
+  }, [params.booking_id, params.plan_id, isSubscription, isSuccess]);
 
   const handleGoToBookings = () => {
     router.replace({
@@ -343,7 +298,7 @@ export default function PaymentResultScreen() {
         <View style={styles.buttonsContainer}>
           {isSubscription ? (
             <>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.primaryButton, { backgroundColor: colors.primary }]}
                 onPress={handleGoToWallet}
               >
@@ -353,7 +308,7 @@ export default function PaymentResultScreen() {
                 </Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.secondaryButton, { borderColor: colors.primary }]}
                 onPress={() => router.replace('/home')}
               >
@@ -365,7 +320,7 @@ export default function PaymentResultScreen() {
             </>
           ) : (
             <>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.primaryButton, { backgroundColor: colors.primary }]}
                 onPress={handleGoToBookings}
               >
@@ -376,7 +331,7 @@ export default function PaymentResultScreen() {
               </TouchableOpacity>
 
               {!isSuccess && (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[styles.secondaryButton, { borderColor: colors.primary }]}
                   onPress={handleRetryPayment}
                 >

@@ -2,15 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import { useTheme } from "../src/context/ThemeContext";
@@ -32,6 +32,27 @@ export default function ChangePasswordScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: any[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   // Handle the recovery token if present
   useEffect(() => {
@@ -44,7 +65,8 @@ export default function ChangePasswordScreen() {
           });
           if (error) {
             console.error("Error setting session from recovery:", error);
-            Alert.alert(
+            showAlert(
+              "error",
               "Error",
               "Invalid or expired reset link. Please request a new one.",
             );
@@ -65,18 +87,19 @@ export default function ChangePasswordScreen() {
   };
 
   const handleUpdatePassword = async () => {
+    if (loading) return;
     setModalVisible(false);
 
     // Validate new password
     const passwordError = validatePassword(newPassword);
     if (passwordError) {
-      Alert.alert("Error", passwordError);
+      showAlert("error", "Error", passwordError);
       return;
     }
 
     // Check if passwords match
     if (newPassword !== confirmPassword) {
-      Alert.alert("Error", "New passwords do not match.");
+      showAlert("error", "Error", "New passwords do not match.");
       return;
     }
 
@@ -90,7 +113,7 @@ export default function ChangePasswordScreen() {
 
         if (error) {
           console.error("Password update error:", error);
-          Alert.alert("Error", error.message || "Failed to update password.");
+          showAlert("error", "Error", error.message || "Failed to update password.");
         } else {
           setSuccessModalVisible(true);
         }
@@ -101,7 +124,7 @@ export default function ChangePasswordScreen() {
         } = await supabase.auth.getUser();
 
         if (!user?.email) {
-          Alert.alert("Error", "Unable to verify user. Please log in again.");
+          showAlert("error", "Error", "Unable to verify user. Please log in again.");
           return;
         }
 
@@ -112,7 +135,7 @@ export default function ChangePasswordScreen() {
         });
 
         if (signInError) {
-          Alert.alert("Error", "Current password is incorrect.");
+          showAlert("error", "Error", "Current password is incorrect.");
           return;
         }
 
@@ -123,7 +146,8 @@ export default function ChangePasswordScreen() {
 
         if (updateError) {
           console.error("Password update error:", updateError);
-          Alert.alert(
+          showAlert(
+            "error",
             "Error",
             updateError.message || "Failed to update password.",
           );
@@ -133,7 +157,7 @@ export default function ChangePasswordScreen() {
       }
     } catch (e: any) {
       console.error("Password change exception:", e);
-      Alert.alert("Error", "An unexpected error occurred. Please try again.");
+      showAlert("error", "Error", "An unexpected error occurred. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -177,7 +201,7 @@ export default function ChangePasswordScreen() {
           onChangeText={setValue}
           secureTextEntry={!show}
         />
-        <TouchableOpacity style={styles.eyeIcon} onPress={() => setShow(!show)}>
+        <TouchableOpacity activeOpacity={1} style={styles.eyeIcon} onPress={() => setShow(!show)}>
           <Ionicons
             name={show ? "eye-outline" : "eye-off-outline"}
             size={22}
@@ -225,7 +249,7 @@ export default function ChangePasswordScreen() {
         </View>
 
         <View style={styles.buttonContainer}>
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[
               styles.button,
               {
@@ -237,19 +261,19 @@ export default function ChangePasswordScreen() {
             onPress={() => {
               // Validate before showing modal
               if (!isResetFlow && !currentPassword) {
-                Alert.alert("Error", "Please enter your current password.");
+                showAlert("error", "Error", "Please enter your current password.");
                 return;
               }
               if (!newPassword) {
-                Alert.alert("Error", "Please enter a new password.");
+                showAlert("error", "Error", "Please enter a new password.");
                 return;
               }
               if (!confirmPassword) {
-                Alert.alert("Error", "Please confirm your new password.");
+                showAlert("error", "Error", "Please confirm your new password.");
                 return;
               }
               if (newPassword !== confirmPassword) {
-                Alert.alert("Error", "New passwords do not match.");
+                showAlert("error", "Error", "New passwords do not match.");
                 return;
               }
               setModalVisible(true);
@@ -291,6 +315,22 @@ export default function ChangePasswordScreen() {
         }
         buttonText="OK"
         onConfirm={handleSuccessClose}
+      />
+
+      <Modal
+        visible={loading}
+        loading
+        loadingMessage="Updating password..."
+        onClose={() => { }}
+      />
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
       />
     </>
   );

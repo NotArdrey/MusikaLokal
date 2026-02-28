@@ -13,8 +13,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import {
     EXPERIENCE_OPTIONS,
@@ -29,6 +31,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function AiSuggestionsScreen() {
     const { colors, isDark } = useTheme();
+    const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
 
     // State
@@ -195,7 +198,7 @@ export default function AiSuggestionsScreen() {
                             {userRoles.map(role => {
                                 const isSelected = currentInstruments.includes(role);
                                 return (
-                                    <TouchableOpacity
+                                    <TouchableOpacity activeOpacity={1}
                                         key={role}
                                         onPress={() => toggleCurrentInstrument(role)}
                                         style={[
@@ -263,7 +266,7 @@ export default function AiSuggestionsScreen() {
                     autoCorrect={false}
                 />
                 {genreSearch.length > 0 && (
-                    <TouchableOpacity onPress={() => setGenreSearch('')}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => setGenreSearch('')}>
                         <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
                     </TouchableOpacity>
                 )}
@@ -285,7 +288,7 @@ export default function AiSuggestionsScreen() {
                     const isSelected = selectedGenres.includes(genre);
                     const isFromProfile = userGenres.includes(genre);
                     return (
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             key={genre}
                             onPress={() => toggleGenre(genre)}
                             style={[
@@ -322,7 +325,7 @@ export default function AiSuggestionsScreen() {
                 {EXPERIENCE_OPTIONS.map(option => {
                     const isSelected = experienceLevel === option.value;
                     return (
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             key={option.value}
                             onPress={() => setExperienceLevel(option.value)}
                             style={[
@@ -359,7 +362,7 @@ export default function AiSuggestionsScreen() {
                 {PURPOSE_OPTIONS.map(option => {
                     const isSelected = purpose === option.value;
                     return (
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             key={option.value}
                             onPress={() => setPurpose(option.value)}
                             style={[
@@ -550,7 +553,7 @@ export default function AiSuggestionsScreen() {
             {renderPurposeSelector()}
 
             {/* Get Suggestions Button */}
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 onPress={fetchSuggestions}
                 disabled={loading || loadingProfile || selectedGenres.length === 0}
                 style={[
@@ -589,7 +592,7 @@ export default function AiSuggestionsScreen() {
             showsVerticalScrollIndicator={false}
         >
             {/* Back Button */}
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 onPress={() => setStep('preferences')}
                 style={styles.backButton}
             >
@@ -664,7 +667,7 @@ export default function AiSuggestionsScreen() {
             {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}
 
             {/* Refresh Button */}
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 onPress={fetchSuggestions}
                 disabled={loading}
                 style={[styles.secondaryButton, { borderColor: '#8B5CF6', backgroundColor: '#8B5CF6' + '10' }]}
@@ -687,16 +690,23 @@ export default function AiSuggestionsScreen() {
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <Header title="AI Suggestions" />
 
-            {/* Error Message */}
-            {error && (
-                <View style={[styles.errorContainer, { backgroundColor: '#FEE2E2' }]}>
-                    <Ionicons name="warning" size={20} color="#DC2626" />
-                    <Text style={styles.errorText}>{error}</Text>
-                </View>
-            )}
+            {isGuest ? (
+                <GuestSignInGate message="Sign in to use AI instrument suggestions." />
+            ) : (
+                <>
 
-            {/* Content */}
-            {step === 'preferences' ? renderPreferencesStep() : renderResultsStep()}
+                    {/* Error Message */}
+                    {error && (
+                        <View style={[styles.errorContainer, { backgroundColor: '#FEE2E2' }]}>
+                            <Ionicons name="warning" size={20} color="#DC2626" />
+                            <Text style={styles.errorText}>{error}</Text>
+                        </View>
+                    )}
+
+                    {/* Content */}
+                    {step === 'preferences' ? renderPreferencesStep() : renderResultsStep()}
+                </>
+            )}
 
             <Navbar />
         </View>

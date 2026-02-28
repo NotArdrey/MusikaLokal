@@ -93,14 +93,10 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
         };
 
         return (
-            <TouchableOpacity
-                style={[
-                    styles.conversationItem,
-                    {
-                        backgroundColor: 'transparent', // Messenger doesn't change bg for unread
-                    },
-                ]}
+            <TouchableOpacity activeOpacity={1}
+                style={styles.conversationItem}
                 onPress={() => onSelectConversation(item)}
+                activeOpacity={1}
             >
                 <View style={styles.avatarContainer}>
                     {isGroup ? (
@@ -113,18 +109,14 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                         </View>
                     ) : (
                         displayAvatar ? (
-                            <Image
-                                source={{ uri: displayAvatar }}
-                                style={styles.avatar}
-                            />
+                            <Image source={{ uri: displayAvatar }} style={styles.avatar} />
                         ) : (
-                            <Image
-                                source={DEFAULT_AVATAR}
-                                style={styles.avatar}
-                            />
+                            <Image source={DEFAULT_AVATAR} style={styles.avatar} />
                         )
                     )}
-                    {hasUnread && <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />}
+                    {hasUnread && (
+                        <View style={[styles.unreadDot, { backgroundColor: colors.primary, borderColor: isDark ? colors.background : '#FFFFFF' }]} />
+                    )}
                 </View>
                 <View style={styles.conversationContent}>
                     <View style={styles.conversationHeader}>
@@ -132,7 +124,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                             {isGroup && (
                                 <Ionicons
                                     name="people"
-                                    size={14}
+                                    size={13}
                                     color={colors.textSecondary}
                                     style={{ marginRight: 4 }}
                                 />
@@ -142,8 +134,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                                     styles.conversationName,
                                     {
                                         color: colors.text,
-                                        fontWeight: hasUnread ? '800' : '500', // Bolder for unread
-                                        fontSize: 17,
+                                        fontWeight: hasUnread ? '700' : '500',
                                     },
                                 ]}
                                 numberOfLines={1}
@@ -151,29 +142,34 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                                 {displayName || 'Chat'}
                             </Text>
                         </View>
-                        <Text style={[styles.conversationTime, { color: colors.textSecondary }]}>
-                            {lastMessage ? formatTime(lastMessage.created_at) : ''}
-                        </Text>
+                        <View style={styles.timeAndBadgeRow}>
+                            <Text style={[
+                                styles.conversationTime,
+                                { color: hasUnread ? colors.primary : colors.textSecondary },
+                            ]}>
+                                {lastMessage ? formatTime(lastMessage.created_at) : ''}
+                            </Text>
+                            {hasUnread && (
+                                <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
+                                    <Text style={styles.unreadCount}>
+                                        {(item.unread_count || 0) > 99 ? '99+' : item.unread_count}
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
                     </View>
-                    <View style={styles.conversationPreview}>
-                        <Text
-                            style={[
-                                styles.lastMessage,
-                                {
-                                    color: hasUnread ? colors.text : colors.textSecondary,
-                                    fontWeight: hasUnread ? '500' : '400',
-                                },
-                            ]}
-                            numberOfLines={1}
-                        >
-                            {getPreviewText()}
-                        </Text>
-                        {hasUnread && (
-                            <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
-                                {/* Messenger uses a simple dot or small badge. We'll keep the badge but make it small if just a dot */}
-                            </View>
-                        )}
-                    </View>
+                    <Text
+                        style={[
+                            styles.lastMessage,
+                            {
+                                color: hasUnread ? colors.text : colors.textSecondary,
+                                fontWeight: hasUnread ? '500' : '400',
+                            },
+                        ]}
+                        numberOfLines={1}
+                    >
+                        {getPreviewText()}
+                    </Text>
                     {isGroup && (
                         <Text style={[styles.memberCount, { color: colors.textSecondary }]}>
                             {item.participant_count || 0} members
@@ -187,7 +183,6 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             {/* Header */}
-            {/* Header */}
             <View
                 style={[
                     styles.header,
@@ -198,24 +193,24 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                 ]}
             >
                 <View style={styles.headerTopRow}>
-                    <TouchableOpacity style={styles.profileIcon}>
-                        {/* Placeholder for user profile if needed, or just padding */}
-                    </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: colors.text }]}>Chats</Text>
-                    <TouchableOpacity style={styles.headerAction} onPress={() => setShowNewMessageModal(true)}>
-                        <Ionicons name="create-outline" size={28} color={colors.primary} />
+                    <Text style={[styles.headerTitle, { color: colors.text }]}>Messages</Text>
+                    <TouchableOpacity activeOpacity={1}
+                        style={[styles.composeBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)' }]}
+                        onPress={() => setShowNewMessageModal(true)}
+                    >
+                        <Ionicons name="create-outline" size={22} color={colors.primary} />
                     </TouchableOpacity>
                 </View>
 
                 {/* Search Bar */}
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                     style={styles.searchContainer}
                     onPress={() => setShowNewMessageModal(true)}
-                    activeOpacity={0.9}
+                    activeOpacity={1}
                 >
-                    <View style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
-                        <Ionicons name="search" size={20} color={colors.textSecondary} style={{ marginRight: 8 }} />
-                        <Text style={{ color: colors.textSecondary, fontSize: 16 }}>Search</Text>
+                    <View style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
+                        <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
+                        <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start a new chat</Text>
                     </View>
                 </TouchableOpacity>
             </View>
@@ -234,7 +229,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
                         Start a conversation by messaging someone from their profile
                     </Text>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                         style={[styles.newMessageButton, { backgroundColor: colors.primary }]}
                         onPress={() => setShowNewMessageModal(true)}
                     >
@@ -272,41 +267,36 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     header: {
-        paddingHorizontal: 16,
-        paddingBottom: 8,
+        paddingHorizontal: 20,
+        paddingBottom: 10,
+        borderBottomWidth: 0,
     },
     headerTopRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 12,
+        marginBottom: 14,
+    },
+    headerTitle: {
+        fontSize: 26,
+        fontWeight: '800',
+    },
+    composeBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     searchContainer: {
-        marginTop: 4,
-        marginBottom: 8,
+        marginBottom: 6,
     },
     searchBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        height: 40,
-        borderRadius: 20,
+        height: 42,
+        borderRadius: 21,
         paddingHorizontal: 16,
-    },
-    profileIcon: {
-        width: 32,
-        height: 32,
-    },
-    backButton: {
-        marginRight: 12,
-    },
-    headerTitle: {
-        fontSize: 30,
-        fontWeight: 'bold',
-        textAlign: 'center',
-        // flex: 1, // Let it center naturally or adjust
-    },
-    headerAction: {
-        padding: 8,
     },
     loadingContainer: {
         flex: 1,
@@ -336,8 +326,8 @@ const styles = StyleSheet.create({
     conversationItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
     },
     avatarContainer: {
         position: 'relative',
@@ -376,6 +366,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        marginBottom: 3,
     },
     nameContainer: {
         flexDirection: 'row',
@@ -384,34 +375,43 @@ const styles = StyleSheet.create({
         marginRight: 8,
     },
     conversationName: {
-        fontSize: 16,
+        fontSize: 15,
         flex: 1,
     },
+    timeAndBadgeRow: {
+        flexDirection: 'column',
+        alignItems: 'flex-end',
+        gap: 4,
+    },
     conversationTime: {
-        fontSize: 12,
+        fontSize: 11,
+        fontWeight: '500',
     },
     conversationPreview: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 4,
+        marginTop: 2,
     },
     lastMessage: {
-        fontSize: 14,
+        fontSize: 13,
         flex: 1,
-        marginRight: 8,
     },
     memberCount: {
-        fontSize: 13,
+        fontSize: 12,
         marginTop: 2,
     },
     unreadBadge: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        marginLeft: 8,
+        minWidth: 20,
+        height: 20,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 5,
     },
     unreadCount: {
-        display: 'none', // Messenger often just shows a blue dot, or we can enable it back if preferred
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '700',
     },
     separator: {
         height: 1,

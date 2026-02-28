@@ -3,21 +3,20 @@ import * as ExpoLinking from "expo-linking";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Linking,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    Linking,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
-import { createSubscriptionCheckout } from "../src/services/paymongo";
 
 const { width } = Dimensions.get("window");
 
@@ -39,6 +38,42 @@ export default function SubscriptionRequiredScreen() {
   const [loading, setLoading] = useState(true);
   const [subscribing, setSubscribing] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: any[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
+
+  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+    const lowerTitle = (title || "").toLowerCase();
+    let type: AlertType = "info";
+    if (lowerTitle.includes("error") || lowerTitle.includes("failed") || lowerTitle.includes("invalid")) {
+      type = "error";
+    } else if (lowerTitle.includes("success")) {
+      type = "success";
+    } else if (lowerTitle.includes("warning") || lowerTitle.includes("required")) {
+      type = "warning";
+    }
+    showAlert(type, title || "Notice", message || "", buttons);
+  };
+
+  const Alert = { alert: showAlertNative };
 
   useEffect(() => {
     fetchPlans();
@@ -111,29 +146,33 @@ export default function SubscriptionRequiredScreen() {
         queryParams: { status: "cancelled", type: "subscription" },
       });
 
-      console.log("📤 Creating subscription checkout locally...");
+      console.log("📤 Creating subscription checkout via edge function...");
 
-      // Use local PayMongo service instead of edge function
-      const result = await createSubscriptionCheckout({
-        userId,
-        planId,
-        amount: plan.price,
-        planName: plan.name,
-        redirectUrl,
-        cancelRedirectUrl,
+      const { data, error } = await supabase.functions.invoke("paymongo", {
+        body: {
+          action: "create_subscription_checkout",
+          user_id: userId,
+          plan_id: planId,
+          amount: plan.price,
+          description: `${plan.name} Plan - Monthly Subscription`,
+          redirect_url: redirectUrl,
+          cancel_redirect_url: cancelRedirectUrl,
+        },
       });
 
-      console.log("📥 Result:", result);
-
-      if (!result.success) {
-        throw new Error(result.error || "Failed to create checkout");
+      if (error) {
+        throw new Error(error.message || "Failed to create checkout");
       }
 
-      if (result.checkout_url) {
+      if (!data?.success) {
+        throw new Error(data?.error || "Failed to create checkout");
+      }
+
+      if (data?.checkout_url) {
         // Open PayMongo checkout
-        const canOpen = await Linking.canOpenURL(result.checkout_url);
+        const canOpen = await Linking.canOpenURL(data.checkout_url);
         if (canOpen) {
-          await Linking.openURL(result.checkout_url);
+          await Linking.openURL(data.checkout_url);
         } else {
           Alert.alert(
             "Error",
@@ -196,7 +235,7 @@ export default function SubscriptionRequiredScreen() {
               MusikaLokal
             </Text>
           </View>
-          <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+          <TouchableOpacity activeOpacity={1} onPress={handleLogout} style={styles.logoutButton}>
             <Ionicons
               name="log-out-outline"
               size={24}
@@ -357,7 +396,7 @@ export default function SubscriptionRequiredScreen() {
                       ))}
                     </View>
 
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       style={[
                         styles.subscribeButton,
                         {
@@ -396,7 +435,7 @@ export default function SubscriptionRequiredScreen() {
         </View>
 
         {/* Refresh Button */}
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={1}
           style={[styles.refreshButton, { borderColor: colors.border }]}
           onPress={handleRefresh}
         >
@@ -420,6 +459,15 @@ export default function SubscriptionRequiredScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
     </View>
   );
 }

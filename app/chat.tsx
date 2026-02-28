@@ -100,25 +100,42 @@ export default function ChatPage() {
                     .single();
 
                 if (conversation) {
-                    setSelectedConversation(conversation);
+                    const { data: display } = await supabase
+                        .from('conversations_display_projection')
+                        .select('group_name, group_avatar_url')
+                        .eq('id', conversation.id)
+                        .maybeSingle();
+
+                    const mergedConversation = {
+                        ...conversation,
+                        group_name: display?.group_name || null,
+                        group_avatar_url: display?.group_avatar_url || null,
+                    };
+
+                    setSelectedConversation(mergedConversation);
                     setIsGroupChat(conversation.is_group || false);
 
                     // For 1-on-1 chats, get other user
                     if (!conversation.is_group) {
-                        const otherParticipantId = conversation.participant_1 === userId
-                            ? conversation.participant_2
-                            : conversation.participant_1;
+                        const { data: participants } = await supabase
+                            .from('conversation_participants')
+                            .select(`
+                                user_id,
+                                profile:profiles!conversation_participants_user_id_fkey(id, full_name, avatar_url)
+                            `)
+                            .eq('conversation_id', conversation.id);
 
-                        if (otherParticipantId) {
-                            const { data } = await supabase
-                                .from('profiles')
-                                .select('id, full_name, avatar_url')
-                                .eq('id', otherParticipantId)
-                                .single();
+                        const otherParticipant = (participants || []).find((p: any) => p.user_id !== userId)?.profile;
+                        const normalizedOtherUser = Array.isArray(otherParticipant)
+                            ? otherParticipant[0]
+                            : otherParticipant;
 
-                            if (data) {
-                                setOtherUser(data);
-                            }
+                        if (normalizedOtherUser) {
+                            setOtherUser({
+                                id: normalizedOtherUser.id,
+                                full_name: normalizedOtherUser.full_name,
+                                avatar_url: normalizedOtherUser.avatar_url ?? null,
+                            });
                         }
                     }
                 }
@@ -167,6 +184,7 @@ export default function ChatPage() {
                     conversationId={selectedConversation.id}
                     currentUserId={userId}
                     isGroupChat={true}
+                    groupId={selectedConversation.group_id || params.groupChatId || null}
                     groupName={selectedConversation.group_name || 'Group Chat'}
                     groupAvatar={selectedConversation.group_avatar_url}
                     onBack={handleBack}

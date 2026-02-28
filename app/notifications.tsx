@@ -3,7 +3,6 @@ import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Image,
     RefreshControl,
     SectionList,
@@ -13,6 +12,7 @@ import {
     View
 } from 'react-native';
 import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -24,6 +24,37 @@ export default function NotificationsScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [processingTransferId, setProcessingTransferId] = useState<string | null>(null);
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: AlertType;
+        title: string;
+        message: string;
+        buttons?: any[];
+    }>({
+        type: 'info',
+        title: '',
+        message: '',
+    });
+
+    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+        setAlertConfig({ type, title, message, buttons });
+        setAlertVisible(true);
+    };
+
+    const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+        const lowerTitle = (title || '').toLowerCase();
+        let type: AlertType = 'info';
+        if (lowerTitle.includes('error') || lowerTitle.includes('failed') || lowerTitle.includes('invalid')) {
+            type = 'error';
+        } else if (lowerTitle.includes('success')) {
+            type = 'success';
+        } else if (lowerTitle.includes('warning') || lowerTitle.includes('decline')) {
+            type = 'warning';
+        }
+        showAlert(type, title || 'Notice', message || '', buttons);
+    };
+
+    const Alert = { alert: showAlertNative };
 
     const fetchNotifications = useCallback(async () => {
         try {
@@ -304,7 +335,7 @@ export default function NotificationsScreen() {
         const isRead = item.read;
 
         return (
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 style={[
                     styles.notificationItem,
                     {
@@ -380,13 +411,13 @@ export default function NotificationsScreen() {
                                     <ActivityIndicator size="small" color={colors.primary} style={{ alignSelf: 'flex-start' }} />
                                 ) : (
                                     <View style={styles.actionButtonsRow}>
-                                        <TouchableOpacity
+                                        <TouchableOpacity activeOpacity={1}
                                             style={[styles.actionButton, styles.declineButton, { borderColor: colors.border }]}
                                             onPress={() => handleDeclineTransfer(item)}
                                         >
                                             <Text style={[styles.actionButtonText, { color: colors.text }]}>Decline</Text>
                                         </TouchableOpacity>
-                                        <TouchableOpacity
+                                        <TouchableOpacity activeOpacity={1}
                                             style={[styles.actionButton, styles.acceptButton]}
                                             onPress={() => handleAcceptTransfer(item)}
                                         >
@@ -409,7 +440,7 @@ export default function NotificationsScreen() {
             {unreadCount > 0 && (
                 <View style={[styles.toolbar, { borderBottomColor: colors.border }]}>
                     <Text style={[styles.unreadText, { color: colors.primary }]}>{unreadCount} unread</Text>
-                    <TouchableOpacity onPress={markAllAsRead}>
+                    <TouchableOpacity activeOpacity={1} onPress={markAllAsRead}>
                         <Text style={[styles.markReadText, { color: colors.textSecondary }]}>Mark all as read</Text>
                     </TouchableOpacity>
                 </View>
@@ -447,6 +478,15 @@ export default function NotificationsScreen() {
             <View style={styles.navbarContainer}>
                 <Navbar />
             </View>
+
+            <CustomAlert
+                visible={alertVisible}
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
+            />
         </View>
     );
 }

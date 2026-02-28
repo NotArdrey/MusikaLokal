@@ -5,14 +5,20 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
 export function useProfileCompletion() {
-    const { userId } = useAuth();
+    const { userId, isGuest } = useAuth();
     const [isProfileComplete, setIsProfileComplete] = useState<boolean>(true);
     const [checking, setChecking] = useState(true);
 
     const checkProfile = useCallback(async () => {
+        if (isGuest) {
+            setChecking(false);
+            setIsProfileComplete(true);
+            return;
+        }
+
         if (!userId) {
             setChecking(false);
-            setIsProfileComplete(false); // Or maybe true if no user? Let's say false if checking. 
+            setIsProfileComplete(false);
             return;
         }
 
@@ -36,7 +42,7 @@ export function useProfileCompletion() {
         } finally {
             setChecking(false);
         }
-    }, [userId]);
+    }, [userId, isGuest]);
 
     useFocusEffect(
         useCallback(() => {

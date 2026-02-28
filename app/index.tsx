@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 
@@ -19,6 +20,7 @@ interface AlertState {
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
+  const { setGuestMode } = useAuth();
   const { verified, accountCreated, email: createdEmail, verification_error } = useLocalSearchParams();
 
   // ... (existing initializeAuth is fine)
@@ -62,8 +64,7 @@ export default function LoginScreen() {
         message = 'We could not confirm your verification status in time. Please try signing up again.';
       }
 
-      // Show the alert
-      Alert.alert(title, message, [{ text: 'OK' }]);
+      showAlert('warning', title, message, [{ text: 'OK' }]);
 
       // Clear the param to prevent re-showing the alert
       router.setParams({ verification_error: '' });
@@ -192,7 +193,8 @@ export default function LoginScreen() {
             console.log('Blocked by metadata check.');
             await supabase.auth.signOut();
             setLoginMessage({ type: 'error', text: 'Account not verified. Please complete verification.' });
-            Alert.alert(
+            showAlert(
+              'warning',
               'Verification Required',
               'Your account is not verified. Please complete verification to continue.',
               [
@@ -247,7 +249,8 @@ export default function LoginScreen() {
 
             setLoginMessage({ type: 'error', text: !profile ? 'Account setup incomplete. Verify identity.' : 'Identity verification required.' });
 
-            Alert.alert(
+            showAlert(
+              'warning',
               'Verification Required',
               !profile ? 'Account setup incomplete. Please verify your identity.' : 'You need to verify your identity before accessing the app.',
               [
@@ -328,6 +331,12 @@ export default function LoginScreen() {
   const handleVerificationSuccess = () => {
     setShowVerification(false);
     // Silent
+  };
+
+  const handleContinueAsGuest = async () => {
+    await supabase.auth.signOut({ scope: 'local' });
+    await setGuestMode(true);
+    router.replace('/home' as any);
   };
 
   // Derived styles based on theme
@@ -420,14 +429,14 @@ export default function LoginScreen() {
                   }}
                   secureTextEntry={!showPassword}
                 />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
                   <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
               {errors.password ? (
                 <Text style={styles.errorText}>{errors.password}</Text>
               ) : (
-                <TouchableOpacity onPress={() => router.push('/forget_password' as any)} style={styles.forgotPasswordButton}>
+                <TouchableOpacity activeOpacity={1} onPress={() => router.push('/forget_password' as any)} style={styles.forgotPasswordButton}>
                   <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
                     Forgot Password?
                   </Text>
@@ -438,7 +447,7 @@ export default function LoginScreen() {
             <TouchableOpacity
               onPress={handleLogin}
               disabled={loading}
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.loginButton, themeStyles.primaryButton, styles.shadow]}
             >
               {loading ? (
@@ -448,6 +457,14 @@ export default function LoginScreen() {
                   Sign In
                 </Text>
               )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={handleContinueAsGuest}
+              activeOpacity={1}
+              style={[styles.guestButton, { borderColor: colors.border }]}
+            >
+              <Text style={[styles.guestButtonText, { color: colors.text }]}>Continue as Guest</Text>
             </TouchableOpacity>
 
             {loginMessage && (
@@ -462,7 +479,7 @@ export default function LoginScreen() {
               <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
                 Don't have an account?{' '}
               </Text>
-              <TouchableOpacity onPress={() => router.push('/signup' as any)}>
+              <TouchableOpacity activeOpacity={1} onPress={() => router.push('/signup' as any)}>
                 <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
                   Create Account
                 </Text>
@@ -579,6 +596,17 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
     color: 'white',
     fontSize: 16,
+  },
+  guestButton: {
+    height: 52,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  guestButtonText: {
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 15,
   },
   shadow: {
     shadowColor: "#4F46E5", // shadow-primary

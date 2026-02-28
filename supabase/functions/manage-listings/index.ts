@@ -8,6 +8,139 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
+const syncStudio3NF = async (client: any, studioId: string) => {
+    const { error } = await client.rpc('sync_studio_3nf', { p_studio_id: studioId })
+    if (error) throw error
+}
+
+const syncGig3NF = async (client: any, gigId: string) => {
+    const { error } = await client.rpc('sync_gig_3nf', { p_gig_id: gigId })
+    if (error) throw error
+}
+
+const replaceGigRequirements = async (client: any, gigId: string, requirements: any) => {
+    const { error: deleteError } = await client.from('gig_requirements').delete().eq('gig_id', gigId)
+    if (deleteError) throw deleteError
+
+    const safeRequirements = requirements && typeof requirements === 'object' ? requirements : {}
+    const payload = Object.entries(safeRequirements)
+        .filter(([key]) => (key ?? '').trim().length > 0)
+        .map(([key, value]) => ({ gig_id: gigId, requirement_key: key, requirement_value: value }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('gig_requirements').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceGigMedia = async (client: any, gigId: string, mediaType: 'image' | 'document', urls: string[]) => {
+    const { error: deleteError } = await client
+        .from('gig_media')
+        .delete()
+        .eq('gig_id', gigId)
+        .eq('media_type', mediaType)
+    if (deleteError) throw deleteError
+
+    const payload = (urls || [])
+        .map((url) => (url ?? '').trim())
+        .filter((url) => url.length > 0)
+        .map((url, index) => ({
+            gig_id: gigId,
+            media_type: mediaType,
+            media_url: url,
+            sort_order: index,
+        }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('gig_media').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceStudioAmenities = async (client: any, studioId: string, amenities: string[]) => {
+    const { error: deleteError } = await client.from('studio_amenities').delete().eq('studio_id', studioId)
+    if (deleteError) throw deleteError
+
+    const payload = (amenities || [])
+        .map((amenity) => (amenity ?? '').trim())
+        .filter((amenity) => amenity.length > 0)
+        .map((amenity) => ({ studio_id: studioId, amenity }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('studio_amenities').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceStudioTypes = async (client: any, studioId: string, types: string[]) => {
+    const { error: deleteError } = await client.from('studio_types').delete().eq('studio_id', studioId)
+    if (deleteError) throw deleteError
+
+    const payload = (types || [])
+        .map((studioType) => (studioType ?? '').trim())
+        .filter((studioType) => studioType.length > 0)
+        .map((studioType) => ({ studio_id: studioId, studio_type: studioType }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('studio_types').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceStudioMedia = async (client: any, studioId: string, mediaUrls: string[]) => {
+    const { error: deleteError } = await client
+        .from('studio_media')
+        .delete()
+        .eq('studio_id', studioId)
+        .eq('media_type', 'image')
+    if (deleteError) throw deleteError
+
+    const payload = (mediaUrls || [])
+        .map((mediaUrl) => (mediaUrl ?? '').trim())
+        .filter((mediaUrl) => mediaUrl.length > 0)
+        .map((mediaUrl, index) => ({
+            studio_id: studioId,
+            media_type: 'image',
+            media_url: mediaUrl,
+            sort_order: index,
+        }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('studio_media').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
+const replaceStudioInstruments = async (client: any, studioId: string, instruments: any[]) => {
+    const { error: deleteError } = await client.from('studio_instruments').delete().eq('studio_id', studioId)
+    if (deleteError) throw deleteError
+
+    const payload = (instruments || [])
+        .map((item) => {
+            if (item && typeof item === 'object') {
+                return {
+                    instrument_name: String(item.name ?? item.instrument ?? '').trim(),
+                    image_url: item.image ?? item.image_url ?? null,
+                }
+            }
+            return {
+                instrument_name: String(item ?? '').trim(),
+                image_url: null,
+            }
+        })
+        .filter((item) => item.instrument_name.length > 0)
+        .map((item) => ({
+            studio_id: studioId,
+            instrument_name: item.instrument_name,
+            image_url: item.image_url,
+        }))
+
+    if (payload.length > 0) {
+        const { error: insertError } = await client.from('studio_instruments').insert(payload)
+        if (insertError) throw insertError
+    }
+}
+
 // Helper to decode JWT payload without verification (for getting user ID)
 // Uses base64url decoding which is what JWT uses
 function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
@@ -357,9 +490,9 @@ serve(async (req: Request) => {
             // This filters out any extra fields that don't exist in the studios table
             if (type === 'studio') {
                 const validStudioColumns = [
-                    'name', 'address', 'hourly_rate', 'description', 'amenities',
-                    'images', 'latitude', 'longitude', 'rate', 'contract_url',
-                    'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
+                    'name', 'address', 'hourly_rate', 'description',
+                    'latitude', 'longitude', 'rate', 'contract_url',
+                    'availability', 'rehearsal_rate',
                     'recording_rate', 'open_dates', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
@@ -381,11 +514,20 @@ serve(async (req: Request) => {
                 // 1. Fetch gig settings for cooldown and slot tracking
                 const { data: gigData, error: gigError } = await supabaseClient
                     .from('gigs')
-                    .select('reapplication_cooldown_days, requirements, slots_filled, total_slots_filled, status')
+                    .select('reapplication_cooldown_days, slots_filled, total_slots_filled, status')
+                    .eq('id', gig_id)
+                    .single();
+
+                const { data: gigLegacyProjection, error: gigLegacyProjectionError } = await supabaseClient
+                    .from('gigs_legacy_projection')
+                    .select('requirements')
                     .eq('id', gig_id)
                     .single();
 
                 if (gigError) throw gigError;
+                if (gigLegacyProjectionError) throw gigLegacyProjectionError;
+
+                const gigRequirements = gigLegacyProjection?.requirements || {};
 
                 // 2. Check if gig is still open
                 if (gigData.status !== 'open') {
@@ -393,7 +535,7 @@ serve(async (req: Request) => {
                 }
 
                 // 3. Check slot availability
-                const totalSlotsNeeded = gigData.requirements?.total_slots_needed || 999;
+                const totalSlotsNeeded = gigRequirements?.total_slots_needed || 999;
                 const totalSlotsFilled = gigData.total_slots_filled || 0;
                 
                 if (totalSlotsFilled >= totalSlotsNeeded) {
@@ -401,8 +543,8 @@ serve(async (req: Request) => {
                 }
 
                 // Check specific slot type availability if provided
-                if (slot_type && gigData.requirements?.slots?.[slot_type]) {
-                    const slotNeeded = gigData.requirements.slots[slot_type]?.needed || 0;
+                if (slot_type && gigRequirements?.slots?.[slot_type]) {
+                    const slotNeeded = gigRequirements.slots[slot_type]?.needed || 0;
                     const slotFilled = gigData.slots_filled?.[slot_type]?.accepted || 0;
                     
                     if (slotNeeded > 0 && slotFilled >= slotNeeded) {
@@ -484,7 +626,7 @@ serve(async (req: Request) => {
                 // For gigs, only allow valid columns to prevent PGRST204 errors
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
-                    'requirements', 'images', 'documents', 'status', 'latitude',
+                    'status', 'latitude',
                     'longitude', 'contract_url', 'business_permit_url',
                     'reapplication_cooldown_days'
                 ];
@@ -659,6 +801,32 @@ serve(async (req: Request) => {
                 }
             }
 
+            if (type === 'studio') {
+                const sourceAmenities = Array.isArray(payload?.amenities) ? payload.amenities : [];
+                const sourceImages = Array.isArray(payload?.images) ? payload.images : [];
+                const sourceTypes = Array.isArray(payload?.types)
+                    ? payload.types
+                    : (payload?.type ? [payload.type] : []);
+                const sourceInstruments = Array.isArray(payload?.instruments) ? payload.instruments : [];
+
+                await syncStudio3NF(supabaseClient, data.id)
+                await replaceStudioAmenities(supabaseClient, data.id, sourceAmenities)
+                await replaceStudioMedia(supabaseClient, data.id, sourceImages)
+                await replaceStudioTypes(supabaseClient, data.id, sourceTypes)
+                await replaceStudioInstruments(supabaseClient, data.id, sourceInstruments)
+            }
+
+            if (type === 'gig') {
+                const sourceRequirements = payload?.requirements
+                const sourceImages = Array.isArray(payload?.images) ? payload.images : []
+                const sourceDocuments = Array.isArray(payload?.documents) ? payload.documents : []
+
+                await syncGig3NF(supabaseClient, data.id)
+                await replaceGigRequirements(supabaseClient, data.id, sourceRequirements)
+                await replaceGigMedia(supabaseClient, data.id, 'image', sourceImages)
+                await replaceGigMedia(supabaseClient, data.id, 'document', sourceDocuments)
+            }
+
             // Return with default stats for new entity
             return new Response(JSON.stringify({ ...data, rating: 0, review_count: 0 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
@@ -679,9 +847,9 @@ serve(async (req: Request) => {
             // This filters out any extra fields that don't exist in the studios table
             if (type === 'studio') {
                 const validStudioColumns = [
-                    'name', 'address', 'hourly_rate', 'description', 'amenities',
+                    'name', 'address', 'hourly_rate', 'description',
                     'images', 'latitude', 'longitude', 'rate', 'contract_url',
-                    'availability', 'instruments', 'type', 'types', 'rehearsal_rate',
+                    'availability', 'rehearsal_rate',
                     'recording_rate', 'open_dates', 'pax', 'business_permit_url'
                 ];
                 const filteredPayload: any = {};
@@ -718,11 +886,10 @@ serve(async (req: Request) => {
             // Log gig requirements if updating a gig
             if (type === 'gig') {
                 console.log('📦 Updating gig with requirements:', JSON.stringify(updatePayload.requirements, null, 2));
-                
-                // For gigs, only allow valid columns to prevent PGRST204 errors
+
                 const validGigColumns = [
                     'name', 'location', 'budget', 'description', 'event_date',
-                    'requirements', 'images', 'documents', 'status', 'latitude',
+                    'status', 'latitude',
                     'longitude', 'contract_url', 'business_permit_url',
                     'reapplication_cooldown_days'
                 ];
@@ -732,7 +899,45 @@ serve(async (req: Request) => {
                         filteredPayload[key] = updatePayload[key];
                     }
                 }
-                updatePayload = filteredPayload;
+
+                const { data: rpcData, error: rpcError } = await supabaseClient.rpc('update_gig_safely', {
+                    p_gig_id: id,
+                    p_payload: filteredPayload,
+                    p_reason: 'Updated via manage-listings edge function',
+                });
+
+                if (rpcError) {
+                    console.error('❌ Gig update RPC error:', JSON.stringify(rpcError, null, 2));
+                    throw rpcError;
+                }
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                const sourceRequirements = payload?.requirements
+                const sourceImages = Array.isArray(payload?.images) ? payload.images : []
+                const sourceDocuments = Array.isArray(payload?.documents) ? payload.documents : []
+
+                await syncGig3NF(supabaseClient, id)
+                if (sourceRequirements !== undefined) {
+                    await replaceGigRequirements(supabaseClient, id, sourceRequirements)
+                }
+                if (payload?.images !== undefined) {
+                    await replaceGigMedia(supabaseClient, id, 'image', sourceImages)
+                }
+                if (payload?.documents !== undefined) {
+                    await replaceGigMedia(supabaseClient, id, 'document', sourceDocuments)
+                }
+
+                return new Response(JSON.stringify(rpcResult.gig), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
             }
 
             console.log('📤 Updating table:', table);
@@ -921,12 +1126,57 @@ serve(async (req: Request) => {
                 }
             }
 
+            if (type === 'studio') {
+                const sourceAmenities = payload?.amenities
+                const sourceTypes = payload?.types !== undefined
+                    ? payload?.types
+                    : (payload?.type !== undefined ? [payload?.type] : undefined)
+                const sourceInstruments = payload?.instruments
+
+                await syncStudio3NF(supabaseClient, id)
+                if (sourceAmenities !== undefined) {
+                    await replaceStudioAmenities(supabaseClient, id, sourceAmenities)
+                }
+                if (payload?.images !== undefined) {
+                    await replaceStudioMedia(supabaseClient, id, payload.images)
+                }
+                if (sourceTypes !== undefined) {
+                    await replaceStudioTypes(supabaseClient, id, sourceTypes)
+                }
+                if (sourceInstruments !== undefined) {
+                    await replaceStudioInstruments(supabaseClient, id, sourceInstruments)
+                }
+            }
+
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
         }
 
         // DELETE ENTITY (uses base table for deletes)
         if (action === 'delete') {
             const { type, id } = params // type: 'gig', 'group', 'studio'
+
+            if (type === 'gig') {
+                const { data: rpcData, error: rpcError } = await supabaseClient.rpc('delete_gig_safely', {
+                    p_gig_id: id,
+                    p_reason: 'Deleted via manage-listings edge function',
+                });
+
+                if (rpcError) throw rpcError;
+
+                const rpcResult: any = rpcData;
+                if (!rpcResult?.success) {
+                    return new Response(JSON.stringify(rpcResult), {
+                        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                        status: 409,
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, ...rpcResult }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 200,
+                });
+            }
+
             const table = type + 's'
 
             const { error } = await supabaseClient
@@ -969,6 +1219,7 @@ serve(async (req: Request) => {
                     group:groups!group_id(id, name, genre, images, members, description, location, rate)
                 `)
                 .eq('gig_id', gigId)
+                .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -1225,9 +1476,20 @@ serve(async (req: Request) => {
             if (appError) throw appError;
 
             // Update the application status
+            const updatePayload: Record<string, any> = { status };
+            if (status === 'accepted') {
+                updatePayload.system_status_reason = null;
+                updatePayload.reconfirmation_required_at = null;
+                updatePayload.reconfirmation_due_at = null;
+            } else if (status === 'rejected') {
+                updatePayload.system_status_reason = 'user_rejection';
+                updatePayload.reconfirmation_required_at = null;
+                updatePayload.reconfirmation_due_at = null;
+            }
+
             const { data, error } = await supabaseClient
                 .from('gig_applications')
-                .update({ status })
+                .update(updatePayload)
                 .eq('id', applicationId)
                 .select()
                 .single();
@@ -1264,7 +1526,8 @@ serve(async (req: Request) => {
                         meta: {
                             gig_id: appDetails.gig_id,
                             application_id: applicationId,
-                            status: status
+                            status: status,
+                            status_reason: status === 'rejected' ? 'user_rejection' : null
                         }
                     });
             }

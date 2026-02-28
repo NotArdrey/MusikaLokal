@@ -2,21 +2,33 @@ import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
-import { useAuth, useRequireAuth } from '../src/context/AuthContext';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function ManageScreen() {
     const { colors } = useTheme();
-    const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
-    const { userRole } = useAuth();
+    const { session, loading: authLoading, userId, userRole, isGuest } = useAuth();
+    const isAuthenticated = !!session;
     const [loading, setLoading] = useState(true);
     const [fetchedRole, setFetchedRole] = useState<string | null>(null);
 
     useEffect(() => {
+        if (!authLoading && !isAuthenticated && !isGuest) {
+            router.replace('/');
+        }
+    }, [authLoading, isAuthenticated, isGuest]);
+
+    useEffect(() => {
         // If not authenticated, the hook will redirect
         if (authLoading) return;
+
+        if (isGuest) {
+            setLoading(false);
+            return;
+        }
 
         if (isAuthenticated && userId) {
             // Try to get role from context first, or fetch directly
@@ -89,6 +101,16 @@ export default function ManageScreen() {
         );
     }
 
+    if (isGuest) {
+        return (
+            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+                <Header title="Manage" />
+                <GuestSignInGate message="Sign in to access your management dashboard." />
+                <Navbar />
+            </View>
+        );
+    }
+
     return (
         <View style={[styles.flex1, { backgroundColor: colors.background }]}>
             <Header title="Manage" />
@@ -126,7 +148,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     scrollContent: {
-        paddingBottom: 150,
+        paddingBottom: 180,
     },
     dashboardContainer: {
         flex: 1,

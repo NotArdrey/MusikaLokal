@@ -1,0 +1,518 @@
+import React, { useMemo } from "react";
+import { Text, TouchableOpacity, View } from "react-native";
+import CachedImage from "../CachedImage";
+import ListingMediaCarousel from "./ListingMediaCarousel";
+
+interface StudioGigVenueAboutTabProps {
+  group: any;
+  colors: any;
+  isDark: boolean;
+  styles: any;
+  hasDualPricing: boolean;
+  rehearsalRate: string;
+  recordingRate: string;
+  displayRate: string;
+  labels: { aboutTitle: string };
+  currentUserId: string | null;
+  calculateCompletion: () => number;
+  handleProfileNavigation: () => void;
+}
+
+const StudioGigVenueAboutTab = ({
+  group,
+  colors,
+  isDark,
+  styles,
+  hasDualPricing,
+  rehearsalRate,
+  recordingRate,
+  displayRate,
+  labels,
+  currentUserId,
+  calculateCompletion,
+  handleProfileNavigation,
+}: StudioGigVenueAboutTabProps) => {
+  const parsedCompletionRate = Number(group.completion_rate);
+  const baseCompletionRate = Number.isFinite(parsedCompletionRate)
+    ? parsedCompletionRate
+    : calculateCompletion();
+  const completionRate = Math.max(0, Math.min(100, Math.round(baseCompletionRate)));
+  const managerId = group.owner_id || group.organizer_id;
+  const isStudioOrVenue = group.type === "Studio" || group.type === "Venue";
+  const isMediaCarouselType =
+    group.type === "Studio" || group.type === "Venue" || group.type === "Gig";
+  const mediaItems = useMemo(() => {
+    if (!isMediaCarouselType) return [];
+
+    const normalizeMedia = (value: any): string[] => {
+      if (Array.isArray(value)) {
+        return value
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0);
+      }
+
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) {
+              return parsed
+                .filter((item): item is string => typeof item === "string")
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0);
+            }
+          } catch {
+            // fallback to single value below
+          }
+        }
+
+        return [trimmed];
+      }
+
+      return [];
+    };
+
+    const merged = [group?.images, group?.media_urls, group?.media].flatMap(
+      (value) => normalizeMedia(value),
+    );
+
+    return merged.filter((value, index, arr) => arr.indexOf(value) === index);
+  }, [group?.images, group?.media_urls, group?.media, isMediaCarouselType]);
+
+  return (
+    <View style={styles.tabContent}>
+    {group.type === "Gig" && (
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>{labels.aboutTitle}</Text>
+        <Text style={[styles.description, { color: colors.textSecondary }]}>
+          {group.description || "No description provided."}
+        </Text>
+      </View>
+    )}
+
+    {group.type === "Gig" && (
+      <View
+        style={{
+          flexDirection: "row",
+          gap: 12,
+          marginBottom: 24,
+        }}
+      >
+        <View
+          style={[
+            styles.statCard,
+            {
+              backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+              flex: 1,
+            },
+          ]}
+        >
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Budget</Text>
+          <Text style={[styles.statValue, { color: colors.text }]}>
+            ₱{group.budget || "5,000"}
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.statCard,
+            {
+              backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+              flex: 1,
+            },
+          ]}
+        >
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Event Date</Text>
+          <Text style={[styles.statValue, { color: colors.text }]}>
+            {group.event_date
+              ? new Date(group.event_date).toLocaleDateString(undefined, {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+              : "TBA"}
+          </Text>
+        </View>
+      </View>
+    )}
+
+    {isStudioOrVenue && (
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>{labels.aboutTitle}</Text>
+        <Text style={[styles.description, { color: colors.textSecondary }]}>
+          {group.description || "No description provided."}
+        </Text>
+      </View>
+    )}
+
+    {isStudioOrVenue && (
+      <View
+        style={{
+          flexDirection: "column",
+          gap: 12,
+          marginBottom: 24,
+        }}
+      >
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          {hasDualPricing ? (
+            <>
+              <View
+                style={[
+                  styles.statCard,
+                  {
+                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                    flex: 1,
+                  },
+                ]}
+              >
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rehearsal Rate</Text>
+                <Text style={[styles.statValue, { color: colors.text }]}>{`₱${rehearsalRate}/hr`}</Text>
+              </View>
+              <View
+                style={[
+                  styles.statCard,
+                  {
+                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                    flex: 1,
+                  },
+                ]}
+              >
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Recording Rate</Text>
+                <Text style={[styles.statValue, { color: colors.text }]}>{`₱${recordingRate}/song`}</Text>
+              </View>
+            </>
+          ) : (
+            <View
+              style={[
+                styles.statCard,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                },
+              ]}
+            >
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+                {group.type === "Venue"
+                  ? "Venue Rate"
+                  : recordingRate && !rehearsalRate
+                    ? "Recording Rate"
+                    : rehearsalRate && !recordingRate
+                      ? "Rehearsal Rate"
+                      : "Hourly Rate"}
+              </Text>
+              <Text style={[styles.statValue, { color: colors.text }]}>
+                {recordingRate && !rehearsalRate
+                  ? `₱${recordingRate}/song`
+                  : `₱${displayRate}/hr`}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <View
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                flex: 1,
+              },
+            ]}
+          >
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rating</Text>
+            <Text style={[styles.statValue, { color: colors.text }]}>
+              {group.rating ? group.rating.toFixed(1) : "-"}
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                flex: 1,
+              },
+            ]}
+          >
+            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Completion</Text>
+            <Text style={[styles.statValue, { color: colors.text }]}>
+              {`${completionRate}%`}
+            </Text>
+          </View>
+          {group.type === "Studio" && group.studio_type && (
+            <View
+              style={[
+                styles.statCard,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                  flex: 1,
+                },
+              ]}
+            >
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Type</Text>
+              <Text style={[styles.statValue, { color: colors.text }]}>
+                {group.studio_type === "Both" ? "Rehearsal & Recording" : group.studio_type}
+              </Text>
+            </View>
+          )}
+          {(group.type === "Studio" || group.type === "Venue") && group.pax && (
+            <View
+              style={[
+                styles.statCard,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                  flex: 1,
+                },
+              ]}
+            >
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Capacity</Text>
+              <Text style={[styles.statValue, { color: colors.text }]}>{group.pax} pax</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    )}
+
+    {isMediaCarouselType && (
+      <View style={[styles.section, { marginBottom: 24 }]}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Gallery</Text>
+        <ListingMediaCarousel
+          mediaItems={mediaItems}
+          colors={colors}
+          isDark={isDark}
+          styles={styles}
+          cacheVersion={group.updated_at || group.created_at || group.id}
+        />
+      </View>
+    )}
+
+    {isStudioOrVenue && (
+      <View
+        style={[
+          styles.managerCard,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.border,
+            borderWidth: 1,
+          },
+        ]}
+      >
+        <View style={{ flex: 1, marginRight: 16 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <CachedImage
+              uri={group.owner_avatar || null}
+              style={[styles.hostAvatar, { backgroundColor: colors.border }]}
+              width={96}
+              height={96}
+              quality={68}
+              cacheVersion={group.updated_at || group.created_at || group.owner_id}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.managerLabel, { color: colors.textSecondary }]}>Managed by</Text>
+              <Text style={[styles.managerName, { color: colors.text }]}>
+                {group.owner_name || "Unknown User"}
+              </Text>
+            </View>
+          </View>
+
+          <View
+            style={{
+              marginTop: 12,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <View
+              style={{
+                flex: 1,
+                height: 6,
+                backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                borderRadius: 3,
+                overflow: "hidden",
+              }}
+            >
+              <View
+                style={{
+                  width: `${completionRate}%`,
+                  height: "100%",
+                  backgroundColor:
+                    completionRate === 100 ? "#10B981" : colors.primary,
+                }}
+              />
+            </View>
+            <Text
+              style={{
+                fontSize: 11,
+                fontFamily: "Poppins_600SemiBold",
+                color:
+                  completionRate === 100 ? "#10B981" : colors.textSecondary,
+              }}
+            >
+              {`${completionRate}% Complete`}
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={1}
+          style={[styles.visitBtn, { borderColor: colors.primary }]}
+          onPress={handleProfileNavigation}
+        >
+          <Text
+            style={{
+              color: colors.primary,
+              fontSize: 12,
+              fontFamily: "Poppins_600SemiBold",
+            }}
+          >
+            {managerId === currentUserId ? "Manage Profile" : "Visit Profile"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    )}
+
+    {group.type === "Gig" && (
+      <View
+        style={[
+          styles.managerCard,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.border,
+            borderWidth: 1,
+            marginBottom: 24,
+          },
+        ]}
+      >
+        <View style={{ flex: 1, marginRight: 16 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <CachedImage
+              uri={group.owner_avatar || undefined}
+              style={[styles.hostAvatar, { backgroundColor: colors.border }]}
+              width={96}
+              height={96}
+              quality={68}
+              cacheVersion={group.updated_at || group.created_at || group.owner_id}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.managerLabel, { color: colors.textSecondary }]}>Organized by</Text>
+              <Text style={[styles.managerName, { color: colors.text }]}>
+                {group.owner_name || "Unknown User"}
+              </Text>
+            </View>
+          </View>
+
+          <View
+            style={{
+              marginTop: 12,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <View
+              style={{
+                flex: 1,
+                height: 6,
+                backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                borderRadius: 3,
+                overflow: "hidden",
+              }}
+            >
+              <View
+                style={{
+                  width: `${completionRate}%`,
+                  height: "100%",
+                  backgroundColor:
+                    completionRate === 100
+                      ? "#10B981"
+                      : colors.primary,
+                }}
+              />
+            </View>
+            <Text
+              style={{
+                fontSize: 11,
+                fontFamily: "Poppins_600SemiBold",
+                color:
+                  completionRate === 100
+                    ? "#10B981"
+                    : colors.textSecondary,
+              }}
+            >
+              {`${completionRate}% Complete`}
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={1}
+          style={[styles.visitBtn, { borderColor: colors.primary }]}
+          onPress={handleProfileNavigation}
+        >
+          <Text
+            style={{
+              color: colors.primary,
+              fontSize: 12,
+              fontFamily: "Poppins_600SemiBold",
+            }}
+          >
+            {managerId === currentUserId ? "Manage Profile" : "Visit Profile"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    )}
+
+    {group.type === "Gig" && (
+      <View
+        style={[
+          styles.dealCard,
+          {
+            backgroundColor: isDark ? "#1e293b" : "#ECFDF5",
+            borderColor: isDark ? "#064e3b" : "#10B981",
+          },
+        ]}
+      >
+        <Text
+          style={{
+            fontFamily: "Poppins_600SemiBold",
+            color: isDark ? "#6ee7b7" : "#047857",
+            marginBottom: 8,
+          }}
+        >
+          The Deal
+        </Text>
+        <Text
+          style={{
+            fontFamily: "Poppins_500Medium",
+            color: isDark ? "#d1fae5" : "#065F46",
+          }}
+        >
+          Guarantee + Door Split
+        </Text>
+        <Text
+          style={{
+            fontFamily: "Poppins_400Regular",
+            color: isDark ? "#d1fae5" : "#065F46",
+            fontSize: 13,
+            marginTop: 4,
+          }}
+        >
+          45 min set • Meal Included
+        </Text>
+      </View>
+    )}
+
+    </View>
+  );
+};
+
+export default StudioGigVenueAboutTab;

@@ -2,18 +2,19 @@ import { Ionicons } from "@expo/vector-icons";
 import {
     BottomSheetBackdrop,
     BottomSheetModal,
-    BottomSheetScrollView,
+    useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
 import React, {
     forwardRef,
     useCallback,
     useEffect,
     useMemo,
+    useRef,
     useState,
 } from "react";
 import {
     ActivityIndicator,
-    Dimensions,
+    FlatList,
     Keyboard,
     LayoutAnimation,
     Platform,
@@ -25,12 +26,13 @@ import {
     UIManager,
     View,
 } from "react-native";
+import { Easing } from "react-native-reanimated";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import ListingCard from "./ListingCard";
 
-const { width } = Dimensions.get("window");
+const debugLog = (..._args: unknown[]) => {};
 
 // Enable LayoutAnimation on Android
 if (
@@ -72,6 +74,8 @@ const SORT_OPTIONS = [
   { label: "Price ↓", value: "price_high", icon: "arrow-down-outline" },
 ];
 
+const PAGE_SIZE = 10;
+
 interface SearchBottomSheetProps {
   onClose?: () => void;
   onItemPress?: (listingId: string) => void;
@@ -81,22 +85,38 @@ interface SearchBottomSheetProps {
 const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
   function SearchBottomSheet({ onClose, onItemPress, onChat }, ref) {
     const { colors, isDark } = useTheme();
-    const { userRole, userId } = useAuth();
-    const snapPoints = useMemo(() => ["94%"], []);
+    const { userRole, isGuest } = useAuth();
+    const snapPoints = useMemo(() => ["90%"], []);
+    const animationConfigs = useBottomSheetTimingConfigs({
+      duration: 320,
+      easing: Easing.inOut(Easing.cubic),
+    });
 
     // Filter Chips - safely handle null userRole
     const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
-    const TYPE_FILTERS = isOwner
-      ? ["All", "Musician"]
-      : ["All", "Musician", "Studio", "Gig"];
+    const TYPE_FILTERS = useMemo(
+      () =>
+        isGuest
+          ? []
+          : isOwner
+            ? ["All", "Musician"]
+            : ["All", "Musician", "Studio", "Gig"],
+      [isGuest, isOwner],
+    );
 
     // Basic State
     const [activeFilter, setActiveFilter] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const [initialLoad, setInitialLoad] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [currentPage, setCurrentPage] = useState(0);
+    const [hasMore, setHasMore] = useState(true);
+    const [spillover, setSpillover] = useState<any[]>([]);
     const [refreshTrigger, setRefreshTrigger] = useState(0);
+    const requestIdRef = useRef(0);
+    const dataRef = useRef<any[]>([]);
+    const spilloverRef = useRef<any[]>([]);
 
     // Advanced Filter State
     const [showFilters, setShowFilters] = useState(false);
@@ -118,6 +138,17 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       if (sortBy !== "newest") count++;
       return count;
     }, [selectedGenre, minRating, priceRange, sortBy]);
+
+    useEffect(() => {
+      dataRef.current = data;
+    }, [data]);
+
+    useEffect(() => {
+      spilloverRef.current = spillover;
+    }, [spillover]);
+
+    const visibleData = data;
+    const hasMoreResults = hasMore || spillover.length > 0;
 
     const renderBackdrop = useCallback(
       (props: any) => (
@@ -151,44 +182,70 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     }, []);
 
     // Search effect with filters
-    useEffect(() => {
-      const doSearch = async () => {
-        if (initialLoad) setLoading(true);
+    const fetchSearchPage = useCallback(
+      async (page: number, mode: "reset" | "append") => {
+        const isReset = mode === "reset";
+        const requestId = ++requestIdRef.current;
+
+        if (isReset) {
+          setLoading(true);
+          setHasMore(true);
+          setCurrentPage(0);
+          setSpillover([]);
+        } else {
+          setLoadingMore(true);
+        }
+
         try {
           let results: any[] = [];
           let tables: string[] = [];
+          const fetchedCountsByTable = new Map<string, number>();
 
-          if (isOwner) {
+          if (isGuest) {
+            tables = ["groups_with_stats", "profiles"];
+          } else if (isOwner) {
             tables = ["groups_with_stats"];
           } else {
-            if (activeFilter === "All")
-              tables = [
-                "groups_with_stats",
-                "studios_with_stats",
-                "gigs_with_stats",
-              ];
-            else if (activeFilter === "Musician")
+            if (activeFilter === "All") {
+              tables = ["groups_with_stats", "studios_with_stats", "gigs_with_stats"];
+            } else if (activeFilter === "Musician") {
               tables = ["groups_with_stats"];
-            else if (activeFilter === "Studio") tables = ["studios_with_stats"];
-            else if (activeFilter === "Gig") tables = ["gigs_with_stats"];
+            } else if (activeFilter === "Studio") {
+              tables = ["studios_with_stats"];
+            } else if (activeFilter === "Gig") {
+              tables = ["gigs_with_stats"];
+            }
           }
 
           for (const table of tables) {
+            const tablePageSize = PAGE_SIZE;
+
             let query = supabase.from(table).select("*");
 
-            // Text search
-            if (searchQuery.trim().length > 0) {
-              query = query.or(
-                `name.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`,
-              );
+            if (table === "profiles") {
+              query = query
+                .select(
+                  "id, full_name, avatar_url, address, created_at, role, genres, skills, show_gig_statuses",
+                )
+                .eq("role", "musician");
             }
 
-            // Only show open gigs
+            if (searchQuery.trim().length > 0) {
+              if (table === "profiles") {
+                query = query.or(
+                  `full_name.ilike.%${searchQuery}%,address.ilike.%${searchQuery}%`,
+                );
+              } else {
+                query = query.or(
+                  `name.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`,
+                );
+              }
+            }
+
             if (table === "gigs_with_stats") {
               query = query.eq("status", "open");
             }
 
-            // Genre filter (Groups and Gigs)
             if (
               selectedGenre !== "All" &&
               (table === "groups_with_stats" || table === "gigs_with_stats")
@@ -196,12 +253,10 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               query = query.ilike("genre", `%${selectedGenre}%`);
             }
 
-            // Rating filter
             if (minRating > 0) {
               query = query.gte("rating", minRating);
             }
 
-            // Price range filter
             if (priceRange !== "all") {
               const priceField = table.includes("studio")
                 ? "hourly_rate"
@@ -218,7 +273,6 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               }
             }
 
-            // Sort order
             if (sortBy === "rating") {
               query = query.order("rating", { ascending: false });
             } else if (sortBy === "price_low") {
@@ -245,28 +299,78 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               query = query.order("created_at", { ascending: false });
             }
 
-            const { data: qData } = await query.limit(15);
+            const from = page * tablePageSize;
+            const to = from + tablePageSize - 1;
+            const { data: qData } = await query.range(from, to);
+            const fetchedCount = qData?.length || 0;
+            fetchedCountsByTable.set(table, fetchedCount);
+
             if (qData) {
               const type = table.includes("group")
                 ? "Group"
                 : table.includes("studio")
                   ? "Studio"
-                  : "Gig";
+                  : table === "profiles"
+                    ? "Artist"
+                    : "Gig";
+
               const mapped = qData.map((item: any) => ({
                 ...item,
                 type: item.type || type,
-                image: item.images?.[0] || item.image,
-                rate: (
-                  item.rate ||
-                  item.hourly_rate ||
-                  item.budget
-                )?.toString(),
+                name: item.name || item.full_name,
+                location: item.location || item.address,
+                image: item.images?.[0] || item.image || item.avatar_url,
+                genre:
+                  item.genre ||
+                  (Array.isArray(item.genres) ? item.genres.join(", ") : ""),
+                rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
+                show_gig_statuses: item.show_gig_statuses,
               }));
-              results.push(...mapped);
+
+              const genreFiltered =
+                selectedGenre !== "All" && table === "profiles"
+                  ? mapped.filter((item: any) =>
+                      String(item.genre || "")
+                        .toLowerCase()
+                        .includes(selectedGenre.toLowerCase()),
+                    )
+                  : mapped;
+
+              results.push(...genreFiltered);
             }
           }
 
-          // Client-side sort for combined results
+          const groupIds = Array.from(
+            new Set(
+              results
+                .filter((item) => item.type === "Group" && item.id)
+                .map((item) => item.id),
+            ),
+          );
+
+          if (groupIds.length > 0) {
+            const { data: groupVisibilityRows } = await supabase
+              .from("groups")
+              .select("id, open_group_applications")
+              .in("id", groupIds);
+
+            const visibilityMap = new Map<string, boolean>();
+            (groupVisibilityRows || []).forEach((row: any) => {
+              visibilityMap.set(row.id, row.open_group_applications !== false);
+            });
+
+            results = results.map((item) =>
+              item.type === "Group"
+                ? {
+                    ...item,
+                    open_group_applications:
+                      visibilityMap.get(item.id) ??
+                      item.open_group_applications !== false,
+                  }
+                : item,
+            );
+          }
+
           if (sortBy === "rating") {
             results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
           } else if (sortBy === "price_low") {
@@ -283,27 +387,74 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             });
           }
 
-          setData(results);
-        } catch (e) {
-          console.log("Search error:", e);
-        } finally {
-          setLoading(false);
-          setInitialLoad(false);
-        }
-      };
+          if (requestId !== requestIdRef.current) {
+            return;
+          }
 
-      const timeout = setTimeout(doSearch, 300);
+          const hasNextPage = tables.some(
+            (table) => (fetchedCountsByTable.get(table) || 0) === PAGE_SIZE,
+          );
+
+          const existingKeys = new Set<string>();
+          if (!isReset) {
+            dataRef.current.forEach((item: any, index: number) => {
+              existingKeys.add(`${item.type || "item"}-${item.id || index}`);
+            });
+          }
+
+          const pooledMap = new Map<string, any>();
+          [...spilloverRef.current, ...results].forEach((item: any, index: number) => {
+            const key = `${item.type || "item"}-${item.id || index}`;
+            if (existingKeys.has(key) || pooledMap.has(key)) {
+              return;
+            }
+            pooledMap.set(key, item);
+          });
+
+          const pooledResults = Array.from(pooledMap.values());
+          const nextChunk = pooledResults.slice(0, PAGE_SIZE);
+          const nextSpillover = pooledResults.slice(PAGE_SIZE);
+
+          setHasMore(hasNextPage);
+          setCurrentPage(page);
+          setSpillover(nextSpillover);
+
+          if (isReset) {
+            setData(nextChunk);
+          } else {
+            setData((prev) => [...prev, ...nextChunk]);
+          }
+        } catch (e) {
+          debugLog("Search error:", e);
+        } finally {
+          if (requestId === requestIdRef.current) {
+            if (isReset) {
+              setLoading(false);
+            } else {
+              setLoadingMore(false);
+            }
+          }
+        }
+      },
+      [
+        activeFilter,
+        isGuest,
+        isOwner,
+        minRating,
+        priceRange,
+        searchQuery,
+        selectedGenre,
+        sortBy,
+      ],
+    );
+
+    useEffect(() => {
+      const timeout = setTimeout(() => {
+        fetchSearchPage(0, "reset");
+      }, 300);
+
       return () => clearTimeout(timeout);
-    }, [
-      searchQuery,
-      activeFilter,
-      isOwner,
-      refreshTrigger,
-      selectedGenre,
-      minRating,
-      priceRange,
-      sortBy,
-    ]);
+    }, [fetchSearchPage, refreshTrigger]);
 
     // Realtime Search Updates
     useEffect(() => {
@@ -333,10 +484,14 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     const handleItemPress = useCallback(
       (item: any) => {
-        onClose?.();
-        onItemPress?.(item.id);
+        // Dismiss first for smoother transition to details sheet
+        // @ts-ignore
+        ref?.current?.dismiss();
+        setTimeout(() => {
+          onItemPress?.(item.id);
+        }, 120);
       },
-      [onClose, onItemPress],
+      [onItemPress, ref],
     );
 
     const clearSearch = () => setSearchQuery("");
@@ -346,13 +501,12 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         // Dismiss the modal first, then trigger chat
         // @ts-ignore
         ref?.current?.dismiss();
-        onClose?.();
         // Small delay to let modal close
         setTimeout(() => {
           onChat?.(item);
         }, 100);
       },
-      [onChat, onClose, ref],
+      [onChat, ref],
     );
 
     const renderItem = useCallback(
@@ -361,6 +515,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           item={item}
           onPress={handleItemPress}
           onChat={onChat ? handleChatPress : undefined}
+          showGigSummary={false}
           variant="vertical"
           style={{ width: "100%" }}
         />
@@ -368,7 +523,57 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       [handleItemPress, handleChatPress, onChat],
     );
 
-    const keyExtractor = useCallback((item: any) => item.id.toString(), []);
+    const keyExtractor = useCallback(
+      (item: any, index: number) => item.id?.toString?.() || String(index),
+      [],
+    );
+
+    const itemSeparator = useCallback(() => <View style={{ height: 24 }} />, []);
+
+    const handleLoadMore = useCallback(() => {
+      if (loading || loadingMore || !hasMoreResults) return;
+
+      const buffered = spilloverRef.current;
+      if (buffered.length > 0) {
+        const nextChunk = buffered.slice(0, PAGE_SIZE);
+        const remaining = buffered.slice(PAGE_SIZE);
+        setData((prev) => [...prev, ...nextChunk]);
+        setSpillover(remaining);
+        return;
+      }
+
+      fetchSearchPage(currentPage + 1, "append");
+    }, [currentPage, fetchSearchPage, hasMoreResults, loading, loadingMore]);
+
+    const listFooter = useMemo(() => {
+      if (loadingMore) {
+        return (
+          <View style={styles.paginationFooter}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        );
+      }
+
+      if (!hasMoreResults || data.length === 0) {
+        return <View style={styles.paginationFooterSpacer} />;
+      }
+
+      return (
+        <View style={styles.paginationFooter}>
+          <Text style={[styles.paginationText, { color: colors.textSecondary }]}>
+            Scroll to load more
+          </Text>
+        </View>
+      );
+    }, [colors.primary, colors.textSecondary, data.length, hasMoreResults, loadingMore]);
+
+    const resultsLabelText = useMemo(() => {
+      if (data.length === 0) return "Top Results";
+      if (hasMoreResults) {
+        return `${data.length}+ Result${data.length !== 1 ? "s" : ""}`;
+      }
+      return `${data.length} Result${data.length !== 1 ? "s" : ""}`;
+    }, [data.length, hasMoreResults]);
 
     // Filter Section Component
     const renderFilterSection = useMemo(() => {
@@ -395,7 +600,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               contentContainerStyle={styles.filterChipsScroll}
             >
               {GENRE_OPTIONS.map((genre) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={genre}
                   style={[
                     styles.filterChip,
@@ -427,7 +632,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             </Text>
             <View style={styles.filterRow}>
               {RATING_OPTIONS.map((option) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={option.value}
                   style={[
                     styles.filterChip,
@@ -467,7 +672,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             </Text>
             <View style={styles.filterRow}>
               {PRICE_OPTIONS.map((option) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={option.value}
                   style={[
                     styles.filterChip,
@@ -499,7 +704,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             </Text>
             <View style={styles.filterRow}>
               {SORT_OPTIONS.map((option) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={option.value}
                   style={[
                     styles.filterChip,
@@ -538,7 +743,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
           {/* Reset Button */}
           {activeFilterCount > 0 && (
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.resetButton, { borderColor: colors.primary }]}
               onPress={resetFilters}
             >
@@ -608,7 +813,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     autoCorrect={false}
                   />
                   {searchQuery.length > 0 && (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={clearSearch}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
@@ -622,7 +827,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 </View>
 
                 {/* Filter Button */}
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[
                     styles.filterButton,
                     {
@@ -655,24 +860,22 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 </TouchableOpacity>
               </View>
 
-              <Text
-                style={{
-                  fontSize: 12,
-                  color: colors.textSecondary,
-                  marginLeft: 4,
-                  fontFamily: "Poppins_400Regular",
-                }}
-              >
-                {activeFilterCount > 0
-                  ? `${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""} applied`
-                  : isOwner
-                    ? "Genre • Availability"
-                    : "Location • Rate"}
-              </Text>
+              {activeFilterCount > 0 ? (
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: colors.textSecondary,
+                    marginLeft: 4,
+                    fontFamily: "Poppins_400Regular",
+                  }}
+                >
+                  {`${activeFilterCount} filter${activeFilterCount > 1 ? "s" : ""} applied`}
+                </Text>
+              ) : null}
             </View>
 
             {/* Type Filter Chips */}
-            {!isOwner && (
+            {!isOwner && TYPE_FILTERS.length > 0 && (
               <View style={styles.chipsRow}>
                 {TYPE_FILTERS.map((filter) => {
                   const isActive = filter === activeFilter;
@@ -689,7 +892,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                             },
                       ]}
                       onPress={() => setActiveFilter(filter)}
-                      activeOpacity={0.8}
+                      activeOpacity={1}
                     >
                       <Text
                         style={[
@@ -713,10 +916,14 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          <Text style={[styles.resultsLabel, { color: colors.textSecondary }]}>
-            {data.length > 0
-              ? `${data.length} Result${data.length !== 1 ? "s" : ""}`
-              : "Top Results"}
+          <Text
+            style={[
+              styles.resultsLabel,
+              { color: colors.textSecondary },
+              !showFilters && activeFilterCount === 0 && styles.resultsLabelCompact,
+            ]}
+          >
+            {resultsLabelText}
           </Text>
         </View>
       ),
@@ -731,7 +938,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         activeFilterCount,
         toggleFilters,
         renderFilterSection,
-        data.length,
+        resultsLabelText,
       ],
     );
 
@@ -759,7 +966,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               : `We couldn't find anything for "${searchQuery}".\nTry adjusting your search terms.`}
           </Text>
           {activeFilterCount > 0 && (
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[
                 styles.clearFiltersBtn,
                 { backgroundColor: colors.primary },
@@ -779,6 +986,11 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
         ref={ref}
         index={0}
         snapPoints={snapPoints}
+        animationConfigs={animationConfigs}
+        animateOnMount={true}
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
         backdropComponent={renderBackdrop}
         onDismiss={handleClose}
         backgroundStyle={{
@@ -802,29 +1014,28 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
         ) : (
-          <BottomSheetScrollView
+          <FlatList
+            data={visibleData}
+            renderItem={renderItem}
+            keyExtractor={keyExtractor}
+            ItemSeparatorComponent={itemSeparator}
+            ListEmptyComponent={ListEmptyComponent}
+            ListFooterComponent={listFooter}
             contentContainerStyle={[
               styles.listContent,
               { paddingHorizontal: 24 },
             ]}
-            showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-          >
-            {data.length === 0
-              ? ListEmptyComponent
-              : data.map((item, index) => (
-                  <View key={item.id?.toString() || index.toString()}>
-                    <ListingCard
-                      item={item}
-                      onPress={handleItemPress}
-                      onChat={onChat ? handleChatPress : undefined}
-                      variant="vertical"
-                      style={{ width: "100%" }}
-                    />
-                    {index < data.length - 1 && <View style={{ height: 24 }} />}
-                  </View>
-                ))}
-          </BottomSheetScrollView>
+            showsVerticalScrollIndicator={false}
+            initialNumToRender={6}
+            maxToRenderPerBatch={6}
+            updateCellsBatchingPeriod={40}
+            windowSize={5}
+            nestedScrollEnabled
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.35}
+            removeClippedSubviews={Platform.OS === "android"}
+          />
         )}
       </BottomSheetModal>
     );
@@ -931,7 +1142,7 @@ const styles = StyleSheet.create({
   chipsRow: {
     flexDirection: "row",
     gap: 8,
-    paddingTop: 4,
+    paddingTop: 0,
   },
   chip: {
     paddingHorizontal: 16,
@@ -1002,6 +1213,23 @@ const styles = StyleSheet.create({
     marginHorizontal: 24,
     marginTop: 24,
   },
+  resultsLabelCompact: {
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  paginationFooter: {
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  paginationFooterSpacer: {
+    height: 12,
+  },
+  paginationText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+  },
 });
 
 export default SearchBottomSheet;
+

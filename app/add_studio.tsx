@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Platform,
   ScrollView,
@@ -13,7 +13,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -25,6 +25,27 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+
+// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
+  const b64 = base64.replace(/=/g, "");
+  const bufLen = Math.floor(b64.length * 0.75);
+  const bytes = new Uint8Array(bufLen);
+  let p = 0;
+  for (let i = 0; i < b64.length; i += 4) {
+    const e1 = lookup[b64.charCodeAt(i)];
+    const e2 = lookup[b64.charCodeAt(i + 1)];
+    const e3 = lookup[b64.charCodeAt(i + 2)];
+    const e4 = lookup[b64.charCodeAt(i + 3)];
+    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
+    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+  }
+  return bytes;
+};
 
 // Helper function to format time input
 const formatTimeInput = (text: string): string => {
@@ -300,7 +321,7 @@ export default function AddStudioScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "studio-owner") {
-        Alert.alert("Unauthorized", "Only studio owners can create studios.");
+        showAlert("error", "Unauthorized", "Only studio owners can create studios.");
         router.replace("/home");
         return;
       }
@@ -555,25 +576,20 @@ export default function AddStudioScreen() {
         ),
       );
 
-      // Direct insert into studios table
+      // Insert base studio row (3NF-safe)
       const { data, error } = await supabase
         .from('studios')
         .insert({
           owner_id: session.user.id,
           name: payload.name,
-          type: payload.type,
           description: payload.description,
           address: payload.address,
           hourly_rate: payload.hourly_rate,
           rehearsal_rate: payload.rehearsal_rate,
           recording_rate: payload.recording_rate,
           pax: payload.pax,
-          amenities: payload.amenities,
-          instruments: payload.instruments,
-          images: payload.images,
           contract_url: payload.contract_url,
           business_permit_url: payload.business_permit_url,
-          availability: payload.availability,
           latitude: payload.latitude,
           longitude: payload.longitude,
         })
@@ -590,11 +606,77 @@ export default function AddStudioScreen() {
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
         if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
 
-        Alert.alert("Error", alertMessage);
+        showAlert("error", "Error", alertMessage);
         return;
       }
 
       const studioId = data.id;
+
+      const normalizedTypes =
+        payload.type === 'Both'
+          ? ['Rehearsal', 'Recording']
+          : payload.type
+            ? [payload.type]
+            : [];
+
+      if (normalizedTypes.length > 0) {
+        const { error: typesError } = await supabase
+          .from('studio_types')
+          .insert(
+            normalizedTypes.map((studio_type) => ({
+              studio_id: studioId,
+              studio_type,
+            })),
+          );
+        if (typesError) {
+          throw new Error(`Failed to save studio types: ${typesError.message}`);
+        }
+      }
+
+      if ((payload.amenities || []).length > 0) {
+        const { error: amenitiesError } = await supabase
+          .from('studio_amenities')
+          .insert(
+            payload.amenities.map((amenity: string) => ({
+              studio_id: studioId,
+              amenity,
+            })),
+          );
+        if (amenitiesError) {
+          throw new Error(`Failed to save studio amenities: ${amenitiesError.message}`);
+        }
+      }
+
+      if ((payload.instruments || []).length > 0) {
+        const { error: instrumentsError } = await supabase
+          .from('studio_instruments')
+          .insert(
+            payload.instruments.map((item: any) => ({
+              studio_id: studioId,
+              instrument_name: item.name,
+              image_url: item.image || null,
+            })),
+          );
+        if (instrumentsError) {
+          throw new Error(`Failed to save studio instruments: ${instrumentsError.message}`);
+        }
+      }
+
+      if ((payload.images || []).length > 0) {
+        const { error: mediaError } = await supabase
+          .from('studio_media')
+          .insert(
+            payload.images.map((media_url: string, index: number) => ({
+              studio_id: studioId,
+              media_type: 'image',
+              media_url,
+              sort_order: index,
+            })),
+          );
+        if (mediaError) {
+          throw new Error(`Failed to save studio images: ${mediaError.message}`);
+        }
+      }
 
       // Insert studio settings
       const bookingSettings = payload.booking_settings || {};
@@ -603,11 +685,11 @@ export default function AddStudioScreen() {
         buffer_minutes: 30,
         bulk_discount_threshold_hours: 10,
         bulk_discount_percentage: 0,
-        lead_time_hours: parseInt(bookingSettings.lead_time_hours) || 24,
-        weekend_multiplier: parseFloat(bookingSettings.weekend_multiplier) || 1.0,
-        peak_season_multiplier: parseFloat(bookingSettings.peak_season_multiplier) || 1.0,
+        lead_time_hours: Number(bookingSettings.lead_time_hours) || 24,
+        weekend_multiplier: Number(bookingSettings.weekend_multiplier) || 1.0,
+        peak_season_multiplier: Number(bookingSettings.peak_season_multiplier) || 1.0,
         peak_season_dates: bookingSettings.peak_season_dates || [],
-        off_peak_multiplier: parseFloat(bookingSettings.off_peak_multiplier) || 1.0,
+        off_peak_multiplier: Number(bookingSettings.off_peak_multiplier) || 1.0,
         off_peak_dates: bookingSettings.off_peak_dates || [],
       });
 
@@ -1005,9 +1087,8 @@ export default function AddStudioScreen() {
       }
 
       // Read file as base64
-      const response = await fetch(fileUri);
-      const arrayBuffer = await response.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
+      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = base64ToUint8Array(base64);
 
       // Upload to Supabase Storage
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
@@ -1083,9 +1164,8 @@ export default function AddStudioScreen() {
         return;
       }
 
-      const response = await fetch(fileUri);
-      const arrayBuffer = await response.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
+      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = base64ToUint8Array(base64);
 
       const contentType = fileName.toLowerCase().endsWith('.pdf')
         ? 'application/pdf'
@@ -1324,6 +1404,7 @@ export default function AddStudioScreen() {
             {
               color: colors.text,
               height: multiline ? 120 : "auto",
+              textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
             },
           ]}
@@ -1451,7 +1532,7 @@ export default function AddStudioScreen() {
                 </Text>
                 <View style={{ flexDirection: "row", gap: 12 }}>
                   {(["Rehearsal", "Recording", "Both"] as const).map((type) => (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={type}
                       onPress={() => setStudioType(type)}
                       style={{
@@ -1520,7 +1601,7 @@ export default function AddStudioScreen() {
                 >
                   Studio Address
                 </Text>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={() => setLocationPickerVisible(true)}
                   style={[
                     styles.inputWrapper,
@@ -1603,7 +1684,7 @@ export default function AddStudioScreen() {
                     </View>
                   </View>
                 ) : !isIdentityVerified ? (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     onPress={() => {
                       showAlert(
                         "warning",
@@ -1650,7 +1731,7 @@ export default function AddStudioScreen() {
                     </View>
                   </TouchableOpacity>
                 ) : (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     onPress={startAddressVerification}
                     disabled={addressVerificationLoading}
                     style={[
@@ -1975,7 +2056,7 @@ export default function AddStudioScreen() {
                         </Text>
                       </View>
                     </View>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={removeContract}
                       style={styles.removeContractBtn}
                     >
@@ -1990,7 +2071,7 @@ export default function AddStudioScreen() {
                   <TouchableOpacity
                     onPress={handleContractUpload}
                     disabled={uploadingContract}
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     style={[
                       styles.uploadContractBtn,
                       {
@@ -2088,7 +2169,7 @@ export default function AddStudioScreen() {
                         </Text>
                       </View>
                     </View>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={removeBusinessPermit}
                       style={styles.removeContractBtn}
                     >
@@ -2103,7 +2184,7 @@ export default function AddStudioScreen() {
                   <TouchableOpacity
                     onPress={handleBusinessPermitUpload}
                     disabled={uploadingBusinessPermit}
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     style={[
                       styles.uploadContractBtn,
                       {
@@ -2179,7 +2260,7 @@ export default function AddStudioScreen() {
                     onSubmitEditing={addAmenity}
                   />
                 </View>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={addAmenity}
                   style={[
                     styles.addAmenityButton,
@@ -2229,7 +2310,7 @@ export default function AddStudioScreen() {
                       >
                         {item}
                       </Text>
-                      <TouchableOpacity onPress={() => removeAmenity(index)}>
+                      <TouchableOpacity activeOpacity={1} onPress={() => removeAmenity(index)}>
                         <Ionicons
                           name="close-circle"
                           size={18}
@@ -2256,7 +2337,7 @@ export default function AddStudioScreen() {
                 </Text>
 
                 {/* Add Equipment Button */}
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={() => {
                     setEditingEquipment(null);
                     setEquipmentForm({
@@ -2364,7 +2445,7 @@ export default function AddStudioScreen() {
                             )}
                           </View>
                           <View style={{ flexDirection: "row", gap: 8 }}>
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                               onPress={() => {
                                 setEditingEquipment(item);
                                 setEquipmentForm({
@@ -2382,7 +2463,7 @@ export default function AddStudioScreen() {
                                 color={colors.primary}
                               />
                             </TouchableOpacity>
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                               onPress={() =>
                                 setEquipment(
                                   equipment.filter((e) => e.id !== item.id),
@@ -2434,7 +2515,7 @@ export default function AddStudioScreen() {
                       (i) => i.name === instrument.name,
                     );
                     return (
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         key={instrument.name}
                         onPress={() => toggleInstrument(instrument)}
                         style={[
@@ -2732,7 +2813,7 @@ export default function AddStudioScreen() {
                                     </View>
                                   )}
                                 </View>
-                                <TouchableOpacity
+                                <TouchableOpacity activeOpacity={1}
                                   onPress={() => {
                                     const newDates = { ...selectedDates };
                                     delete newDates[dateStr];
@@ -2803,7 +2884,7 @@ export default function AddStudioScreen() {
                                           },
                                         ]}
                                       />
-                                      <TouchableOpacity
+                                      <TouchableOpacity activeOpacity={1}
                                         onPress={() => {
                                           const newDates = { ...selectedDates };
                                           newDates[dateStr].slots[
@@ -2882,7 +2963,7 @@ export default function AddStudioScreen() {
                                           },
                                         ]}
                                       />
-                                      <TouchableOpacity
+                                      <TouchableOpacity activeOpacity={1}
                                         onPress={() => {
                                           const newDates = { ...selectedDates };
                                           newDates[dateStr].slots[slotIndex].end =
@@ -2911,7 +2992,7 @@ export default function AddStudioScreen() {
                                     </View>
                                   </View>
                                   {data.slots.length > 1 && (
-                                    <TouchableOpacity
+                                    <TouchableOpacity activeOpacity={1}
                                       onPress={() => {
                                         const newDates = { ...selectedDates };
                                         newDates[dateStr].slots.splice(
@@ -2934,7 +3015,7 @@ export default function AddStudioScreen() {
 
                               {/* Add Slot Button for Specific Date */}
                               {data.slots.length < 3 && (
-                                <TouchableOpacity
+                                <TouchableOpacity activeOpacity={1}
                                   onPress={() => {
                                     const newDates = { ...selectedDates };
                                     newDates[dateStr].slots.push({
@@ -3036,7 +3117,7 @@ export default function AddStudioScreen() {
                     <Text style={[styles.dayLabel, { color: colors.text }]}>
                       {daySchedule.day}
                     </Text>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => {
                         const newAvailability = [...availability];
                         if (newAvailability[dayIndex].slots.length === 0) {
@@ -3134,7 +3215,7 @@ export default function AddStudioScreen() {
                                 },
                               ]}
                             />
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                               onPress={() => {
                                 const newAvailability = [...availability];
                                 newAvailability[dayIndex].slots[
@@ -3210,7 +3291,7 @@ export default function AddStudioScreen() {
                                 },
                               ]}
                             />
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                               onPress={() => {
                                 const newAvailability = [...availability];
                                 newAvailability[dayIndex].slots[slotIndex].end =
@@ -3239,7 +3320,7 @@ export default function AddStudioScreen() {
                           </View>
                         </View>
                         {daySchedule.slots.length > 1 && (
-                          <TouchableOpacity
+                          <TouchableOpacity activeOpacity={1}
                             onPress={() => {
                               const newAvailability = [...availability];
                               newAvailability[dayIndex].slots.splice(
@@ -3263,7 +3344,7 @@ export default function AddStudioScreen() {
 
                   {daySchedule.slots.length > 0 &&
                     daySchedule.slots.length < 3 && (
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() => {
                           const newAvailability = [...availability];
                           // Default next slot
@@ -3605,31 +3686,31 @@ export default function AddStudioScreen() {
 
           {/* Navigation Buttons */}
           <View style={styles.navigationButtons}>
-            {step > 1 && (
-              <TouchableOpacity
-                onPress={handleBack}
-                disabled={creating}
-                activeOpacity={0.8}
-                style={[
-                  styles.backBtn,
-                  {
-                    borderColor: isDark ? "#374151" : "#E5E7EB",
-                    opacity: creating ? 0.5 : 1,
-                  },
-                ]}
-              >
-                <Text style={[styles.backBtnText, { color: colors.text }]}>
-                  Back
-                </Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              onPress={handleBack}
+              disabled={creating}
+              activeOpacity={1}
+              style={[
+                styles.backBtn,
+                {
+                  flex: 1,
+                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  opacity: creating ? 0.5 : 1,
+                },
+              ]}
+            >
+              <Text style={[styles.backBtnText, { color: colors.text }]}>
+                {step === 1 ? "Cancel" : "Back"}
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={handleNext}
               disabled={creating}
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[
                 styles.nextBtn,
                 {
+                  flex: 1,
                   backgroundColor: colors.primary,
                   shadowColor: colors.primary,
                   opacity: creating ? 0.7 : 1,
@@ -3658,6 +3739,13 @@ export default function AddStudioScreen() {
         onClose={handleSuccessRedirect}
       />
 
+      <Modal
+        visible={creating}
+        loading
+        loadingMessage="Creating studio..."
+        onClose={() => { }}
+      />
+
       {/* Address Verification Modal - Commented Out
       {addressVerificationModalVisible && (
         <View style={styles.verificationModalOverlay}>
@@ -3666,7 +3754,7 @@ export default function AddStudioScreen() {
               <Text style={[styles.verificationModalTitle, { color: colors.text }]}>
                 Verify Studio Address
               </Text>
-              <TouchableOpacity onPress={skipAddressVerification} style={styles.skipButton}>
+              <TouchableOpacity activeOpacity={1} onPress={skipAddressVerification} style={styles.skipButton}>
                 <Text style={[styles.skipButtonText, { color: colors.textSecondary }]}>Skip for now</Text>
               </TouchableOpacity>
             </View>
@@ -3733,7 +3821,7 @@ export default function AddStudioScreen() {
               </View>
             )}
             <View style={styles.verificationModalFooter}>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={handleAddressVerificationComplete}
                 style={[styles.verificationCompleteBtn, { backgroundColor: colors.primary }]}
               >
@@ -3808,7 +3896,7 @@ export default function AddStudioScreen() {
               >
                 {editingEquipment ? "Edit Equipment" : "Add Equipment"}
               </Text>
-              <TouchableOpacity onPress={() => setShowEquipmentModal(false)}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowEquipmentModal(false)}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -3933,7 +4021,7 @@ export default function AddStudioScreen() {
                       source={{ uri: equipmentForm.image }}
                       style={{ width: "100%", height: 150, borderRadius: 12 }}
                     />
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() =>
                         setEquipmentForm({ ...equipmentForm, image: "" })
                       }
@@ -3953,7 +4041,7 @@ export default function AddStudioScreen() {
                   <TouchableOpacity
                     onPress={pickEquipmentImage}
                     disabled={uploadingEquipmentImage}
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     style={{
                       backgroundColor: colors.inputBackground,
                       borderRadius: 12,
@@ -3989,7 +4077,7 @@ export default function AddStudioScreen() {
               </View>
 
               {/* Submit Button */}
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => {
                   if (!equipmentForm.name.trim()) {
                     showAlert(
@@ -4137,6 +4225,8 @@ const styles = StyleSheet.create({
   textInput: {
     padding: 16,
     fontFamily: "Poppins_400Regular",
+    textAlign: "left",
+    textAlignVertical: "center",
   },
 
   // Improved Amenities Styles

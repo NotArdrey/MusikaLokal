@@ -84,6 +84,7 @@ Deno.serve(async (req: Request) => {
                     group:groups!group_id(id, name, genre, images, members, description, location, rate)
                 `)
                 .eq('gig_id', gigId)
+                .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -95,7 +96,8 @@ Deno.serve(async (req: Request) => {
             const { groupId } = params;
             let query = supabaseClient.from('gig_applications').select(`
                 *,
-                gig:gigs!gig_id(name, location, budget, event_date, status, images)
+                gig:gigs!gig_id(name, location, budget, event_date, status, images),
+                applicant:profiles!applicant_id(id, full_name, avatar_url)
              `);
 
             if (groupId) {
@@ -108,6 +110,93 @@ Deno.serve(async (req: Request) => {
 
             if (error) throw error;
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // LEADER APPROVAL FOR GROUP APPLICATIONS
+        if (action === 'update_leader_approval') {
+            const { applicationId, decision } = params; // decision: 'approved' | 'rejected'
+
+            if (!applicationId || !decision || !['approved', 'rejected'].includes(decision)) {
+                return new Response(JSON.stringify({ error: 'Invalid applicationId or decision' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            const { data: appRow, error: appFetchError } = await supabaseClient
+                .from('gig_applications')
+                .select('id, applicant_id, group_id, gig_id, leader_approval_status, gig:gig_id(name, organizer_id), group:group_id(owner_id, name)')
+                .eq('id', applicationId)
+                .single();
+
+            if (appFetchError || !appRow) {
+                return new Response(JSON.stringify({ error: 'Application not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                });
+            }
+
+            if (!appRow.group_id) {
+                return new Response(JSON.stringify({ error: 'Leader approval only applies to group applications' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                });
+            }
+
+            if (appRow.group?.owner_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the group leader can review this application' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                });
+            }
+
+            const { data: updated, error: updateError } = await supabaseClient
+                .from('gig_applications')
+                .update({
+                    leader_approval_status: decision,
+                    leader_reviewed_at: new Date().toISOString(),
+                })
+                .eq('id', applicationId)
+                .select('*')
+                .single();
+
+            if (updateError) throw updateError;
+
+            await supabaseClient.from('notifications').insert({
+                user_id: appRow.applicant_id,
+                type: decision === 'approved' ? 'success' : 'warning',
+                title: decision === 'approved' ? 'Leader Approved Your Application' : 'Leader Rejected Your Application',
+                message:
+                    decision === 'approved'
+                        ? `Your group leader approved your application for "${appRow.gig?.name || 'this gig'}".`
+                        : `Your group leader rejected your application for "${appRow.gig?.name || 'this gig'}".`,
+                meta: {
+                    application_id: applicationId,
+                    gig_id: appRow.gig_id,
+                    group_id: appRow.group_id,
+                    leader_decision: decision,
+                },
+            });
+
+            if (decision === 'approved' && appRow.gig?.organizer_id) {
+                await supabaseClient.from('notifications').insert({
+                    user_id: appRow.gig.organizer_id,
+                    type: 'info',
+                    title: 'New Approved Group Application',
+                    message: `${appRow.group?.name || 'A group'} has an approved application for "${appRow.gig?.name || 'your gig'}".`,
+                    meta: {
+                        application_id: applicationId,
+                        gig_id: appRow.gig_id,
+                        group_id: appRow.group_id,
+                        source: 'leader_approval',
+                    },
+                });
+            }
+
+            return new Response(JSON.stringify(updated), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
         }
 
         // UPDATE APPLICATION STATUS
@@ -127,9 +216,20 @@ Deno.serve(async (req: Request) => {
 
             if (appError) throw appError;
 
+            const updatePayload: Record<string, any> = { status };
+            if (status === 'accepted') {
+                updatePayload.system_status_reason = null;
+                updatePayload.reconfirmation_required_at = null;
+                updatePayload.reconfirmation_due_at = null;
+            } else if (status === 'rejected') {
+                updatePayload.system_status_reason = 'user_rejection';
+                updatePayload.reconfirmation_required_at = null;
+                updatePayload.reconfirmation_due_at = null;
+            }
+
             const { data, error } = await supabaseClient
                 .from('gig_applications')
-                .update({ status })
+                .update(updatePayload)
                 .eq('id', applicationId)
                 .select()
                 .single();
@@ -163,7 +263,8 @@ Deno.serve(async (req: Request) => {
                         meta: {
                             gig_id: appDetails.gig_id,
                             application_id: applicationId,
-                            status: status
+                            status: status,
+                            status_reason: status === 'rejected' ? 'user_rejection' : null
                         }
                     });
             }

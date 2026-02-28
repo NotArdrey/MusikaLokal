@@ -60,7 +60,7 @@ export default function ToReviewScreen() {
                   <Text style={[styles.statusText, { color: colors.textSecondary }]}>{item.status}</Text>
                 </View>
 
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[styles.reviewBtn, { borderColor: colors.primary }]}
                   onPress={() => router.push('/submit_review' as any)}
                 >

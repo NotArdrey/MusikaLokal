@@ -3,6 +3,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
+import CustomAlert, { AlertType } from './CustomAlert';
 
 interface DocumentUploaderProps {
     onFileSelect: (file: any) => void;
@@ -13,6 +14,22 @@ interface DocumentUploaderProps {
 const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label = 'Upload Document', existingUrl }) => {
     const { colors, isDark } = useTheme();
     const [fileName, setFileName] = useState<string | null>(existingUrl ? 'Current CV' : null);
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: AlertType;
+        title: string;
+        message: string;
+        buttons?: any[];
+    }>({
+        type: 'info',
+        title: '',
+        message: '',
+    });
+
+    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+        setAlertConfig({ type, title, message, buttons });
+        setAlertVisible(true);
+    };
 
     const pickDocument = async () => {
         try {
@@ -28,7 +45,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
             onFileSelect(file);
         } catch (error) {
             console.error('Error picking document:', error);
-            alert('Error picking document');
+            showAlert('error', 'Error', 'Error picking document');
         }
     };
 
@@ -42,7 +59,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
             <Text style={[styles.label, { color: colors.textSecondary }]}>{label} <Text style={{ color: '#EF4444' }}>*</Text></Text>
 
             {!fileName ? (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                     style={[styles.uploadBtn, { borderColor: colors.border, backgroundColor: isDark ? '#374151' : '#F9FAFB' }]}
                     onPress={pickDocument}
                 >
@@ -55,11 +72,20 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
                         <Ionicons name="document-text" size={24} color={colors.primary} />
                         <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>{fileName}</Text>
                     </View>
-                    <TouchableOpacity onPress={clearDocument} style={styles.removeBtn}>
+                    <TouchableOpacity activeOpacity={1} onPress={clearDocument} style={styles.removeBtn}>
                         <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
                     </TouchableOpacity>
                 </View>
             )}
+
+            <CustomAlert
+                visible={alertVisible}
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
+            />
         </View>
     );
 };

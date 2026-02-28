@@ -1,9 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import CustomAlert, { AlertType } from './CustomAlert';
+
+const debugLog = (..._args: unknown[]) => {};
 
 interface VideoUploaderProps {
   videoUrl: string | null;
@@ -25,20 +28,36 @@ export default function VideoUploader({
   const { colors, isDark } = useTheme();
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   const pickAndUploadVideo = async () => {
     try {
       // Check authentication first
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session) {
-        Alert.alert('Authentication Required', 'Please log in to upload videos.');
+        showAlert('warning', 'Authentication Required', 'Please log in to upload videos.');
         console.error('Auth check failed:', authError?.message || 'No session');
         return;
       }
 
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
-        Alert.alert('Permission needed', 'Please allow access to your media library.');
+        showAlert('warning', 'Permission needed', 'Please allow access to your media library.');
         return;
       }
 
@@ -58,7 +77,7 @@ export default function VideoUploader({
       const fileSizeMB = arrayBuffer.byteLength / (1024 * 1024);
 
       if (fileSizeMB > maxSizeMB) {
-        Alert.alert('File Too Large', `Video must be under ${maxSizeMB}MB. Your file is ${fileSizeMB.toFixed(1)}MB.`);
+        showAlert('error', 'File Too Large', `Video must be under ${maxSizeMB}MB. Your file is ${fileSizeMB.toFixed(1)}MB.`);
         return;
       }
 
@@ -88,9 +107,9 @@ export default function VideoUploader({
 
         const fileName = `${userId}/${folder}/${Date.now()}_video.${fileExt}`;
 
-        console.log('📤 Uploading video:', fileName);
-        console.log('📦 File size:', fileSizeMB.toFixed(2), 'MB');
-        console.log('📍 File extension:', fileExt);
+        debugLog('📤 Uploading video:', fileName);
+        debugLog('📦 File size:', fileSizeMB.toFixed(2), 'MB');
+        debugLog('📍 File extension:', fileExt);
 
         // Upload using ArrayBuffer for better React Native compatibility
         const { data, error } = await supabase.storage
@@ -113,7 +132,7 @@ export default function VideoUploader({
             errorMsg = 'Network error. Check your internet connection.';
           }
 
-          Alert.alert('Upload Failed', errorMsg);
+          showAlert('error', 'Upload Failed', errorMsg);
           return;
         }
 
@@ -122,25 +141,26 @@ export default function VideoUploader({
           .from(bucketName)
           .getPublicUrl(data.path);
 
-        console.log('Video uploaded successfully:', urlData.publicUrl);
+        debugLog('Video uploaded successfully:', urlData.publicUrl);
         onVideoChange(urlData.publicUrl);
-        Alert.alert('Success', 'Video uploaded successfully!');
+        showAlert('success', 'Success', 'Video uploaded successfully!');
       } catch (e: any) {
         console.error('Error uploading video:', e);
-        Alert.alert('Error', e.message || 'Failed to upload video');
+        showAlert('error', 'Error', e.message || 'Failed to upload video');
       } finally {
         setUploading(false);
         setUploadProgress(0);
       }
     } catch (e: any) {
-      console.log('Video picker error:', e);
-      Alert.alert('Error', e.message || 'Failed to select video');
+      debugLog('Video picker error:', e);
+      showAlert('error', 'Error', e.message || 'Failed to select video');
       setUploading(false);
     }
   };
 
   const removeVideo = () => {
-    Alert.alert(
+    showAlert(
+      'warning',
       'Remove Video',
       'Are you sure you want to remove this video?',
       [
@@ -167,7 +187,7 @@ export default function VideoUploader({
               </Text>
             </View>
           </View>
-          <TouchableOpacity onPress={removeVideo} style={styles.removeButton}>
+          <TouchableOpacity activeOpacity={1} onPress={removeVideo} style={styles.removeButton}>
             <Ionicons name="trash-outline" size={24} color="#EF4444" />
           </TouchableOpacity>
         </View>
@@ -176,7 +196,7 @@ export default function VideoUploader({
           style={[styles.uploadBox, { borderColor: colors.border }]}
           onPress={pickAndUploadVideo}
           disabled={uploading}
-          activeOpacity={0.8}
+          activeOpacity={1}
         >
           {uploading ? (
             <>
@@ -198,6 +218,15 @@ export default function VideoUploader({
           )}
         </TouchableOpacity>
       )}
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
     </View>
   );
 }
@@ -243,3 +272,4 @@ const styles = StyleSheet.create({
     padding: 8,
   },
 });
+

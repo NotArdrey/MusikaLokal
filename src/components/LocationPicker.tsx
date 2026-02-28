@@ -1,7 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react'; // Added useEffect
 import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import CustomAlert, { AlertType } from './CustomAlert';
+
+const debugLog = (..._args: unknown[]) => {};
 
 interface LocationPickerProps {
     visible: boolean;
@@ -14,6 +17,22 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
     const webviewRef = useRef<WebView>(null);
     const [searchText, setSearchText] = useState('');
     const [loading, setLoading] = useState(true);
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: AlertType;
+        title: string;
+        message: string;
+        buttons?: any[];
+    }>({
+        type: 'info',
+        title: '',
+        message: '',
+    });
+
+    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+        setAlertConfig({ type, title, message, buttons });
+        setAlertVisible(true);
+    };
 
     // Default to Manila, Philippines
     const defaultLocation = {
@@ -122,12 +141,12 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                 };
                 setCurrentSelection(locationData);
             } catch (parseError) {
-                console.log('Error parsing JSON from reverse geocode:', parseError);
-                console.log('Response text:', text);
+                debugLog('Error parsing JSON from reverse geocode:', parseError);
+                debugLog('Response text:', text);
                 throw parseError;
             }
         } catch (e) {
-            console.log('Error fetching initial address:', e);
+            debugLog('Error fetching initial address:', e);
             // Fallback
             setCurrentSelection({
                 lat,
@@ -153,9 +172,9 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
             try {
                 data = JSON.parse(text);
             } catch (parseError) {
-                console.log('Error parsing JSON from search:', parseError);
-                console.log('Response text:', text);
-                alert('Search Error: Invalid response from server');
+                debugLog('Error parsing JSON from search:', parseError);
+                debugLog('Response text:', text);
+                showAlert('error', 'Search Error', 'Invalid response from server');
                 return;
             }
 
@@ -179,11 +198,11 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                 };
                 setCurrentSelection(newSelection);
             } else {
-                alert('Location not found');
+                showAlert('warning', 'Not Found', 'Location not found');
             }
         } catch (error) {
             console.error(error);
-            alert('Search failed');
+            showAlert('error', 'Search Failed', 'Search failed');
         } finally {
             setLoading(false);
         }
@@ -197,18 +216,19 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                 await fetchAddress(data.lat, data.lng);
             }
         } catch (e) {
-            console.log("Error parsing message", e);
+            debugLog("Error parsing message", e);
         }
     };
 
     const [currentSelection, setCurrentSelection] = useState<{ address: string; lat: number; lng: number } | null>(null);
 
     return (
+        <>
         <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
             <View style={styles.container}>
                 {/* Header */}
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                    <TouchableOpacity activeOpacity={1} onPress={onClose} style={styles.closeBtn}>
                         <Ionicons name="close" size={24} color="#000" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Pin Location</Text>
@@ -248,17 +268,26 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                     <Text style={styles.addressPreview} numberOfLines={2}>
                         {currentSelection ? currentSelection.address : 'Loading location...'}
                     </Text>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                         style={[styles.confirmBtn, !currentSelection && styles.disabledBtn]}
                         onPress={() => currentSelection && onSelect(currentSelection)}
                         disabled={!currentSelection}
-                        activeOpacity={0.8}
+                        activeOpacity={1}
                     >
                         <Text style={styles.confirmBtnText}>Confirm Location</Text>
                     </TouchableOpacity>
                 </View>
             </View>
         </Modal>
+        <CustomAlert
+            visible={alertVisible}
+            type={alertConfig.type}
+            title={alertConfig.title}
+            message={alertConfig.message}
+            buttons={alertConfig.buttons}
+            onClose={() => setAlertVisible(false)}
+        />
+        </>
     );
 }
 
@@ -340,3 +369,4 @@ const styles = StyleSheet.create({
         fontSize: 16,
     },
 });
+

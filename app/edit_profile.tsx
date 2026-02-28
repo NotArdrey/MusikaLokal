@@ -1,10 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  BackHandler,
   Image,
 
   Platform,
@@ -16,8 +16,10 @@ import {
   View
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import LeafletAddressPicker from "../src/components/LeafletAddressPicker";
+import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
@@ -106,6 +108,88 @@ export default function EditProfileScreen() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [roleSearch, setRoleSearch] = useState("");
   const [genreSearch, setGenreSearch] = useState("");
+  const [pendingAvatar, setPendingAvatar] = useState<{
+    base64: string;
+    ext: string;
+  } | null>(null);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: any[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
+
+  const initialSnapshotRef = useRef<{
+    contactNumber: string;
+    location: string;
+    bio: string;
+    roles: string[];
+    genres: string[];
+  } | null>(null);
+
+  const normalizeList = (items: string[]) =>
+    Array.from(new Set(items.map((item) => item.trim()).filter(Boolean))).sort(
+      (a, b) => a.localeCompare(b),
+    );
+
+  const currentSnapshot = useMemo(
+    () => ({
+      contactNumber: contactNumber.trim(),
+      location: location.trim(),
+      bio: bio.trim(),
+      roles: normalizeList(selectedRoles),
+      genres: normalizeList(selectedGenres),
+    }),
+    [contactNumber, location, bio, selectedRoles, selectedGenres],
+  );
+
+  const hasUnsavedChanges = useMemo(() => {
+    const initial = initialSnapshotRef.current;
+    if (!initial) return false;
+
+    return (
+      initial.contactNumber !== currentSnapshot.contactNumber ||
+      initial.location !== currentSnapshot.location ||
+      initial.bio !== currentSnapshot.bio ||
+      JSON.stringify(initial.roles) !== JSON.stringify(currentSnapshot.roles) ||
+      JSON.stringify(initial.genres) !== JSON.stringify(currentSnapshot.genres) ||
+      Boolean(pendingAvatar)
+    );
+  }, [currentSnapshot, pendingAvatar]);
+
+  const handleAttemptLeave = useCallback(() => {
+    if (saving) return;
+    showAlert(
+      "warning",
+      "Leave edit profile?",
+      hasUnsavedChanges
+        ? "You have unsaved changes. Leave without saving?"
+        : "Your current edits won't be saved unless you tap Save Profile.",
+      [
+        { text: "Stay", style: "cancel" },
+        {
+          text: "Leave",
+          style: "destructive",
+          onPress: () => router.back(),
+        },
+      ],
+    );
+  }, [hasUnsavedChanges, saving]);
 
 
   useEffect(() => {
@@ -118,31 +202,64 @@ export default function EditProfileScreen() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert("Error", "Please log in first");
+        showAlert("error", "Error", "Please log in first");
         router.back();
         return;
       }
 
       setUserId(user.id);
 
-      const { data, error } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
-      if (error && error.code !== "PGRST116") {
-        console.error("Load profile error:", error);
+      if (profileError) {
+        console.error("Load profile error:", profileError);
       }
 
-      if (data) {
-        setDisplayName(data.full_name || "");
-        setContactNumber(data.contact_number || "");
-        setLocation(data.address || data.location || "");
-        setBio(data.bio || "");
-        setAvatarUrl(data.avatar_url || DEFAULT_AVATAR);
-        setSelectedRoles(Array.isArray(data.skills) ? data.skills : []);
-        setSelectedGenres(Array.isArray(data.genres) ? data.genres : []);
+      let resolvedProfile = null;
+
+      if (profileData) {
+        const [skillsResult, genresResult] = await Promise.all([
+          supabase
+            .from("profile_skills")
+            .select("skill")
+            .eq("profile_id", user.id),
+          supabase
+            .from("profile_genres")
+            .select("genre")
+            .eq("profile_id", user.id),
+        ]);
+
+        resolvedProfile = {
+          ...profileData,
+          skills: (skillsResult.data || []).map((row: any) => row.skill).filter(Boolean),
+          genres: (genresResult.data || []).map((row: any) => row.genre).filter(Boolean),
+        };
+      }
+
+      if (resolvedProfile) {
+        setDisplayName(resolvedProfile.full_name || "");
+        setContactNumber(resolvedProfile.contact_number || "");
+        setLocation(resolvedProfile.address || resolvedProfile.location || "");
+        setBio(resolvedProfile.bio || "");
+        setAvatarUrl(resolvedProfile.avatar_url || DEFAULT_AVATAR);
+        setSelectedRoles(Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : []);
+        setSelectedGenres(Array.isArray(resolvedProfile.genres) ? resolvedProfile.genres : []);
+
+        initialSnapshotRef.current = {
+          contactNumber: (resolvedProfile.contact_number || "").trim(),
+          location: (resolvedProfile.address || resolvedProfile.location || "").trim(),
+          bio: (resolvedProfile.bio || "").trim(),
+          roles: normalizeList(
+            Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : [],
+          ),
+          genres: normalizeList(
+            Array.isArray(resolvedProfile.genres) ? resolvedProfile.genres : [],
+          ),
+        };
 
       }
     } catch (err) {
@@ -151,6 +268,18 @@ export default function EditProfileScreen() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    const backSubscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        handleAttemptLeave();
+        return true;
+      },
+    );
+
+    return () => backSubscription.remove();
+  }, [handleAttemptLeave]);
 
 
 
@@ -173,7 +302,8 @@ export default function EditProfileScreen() {
       const { status } =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
+        showAlert(
+          "warning",
           "Permission Required",
           "Please allow access to your photos",
         );
@@ -193,123 +323,190 @@ export default function EditProfileScreen() {
       const asset = result.assets[0];
 
       if (!asset.base64) {
-        Alert.alert("Error", "Could not read image data");
+        showAlert("error", "Error", "Could not read image data");
         return;
       }
-
-      setUploadingPhoto(true);
 
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
-      const path = `${userId}/${Date.now()}.${ext}`;
-      const contentType = `image/${ext === "jpg" ? "jpeg" : ext}`;
-
-      console.log("📤 Uploading photo...");
-      console.log("📦 Base64 length:", asset.base64.length);
-
-      // Decode base64 to ArrayBuffer
-      const base64 = asset.base64;
-      const chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      const lookup = new Uint8Array(256);
-      for (let i = 0; i < chars.length; i++) {
-        lookup[chars.charCodeAt(i)] = i;
-      }
-
-      let bufferLength = base64.length * 0.75;
-      if (base64[base64.length - 1] === "=") bufferLength--;
-      if (base64[base64.length - 2] === "=") bufferLength--;
-
-      const bytes = new Uint8Array(Math.floor(bufferLength));
-      let p = 0;
-
-      for (let i = 0; i < base64.length; i += 4) {
-        const e1 = lookup[base64.charCodeAt(i)];
-        const e2 = lookup[base64.charCodeAt(i + 1)];
-        const e3 = lookup[base64.charCodeAt(i + 2)];
-        const e4 = lookup[base64.charCodeAt(i + 3)];
-
-        if (p < bytes.length) bytes[p++] = (e1 << 2) | (e2 >> 4);
-        if (p < bytes.length) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-        if (p < bytes.length) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-      }
-
-      console.log("📤 Bytes length:", bytes.length);
-
-      const { data, error } = await supabase.storage
-        .from("avatars")
-        .upload(path, bytes, {
-          contentType,
-          upsert: true,
-        });
-
-      setUploadingPhoto(false);
-
-      if (error) {
-        console.error("❌ Upload error:", error);
-        Alert.alert("Upload Failed", error.message);
-        return;
-      }
-
-      const { data: urlData } = supabase.storage
-        .from("avatars")
-        .getPublicUrl(data.path);
-      const newAvatarUrl = urlData.publicUrl;
-
-      console.log("✅ Uploaded:", newAvatarUrl);
-
-      const { error: updateErr } = await supabase
-        .from("profiles")
-        .update({ avatar_url: newAvatarUrl })
-        .eq("id", userId);
-
-      if (updateErr) {
-        console.error("❌ Profile update error:", updateErr);
-        Alert.alert("Error", "Photo uploaded but failed to save to profile");
-        return;
-      }
-
-      setAvatarUrl(newAvatarUrl);
-      Alert.alert("Success", "Profile photo updated!");
+      setPendingAvatar({ base64: asset.base64, ext });
+      setAvatarUrl(asset.uri);
+      showAlert("info", "Photo selected", "Tap Save Profile to apply your new photo.");
     } catch (err: any) {
       setUploadingPhoto(false);
       console.error("❌ Error:", err);
-      Alert.alert("Error", err.message || "Failed to upload photo");
+      showAlert("error", "Error", err.message || "Failed to upload photo");
     }
   }
 
   async function handleSave() {
     if (!userId) {
-      Alert.alert("Error", "Not authenticated");
+      showAlert("error", "Error", "Not authenticated");
+      return;
+    }
+
+    if (!contactNumber.trim()) {
+      showAlert("warning", "Required", "Please enter your contact number.");
+      return;
+    }
+    if (!location.trim()) {
+      showAlert("warning", "Required", "Please enter your address.");
+      return;
+    }
+    if (selectedRoles.length === 0) {
+      showAlert("warning", "Required", "Please select at least one role or instrument.");
+      return;
+    }
+    if (selectedGenres.length === 0) {
+      showAlert("warning", "Required", "Please select at least one genre.");
+      return;
+    }
+    if (!bio.trim()) {
+      showAlert("warning", "Required", "Please write a short bio.");
       return;
     }
 
     setSaving(true);
 
-    const updateData = {
-      skills: selectedRoles,
-      genres: selectedGenres,
-      bio,
-      contact_number: contactNumber,
-      address: location,
-      location: location,
+    try {
+      const cleanedRoles = Array.from(
+        new Set(selectedRoles.map((role) => role.trim()).filter(Boolean)),
+      );
+      const cleanedGenres = Array.from(
+        new Set(selectedGenres.map((genre) => genre.trim()).filter(Boolean)),
+      );
 
-    };
+      let uploadedAvatarUrl: string | null = null;
 
-    const { error } = await supabase
-      .from("profiles")
-      .update(updateData)
-      .eq("id", userId);
+      if (pendingAvatar) {
+        setUploadingPhoto(true);
 
-    setSaving(false);
+        const path = `${userId}/${Date.now()}.${pendingAvatar.ext}`;
+        const contentType = `image/${pendingAvatar.ext === "jpg" ? "jpeg" : pendingAvatar.ext}`;
+        const base64 = pendingAvatar.base64;
 
-    if (error) {
-      Alert.alert("Error", error.message || "Failed to save");
-      return;
+        const chars =
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const lookup = new Uint8Array(256);
+        for (let i = 0; i < chars.length; i++) {
+          lookup[chars.charCodeAt(i)] = i;
+        }
+
+        let bufferLength = base64.length * 0.75;
+        if (base64[base64.length - 1] === "=") bufferLength--;
+        if (base64[base64.length - 2] === "=") bufferLength--;
+
+        const bytes = new Uint8Array(Math.floor(bufferLength));
+        let p = 0;
+
+        for (let i = 0; i < base64.length; i += 4) {
+          const e1 = lookup[base64.charCodeAt(i)];
+          const e2 = lookup[base64.charCodeAt(i + 1)];
+          const e3 = lookup[base64.charCodeAt(i + 2)];
+          const e4 = lookup[base64.charCodeAt(i + 3)];
+
+          if (p < bytes.length) bytes[p++] = (e1 << 2) | (e2 >> 4);
+          if (p < bytes.length) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+          if (p < bytes.length) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+        }
+
+        const { data, error } = await supabase.storage
+          .from("avatars")
+          .upload(path, bytes, {
+            contentType,
+            upsert: true,
+          });
+
+        if (error) {
+          throw error;
+        }
+
+        const { data: urlData } = supabase.storage
+          .from("avatars")
+          .getPublicUrl(data.path);
+        uploadedAvatarUrl = urlData.publicUrl;
+      }
+
+      const profilePayload: any = {
+        bio,
+        contact_number: contactNumber,
+        address: location,
+        location,
+      };
+
+      if (uploadedAvatarUrl) {
+        profilePayload.avatar_url = uploadedAvatarUrl;
+      }
+
+      const { error: profileUpdateError } = await supabase
+        .from("profiles")
+        .update(profilePayload)
+        .eq("id", userId);
+
+      if (profileUpdateError) {
+        throw profileUpdateError;
+      }
+
+      const { error: skillsDeleteError } = await supabase
+        .from("profile_skills")
+        .delete()
+        .eq("profile_id", userId);
+
+      if (skillsDeleteError) {
+        throw skillsDeleteError;
+      }
+
+      if (cleanedRoles.length > 0) {
+        const { error: skillsInsertError } = await supabase
+          .from("profile_skills")
+          .insert(cleanedRoles.map((skill) => ({ profile_id: userId, skill })));
+
+        if (skillsInsertError) {
+          throw skillsInsertError;
+        }
+      }
+
+      const { error: genresDeleteError } = await supabase
+        .from("profile_genres")
+        .delete()
+        .eq("profile_id", userId);
+
+      if (genresDeleteError) {
+        throw genresDeleteError;
+      }
+
+      if (cleanedGenres.length > 0) {
+        const { error: genresInsertError } = await supabase
+          .from("profile_genres")
+          .insert(cleanedGenres.map((genre) => ({ profile_id: userId, genre })));
+
+        if (genresInsertError) {
+          throw genresInsertError;
+        }
+      }
+
+      if (uploadedAvatarUrl) {
+        setAvatarUrl(uploadedAvatarUrl);
+      }
+
+      setPendingAvatar(null);
+
+      initialSnapshotRef.current = {
+        contactNumber: contactNumber.trim(),
+        location: location.trim(),
+        bio: bio.trim(),
+        roles: normalizeList(cleanedRoles),
+        genres: normalizeList(cleanedGenres),
+      };
+
+      showAlert("success", "Success", "Profile updated!", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
+    } catch (error: any) {
+      showAlert("error", "Error", error?.message || "Failed to save");
+    } finally {
+      setUploadingPhoto(false);
+      setSaving(false);
     }
-
-    Alert.alert("Success", "Profile updated!", [
-      { text: "OK", onPress: () => router.back() },
-    ]);
   }
 
   if (loading) {
@@ -325,7 +522,7 @@ export default function EditProfileScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Header title="Edit Profile" />
+      <Header title="Edit Profile" onBackPress={handleAttemptLeave} />
 
       <ScrollView
         style={styles.scroll}
@@ -345,7 +542,7 @@ export default function EditProfileScreen() {
               style={[styles.cameraBtn, { backgroundColor: colors.primary }]}
               onPress={handleChangePhoto}
               disabled={uploadingPhoto}
-              activeOpacity={0.8}
+              activeOpacity={1}
             >
               {uploadingPhoto ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -385,7 +582,7 @@ export default function EditProfileScreen() {
         {/* Contact Number */}
         <View style={styles.field}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>
-            CONTACT NUMBER
+            CONTACT NUMBER <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           <TextInput
             style={[
@@ -407,7 +604,7 @@ export default function EditProfileScreen() {
         {/* Address */}
         <View style={styles.field}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>
-            ADDRESS
+            ADDRESS <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           <LeafletAddressPicker
             value={location}
@@ -419,13 +616,13 @@ export default function EditProfileScreen() {
         {/* Roles */}
         <View style={styles.field}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>
-            ROLES & INSTRUMENTS
+            ROLES & INSTRUMENTS <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           {/* Selected roles */}
           {selectedRoles.length > 0 && (
             <View style={styles.selectedChips}>
               {selectedRoles.map((role) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={role}
                   onPress={() => toggleRole(role)}
                   style={[
@@ -480,7 +677,7 @@ export default function EditProfileScreen() {
             )
               .slice(0, roleSearch ? 20 : 8)
               .map((role) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={role}
                   onPress={() => toggleRole(role)}
                   style={[
@@ -512,13 +709,13 @@ export default function EditProfileScreen() {
         {/* Genres */}
         <View style={styles.field}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>
-            GENRES
+            GENRES <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           {/* Selected genres */}
           {selectedGenres.length > 0 && (
             <View style={styles.selectedChips}>
               {selectedGenres.map((genre) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={genre}
                   onPress={() => toggleGenre(genre)}
                   style={[
@@ -573,7 +770,7 @@ export default function EditProfileScreen() {
             )
               .slice(0, genreSearch ? 20 : 8)
               .map((genre) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={genre}
                   onPress={() => toggleGenre(genre)}
                   style={[
@@ -605,7 +802,7 @@ export default function EditProfileScreen() {
         {/* Bio */}
         <View style={styles.field}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>
-            BIO
+            BIO <Text style={{ color: "#ef4444" }}>*</Text>
           </Text>
           <TextInput
             style={[
@@ -636,7 +833,7 @@ export default function EditProfileScreen() {
           ]}
           onPress={handleSave}
           disabled={saving}
-          activeOpacity={0.8}
+          activeOpacity={1}
         >
           {saving ? (
             <ActivityIndicator size="small" color="#fff" />
@@ -647,9 +844,9 @@ export default function EditProfileScreen() {
 
         <TouchableOpacity
           style={[styles.cancelBtn, { borderColor: colors.border }]}
-          onPress={() => router.back()}
+          onPress={handleAttemptLeave}
           disabled={saving}
-          activeOpacity={0.8}
+          activeOpacity={1}
         >
           <Text style={[styles.cancelBtnText, { color: colors.text }]}>
             Cancel
@@ -660,6 +857,22 @@ export default function EditProfileScreen() {
       </ScrollView>
 
       <Navbar />
+
+      <Modal
+        visible={saving}
+        loading
+        loadingMessage="Saving profile..."
+        onClose={() => { }}
+      />
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
     </View>
   );
 }
@@ -673,7 +886,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
   },
   scroll: { flex: 1 },
-  scrollContent: { padding: 20, paddingBottom: 100 },
+  scrollContent: { padding: 20, paddingBottom: 150 },
 
   avatarContainer: { alignItems: "center", marginBottom: 24 },
   avatarWrapper: { position: "relative" },
@@ -728,7 +941,6 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     minHeight: 100,
   },
-
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     paddingHorizontal: 14,
@@ -764,6 +976,7 @@ const styles = StyleSheet.create({
     padding: 10,
     fontSize: 14,
     fontFamily: "Poppins_400Regular",
+    textAlign: "center",
   },
   moreText: {
     fontSize: 12,

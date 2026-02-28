@@ -1,14 +1,15 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Session } from "@supabase/supabase-js";
 import { router } from "expo-router";
 import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useState,
 } from "react";
-import { Alert } from "react-native";
 import { supabase } from "../../lib/supabase";
+import CustomAlert, { AlertType } from "../components/CustomAlert";
 
 type UnpaidBooking = {
   id: string;
@@ -20,6 +21,8 @@ type UnpaidBooking = {
 type AuthContextType = {
   session: Session | null;
   loading: boolean;
+  isGuest: boolean;
+  setGuestMode: (enabled: boolean) => Promise<void>;
   isAdmin: boolean;
   userRole: string | null;
   userId: string | null;
@@ -39,6 +42,8 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType>({
   session: null,
   loading: true,
+  isGuest: false,
+  setGuestMode: async () => { },
   isAdmin: false,
   userRole: null,
   userId: null,
@@ -57,14 +62,14 @@ export const useAuth = () => useContext(AuthContext);
 
 // Hook to require auth - redirects to login if not authenticated
 export const useRequireAuth = () => {
-  const { session, loading } = useAuth();
+  const { session, loading, isGuest } = useAuth();
 
   useEffect(() => {
     if (!loading && !session) {
-      // Not logged in - redirect to login
-      router.replace("/");
+      // Not logged in - guests stay in Home, others go to login
+      router.replace(isGuest ? "/home" : "/");
     }
-  }, [session, loading]);
+  }, [session, loading, isGuest]);
 
   return {
     isAuthenticated: !!session,
@@ -76,6 +81,7 @@ export const useRequireAuth = () => {
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isGuest, setIsGuest] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
 
@@ -90,6 +96,43 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
   const [subscriptionRequired, setSubscriptionRequired] = useState(false);
   const [subscriptionChecked, setSubscriptionChecked] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = useCallback(
+    (
+      type: AlertType,
+      title: string,
+      message: string,
+      buttons?: any[],
+    ) => {
+      setAlertConfig({ type, title, message, buttons });
+      setAlertVisible(true);
+    },
+    [],
+  );
+
+  const setGuestMode = useCallback(async (enabled: boolean) => {
+    setIsGuest(enabled);
+    try {
+      if (enabled) {
+        await AsyncStorage.setItem("auth_guest_mode", "1");
+      } else {
+        await AsyncStorage.removeItem("auth_guest_mode");
+      }
+    } catch (e) {
+      console.log("Failed to persist guest mode:", e);
+    }
+  }, []);
 
   // Check subscription status for owners
   const checkSubscription = useCallback(async () => {
@@ -131,9 +174,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       // Only studio-owner and venue-owner need subscription
-      // UPDATE: User requested to remove subscription requirement for everyone.
-      const needsSubscription = false;
-      // was: profile?.role === "studio-owner" || profile?.role === "venue-owner";
+      const needsSubscription =
+        profile?.role === "studio-owner" || profile?.role === "venue-owner";
 
       if (needsSubscription) {
         const status = profile?.subscription_status;
@@ -230,7 +272,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // Show lock alert and redirect to wallet
   const showLockAlert = useCallback(() => {
-    Alert.alert(
+    showAlert(
+      "warning",
       "Action Blocked",
       `You have an outstanding balance of ₱${unpaidBalance.toLocaleString()}. Please settle your payment to continue using the app.`,
       [
@@ -238,9 +281,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         { text: "Pay Now", onPress: () => router.push("/wallet") },
       ],
     );
-  }, [unpaidBalance]);
+  }, [showAlert, unpaidBalance]);
 
   useEffect(() => {
+    AsyncStorage.getItem("auth_guest_mode")
+      .then((value) => {
+        if (value === "1") {
+          setIsGuest(true);
+        }
+      })
+      .catch((e) => {
+        console.log("Failed to load guest mode:", e);
+      });
+
     // Helper to filter/block unverified sessions (prevents auto-login during signup)
     const filterSession = (currentSession: Session | null) => {
       // If user exists but has explicit is_verified: false, mimic logged out state
@@ -281,6 +334,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const secureSession = filterSession(session);
       setSession(secureSession);
       if (secureSession) {
+        setGuestMode(false);
         checkAdmin(secureSession.user.id);
         fetchUserRole(secureSession.user.id);
       }
@@ -321,6 +375,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const secureSession = filterSession(session);
       setSession(secureSession);
       if (secureSession) {
+        setGuestMode(false);
         checkAdmin(secureSession.user.id);
         fetchUserRole(secureSession.user.id);
       } else if (event !== "INITIAL_SESSION") {
@@ -396,6 +451,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       value={{
         session,
         loading,
+        isGuest,
+        setGuestMode,
         isAdmin,
         userRole,
         userId: session?.user?.id || null,
@@ -411,6 +468,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }}
     >
       {children}
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
     </AuthContext.Provider>
   );
 };

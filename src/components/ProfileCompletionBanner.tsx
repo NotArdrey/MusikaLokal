@@ -24,7 +24,7 @@ export const ProfileCompletionBanner = () => {
                     </Text>
                 </View>
             </View>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 style={[styles.button, { backgroundColor: colors.primary }]}
                 onPress={() => router.push('/edit_profile')}
             >

@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { BottomSheetBackdrop, BottomSheetFlatList, BottomSheetModal, useBottomSheetTimingConfigs } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Easing } from 'react-native-reanimated';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import ListingCard from './ListingCard';
@@ -33,7 +34,11 @@ interface RecentlyViewedSheetProps {
 
 const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProps>(({ onClose, onItemPress, onChat }, ref) => {
     const { colors, isDark } = useTheme();
-    const snapPoints = useMemo(() => ['94%'], []);
+    const snapPoints = useMemo(() => ['90%'], []);
+    const animationConfigs = useBottomSheetTimingConfigs({
+        duration: 320,
+        easing: Easing.inOut(Easing.cubic),
+    });
 
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -50,18 +55,23 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
         []
     );
 
-    const handleDismiss = () => {
+    const handleDismiss = useCallback(() => {
+        if (onClose) onClose();
+    }, [onClose]);
+
+    const closeSheet = useCallback(() => {
         // @ts-ignore
         ref?.current?.dismiss();
-        if (onClose) onClose();
-    };
+    }, [ref]);
 
-    const handleCardPress = (item: any) => {
+    const handleCardPress = useCallback((item: any) => {
         if (onItemPress) {
-            handleDismiss();
-            onItemPress(item.id);
+            closeSheet();
+            setTimeout(() => {
+                onItemPress(item.id);
+            }, 120);
         }
-    };
+    }, [closeSheet, onItemPress]);
 
     // Fetch recently viewed items - uses full objects stored by home.tsx
     useEffect(() => {
@@ -102,11 +112,11 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                 // Legacy fallback: if stored as IDs, fetch from database
                 const recentIds = history.slice(0, 50);
 
-                // Fetch from all tables
+                // Fetch from projection-backed stats views (legacy-compatible shape)
                 const [studiosRes, groupsRes, gigsRes] = await Promise.all([
-                    supabase.from('studios').select('*').in('id', recentIds),
-                    supabase.from('groups').select('*').in('id', recentIds),
-                    supabase.from('gigs').select('*, venues(name, location)').in('id', recentIds)
+                    supabase.from('studios_with_stats').select('*').in('id', recentIds),
+                    supabase.from('groups_with_stats').select('*').in('id', recentIds),
+                    supabase.from('gigs_with_stats').select('*').in('id', recentIds)
                 ]);
 
                 const combined: any[] = [];
@@ -128,7 +138,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                             ...g,
                             type: 'Group',
                             image: g.images?.[0] || 'https://via.placeholder.com/300x200?text=Group',
-                            rating: g.average_rating || 0
+                            rating: g.rating || g.average_rating || 0
                         });
                     });
                 }
@@ -140,7 +150,7 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                             type: 'Gig',
                             image: gig.images?.[0] || 'https://via.placeholder.com/300x200?text=Gig',
                             rating: gig.rating || 0,
-                            location: gig.venues?.location || gig.location
+                            location: gig.location
                         });
                     });
                 }
@@ -164,20 +174,13 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
         fetchRecentlyViewed();
     }, []);
 
-    const handleChatPress = useCallback((item: any) => {
-        // Dismiss the modal first, then trigger chat
-        handleDismiss();
-        // Small delay to let modal close
-        setTimeout(() => {
-            onChat?.(item);
-        }, 100);
-    }, [onChat]);
-
     const renderItem = useCallback(({ item }: { item: any }) => (
         <View style={{ paddingHorizontal: scale(24), marginBottom: moderateScale(16) }}>
-            <ListingCard item={item} onPress={() => handleCardPress(item)} onChat={onChat ? handleChatPress : undefined} />
+            <ListingCard item={item} onPress={() => handleCardPress(item)} />
         </View>
-    ), [onChat, handleChatPress]);
+    ), [handleCardPress]);
+
+    const keyExtractor = useCallback((item: any, index: number) => item?.id?.toString?.() || index.toString(), []);
 
     const renderEmpty = () => (
         <View style={styles.emptyContainer}>
@@ -195,6 +198,11 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                 ref={ref}
                 index={0}
                 snapPoints={snapPoints}
+                animationConfigs={animationConfigs}
+                animateOnMount={true}
+                enableDynamicSizing={false}
+                enableContentPanningGesture={false}
+                enableOverDrag={false}
                 backdropComponent={renderBackdrop}
                 onDismiss={handleDismiss}
                 backgroundStyle={{ backgroundColor: colors.background }}
@@ -209,9 +217,9 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                                 {data.length} {data.length === 1 ? 'item' : 'items'}
                             </Text>
                         </View>
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             style={[styles.closeBtn, { backgroundColor: colors.card }]}
-                            onPress={handleDismiss}
+                            onPress={closeSheet}
                         >
                             <Ionicons name="close" size={moderateScale(24)} color={colors.text} />
                         </TouchableOpacity>
@@ -226,20 +234,18 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                         </Text>
                     </View>
                 ) : (
-                    <BottomSheetScrollView
-                        contentContainerStyle={{ paddingTop: moderateScale(16), paddingBottom: moderateScale(100) }}
+                    <BottomSheetFlatList
+                        data={data}
+                        keyExtractor={keyExtractor}
+                        renderItem={renderItem}
+                        ListEmptyComponent={renderEmpty}
                         showsVerticalScrollIndicator={false}
-                    >
-                        {data.length === 0 ? (
-                            renderEmpty()
-                        ) : (
-                            data.map((item: any) => (
-                                <View key={item.id} style={{ paddingHorizontal: scale(24), marginBottom: moderateScale(16) }}>
-                                    <ListingCard item={item} onPress={() => handleCardPress(item)} />
-                                </View>
-                            ))
-                        )}
-                    </BottomSheetScrollView>
+                        contentContainerStyle={{ paddingTop: moderateScale(16), paddingBottom: moderateScale(100) }}
+                        initialNumToRender={5}
+                        maxToRenderPerBatch={8}
+                        windowSize={5}
+                        removeClippedSubviews
+                    />
                 )}
             </BottomSheetModal>
         </>

@@ -6,9 +6,10 @@ import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import { useTheme } from '../src/context/ThemeContext';
 
 type OnboardingStep = 'role' | 'details' | 'verification' | 'email_verification';
@@ -34,6 +35,37 @@ export default function SignupScreen() {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: AlertType;
+        title: string;
+        message: string;
+        buttons?: any[];
+    }>({
+        type: 'info',
+        title: '',
+        message: '',
+    });
+
+    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+        setAlertConfig({ type, title, message, buttons });
+        setAlertVisible(true);
+    };
+
+    const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+        const lowerTitle = (title || '').toLowerCase();
+        let type: AlertType = 'info';
+        if (lowerTitle.includes('error') || lowerTitle.includes('failed') || lowerTitle.includes('invalid') || lowerTitle.includes('timeout') || lowerTitle.includes('exists')) {
+            type = 'error';
+        } else if (lowerTitle.includes('success') || lowerTitle.includes('sent')) {
+            type = 'success';
+        } else if (lowerTitle.includes('pending') || lowerTitle.includes('processing') || lowerTitle.includes('required') || lowerTitle.includes('verification')) {
+            type = 'warning';
+        }
+        showAlert(type, title || 'Notice', message || '', buttons);
+    };
+
+    const Alert = { alert: showAlertNative };
 
     const [errors, setErrors] = useState<{ email?: string; password?: string; confirmPassword?: string; role?: string }>({});
 
@@ -660,7 +692,7 @@ export default function SignupScreen() {
      */
     const renderRoleStep = () => (
         <View style={styles.stepContainer}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backLink}>
+            <TouchableOpacity activeOpacity={1} onPress={() => router.back()} style={styles.backLink}>
                 <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
                 <Text style={themeStyles.textSecondary}>Back</Text>
             </TouchableOpacity>
@@ -670,7 +702,7 @@ export default function SignupScreen() {
 
             <View style={styles.roleGrid}>
                 {roleOptions.map((option) => (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                         key={option.value}
                         onPress={() => setSelectedRole(option.value)}
                         style={[
@@ -690,10 +722,10 @@ export default function SignupScreen() {
                 ))}
             </View>
 
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 disabled={!selectedRole}
                 onPress={() => setStep('details')}
-                activeOpacity={0.8}
+                activeOpacity={1}
                 style={[styles.nextButton, themeStyles.primaryButton, !selectedRole && { opacity: 0.5 }]}
             >
                 <Text style={styles.nextButtonText}>Continue</Text>
@@ -707,7 +739,7 @@ export default function SignupScreen() {
      */
     const renderDetailsStep = () => (
         <View style={styles.stepContainer}>
-            <TouchableOpacity onPress={() => setStep('role')} style={styles.backLink}>
+            <TouchableOpacity activeOpacity={1} onPress={() => setStep('role')} style={styles.backLink}>
                 <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
                 <Text style={themeStyles.textSecondary}>Back</Text>
             </TouchableOpacity>
@@ -741,7 +773,7 @@ export default function SignupScreen() {
                         onChangeText={setPassword}
                         secureTextEntry={!showPassword}
                     />
-                    <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
                         <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
                     </TouchableOpacity>
                 </View>
@@ -758,7 +790,7 @@ export default function SignupScreen() {
                         onChangeText={setConfirmPassword}
                         secureTextEntry={!showConfirmPassword}
                     />
-                    <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => setShowConfirmPassword(!showConfirmPassword)}>
                         <Ionicons name={showConfirmPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
                     </TouchableOpacity>
                 </View>
@@ -768,7 +800,7 @@ export default function SignupScreen() {
             <TouchableOpacity
                 onPress={handleNext}
                 disabled={loading}
-                activeOpacity={0.8}
+                activeOpacity={1}
                 style={[styles.nextButton, themeStyles.primaryButton]}
             >
                 {loading ? <ActivityIndicator color="white" /> : <Text style={styles.nextButtonText}>Next</Text>}
@@ -856,7 +888,7 @@ export default function SignupScreen() {
                         </Text>
 
                         {!loading && (
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                                 onPress={manualStatusCheck}
                                 style={{ marginTop: 20 }}
                             >
@@ -874,7 +906,7 @@ export default function SignupScreen() {
                 <View style={{ flex: 1, backgroundColor: colors.background }}>
                     <View style={{ padding: 16, flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={[themeStyles.text, { fontSize: 18, fontWeight: 'bold' }]}>Identity Verification</Text>
-                        <TouchableOpacity onPress={() => router.push('/')} style={{ marginLeft: 'auto' }}>
+                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/')} style={{ marginLeft: 'auto' }}>
                             <Text style={{ color: colors.primary }}>Cancel</Text>
                         </TouchableOpacity>
                     </View>
@@ -916,7 +948,7 @@ export default function SignupScreen() {
                         We use a secure third-party service to verify your identity. Please complete this step to activate your account.
                     </Text>
 
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                         onPress={handleWebVerify}
                         style={[styles.nextButton, themeStyles.primaryButton, { width: 250, marginTop: 32 }]}
                     >
@@ -924,7 +956,7 @@ export default function SignupScreen() {
                         <Ionicons name="open-outline" size={20} color="white" style={{ marginLeft: 8 }} />
                     </TouchableOpacity>
 
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                         onPress={() => {
                             startNewVerificationSession().then(newUrl => {
                                 if (newUrl && Platform.OS === 'web') window.open(newUrl, '_self');
@@ -937,7 +969,7 @@ export default function SignupScreen() {
                         </Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity onPress={() => router.push('/')} style={{ marginTop: 24 }}>
+                    <TouchableOpacity activeOpacity={1} onPress={() => router.push('/')} style={{ marginTop: 24 }}>
                         <Text style={themeStyles.textSecondary}>I'll do this later</Text>
                     </TouchableOpacity>
                 </View>
@@ -975,7 +1007,7 @@ export default function SignupScreen() {
 
                 {/* 'Back to Login' button removed as requested */}
 
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                     onPress={handleResendEmail}
                     style={{ marginTop: 24 }}
                 >
@@ -991,29 +1023,49 @@ export default function SignupScreen() {
     if (step === 'verification' || step === 'email_verification') {
         // Verification steps take over full screen mostly
         return (
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
-                {step === 'verification' ? renderVerificationStep() : renderEmailVerificationStep()}
-            </KeyboardAvoidingView>
+            <>
+                <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
+                    {step === 'verification' ? renderVerificationStep() : renderEmailVerificationStep()}
+                </KeyboardAvoidingView>
+                <CustomAlert
+                    visible={alertVisible}
+                    type={alertConfig.type}
+                    title={alertConfig.title}
+                    message={alertConfig.message}
+                    buttons={alertConfig.buttons}
+                    onClose={() => setAlertVisible(false)}
+                />
+            </>
         );
     }
 
     return (
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
-                <View style={styles.contentContainer}>
-                    {/* Progress Indicator */}
-                    <View style={styles.progressContainer}>
-                        <View style={[styles.dot, step === 'role' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                        <View style={[styles.dot, step === 'details' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                        <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                        <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                    </View>
+        <>
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
+                <ScrollView contentContainerStyle={styles.scrollContent}>
+                    <View style={styles.contentContainer}>
+                        {/* Progress Indicator */}
+                        <View style={styles.progressContainer}>
+                            <View style={[styles.dot, step === 'role' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
+                            <View style={[styles.dot, step === 'details' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
+                            <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
+                            <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
+                        </View>
 
-                    {step === 'role' && renderRoleStep()}
-                    {step === 'details' && renderDetailsStep()}
-                </View>
-            </ScrollView>
-        </KeyboardAvoidingView>
+                        {step === 'role' && renderRoleStep()}
+                        {step === 'details' && renderDetailsStep()}
+                    </View>
+                </ScrollView>
+            </KeyboardAvoidingView>
+            <CustomAlert
+                visible={alertVisible}
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
+            />
+        </>
     );
 }
 

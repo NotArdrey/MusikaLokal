@@ -88,25 +88,46 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
 
     const loadRecentUsers = async () => {
         try {
-            // Get recent conversations and extract other participants
-            const { data: conversations, error } = await supabase
+            const { data: myParticipations, error: participationError } = await supabase
+                .from('conversation_participants')
+                .select('conversation_id')
+                .eq('user_id', currentUserId);
+
+            if (participationError) throw participationError;
+
+            const conversationIds = myParticipations?.map((p) => p.conversation_id) || [];
+            if (conversationIds.length === 0) {
+                setRecentUsers([]);
+                return;
+            }
+
+            const { data: recentConversations, error: recentConversationError } = await supabase
                 .from('conversations')
-                .select(`
-                    participant_1,
-                    participant_2,
-                    updated_at
-                `)
+                .select('id, updated_at')
                 .eq('is_group', false)
-                .or(`participant_1.eq.${currentUserId},participant_2.eq.${currentUserId}`)
+                .in('id', conversationIds)
                 .order('updated_at', { ascending: false })
                 .limit(10);
 
-            if (error) throw error;
+            if (recentConversationError) throw recentConversationError;
 
-            // Get unique other user IDs
-            const otherUserIds = conversations
-                ?.map(c => c.participant_1 === currentUserId ? c.participant_2 : c.participant_1)
-                .filter((id, index, self) => id && self.indexOf(id) === index) || [];
+            const recentConversationIds = recentConversations?.map((c) => c.id) || [];
+            if (recentConversationIds.length === 0) {
+                setRecentUsers([]);
+                return;
+            }
+
+            const { data: otherParticipants, error: otherParticipantsError } = await supabase
+                .from('conversation_participants')
+                .select('user_id')
+                .in('conversation_id', recentConversationIds)
+                .neq('user_id', currentUserId);
+
+            if (otherParticipantsError) throw otherParticipantsError;
+
+            const otherUserIds = Array.from(new Set(
+                (otherParticipants || []).map((participant) => participant.user_id).filter(Boolean)
+            ));
 
             if (otherUserIds.length > 0) {
                 const { data: profiles } = await supabase
@@ -128,7 +149,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
     };
 
     const renderUser = ({ item }: { item: User }) => (
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={1}
             style={styles.userItem}
             onPress={() => handleSelectUser(item)}
         >
@@ -161,7 +182,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
             <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
                 {/* Header */}
                 <View style={[styles.header, { borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }]}>
-                    <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                    <TouchableOpacity activeOpacity={1} onPress={onClose} style={styles.closeButton}>
                         <Ionicons name="close" size={24} color={colors.text} />
                     </TouchableOpacity>
                     <Text style={[styles.headerTitle, { color: colors.text }]}>New Message</Text>
@@ -180,7 +201,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
                         autoFocus
                     />
                     {searchQuery.length > 0 && (
-                        <TouchableOpacity onPress={() => setSearchQuery('')}>
+                        <TouchableOpacity activeOpacity={1} onPress={() => setSearchQuery('')}>
                             <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
                         </TouchableOpacity>
                     )}

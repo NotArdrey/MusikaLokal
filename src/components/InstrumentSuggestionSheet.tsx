@@ -129,7 +129,7 @@ export default function InstrumentSuggestionSheet({
                 {MUSIC_GENRES.map(genre => {
                     const isSelected = selectedGenres.includes(genre);
                     return (
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             key={genre}
                             onPress={() => toggleGenre(genre)}
                             style={[
@@ -163,7 +163,7 @@ export default function InstrumentSuggestionSheet({
                 {EXPERIENCE_OPTIONS.map(option => {
                     const isSelected = experienceLevel === option.value;
                     return (
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             key={option.value}
                             onPress={() => setExperienceLevel(option.value)}
                             style={[
@@ -200,7 +200,7 @@ export default function InstrumentSuggestionSheet({
                 {PURPOSE_OPTIONS.map(option => {
                     const isSelected = purpose === option.value;
                     return (
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             key={option.value}
                             onPress={() => setPurpose(option.value)}
                             style={[
@@ -234,7 +234,7 @@ export default function InstrumentSuggestionSheet({
         const matchPercentage = Math.min(100, Math.round(suggestion.score * 5));
         
         return (
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 key={suggestion.name}
                 onPress={() => handleSelectInstrument(suggestion)}
                 style={[styles.suggestionCard, { 
@@ -345,7 +345,7 @@ export default function InstrumentSuggestionSheet({
             )}
             
             {/* Get Suggestions Button */}
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 onPress={fetchSuggestions}
                 disabled={loading || selectedGenres.length === 0}
                 style={[
@@ -384,7 +384,7 @@ export default function InstrumentSuggestionSheet({
             showsVerticalScrollIndicator={false}
         >
             {/* Back Button */}
-            <TouchableOpacity 
+            <TouchableOpacity activeOpacity={1} 
                 onPress={() => setStep('preferences')}
                 style={styles.backButton}
             >
@@ -415,7 +415,7 @@ export default function InstrumentSuggestionSheet({
             {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}
             
             {/* Refresh Button */}
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
                 onPress={fetchSuggestions}
                 disabled={loading}
                 style={[styles.secondaryButton, { borderColor: colors.primary }]}
@@ -456,7 +456,7 @@ export default function InstrumentSuggestionSheet({
                                 </Text>
                             </View>
                         </View>
-                        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                        <TouchableOpacity activeOpacity={1} onPress={onClose} style={styles.closeButton}>
                             <Ionicons name="close" size={24} color={colors.text} />
                         </TouchableOpacity>
                     </View>

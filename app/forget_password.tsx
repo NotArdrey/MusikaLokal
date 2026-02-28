@@ -3,7 +3,6 @@ import { router } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   StyleSheet,
   Text,
   TextInput,
@@ -11,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import { useTheme } from "../src/context/ThemeContext";
@@ -21,6 +21,27 @@ export default function ForgetPasswordScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: any[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -36,15 +57,16 @@ export default function ForgetPasswordScreen() {
   };
 
   const handleSendResetLink = async () => {
+    if (loading) return;
     setModalVisible(false);
 
     if (!email.trim()) {
-      Alert.alert("Error", "Please enter your email address.");
+      showAlert("error", "Error", "Please enter your email address.");
       return;
     }
 
     if (!validateEmail(email.trim())) {
-      Alert.alert("Error", "Please enter a valid email address.");
+      showAlert("error", "Error", "Please enter a valid email address.");
       return;
     }
 
@@ -62,7 +84,8 @@ export default function ForgetPasswordScreen() {
 
       if (error) {
         console.error("Password reset error:", error);
-        Alert.alert(
+        showAlert(
+          "error",
           "Error",
           error.message || "Failed to send reset link. Please try again.",
         );
@@ -71,7 +94,7 @@ export default function ForgetPasswordScreen() {
       }
     } catch (e: any) {
       console.error("Password reset exception:", e);
-      Alert.alert("Error", "An unexpected error occurred. Please try again.");
+      showAlert("error", "Error", "An unexpected error occurred. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -117,7 +140,7 @@ export default function ForgetPasswordScreen() {
         </View>
 
         <View style={styles.buttonSection}>
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[
               styles.button,
               { backgroundColor: colors.primary },
@@ -125,11 +148,11 @@ export default function ForgetPasswordScreen() {
             ]}
             onPress={() => {
               if (!email.trim()) {
-                Alert.alert("Error", "Please enter your email address.");
+                showAlert("error", "Error", "Please enter your email address.");
                 return;
               }
               if (!validateEmail(email.trim())) {
-                Alert.alert("Error", "Please enter a valid email address.");
+                showAlert("error", "Error", "Please enter a valid email address.");
                 return;
               }
               setModalVisible(true);
@@ -161,6 +184,22 @@ export default function ForgetPasswordScreen() {
         message="Check your inbox for a password reset link. When you tap the link, it should open directly in Expo Go. If you don't see the email, check your spam folder."
         buttonText="Back to Login"
         onConfirm={handleSuccessClose}
+      />
+
+      <Modal
+        visible={loading}
+        loading
+        loadingMessage="Sending reset link..."
+        onClose={() => { }}
+      />
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
       />
     </>
   );

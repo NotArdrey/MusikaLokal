@@ -3,7 +3,6 @@ import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   Image,
   Linking,
@@ -14,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
@@ -43,6 +43,51 @@ export default function GigDetailsScreen() {
   const [applications, setApplications] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: any[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
+
+  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+    const lowerTitle = (title || "").toLowerCase();
+    let type: AlertType = "info";
+    if (
+      lowerTitle.includes("error") ||
+      lowerTitle.includes("failed") ||
+      lowerTitle.includes("unauthorized") ||
+      lowerTitle.includes("invalid")
+    ) {
+      type = "error";
+    } else if (lowerTitle.includes("success")) {
+      type = "success";
+    } else if (
+      lowerTitle.includes("warning") ||
+      lowerTitle.includes("decline") ||
+      lowerTitle.includes("required")
+    ) {
+      type = "warning";
+    }
+    showAlert(type, title || "Notice", message || "", buttons);
+  };
+
+  const Alert = { alert: showAlertNative };
 
   // Role-based access control
   useEffect(() => {
@@ -96,12 +141,18 @@ export default function GigDetailsScreen() {
 
       console.log(`[manage_gig] Fetching data for gigId: ${gigId}, userId: ${userId}`);
 
-      // Direct query to gigs table
+      // Base query + legacy projection merge
       const { data: gigData, error: gigError } = await supabase
         .from('gigs')
         .select('*')
         .eq('id', gigId)
         .eq('organizer_id', userId)
+        .single();
+
+      const { data: legacyGig, error: legacyGigError } = await supabase
+        .from('gigs_legacy_projection')
+        .select('requirements, images, documents')
+        .eq('id', gigId)
         .single();
 
       if (gigError) {
@@ -111,7 +162,15 @@ export default function GigDetailsScreen() {
         // }
         throw gigError;
       }
-      setGig(gigData);
+      if (legacyGigError) {
+        throw legacyGigError;
+      }
+      setGig({
+        ...gigData,
+        requirements: legacyGig?.requirements || {},
+        images: legacyGig?.images || [],
+        documents: legacyGig?.documents || [],
+      });
 
       // Fetch Applications
       try {
@@ -304,7 +363,7 @@ export default function GigDetailsScreen() {
             ]}
           >
             {tabs.map((tab) => (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 key={tab}
                 onPress={() => setActiveTab(tab)}
                 style={[
@@ -599,7 +658,7 @@ export default function GigDetailsScreen() {
                     Contract
                   </Text>
                   {gig?.contract_url ? (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={async () => {
                         try {
                           const supported = await Linking.canOpenURL(
@@ -696,7 +755,7 @@ export default function GigDetailsScreen() {
                       >
                         No contract uploaded
                       </Text>
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() =>
                           router.push({
                             pathname: "/edit_gig",
@@ -920,7 +979,7 @@ export default function GigDetailsScreen() {
                               marginBottom: 6,
                             }}
                           >
-                            Band Members ({app.group.members.length})
+                            Group Members ({app.group.members.length})
                           </Text>
                           <Text
                             style={{
@@ -978,7 +1037,7 @@ export default function GigDetailsScreen() {
 
                       {/* Demo Video */}
                       {app.video_url && (
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                           onPress={async () => {
                             try {
                               const supported = await Linking.canOpenURL(
@@ -1035,7 +1094,7 @@ export default function GigDetailsScreen() {
                           >
                             CV / Resume
                           </Text>
-                          <TouchableOpacity
+                          <TouchableOpacity activeOpacity={1}
                             onPress={async () => {
                               try {
                                 const supported = await Linking.canOpenURL(
@@ -1117,7 +1176,7 @@ export default function GigDetailsScreen() {
                                     url.includes("soundcloud");
 
                                   return (
-                                    <TouchableOpacity
+                                    <TouchableOpacity activeOpacity={1}
                                       key={idx}
                                       onPress={async () => {
                                         try {
@@ -1249,7 +1308,7 @@ export default function GigDetailsScreen() {
                               )
                               .slice(0, 3)
                               .map((url: string, idx: number) => (
-                                <TouchableOpacity
+                                <TouchableOpacity activeOpacity={1}
                                   key={idx}
                                   onPress={async () => {
                                     try {
@@ -1298,7 +1357,7 @@ export default function GigDetailsScreen() {
                         )}
 
                       {/* View Full Profile Button */}
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() => {
                           console.log("👤 View Profile pressed");
                           console.log("👤 app.group:", app.group);
@@ -1362,7 +1421,7 @@ export default function GigDetailsScreen() {
                       {/* Action Buttons */}
                       {app.status === "pending" && (
                         <View style={[styles.actionButtons, { marginTop: 12 }]}>
-                          <TouchableOpacity
+                          <TouchableOpacity activeOpacity={1}
                             onPress={() => confirmAction(app.id, "rejected")}
                             style={[
                               styles.declineButton,
@@ -1378,7 +1437,7 @@ export default function GigDetailsScreen() {
                               Decline
                             </Text>
                           </TouchableOpacity>
-                          <TouchableOpacity
+                          <TouchableOpacity activeOpacity={1}
                             onPress={() => confirmAction(app.id, "accepted")}
                             style={[
                               styles.acceptButton,
@@ -1511,6 +1570,14 @@ export default function GigDetailsScreen() {
         message={modalMessage}
         buttonText={modalButtonText}
       />
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
     </>
   );
 }
@@ -1524,7 +1591,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   scrollContent: {
-    paddingBottom: 150,
+    paddingBottom: 180,
   },
   headerContainer: {
     paddingHorizontal: 24,

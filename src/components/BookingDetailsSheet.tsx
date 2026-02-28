@@ -5,7 +5,6 @@ import React, { forwardRef, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Dimensions,
-    Image,
     Linking,
     StyleSheet,
     Text,
@@ -14,6 +13,9 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
+import CachedImage from "./CachedImage";
+
+const debugLog = (..._args: unknown[]) => { };
 
 const { width, height } = Dimensions.get("window");
 
@@ -52,7 +54,7 @@ const BookingDetailsSheet = forwardRef<
 
   useEffect(() => {
     if (booking?.studio_id) {
-      console.log("BookingDetailsSheet - Booking data:", {
+      debugLog("BookingDetailsSheet - Booking data:", {
         start_time: booking.start_time,
         end_time: booking.end_time,
         date: booking.date,
@@ -68,13 +70,30 @@ const BookingDetailsSheet = forwardRef<
     try {
       setLoading(true);
       const { data, error } = await supabase
-        .from("studios")
-        .select("*, owner:profiles!owner_id(full_name, avatar_url)")
+        .from("studios_with_stats")
+        .select("*")
         .eq("id", booking.studio_id)
         .single();
 
       if (error) throw error;
-      setStudioDetails(data);
+
+      let owner = null;
+      if (data?.owner_id) {
+        const { data: ownerProfile, error: ownerError } = await supabase
+          .from("profiles")
+          .select("full_name, avatar_url")
+          .eq("id", data.owner_id)
+          .single();
+
+        if (!ownerError) {
+          owner = ownerProfile;
+        }
+      }
+
+      setStudioDetails({
+        ...data,
+        owner,
+      });
 
       // Check if this booking date has a specific date override
       if (booking.start_time || booking.raw_date) {
@@ -91,11 +110,11 @@ const BookingDetailsSheet = forwardRef<
 
         if (!overrideError && override) {
           setDateOverride(override);
-          console.log("📅 Found date override for booking date:", override);
+          debugLog("📅 Found date override for booking date:", override);
         }
       }
     } catch (e) {
-      console.log("Error fetching studio details:", e);
+      debugLog("Error fetching studio details:", e);
     } finally {
       setLoading(false);
     }
@@ -162,7 +181,7 @@ const BookingDetailsSheet = forwardRef<
       const displayHours = hours % 12 || 12;
       return `${displayHours}:${minutes.toString().padStart(2, "0")} ${period}`;
     } catch (e) {
-      console.log("Error formatting time:", time, e);
+      debugLog("Error formatting time:", time, e);
       return time;
     }
   };
@@ -188,7 +207,7 @@ const BookingDetailsSheet = forwardRef<
               <Text style={[styles.title, { color: colors.text }]}>
                 {isGig ? "Application Details" : "Booking Details"}
               </Text>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => (ref as any)?.current?.dismiss()}
                 style={[
                   styles.closeBtn,
@@ -236,14 +255,17 @@ const BookingDetailsSheet = forwardRef<
                     { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
                   ]}
                 >
-                  <Image
-                    source={{
-                      uri:
-                        studioDetails?.images?.[0] ||
-                        booking.image ||
-                        "https://via.placeholder.com/400x200",
-                    }}
+                  <CachedImage
+                    uri={
+                      studioDetails?.images?.[0] ||
+                      booking.image ||
+                      "https://via.placeholder.com/400x200"
+                    }
                     style={styles.studioImage}
+                    width={1000}
+                    height={500}
+                    quality={72}
+                    cacheVersion={studioDetails?.updated_at || booking.updated_at || booking.id}
                   />
                   <View style={styles.studioInfo}>
                     <Text style={[styles.studioName, { color: colors.text }]}>
@@ -253,13 +275,16 @@ const BookingDetailsSheet = forwardRef<
                     {/* Studio Owner Info - Only for Studio */}
                     {isStudio && studioDetails?.owner && (
                       <View style={styles.ownerRow}>
-                        <Image
-                          source={{
-                            uri:
-                              studioDetails.owner?.avatar_url ||
-                              "https://via.placeholder.com/40",
-                          }}
+                        <CachedImage
+                          uri={
+                            studioDetails.owner?.avatar_url ||
+                            "https://via.placeholder.com/40"
+                          }
                           style={styles.ownerAvatar}
+                          width={100}
+                          height={100}
+                          quality={68}
+                          cacheVersion={studioDetails.owner?.updated_at || studioDetails?.updated_at || booking.id}
                         />
                         <Text
                           style={[
@@ -275,13 +300,16 @@ const BookingDetailsSheet = forwardRef<
                     {/* Applicant Info - Only for Gig Application */}
                     {isGig && booking.customer_name && (
                       <View style={styles.ownerRow}>
-                        <Image
-                          source={{
-                            uri:
-                              booking.customer_avatar ||
-                              "https://via.placeholder.com/40",
-                          }}
+                        <CachedImage
+                          uri={
+                            booking.customer_avatar ||
+                            "https://via.placeholder.com/40"
+                          }
                           style={styles.ownerAvatar}
+                          width={100}
+                          height={100}
+                          quality={68}
+                          cacheVersion={booking.customer_updated_at || booking.updated_at || booking.id}
                         />
                         <View style={{ flex: 1 }}>
                           <Text
@@ -437,7 +465,7 @@ const BookingDetailsSheet = forwardRef<
                       >
                         Video / Demo
                       </Text>
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() => Linking.openURL(booking.video_url)}
                       >
                         <Text
@@ -470,7 +498,7 @@ const BookingDetailsSheet = forwardRef<
                       >
                         CV / Resume
                       </Text>
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() => Linking.openURL(booking.cv_url)}
                       >
                         <Text
@@ -546,13 +574,17 @@ const BookingDetailsSheet = forwardRef<
                                 }}
                               >
                                 {member.avatar_url ? (
-                                  <Image
-                                    source={{ uri: member.avatar_url }}
+                                  <CachedImage
+                                    uri={member.avatar_url}
                                     style={{
                                       width: 40,
                                       height: 40,
                                       borderRadius: 20,
                                     }}
+                                    width={100}
+                                    height={100}
+                                    quality={68}
+                                    cacheVersion={member.updated_at || member.user_id || memberName}
                                   />
                                 ) : (
                                   <Text
@@ -668,17 +700,17 @@ const BookingDetailsSheet = forwardRef<
                     </Text>
                     <Text style={[styles.detailValue, { color: colors.text }]}>
                       {booking.raw_date &&
-                      (booking.raw_date.includes("T") ||
-                        !isNaN(Date.parse(booking.raw_date)))
+                        (booking.raw_date.includes("T") ||
+                          !isNaN(Date.parse(booking.raw_date)))
                         ? new Date(booking.raw_date).toLocaleDateString(
-                            "en-US",
-                            {
-                              weekday: "short",
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            },
-                          )
+                          "en-US",
+                          {
+                            weekday: "short",
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          },
+                        )
                         : booking.date?.includes("•")
                           ? booking.date.split("•")[0]
                           : booking.date}
@@ -697,9 +729,9 @@ const BookingDetailsSheet = forwardRef<
                     <Text style={[styles.detailValue, { color: colors.text }]}>
                       {formatTime(
                         booking.start_time ||
-                          (booking.date?.includes("•")
-                            ? booking.date.split("•")[1]?.trim()
-                            : ""),
+                        (booking.date?.includes("•")
+                          ? booking.date.split("•")[1]?.trim()
+                          : ""),
                       )}
                       {booking.end_time
                         ? ` - ${formatTime(booking.end_time)}`
@@ -838,7 +870,7 @@ const BookingDetailsSheet = forwardRef<
                                 (booking.modifiers_applied
                                   .peak_season_multiplier -
                                   1) *
-                                  100,
+                                100,
                               )}
                               %)
                             </Text>
@@ -865,7 +897,7 @@ const BookingDetailsSheet = forwardRef<
                                 (1 -
                                   booking.modifiers_applied
                                     .off_peak_multiplier) *
-                                  100,
+                                100,
                               )}
                               %)
                             </Text>
@@ -891,7 +923,7 @@ const BookingDetailsSheet = forwardRef<
                               {Math.round(
                                 (booking.modifiers_applied.weekend_multiplier -
                                   1) *
-                                  100,
+                                100,
                               )}
                               %)
                             </Text>
@@ -918,7 +950,7 @@ const BookingDetailsSheet = forwardRef<
                                 (booking.modifiers_applied
                                   .late_night_multiplier -
                                   1) *
-                                  100,
+                                100,
                               )}
                               %)
                             </Text>
@@ -994,7 +1026,7 @@ const BookingDetailsSheet = forwardRef<
               {/* Action Buttons */}
               <View style={styles.actions}>
                 {booking.status === "pending" && onConfirm && (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     style={[styles.actionBtn, styles.confirmBtn]}
                     onPress={() => {
                       onConfirm(booking.id);
@@ -1013,7 +1045,7 @@ const BookingDetailsSheet = forwardRef<
                 )}
 
                 {booking.status === "completed" && (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     style={[
                       styles.actionBtn,
                       { backgroundColor: colors.primary },
@@ -1032,7 +1064,7 @@ const BookingDetailsSheet = forwardRef<
                   booking.status === "pending" ||
                   booking.status === "accepted") &&
                   onCancel && (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       style={[
                         styles.actionBtn,
                         styles.cancelBtn,
@@ -1061,6 +1093,8 @@ const BookingDetailsSheet = forwardRef<
     </BottomSheetModal>
   );
 });
+
+BookingDetailsSheet.displayName = "BookingDetailsSheet";
 
 const styles = StyleSheet.create({
   container: {
@@ -1107,11 +1141,12 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(16),
     padding: height < 700 ? moderateScale(12) : moderateScale(16),
     marginBottom: height < 700 ? moderateScale(12) : moderateScale(16),
+    // Tighter, crisp native mobile shadow
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
   },
   studioImage: {
     width: "100%",
@@ -1245,11 +1280,13 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: moderateScale(16),
     fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
   },
   cancelBtnText: {
     color: "#EF4444",
     fontSize: moderateScale(16),
     fontFamily: "Poppins_600SemiBold",
+    textAlign: "center",
   },
   viewStudioBtnText: {
     fontSize: moderateScale(16),
@@ -1258,3 +1295,4 @@ const styles = StyleSheet.create({
 });
 
 export default BookingDetailsSheet;
+

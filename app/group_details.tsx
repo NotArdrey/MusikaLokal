@@ -3,32 +3,54 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Dimensions,
-  Image,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Dimensions,
+    Image,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Modal from '../src/components/modal';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { getGroupMembersLabel, getGroupTypeLabel, isGroupLeaderMember } from '../src/utils/groupMembers';
 
 const { width, height } = Dimensions.get('window');
 const IMG_HEIGHT = height * 0.5;
+const REPORT_REASONS = [
+  'Spam or scam',
+  'Harassment',
+  'Inappropriate content',
+  'Fake listing/profile',
+  'Other',
+];
 
 export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
+  const { userId } = useAuth();
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [group, setGroup] = useState<any>(null);
   const [isFavorited, setIsFavorited] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
 
   useEffect(() => {
     fetchGroupDetails();
@@ -59,6 +81,68 @@ export default function GroupDetailsScreen() {
 
   const toggleFavorite = () => setIsFavorited(!isFavorited);
 
+  const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
+
+  const submitGroupReport = async (reason: string) => {
+    if (!userId) {
+      showAlert('warning', 'Login Required', 'You need to be logged in to submit a report.');
+      return;
+    }
+    if (!group?.id) {
+      showAlert('error', 'Unable to Report', 'Missing group details.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase.functions.invoke('manage-details', {
+        body: {
+          action: 'report',
+          type: 'group',
+          id: group.id,
+          userId,
+          reason,
+          details: null,
+        },
+      });
+
+      if (error) throw error;
+      showAlert('success', 'Report Submitted', 'Thanks. We’ll review this report shortly.');
+    } catch (e: any) {
+      showAlert('error', 'Report Failed', e?.message || 'Failed to submit report.');
+    }
+  };
+
+  const openReportModal = () => {
+    if (!group?.id) {
+      showAlert('error', 'Unable to Report', 'Missing group details.');
+      return;
+    }
+
+    const reportButtons = [
+      ...REPORT_REASONS.map((reason) => ({
+        text: reason,
+        style: 'default' as const,
+        onPress: () => {
+          void submitGroupReport(reason);
+        },
+      })),
+      {
+        text: 'Cancel',
+        style: 'cancel' as const,
+      },
+    ];
+
+    showAlert(
+      'warning',
+      'Report Group',
+      `Why are you reporting ${group.name || 'this group'}?`,
+      reportButtons,
+    );
+  };
+
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -68,6 +152,8 @@ export default function GroupDetailsScreen() {
   }
 
   if (!group) return null;
+
+  const isOwner = !!userId && group?.owner_id === userId;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -92,7 +178,7 @@ export default function GroupDetailsScreen() {
 
           {/* Header Actions */}
           <View style={[styles.headerActions, { top: insets.top + 10 }]}>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={() => router.back()}
               style={styles.roundBtn}
             >
@@ -100,10 +186,18 @@ export default function GroupDetailsScreen() {
             </TouchableOpacity>
 
             <View style={styles.rightActions}>
-              <TouchableOpacity style={styles.roundBtn}>
+              <TouchableOpacity activeOpacity={1} style={styles.roundBtn}>
                 <Ionicons name="share-outline" size={24} color="#000" />
               </TouchableOpacity>
-              <TouchableOpacity
+              {!isOwner && userId ? (
+                <TouchableOpacity activeOpacity={1}
+                  onPress={openReportModal}
+                  style={styles.roundBtn}
+                >
+                  <Ionicons name="flag-outline" size={24} color="#EF4444" />
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity activeOpacity={1}
                 onPress={toggleFavorite}
                 style={styles.roundBtn}
               >
@@ -166,7 +260,7 @@ export default function GroupDetailsScreen() {
               <View style={styles.featureItem}>
                 <Ionicons name="people-outline" size={24} color={colors.text} />
                 <Text style={[styles.featureText, { color: colors.textSecondary }]}>
-                  {group.group_type === 'duo' ? 'Duo' : 'Band'} ({group.members?.length || '2'} Members)
+                  {getGroupTypeLabel(group.group_type)} ({group.members?.length || '2'} Members)
                 </Text>
               </View>
             </View>
@@ -174,14 +268,14 @@ export default function GroupDetailsScreen() {
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-          {/* Band Members Section */}
+          {/* Group Members Section */}
           {group.members && group.members.length > 0 && (
             <>
               <View style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Band Members</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>{getGroupMembersLabel(group.group_type)}</Text>
                 <View style={{ gap: 12 }}>
                   {group.members.map((member: any, index: number) => {
-                    const isLeader = member.role === 'Leader' || index === 0;
+                    const isLeader = isGroupLeaderMember(member, group.owner_id);
                     const memberName = typeof member === 'string' ? member : member.name;
                     const memberInstrument = typeof member === 'string' ? member : member.instrument;
                     return (
@@ -237,7 +331,7 @@ export default function GroupDetailsScreen() {
                 Oct 25 - 30
               </Text>
             </View>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.bookBtn, { backgroundColor: colors.primary }]}
               onPress={() => setModalVisible(true)}
             >
@@ -251,6 +345,14 @@ export default function GroupDetailsScreen() {
             title="Confirm Booking"
             message="This will send a booking request to the artist."
             buttonText="Send Request"
+          />
+          <CustomAlert
+            visible={alertVisible}
+            type={alertConfig.type}
+            title={alertConfig.title}
+            message={alertConfig.message}
+            buttons={alertConfig.buttons}
+            onClose={() => setAlertVisible(false)}
           />
         </View>
       </ScrollView>

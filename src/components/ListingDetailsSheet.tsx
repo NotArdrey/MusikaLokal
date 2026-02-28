@@ -1,44 +1,61 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import {
-  BottomSheetBackdrop,
-  BottomSheetModal,
-  BottomSheetScrollView
+    BottomSheetBackdrop,
+    BottomSheetModal,
+    BottomSheetScrollView,
+    useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { LinearGradient } from "expo-linear-gradient";
 import * as ExpoLinking from "expo-linking";
 import { router } from "expo-router";
 import React, {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState
+    forwardRef,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState
 } from "react";
 import {
-  ActivityIndicator,
-  BackHandler,
-  Dimensions,
-  Image,
-  Linking,
-  Modal as RNModal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    BackHandler,
+    Dimensions,
+    InteractionManager,
+    Linking,
+    Modal as RNModal,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from "react-native";
-import { Calendar } from "react-native-calendars";
+import { Easing } from "react-native-reanimated";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import { useApplicationSubmissionAction } from "../hooks/useApplicationSubmissionAction";
+import { useBookingRequestAction } from "../hooks/useBookingRequestAction";
+import { useCurrentUserVenueRole } from "../hooks/useCurrentUserVenueRole";
+import { useListingSheetDerived } from "../hooks/useListingSheetDerived";
+import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
 import CustomAlert from "./CustomAlert";
-import DocumentUploader from "./DocumentUploader";
+import ReportModal, { REPORT_REASONS } from "./ReportModal";
+import BookingControls from "./listingDetails/BookingControls";
+import GigApplyTab from "./listingDetails/GigApplyTab";
+import GigInfoTab from "./listingDetails/GigInfoTab";
+import GroupAboutTab from "./listingDetails/GroupAboutTab";
+import GroupConnectTab from "./listingDetails/GroupConnectTab";
+import GroupSetupTab from "./listingDetails/GroupSetupTab";
+import GroupTimelineTab from "./listingDetails/GroupTimelineTab";
+import ListingBottomBar from "./listingDetails/ListingBottomBar";
+import ListingContentBody from "./listingDetails/ListingContentBody";
+import ListingHeroSection from "./listingDetails/ListingHeroSection";
+import ReviewsTab from "./listingDetails/ReviewsTab";
+import StudioBookTab from "./listingDetails/StudioBookTab";
+import StudioGigVenueAboutTab from "./listingDetails/StudioGigVenueAboutTab";
+import StudioSetupTab from "./listingDetails/StudioSetupTab";
 import Modal from "./modal";
-import VideoUploader from "./VideoUploader";
+
+const debugLog = (..._args: unknown[]) => { };
 
 const { width, height } = Dimensions.get("window");
 const IMG_HEIGHT = height < 700 ? height * 0.3 : height * 0.35;
@@ -61,6 +78,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 
 interface ListingDetailsSheetProps {
   listingId: string | null;
+  onDismiss?: () => void;
 }
 
 const formatTime12 = (time24: string) => {
@@ -72,10 +90,17 @@ const formatTime12 = (time24: string) => {
   return `${h12}:${minutes} ${suffix}`;
 };
 
+const toLocalDateKey = (value: Date) => {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const ListingDetailsSheet = forwardRef<
   BottomSheetModal,
   ListingDetailsSheetProps
->(({ listingId }, ref) => {
+>(function ListingDetailsSheet({ listingId, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
   const { userId, isSystemLocked, showLockAlert } = useAuth();
   const { isProfileComplete } = useProfileCompletion();
@@ -105,6 +130,9 @@ const ListingDetailsSheet = forwardRef<
   // Group Selection State (for gig applications)
   const [userGroups, setUserGroups] = useState<any[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [selectedSlotType, setSelectedSlotType] = useState<
+    "solo" | "duo" | "band" | null
+  >(null);
   const [loadingGroups, setLoadingGroups] = useState(false);
 
   // Group Deduplication State (prevent same group applying twice)
@@ -125,6 +153,7 @@ const ListingDetailsSheet = forwardRef<
     message: string;
     buttons?: any[];
   }>({ type: "info", title: "", message: "" });
+  const [showListingReportModal, setShowListingReportModal] = useState(false);
 
   // Booking Request State (Invites)
   const [requestMessage, setRequestMessage] = useState("");
@@ -166,7 +195,7 @@ const ListingDetailsSheet = forwardRef<
   const [selectedSessionType, setSelectedSessionType] = useState<"Rehearsal" | "Recording" | null>(null);
 
   // Helper: Check if we're in recording mode (either pure Recording studio OR Both with Recording selected)
-  const isRecordingMode = group?.studio_type === "Recording" || 
+  const isRecordingMode = group?.studio_type === "Recording" ||
     (group?.studio_type === "Both" && selectedSessionType === "Recording");
 
   // Multiple time slots state for multi-slot bookings (same day)
@@ -219,6 +248,7 @@ const ListingDetailsSheet = forwardRef<
   const [confirmAction, setConfirmAction] = useState<() => void>(() => { });
   const [confirmMessage, setConfirmMessage] = useState("");
   const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmRequireTerms, setConfirmRequireTerms] = useState(false);
 
   // BackHandler Logic
   const [sheetIndex, setSheetIndex] = useState(-1);
@@ -240,7 +270,7 @@ const ListingDetailsSheet = forwardRef<
         group &&
         (group.type === "Studio" || group.type === "Venue")
       ) {
-        console.log(
+        debugLog(
           "📅 Sheet opened - refreshing studio availability and bookings...",
         );
         try {
@@ -261,7 +291,7 @@ const ListingDetailsSheet = forwardRef<
           let freshDateOverrides = group.dateOverrides;
 
           if (!hoursError && operatingHours) {
-            console.log("📅 Fresh operating hours fetched:", operatingHours.length);
+            debugLog("📅 Fresh operating hours fetched:", operatingHours.length);
             const dayNames = [
               "Sunday",
               "Monday",
@@ -288,7 +318,7 @@ const ListingDetailsSheet = forwardRef<
           }
 
           if (!overridesError && dateOverrides) {
-            console.log("📅 Fresh date overrides fetched:", dateOverrides.length);
+            debugLog("📅 Fresh date overrides fetched:", dateOverrides.length);
             freshDateOverrides = dateOverrides;
             // Update group state with fresh date overrides
             setGroup((prev: any) => prev ? { ...prev, dateOverrides: freshDateOverrides } : prev);
@@ -303,6 +333,33 @@ const ListingDetailsSheet = forwardRef<
           );
           const fetchedBookings = Array.isArray(bookingData) ? bookingData : [];
           setExistingBookings(fetchedBookings);
+
+          // Re-check user's latest payment-blocking booking status when sheet reopens
+          if (userId) {
+            const { data: latestUserBooking, error: latestUserBookingError } = await supabase
+              .from("studio_bookings")
+              .select("id, status, payment_status")
+              .eq("user_id", userId)
+              .eq("studio_id", listingId)
+              .eq("status", "confirmed")
+              .in("payment_status", ["unpaid", "pending", "failed"])
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (latestUserBookingError) {
+              console.error("Error refreshing studio booking payment status:", latestUserBookingError);
+            } else if (latestUserBooking) {
+              setHasExistingStudioBooking(true);
+              setExistingStudioBookingStatus("unpaid");
+              setBookings([]);
+              setSelectedTimeSlots([]);
+              setShowAddBooking(false);
+            } else {
+              setHasExistingStudioBooking(false);
+              setExistingStudioBookingStatus(null);
+            }
+          }
 
           // Re-process availability with fresh data
           if (freshAvailability) {
@@ -340,8 +397,9 @@ const ListingDetailsSheet = forwardRef<
     action: () => void,
     title: string,
     message: string,
+    options?: { requireTerms?: boolean },
   ) => {
-    console.log("🔵 handleConfirm called");
+    debugLog("🔵 handleConfirm called");
 
     // System Lock Check - Block if user has unpaid balance
     if (isSystemLocked) {
@@ -376,14 +434,90 @@ const ListingDetailsSheet = forwardRef<
       return;
     }
 
-    console.log("Title:", title);
-    console.log("Message:", message);
-    console.log("Action function:", action.name || "anonymous");
+    debugLog("Title:", title);
+    debugLog("Message:", message);
+    debugLog("Action function:", action.name || "anonymous");
     setConfirmAction(() => action);
     setConfirmTitle(title);
     setConfirmMessage(message);
+    setConfirmRequireTerms(Boolean(options?.requireTerms));
     setModalVisible(true);
-    console.log("Modal should now be visible");
+    debugLog("Modal should now be visible");
+  };
+
+  const showSheetAlert = (
+    type: "success" | "error" | "warning" | "info",
+    title: string,
+    message: string,
+    buttons?: any[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
+
+  const getReportTargetType = (listingType?: string) => {
+    const normalized = (listingType || "").toLowerCase();
+    if (normalized === "artist") return "profile";
+    return normalized || "profile";
+  };
+
+  const submitReport = async (reason: string) => {
+    if (!userId) {
+      showSheetAlert("warning", "Login Required", "You need to be logged in to submit a report.");
+      return;
+    }
+
+    if (!group?.id) {
+      showSheetAlert("error", "Unable to Report", "Missing listing details.");
+      return;
+    }
+
+    try {
+      const { error } = await supabase.functions.invoke("manage-details", {
+        body: {
+          action: "report",
+          type: getReportTargetType(group.type),
+          id: group.id,
+          userId,
+          reason,
+          details: null,
+        },
+      });
+
+      if (error) throw error;
+
+      showSheetAlert("success", "Report Submitted", "Thanks. We’ll review this report shortly.");
+    } catch (e: any) {
+      showSheetAlert("error", "Report Failed", e?.message || "Failed to submit report.");
+    }
+  };
+
+  const handleReport = () => {
+    if (!group?.id) {
+      showSheetAlert("error", "Unable to Report", "Missing listing details.");
+      return;
+    }
+
+    const reportButtons = [
+      ...REPORT_REASONS.map((reason: string) => ({
+        text: reason,
+        style: "default" as const,
+        onPress: () => {
+          void submitReport(reason);
+        },
+      })),
+      {
+        text: "Cancel",
+        style: "cancel" as const,
+      },
+    ];
+
+    showSheetAlert(
+      "warning",
+      "Report Listing",
+      `Why are you reporting ${group.name || "this listing"}?`,
+      reportButtons,
+    );
   };
 
   // Process payment with selected payment type (full or downpayment)
@@ -400,7 +534,7 @@ const ListingDetailsSheet = forwardRef<
 
     try {
       setIsProcessingPayment(true);
-      console.log("💳 Creating PayMongo checkout session...", {
+      debugLog("💳 Creating PayMongo checkout session...", {
         paymentType,
         payAmount,
         remainingBalance,
@@ -439,7 +573,9 @@ const ListingDetailsSheet = forwardRef<
         console.error("❌ Payment error:", paymentError);
         setIsProcessingPayment(false);
         setShowPaymentOptionModal(false);
-        alert(
+        showSheetAlert(
+          "warning",
+          "Payment Setup Failed",
           "Booking created! However, payment setup failed. Please go to Pending bookings to complete payment.",
         );
 
@@ -457,7 +593,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (paymentData?.checkout_url) {
-        console.log("✅ Checkout URL:", paymentData.checkout_url);
+        debugLog("✅ Checkout URL:", paymentData.checkout_url);
 
         // Clear form
         setBookings([]);
@@ -473,7 +609,9 @@ const ListingDetailsSheet = forwardRef<
         if (canOpen) {
           await Linking.openURL(paymentData.checkout_url);
         } else {
-          alert(
+          showSheetAlert(
+            "info",
+            "Booking Created",
             "Booking created! Please complete payment from your Pending bookings.",
           );
           setTimeout(() => {
@@ -482,7 +620,9 @@ const ListingDetailsSheet = forwardRef<
         }
       } else {
         setShowPaymentOptionModal(false);
-        alert(
+        showSheetAlert(
+          "info",
+          "Booking Created",
           "Booking created! Please complete payment from your Pending bookings.",
         );
 
@@ -499,7 +639,9 @@ const ListingDetailsSheet = forwardRef<
       }
     } catch (payErr: any) {
       console.error("❌ Payment initiation error:", payErr);
-      alert(
+      showSheetAlert(
+        "warning",
+        "Payment Pending",
         "Booking created! Please complete payment from your Pending bookings to confirm.",
       );
 
@@ -539,7 +681,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data) {
-        console.log("📋 User has already applied to this gig:", data);
+        debugLog("📋 User has already applied to this gig:", data);
         setHasExistingApplication(true);
         setExistingApplicationStatus(data.status);
         if (data.cv_url) setCvUrl(data.cv_url);
@@ -559,17 +701,39 @@ const ListingDetailsSheet = forwardRef<
 
     setLoadingGroups(true);
     try {
-      // Fetch groups where user is owner
+      // Fetch groups where user is owner (legacy-shaped fields from stats view)
       const { data: ownedGroups, error: ownedError } = await supabase
-        .from("groups")
-        .select("id, name, images, genre")
+        .from("groups_with_stats")
+        .select("id, owner_id, name, images, genre, group_type")
         .eq("owner_id", userId);
 
-      // Fetch groups where user is a member (from group_members table)
-      const { data: memberGroups, error: memberError } = await supabase
+      // Fetch group IDs where user is a member
+      const { data: membershipRows, error: memberError } = await supabase
         .from("group_members")
-        .select("group_id, groups:group_id(id, name, images, genre)")
+        .select("group_id")
         .eq("user_id", userId);
+
+      const memberGroupIds = Array.from(
+        new Set(
+          (membershipRows || [])
+            .map((row: any) => row.group_id)
+            .filter((id: any) => typeof id === "string" && id.length > 0),
+        ),
+      );
+
+      let memberGroups: any[] = [];
+      if (memberGroupIds.length > 0) {
+        const { data: memberGroupData, error: memberGroupDataError } = await supabase
+          .from("groups_with_stats")
+          .select("id, owner_id, name, images, genre, group_type")
+          .in("id", memberGroupIds);
+
+        if (memberGroupDataError) {
+          console.error("Error fetching member group details:", memberGroupDataError);
+        } else {
+          memberGroups = memberGroupData || [];
+        }
+      }
 
       if (ownedError) {
         console.error("Error fetching owned groups:", ownedError);
@@ -582,7 +746,7 @@ const ListingDetailsSheet = forwardRef<
       // Combine and deduplicate
       const allGroups = [
         ...(ownedGroups || []),
-        ...(memberGroups || []).map((m: any) => m.groups).filter(Boolean),
+        ...memberGroups,
       ];
 
       // Remove duplicates by id
@@ -590,7 +754,7 @@ const ListingDetailsSheet = forwardRef<
         (g, idx, arr) => arr.findIndex((x) => x.id === g.id) === idx,
       );
 
-      console.log("📋 Fetched groups (owned + member):", uniqueGroups.length);
+      debugLog("📋 Fetched groups (owned + member):", uniqueGroups.length);
       setUserGroups(uniqueGroups);
     } catch (err) {
       console.error("Error fetching groups:", err);
@@ -622,7 +786,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data && data.applicant_id !== userId) {
-        console.log("⚠️ Group already applied by another member:", data);
+        debugLog("⚠️ Group already applied by another member:", data);
         setGroupAlreadyApplied(true);
         setGroupApplicationBy(
           (data.profiles as any)?.full_name || "Another member",
@@ -668,7 +832,7 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data) {
-        console.log("📋 User has an unpaid booking for this studio:", data);
+        debugLog("📋 User has an unpaid booking for this studio:", data);
         setHasExistingStudioBooking(true);
         setExistingStudioBookingStatus("unpaid");
       } else {
@@ -720,343 +884,55 @@ const ListingDetailsSheet = forwardRef<
     }
   };
 
-  // Helper to upload CV
-  const uploadDocument = async (file: any) => {
-    try {
-      console.log("📤 Uploading CV:", file.name);
-
-      // 1. Read file
-      const response = await fetch(file.uri);
-      const arrayBuffer = await response.arrayBuffer();
-
-      // 2. Prepare path
-      const fileExt = file.name.split(".").pop() || "pdf";
-      const fileName = `${userId}/cvs/${Date.now()}_cv.${fileExt}`;
-
-      // 3. Upload
-      const { data, error } = await supabase.storage
-        .from("documents") // Ensure this bucket exists or use 'applications'
-        .upload(fileName, arrayBuffer, {
-          contentType: file.mimeType || "application/pdf",
-          upsert: false,
-        });
-
-      if (error) throw error;
-
-      // 4. Get Public URL
-      const { data: urlData } = supabase.storage
-        .from("documents")
-        .getPublicUrl(data.path);
-
-      return urlData.publicUrl;
-    } catch (error) {
-      console.error("Error uploading CV:", error);
-      throw error;
-    }
-  };
-
-  // Handle Submit Application for Gigs
-  const handleSubmitApplication = async () => {
-    // ... (validation checks same as before) ...
-    console.log("=== handleSubmitApplication CALLED ===");
-
-    if (!userId || !listingId || !group) {
-      console.error("Missing required data for application:", {
-        userId,
-        listingId,
-        group,
-      });
-      return;
-    }
-
-    // Check if group already applied (by another member)
-    if (groupAlreadyApplied) {
-      setAlertConfig({
-        type: "warning",
-        title: "Group Already Applied",
-        message: `This group has already applied via ${groupApplicationBy}. Only one application per group is allowed.`,
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    // Validate group selection for group-only gigs
-    const musicianTypeRequired = group.requirements?.musician_type || "both";
-    if (musicianTypeRequired === "group" && !selectedGroupId) {
-      setAlertConfig({
-        type: "error",
-        title: "Group Required",
-        message:
-          "This gig requires applications from groups. Please select a group to apply.",
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    // Validate Pitch Message
-    if (!pitchMessage.trim()) {
-      setAlertConfig({
-        type: "error",
-        title: "Pitch Required",
-        message: "Please tell the organizer why you are a good fit for this gig.",
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    // Validate CV
-    if (!cvFile && !cvUrl) {
-      // Check if new file selected OR existing CV exists (though logic resets cvUrl on load, but good to be safe)
-      setAlertConfig({
-        type: "error",
-        title: "CV Required",
-        message: "Please upload your CV/Resume to apply.",
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    // Validate Video (required for venue gig applications)
-    if (!videoUrl) {
-      setAlertConfig({
-        type: "error",
-        title: "Video Required",
-        message: "Please upload a performance video to apply. This helps venue owners evaluate your talent.",
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    // Check slot availability before submitting
-    if (group.requirements?.total_slots_needed) {
-      try {
-        const { data: acceptedApps, error: countError } = await supabase
-          .from("gig_applications")
-          .select("id")
-          .eq("gig_id", listingId)
-          .eq("status", "accepted");
-
-        if (!countError && acceptedApps) {
-          const acceptedCount = acceptedApps.length;
-          const totalSlots = group.requirements.total_slots_needed;
-
-          if (acceptedCount >= totalSlots) {
-            setAlertConfig({
-              type: "error",
-              title: "Slots Full",
-              message: `All ${totalSlots} performer slot${totalSlots > 1 ? 's have' : ' has'} been filled for this gig. No more applications can be accepted.`,
-            });
-            setAlertVisible(true);
-            return;
-          }
-        }
-      } catch (e) {
-        console.error("Error checking slot availability:", e);
+  const { handleSubmitApplication } = useApplicationSubmissionAction({
+    userId,
+    listingId,
+    group,
+    groupAlreadyApplied,
+    groupApplicationBy,
+    selectedGroupId,
+    selectedSlotType,
+    pitchMessage,
+    cvFile,
+    cvUrl,
+    videoUrl,
+    userGroups,
+    setAlertConfig,
+    setAlertVisible,
+    setConfirmTitle,
+    setConfirmMessage,
+    setConfirmAction,
+    setConfirmRequireTerms,
+    setModalVisible,
+    setIsSubmittingApplication,
+    setHasExistingApplication,
+    setExistingApplicationStatus,
+    setPitchMessage,
+    setVideoUrl,
+    setCvFile,
+    setCvUrl,
+    closeSheet: () => {
+      if (ref && "current" in ref && ref.current) {
+        ref.current.dismiss();
       }
-    }
+    },
+  });
 
-    // CONFIRMATION STEP
-    setConfirmTitle("Submit Application?");
-    setConfirmMessage(
-      "Are you sure you want to submit this application? This action cannot be undone.",
-    );
-    setConfirmAction(() => processApplicationSubmission); // Delegate to actual submission function
-    setModalVisible(true);
-  };
-
-  const processApplicationSubmission = async () => {
-    setIsSubmittingApplication(true);
-    console.log("Inserting application into database...");
-
-    try {
-      // Upload CV first
-      let uploadedCvUrl = null;
-      if (cvFile) {
-        try {
-          uploadedCvUrl = await uploadDocument(cvFile);
-          console.log("✅ CV Uploaded:", uploadedCvUrl);
-        } catch (e) {
-          console.error("Failed to upload CV", e);
-          setAlertConfig({
-            type: "error",
-            title: "Upload Failed",
-            message: "Failed to upload CV. Please try again.",
-          });
-          setAlertVisible(true);
-          setIsSubmittingApplication(false);
-          return;
-        }
-      } else if (cvUrl) {
-        uploadedCvUrl = cvUrl;
-      }
-
-      const { data, error } = await supabase
-        .from("gig_applications")
-        .insert({
-          applicant_id: userId,
-          gig_id: listingId,
-          group_id: selectedGroupId || null,
-          is_solo_application: !selectedGroupId, // Flag to distinguish solo vs group
-          pitch_message: pitchMessage,
-          video_url: videoUrl || null,
-          cv_url: uploadedCvUrl,
-          status: "pending",
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error("Error submitting application:", error);
-
-        // Check for unique constraint violation (group already applied)
-        if (error.code === "23505") {
-          setAlertConfig({
-            type: "error",
-            title: "Duplicate Application",
-            message: "This group has already applied to this gig.",
-          });
-        } else {
-          setAlertConfig({
-            type: "error",
-            title: "Submission Failed",
-            message:
-              error.message ||
-              "Failed to submit application. Please try again.",
-          });
-        }
-        setAlertVisible(true);
-        return;
-      }
-
-      console.log("✅ Application submitted successfully!", data);
-
-      // ... (rest of notification logic same as before) ...
-      if (group?.organizer_id && data) {
-        try {
-          if (group.organizer_id !== userId) {
-            await supabase.functions.invoke("listings-crud", {
-              body: {
-                action: "create_notification",
-                userId,
-                targetUserId: group.organizer_id,
-                type: "info",
-                title: "New Gig Application",
-                message: `You have a new application for "${group.name}".`,
-                meta: {
-                  gig_id: listingId,
-                  application_id: data.id,
-                  applicant_id: userId,
-                  group_id: selectedGroupId || null,
-                },
-              },
-            });
-          }
-        } catch (notifyErr) {
-          console.error("Failed to notify gig organizer:", notifyErr);
-        }
-      }
-
-      // Notify group members if this is a group application
-      if (selectedGroupId && data) {
-        try {
-          // Fetch group members (excluding the applicant)
-          const { data: members } = await supabase
-            .from("group_members")
-            .select("user_id")
-            .eq("group_id", selectedGroupId)
-            .neq("user_id", userId);
-
-          if (members && members.length > 0) {
-            // Get group name for notification
-            const selectedGroup = userGroups.find(
-              (g) => g.id === selectedGroupId,
-            );
-
-            // Create notifications for all members
-            const notifications = members.map((m) => ({
-              user_id: m.user_id,
-              type: "info",
-              title: "Group Gig Application",
-              message: `${selectedGroup?.name || "Your group"} has applied for "${group.name}". Check the gig details for more info.`,
-              meta: { gig_id: listingId, application_id: data.id },
-            }));
-
-            await supabase.functions.invoke("listings-crud", {
-              body: {
-                action: "create_notifications",
-                userId,
-                notifications,
-              },
-            });
-            console.log("📬 Notified group members:", members.length);
-          }
-        } catch (notifyErr) {
-          console.error("Failed to notify group members:", notifyErr);
-        }
-      }
-
-      // AI LEARNING: Strong signal from applying to a gig
-      if (group && group.embedding) {
-        try {
-          await supabase.rpc("update_user_interest", {
-            p_user_id: userId,
-            p_item_vector: group.embedding,
-            p_weight: 0.4, // Strong learning signal for applying
-          });
-          console.log("🤖 AI learned from gig application:", group.name);
-        } catch (e) {
-          console.log("Error updating AI interest from application:", e);
-        }
-      }
-
-      // Update application status
-      setHasExistingApplication(true);
-      setExistingApplicationStatus("pending");
-
-      // Show success alert
-      setAlertConfig({
-        type: "success",
-        title: "Application Submitted!",
-        message: selectedGroupId
-          ? "Your group application has been submitted successfully. Group members have been notified. The venue owner will review it and get back to you soon."
-          : "Your application has been submitted successfully. The venue owner will review it and get back to you soon.",
-      });
-      setAlertVisible(true);
-
-      // Clear form
-      setPitchMessage("");
-      setVideoUrl("");
-      setCvFile(null);
-      setCvUrl("");
-
-      // Close the bottom sheet after alert is dismissed
-      setTimeout(() => {
-        if (ref && "current" in ref && ref.current) {
-          ref.current.dismiss();
-        }
-      }, 2500);
-    } catch (err) {
-      console.error("Unexpected error:", err);
-      setAlertConfig({
-        type: "error",
-        title: "Error",
-        message: "An unexpected error occurred. Please try again.",
-      });
-      setAlertVisible(true);
-    } finally {
-      setIsSubmittingApplication(false);
-    }
-  };
-
-  // Snap points
-  const snapPoints = useMemo(() => ["50%", "95%"], []);
+  // Fixed sheet height
+  const snapPoints = useMemo(() => ["90%"], []);
+  const animationConfigs = useBottomSheetTimingConfigs({
+    duration: 320,
+    easing: Easing.inOut(Easing.cubic),
+  });
 
   useEffect(() => {
-    console.log("=== ListingDetailsSheet useEffect triggered ===");
-    console.log("listingId:", listingId);
+    debugLog("=== ListingDetailsSheet useEffect triggered ===");
+    debugLog("listingId:", listingId);
     if (listingId) {
-      console.log("Fetching group details for:", listingId);
-      fetchGroupDetails();
+      debugLog("Fetching group details for:", listingId);
+      const interactionTask = InteractionManager.runAfterInteractions(() => {
+        fetchGroupDetails();
+      });
       setActiveTab("About");
       // Reset booking state
       setDate(null as any);
@@ -1073,13 +949,18 @@ const ListingDetailsSheet = forwardRef<
       setExistingStudioBookingStatus(null);
       // Reset group selection state
       setSelectedGroupId(null);
+      setSelectedSlotType(null);
       setUserGroups([]);
       // Reset venue selection state
       setSelectedVenueId(null);
       setUserVenues([]);
 
-      console.log("Application form reset");
+      debugLog("Application form reset");
       setShowAddBooking(false);
+
+      return () => {
+        interactionTask.cancel();
+      };
     }
   }, [listingId]);
 
@@ -1118,25 +999,25 @@ const ListingDetailsSheet = forwardRef<
 
   // Debug effect to monitor application state changes
   useEffect(() => {
-    console.log("📝 Application State Updated:");
-    console.log("  - pitchMessage:", pitchMessage);
-    console.log("  - videoUrl:", videoUrl);
-    console.log("  - isSubmittingApplication:", isSubmittingApplication);
+    debugLog("📝 Application State Updated:");
+    debugLog("  - pitchMessage:", pitchMessage);
+    debugLog("  - videoUrl:", videoUrl);
+    debugLog("  - isSubmittingApplication:", isSubmittingApplication);
   }, [pitchMessage, videoUrl, isSubmittingApplication]);
 
   // Debug effect to monitor userId changes
   useEffect(() => {
-    console.log("👤 userId changed:", userId);
+    debugLog("👤 userId changed:", userId);
   }, [userId]);
 
   const fetchGroupDetails = async () => {
-    console.log("=== fetchGroupDetails called ===");
+    debugLog("=== fetchGroupDetails called ===");
     setLoading(true);
     try {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      console.log("User:", user?.id);
+      debugLog("User:", user?.id);
 
       let data = null;
       let type = "Group";
@@ -1196,18 +1077,78 @@ const ListingDetailsSheet = forwardRef<
       }
 
       if (data && ownerId) {
-        console.log("Found data:", {
+        debugLog("Found data:", {
           type,
           id: data.id,
           name: data.name || data.full_name,
         });
+
+        const normalizeImageArray = (value: any): string[] => {
+          if (Array.isArray(value)) {
+            return value
+              .filter((item): item is string => typeof item === "string")
+              .map((item) => item.trim())
+              .filter((item) => item.length > 0);
+          }
+
+          if (typeof value === "string") {
+            const trimmed = value.trim();
+            if (!trimmed) return [];
+
+            if ((trimmed.startsWith("[") && trimmed.endsWith("]")) || (trimmed.startsWith("{") && trimmed.endsWith("}"))) {
+              try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) {
+                  return parsed
+                    .filter((item): item is string => typeof item === "string")
+                    .map((item) => item.trim())
+                    .filter((item) => item.length > 0);
+                }
+              } catch {
+                // Fallback below
+              }
+            }
+
+            return trimmed
+              .split(",")
+              .map((item) => item.trim())
+              .filter((item) => item.length > 0);
+          }
+
+          return [];
+        };
+
+        let resolvedImages = normalizeImageArray(data.images);
+
+        if (type === "Group") {
+          const { data: mediaRows, error: mediaError } = await supabase
+            .from("group_media")
+            .select("media_url, sort_order")
+            .eq("group_id", data.id)
+            .eq("media_type", "image")
+            .order("sort_order", { ascending: true });
+
+          if (!mediaError && Array.isArray(mediaRows)) {
+            const groupMediaImages = mediaRows
+              .map((row: any) => row?.media_url)
+              .filter((url: any): url is string => typeof url === "string")
+              .map((url: string) => url.trim())
+              .filter((url: string) => url.length > 0);
+
+            if (groupMediaImages.length > 0) {
+              resolvedImages = groupMediaImages;
+            }
+          } else if (mediaError) {
+            debugLog("⚠️ group_media fetch failed, using fallback images:", mediaError);
+          }
+        }
         // Fetch owner profile separately
         const { data: ownerProfile } = await supabase
           .from("profiles")
           .select("full_name, avatar_url, role")
           .eq("id", ownerId)
           .single();
-        console.log("Owner profile:", ownerProfile);
+        debugLog("Owner profile:", ownerProfile);
 
         const normalizedData = {
           ...data,
@@ -1215,7 +1156,7 @@ const ListingDetailsSheet = forwardRef<
           name: data.name || data.full_name, // Handle profile name
           description: data.description || data.bio, // Handle profile bio
           image: data.image || data.avatar_url, // Handle profile avatar
-          images: data.images || (data.avatar_url ? [data.avatar_url] : []),
+          images: resolvedImages.length > 0 ? resolvedImages : (data.avatar_url ? [data.avatar_url] : []),
           location: data.location || data.address, // Handle profile address
           genre: data.genre || (data.genres ? data.genres.join(", ") : ""),
           owner_name:
@@ -1235,22 +1176,37 @@ const ListingDetailsSheet = forwardRef<
 
         // If studio or venue, fetch availability from operating hours
         if (type === "Studio" || type === "Venue") {
-          console.log("📅 Fetching studio operating hours...");
-          const { data: operatingHours, error: hoursError } = await supabase
-            .from("studio_operating_hours")
-            .select("*")
-            .eq("studio_id", data.id)
-            .order("slot_order", { ascending: true });
+          debugLog("📅 Fetching studio availability data...");
+          const [
+            operatingHoursResult,
+            dateOverridesResult,
+            studioSettingsResult,
+          ] = await Promise.all([
+            supabase
+              .from("studio_operating_hours")
+              .select("*")
+              .eq("studio_id", data.id)
+              .order("slot_order", { ascending: true }),
+            supabase
+              .from("studio_date_overrides")
+              .select("*")
+              .eq("studio_id", data.id),
+            supabase
+              .from("studio_settings")
+              .select("*")
+              .eq("studio_id", data.id)
+              .single(),
+          ]);
 
-          // Also fetch date overrides (specific dates)
-          console.log("📅 Fetching studio date overrides...");
-          const { data: dateOverrides, error: overridesError } = await supabase
-            .from("studio_date_overrides")
-            .select("*")
-            .eq("studio_id", data.id);
+          const operatingHours = operatingHoursResult.data;
+          const hoursError = operatingHoursResult.error;
+          const dateOverrides = dateOverridesResult.data;
+          const overridesError = dateOverridesResult.error;
+          const studioSettings = studioSettingsResult.data;
+          const settingsError = studioSettingsResult.error;
 
           if (!hoursError && operatingHours) {
-            console.log("📅 Operating hours fetched:", operatingHours);
+            debugLog("📅 Operating hours fetched:", operatingHours);
             // Convert operating hours to availability format - now supports multiple slots per day
             const dayNames = [
               "Sunday",
@@ -1274,15 +1230,15 @@ const ListingDetailsSheet = forwardRef<
               };
             });
             normalizedData.availability = availability;
-            console.log("📅 Converted availability:", availability);
+            debugLog("📅 Converted availability:", availability);
           } else if (!data.availability) {
-            console.log(
+            debugLog(
               "⚠️ No operating hours found, checking availability column...",
             );
             // Fallback: check if availability exists in the data (JSONB column)
             if (data.availability) {
               normalizedData.availability = data.availability;
-              console.log(
+              debugLog(
                 "📅 Using availability from JSONB column:",
                 data.availability,
               );
@@ -1291,23 +1247,15 @@ const ListingDetailsSheet = forwardRef<
 
           // Store date overrides for use in availability processing
           if (!overridesError && dateOverrides && dateOverrides.length > 0) {
-            console.log("📅 Date overrides fetched:", dateOverrides);
+            debugLog("📅 Date overrides fetched:", dateOverrides);
             normalizedData.dateOverrides = dateOverrides;
           }
 
-          // Fetch studio settings (booking rules, pricing multipliers)
-          console.log("⚙️ Fetching studio settings...");
-          const { data: studioSettings, error: settingsError } = await supabase
-            .from("studio_settings")
-            .select("*")
-            .eq("studio_id", data.id)
-            .single();
-
           if (!settingsError && studioSettings) {
-            console.log("⚙️ Studio settings fetched:", studioSettings);
+            debugLog("⚙️ Studio settings fetched:", studioSettings);
             normalizedData.settings = studioSettings;
           } else {
-            console.log("⚠️ No studio settings found, using defaults");
+            debugLog("⚠️ No studio settings found, using defaults");
             normalizedData.settings = {
               lead_time_hours: 24,
               weekend_multiplier: 1.0,
@@ -1319,38 +1267,42 @@ const ListingDetailsSheet = forwardRef<
           }
         }
 
-        console.log("Setting group data:", normalizedData);
+        debugLog("Setting group data:", normalizedData);
         setGroup(normalizedData);
 
-        // Fetch existing bookings for availability calculation
-        const { data: bookingData } = await supabase.functions.invoke(
-          "bookings-manage",
-          {
-            body: { action: "fetch_studio_bookings", studioId: data.id },
-          },
-        );
-        const fetchedBookings = Array.isArray(bookingData) ? bookingData : [];
-        setExistingBookings(fetchedBookings);
-
-        // Process availability (Availability + Bookings + Date Overrides)
-        if (normalizedData.availability) {
-          console.log("📅 Processing availability for calendar...");
-          processAvailability(
-            normalizedData.availability,
-            fetchedBookings,
-            normalizedData.dateOverrides,
+        if (type === "Studio" || type === "Venue") {
+          // Fetch existing bookings for availability calculation
+          const { data: bookingData } = await supabase.functions.invoke(
+            "bookings-manage",
+            {
+              body: { action: "fetch_studio_bookings", studioId: data.id },
+            },
           );
+          const fetchedBookings = Array.isArray(bookingData) ? bookingData : [];
+          setExistingBookings(fetchedBookings);
+
+          // Process availability (Availability + Bookings + Date Overrides)
+          if (normalizedData.availability) {
+            debugLog("📅 Processing availability for calendar...");
+            processAvailability(
+              normalizedData.availability,
+              fetchedBookings,
+              normalizedData.dateOverrides,
+            );
+          } else {
+            debugLog("⚠️ No availability data to process");
+          }
         } else {
-          console.log("⚠️ No availability data to process");
+          setExistingBookings([]);
         }
       } else {
-        console.log("No data found for listingId:", listingId);
+        debugLog("No data found for listingId:", listingId);
       }
     } catch (e) {
-      console.log("Error fetching details:", e);
+      debugLog("Error fetching details:", e);
     } finally {
       setLoading(false);
-      console.log("fetchGroupDetails complete, loading:", false);
+      debugLog("fetchGroupDetails complete, loading:", false);
     }
   };
 
@@ -1362,8 +1314,8 @@ const ListingDetailsSheet = forwardRef<
   ) => {
     // Safeguard against undefined or non-array dbBookings
     const safeDbBookings = Array.isArray(dbBookings) ? dbBookings : [];
-    
-    console.log("📅 processAvailability called with:", {
+
+    debugLog("📅 processAvailability called with:", {
       availability,
       dbBookingsCount: safeDbBookings.length,
       dateOverridesCount: dateOverrides?.length || 0,
@@ -1392,7 +1344,7 @@ const ListingDetailsSheet = forwardRef<
       ].indexOf(daySchedule.day.toLowerCase());
       if (dayIndex !== -1) {
         availabilityMap[dayIndex] = daySchedule;
-        console.log(
+        debugLog(
           `📅 Mapped ${daySchedule.day} (index ${dayIndex}) with ${daySchedule.slots?.length || 0} slots`,
         );
       }
@@ -1404,14 +1356,14 @@ const ListingDetailsSheet = forwardRef<
       dateOverrides.forEach((override: any) => {
         const dateStr = override.override_date;
         dateOverrideMap[dateStr] = override;
-        console.log(
+        debugLog(
           `📅 Mapped date override for ${dateStr}: open=${override.is_open}, ${override.open_time} - ${override.close_time}`,
         );
       });
     }
 
-    console.log("📅 Availability map:", availabilityMap);
-    console.log("📅 Date override map:", dateOverrideMap);
+    debugLog("📅 Availability map:", availabilityMap);
+    debugLog("📅 Date override map:", dateOverrideMap);
 
     // Loop next 90 days to ensure coverage
     for (let i = 0; i < 90; i++) {
@@ -1439,7 +1391,7 @@ const ListingDetailsSheet = forwardRef<
             ],
             isOverride: true,
           };
-          console.log(`📅 Using date override for ${dateStr}:`, daySchedule);
+          debugLog(`📅 Using date override for ${dateStr}:`, daySchedule);
         } else {
           // Date is closed via override
           daySchedule = null;
@@ -1487,12 +1439,14 @@ const ListingDetailsSheet = forwardRef<
 
         // RECORDING STUDIO WHOLE-DAY LOGIC:
         // For recording studios, if there are ANY bookings on this date, block the entire day
-        const isRecordingStudio = group?.studio_type === "Recording" || 
+        const isRecordingStudio = group?.studio_type === "Recording" ||
           (group?.studio_type === "Both" && selectedSessionType === "Recording");
         if (isRecordingStudio) {
           // Also check cart bookings for recording studios
           const cartBookingsForDate = (cartBookings || []).filter((b) => {
-            const cartDateStr = b.date.toISOString().split("T")[0];
+            const cartDate = b?.date instanceof Date ? b.date : new Date(b?.date);
+            if (Number.isNaN(cartDate.getTime())) return false;
+            const cartDateStr = toLocalDateKey(cartDate);
             return cartDateStr === dateStr;
           });
 
@@ -1514,17 +1468,17 @@ const ListingDetailsSheet = forwardRef<
           }
         }
 
-        
+
         const blockedTimes = new Set<string>();
 
-        
+
         dayDbBookings.forEach((b: any) => {
-          
+
           const bStart = new Date(`${b.booking_date}T${b.start_time}`);
           const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
 
           if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
-            console.log("⚠️ Invalid booking times in processAvailability:", b);
+            debugLog("⚠️ Invalid booking times in processAvailability:", b);
             return;
           }
 
@@ -1538,7 +1492,9 @@ const ListingDetailsSheet = forwardRef<
         // Also block times from cart bookings (same date)
         if (cartBookings && cartBookings.length > 0) {
           const cartBookingsForDate = cartBookings.filter((b) => {
-            const cartDateStr = b.date.toISOString().split("T")[0];
+            const cartDate = b?.date instanceof Date ? b.date : new Date(b?.date);
+            if (Number.isNaN(cartDate.getTime())) return false;
+            const cartDateStr = toLocalDateKey(cartDate);
             return cartDateStr === dateStr;
           });
 
@@ -1592,19 +1548,29 @@ const ListingDetailsSheet = forwardRef<
       }
     }
 
-    console.log("📅 Marked dates count:", Object.keys(marked).length);
-    console.log("📅 Sample marked dates:", Object.keys(marked).slice(0, 5));
+    debugLog("📅 Marked dates count:", Object.keys(marked).length);
+    debugLog("📅 Sample marked dates:", Object.keys(marked).slice(0, 5));
     setMarkedDates(marked);
+
+    if (selectedDate && marked[selectedDate]?.disabled) {
+      setSelectedDate("");
+      setSelectedSlot(null);
+      setValidEndTimes([]);
+      setEndTime(null as any);
+      setDate(null as any);
+      setAvailableSlots([]);
+    }
   };
 
-  const fetchAvailableSlots = async (dateStr: string) => {
-    console.log("🕐 fetchAvailableSlots called for date:", dateStr);
-    console.log("🕐 group.availability:", group?.availability);
-    console.log("🕐 group.dateOverrides:", group?.dateOverrides);
+  const fetchAvailableSlots = async (dateStr: string): Promise<string[]> => {
+    debugLog("🕐 fetchAvailableSlots called for date:", dateStr);
+    debugLog("🕐 group.availability:", group?.availability);
+    debugLog("🕐 group.dateOverrides:", group?.dateOverrides);
 
     if (!group?.availability) {
-      console.log("⚠️ No availability data in group");
-      return;
+      debugLog("⚠️ No availability data in group");
+      setAvailableSlots([]);
+      return [];
     }
 
     const selectedDate = new Date(dateStr);
@@ -1617,7 +1583,7 @@ const ListingDetailsSheet = forwardRef<
       "friday",
       "saturday",
     ][selectedDate.getDay()];
-    console.log("🕐 Looking for day:", dayName);
+    debugLog("🕐 Looking for day:", dayName);
 
     // Check if there's a specific date override for this date
     let daySchedule: any = null;
@@ -1627,7 +1593,7 @@ const ListingDetailsSheet = forwardRef<
         (o: any) => o.override_date === dateStr,
       );
       if (dateOverride) {
-        console.log("🕐 Found date override:", dateOverride);
+        debugLog("🕐 Found date override:", dateOverride);
         if (
           dateOverride.is_open &&
           dateOverride.open_time &&
@@ -1642,9 +1608,9 @@ const ListingDetailsSheet = forwardRef<
           };
         } else {
           // Date is closed
-          console.log("⚠️ Date override marks this date as closed");
+          debugLog("⚠️ Date override marks this date as closed");
           setAvailableSlots([]);
-          return;
+          return [];
         }
       }
     }
@@ -1656,12 +1622,12 @@ const ListingDetailsSheet = forwardRef<
       );
     }
 
-    console.log("🕐 Found day schedule:", daySchedule);
+    debugLog("🕐 Found day schedule:", daySchedule);
 
     if (!daySchedule || !daySchedule.slots) {
-      console.log("⚠️ No slots for this day");
+      debugLog("⚠️ No slots for this day");
       setAvailableSlots([]);
-      return;
+      return [];
     }
 
     // Generate time slots from the availability
@@ -1677,7 +1643,7 @@ const ListingDetailsSheet = forwardRef<
       const bookingDateStr = b.booking_date;
       return bookingDateStr === dateStr;
     });
-    console.log(
+    debugLog(
       "🕐 Day bookings:",
       dayBookings.length,
       dayBookings.map((b: any) => ({
@@ -1690,12 +1656,14 @@ const ListingDetailsSheet = forwardRef<
 
     // RECORDING STUDIO WHOLE-DAY LOGIC:
     // For recording studios, the entire day is booked as one unit
-    const isRecordingStudio = group?.studio_type === "Recording" || 
+    const isRecordingStudio = group?.studio_type === "Recording" ||
       (group?.studio_type === "Both" && selectedSessionType === "Recording");
     if (isRecordingStudio) {
       // Also check cart bookings for recording studios
       const cartBookingsForDate = bookings.filter((b) => {
-        const cartDateStr = b.date.toISOString().split("T")[0];
+        const cartDate = b?.date instanceof Date ? b.date : new Date(b?.date);
+        if (Number.isNaN(cartDate.getTime())) return false;
+        const cartDateStr = toLocalDateKey(cartDate);
         return cartDateStr === dateStr;
       });
 
@@ -1704,8 +1672,8 @@ const ListingDetailsSheet = forwardRef<
         setIsRecordingWholeDayAvailable(false);
         setRecordingDaySlot(null);
         setAvailableSlots([]);
-        console.log("🎙️ Recording studio: Date has bookings, blocking entire day");
-        return;
+        debugLog("🎙️ Recording studio: Date has bookings, blocking entire day");
+        return [];
       } else {
         // No bookings - date is available for whole-day recording booking
         // Get the operating hours for this day
@@ -1713,8 +1681,8 @@ const ListingDetailsSheet = forwardRef<
         setIsRecordingWholeDayAvailable(true);
         setRecordingDaySlot({ start: operatingSlot.start, end: operatingSlot.end });
         setAvailableSlots(["whole-day"]); // Special marker for whole-day booking
-        console.log("🎙️ Recording studio: Date available for whole-day booking", operatingSlot);
-        return;
+        debugLog("🎙️ Recording studio: Date available for whole-day booking", operatingSlot);
+        return ["whole-day"];
       }
     }
 
@@ -1732,7 +1700,7 @@ const ListingDetailsSheet = forwardRef<
       const bEnd = new Date(`${b.booking_date}T${b.end_time}`);
 
       if (isNaN(bStart.getTime()) || isNaN(bEnd.getTime())) {
-        console.log("⚠️ Invalid booking times:", b);
+        debugLog("⚠️ Invalid booking times:", b);
         return;
       }
 
@@ -1745,7 +1713,9 @@ const ListingDetailsSheet = forwardRef<
 
     // Also block times from bookings already added to cart (same date)
     const cartBookingsForDate = bookings.filter((b) => {
-      const cartDateStr = b.date.toISOString().split("T")[0];
+      const cartDate = b?.date instanceof Date ? b.date : new Date(b?.date);
+      if (Number.isNaN(cartDate.getTime())) return false;
+      const cartDateStr = toLocalDateKey(cartDate);
       return cartDateStr === dateStr;
     });
 
@@ -1782,10 +1752,10 @@ const ListingDetailsSheet = forwardRef<
       }
     });
 
-    console.log("🕐 Blocked times (including cart):", Array.from(blockedTimes));
+    debugLog("🕐 Blocked times (including cart):", Array.from(blockedTimes));
 
     daySchedule.slots.forEach((slot: any) => {
-      console.log("🕐 Processing slot:", slot);
+      debugLog("🕐 Processing slot:", slot);
       const start = new Date(`${dateStr}T${slot.start}`);
       const end = new Date(`${dateStr}T${slot.end}`);
 
@@ -1812,28 +1782,10 @@ const ListingDetailsSheet = forwardRef<
     });
 
     const uniqueSlots = Array.from(slotsSet).sort();
-    console.log("🕐 Generated slots:", uniqueSlots);
+    debugLog("🕐 Generated slots:", uniqueSlots);
     setAvailableSlots(uniqueSlots);
+    return uniqueSlots;
   };
-
-  // Refresh available slots and calendar when bookings cart changes (to block already-selected times)
-  // Also refresh when session type changes for studios offering Both
-  useEffect(() => {
-    if (group?.availability) {
-      // Re-process calendar marked dates to reflect cart changes
-      processAvailability(
-        group.availability,
-        existingBookings,
-        group.dateOverrides,
-        bookings,
-      );
-
-      // Also refresh available slots if a date is selected
-      if (selectedDate) {
-        fetchAvailableSlots(selectedDate);
-      }
-    }
-  }, [bookings.length, selectedTimeSlots.length, selectedSessionType]);
 
   const toggleFavorite = async () => {
     const nextState = !isFavorited;
@@ -1851,121 +1803,27 @@ const ListingDetailsSheet = forwardRef<
             p_item_vector: group.embedding,
             p_weight: 0.3, // Strong learning signal for explicit favorite
           });
-          // console.log('AI Learned from Favorite!');
+          // debugLog('AI Learned from Favorite!');
         }
       } catch (e) {
-        console.log("Error updating interest:", e);
+        debugLog("Error updating interest:", e);
       }
     }
   };
 
-  // Track View History (AI Signal) - Learn from views with weak weight
-  useEffect(() => {
-    const trackView = async () => {
-      if (group && group.embedding) {
-        try {
-          // Save to local storage for history
-          await AsyncStorage.setItem(
-            "last_viewed_item",
-            JSON.stringify({
-              id: listingId,
-              embedding: group.embedding,
-              type: group.type,
-              timestamp: Date.now(),
-            }),
-          );
-
-          // AI LEARNING: Update user interest from view (weak signal)
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-          if (user) {
-            await supabase.rpc("update_user_interest", {
-              p_user_id: user.id,
-              p_item_vector: group.embedding,
-              p_weight: 0.05, // Weak learning signal for just viewing
-            });
-            console.log("🤖 AI learned from view:", group.name);
-          }
-        } catch (e) {
-          console.log("Error tracking view:", e);
-        }
-      }
-    };
-    trackView();
-  }, [listingId, group]);
-
-  // Fetch Reviews
-  useEffect(() => {
-    const fetchDetails = async () => {
-      if (!listingId) return;
-      try {
-        // Determine filter column based on type
-        // Note: type might not be set yet if group is null, but we can try common logic or wait for group
-        // Better: fetch all reviews linked to this ID if we assume ID is unique across tables?
-        // Actually schema has separate columns. We need to know the type or check all cols.
-        // However, listingId comes from props.
-        // Let's use the `group` type if available or try to infer.
-        if (!group) return;
-
-        let col = "group_id";
-        if (group.type === "Studio" || group.type === "Venue")
-          col = "studio_id";
-        if (group.type === "Gig") col = "gig_id";
-
-        const { data: rData } = await supabase
-          .from("reviews")
-          .select("*, author:author_id(full_name, avatar_url)")
-          .eq(col, listingId)
-          .order("created_at", { ascending: false })
-          .limit(5);
-
-        if (rData) setReviews(rData);
-      } catch (e) {
-        console.log("Error reviews:", e);
-      }
-
-      // 2. Fetch Related Listings (AI Recommendation)
-      if (group.embedding) {
-        try {
-          const { data: relatedData, error } = await supabase.rpc(
-            "match_listings",
-            {
-              query_embedding: group.embedding,
-              match_threshold: 0.5, // 50% similarity
-              match_count: 5,
-              listing_type: group.type,
-            },
-          );
-
-          if (relatedData && relatedData.length > 0) {
-            // Filter out self
-            const relatedIds = relatedData
-              .map((r: any) => r.id)
-              .filter((id: string) => id !== listingId);
-
-            if (relatedIds.length > 0) {
-              // Fetch full details for these IDs from the respective view
-              let viewName = "groups_with_stats";
-              if (group.type === "Studio" || group.type === "Venue")
-                viewName = "studios_with_stats";
-              if (group.type === "Gig") viewName = "gigs_with_stats";
-
-              const { data: fullRelated } = await supabase
-                .from(viewName)
-                .select("*")
-                .in("id", relatedIds);
-
-              if (fullRelated) setRelatedListings(fullRelated);
-            }
-          }
-        } catch (e) {
-          console.log("Error fetching related:", e);
-        }
-      }
-    };
-    fetchDetails();
-  }, [listingId, group]);
+  useListingSheetEffects({
+    group,
+    listingId,
+    bookings,
+    selectedTimeSlots,
+    selectedSessionType,
+    existingBookings,
+    selectedDate,
+    processAvailability,
+    fetchAvailableSlots,
+    setReviews,
+    setRelatedListings,
+  });
 
   const renderBackdrop = React.useCallback(
     (props: any) => (
@@ -1979,68 +1837,22 @@ const ListingDetailsSheet = forwardRef<
     [],
   );
 
-  // Dynamic Labels based on Type
-  const getTypeLabels = (type: string) => {
-    switch (type) {
-      case "Studio":
-        return {
-          aboutTitle: "About this studio",
-          tabs: ["About", "Setup", "Book", "Review"],
-          unit: "hour",
-        };
-      case "Venue":
-        return {
-          aboutTitle: "About this venue",
-          tabs: ["About", "Specs", "Book", "Review"],
-          unit: "hour",
-        };
-      case "Gig":
-        return {
-          aboutTitle: "About this gig",
-          tabs: ["About", "Info", "Apply", "Review"],
-          unit: "project",
-        };
-      case "Artist":
-        return {
-          aboutTitle: "About this artist",
-          tabs: ["About", "Timeline", "Review"],
-          unit: "event",
-        };
-      default: // Group
-        return {
-          aboutTitle: "About this artist",
-          tabs: ["About", "Timeline", "Review"],
-          unit: "night",
-        };
-    }
-  };
+  const {
+    labels,
+    rehearsalRate,
+    recordingRate,
+    hasDualPricing,
+    displayRate,
+    showTabs,
+  } = useListingSheetDerived(group);
 
-  const labels = group ? getTypeLabels(group.type) : getTypeLabels("Group");
-
-  // Handle dual pricing for studios
-  const rehearsalRate = group?.rehearsal_rate
-    ? parseInt(group.rehearsal_rate).toLocaleString()
-    : null;
-  const recordingRate = group?.recording_rate
-    ? parseInt(group.recording_rate).toLocaleString()
-    : null;
-  const hasDualPricing =
-    group?.type === "Studio" &&
-    rehearsalRate &&
-    recordingRate &&
-    rehearsalRate !== "0" &&
-    recordingRate !== "0";
-  const displayRate = group?.rate
-    ? parseInt(group.rate).toLocaleString()
-    : rehearsalRate || recordingRate || group?.hourly_rate
-      ? parseInt(group?.hourly_rate || "0").toLocaleString()
-      : "0";
-  const showTabs = labels.tabs.length > 0;
+  const listingOwnerId = group?.owner_id || group?.organizer_id || group?.id;
+  const showReportButton = !!group && !!userId && listingOwnerId !== userId;
 
   const renderTabs = () => (
     <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>
       {labels.tabs.map((tab) => (
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={1}
           key={tab}
           style={[
             styles.tab,
@@ -2067,2717 +1879,183 @@ const ListingDetailsSheet = forwardRef<
   );
 
   const renderBookingControls = () => (
-    <View
-      style={[
-        styles.bookingContainer,
-        {
-          backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
-          borderColor: colors.border,
-          borderWidth: 1,
-          borderRadius: 16,
-          overflow: "hidden",
-          padding: 16,
-          marginBottom: 24,
-        },
-      ]}
-    >
-      {/* Session Type Selector for Studios with Both Rehearsal & Recording */}
-      {group?.studio_type === "Both" && (
-        <View style={{ marginBottom: 16 }}>
-          <Text
-            style={[
-              styles.label,
-              { color: colors.textSecondary, marginBottom: 8 },
-            ]}
-          >
-            What would you like to book?
-          </Text>
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <TouchableOpacity
-              style={[
-                {
-                  flex: 1,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  paddingVertical: 12,
-                  paddingHorizontal: 16,
-                  borderRadius: 12,
-                  borderWidth: 2,
-                  borderColor: selectedSessionType === "Rehearsal" ? colors.primary : colors.border,
-                  backgroundColor: selectedSessionType === "Rehearsal" 
-                    ? (isDark ? "rgba(124, 58, 237, 0.15)" : "rgba(124, 58, 237, 0.08)")
-                    : "transparent",
-                },
-              ]}
-              onPress={() => {
-                setSelectedSessionType("Rehearsal");
-                // Reset booking state when switching types
-                setSelectedDate("");
-                setSelectedSlot(null);
-                setValidEndTimes([]);
-                setIsRecordingWholeDayAvailable(false);
-                setRecordingDaySlot(null);
-              }}
-            >
-              <Ionicons 
-                name="musical-notes" 
-                size={20} 
-                color={selectedSessionType === "Rehearsal" ? colors.primary : colors.textSecondary} 
-              />
-              <Text
-                style={{
-                  fontFamily: selectedSessionType === "Rehearsal" ? "Poppins_600SemiBold" : "Poppins_500Medium",
-                  color: selectedSessionType === "Rehearsal" ? colors.primary : colors.text,
-                  marginLeft: 8,
-                  fontSize: 14,
-                }}
-              >
-                Rehearsal
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                {
-                  flex: 1,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  paddingVertical: 12,
-                  paddingHorizontal: 16,
-                  borderRadius: 12,
-                  borderWidth: 2,
-                  borderColor: selectedSessionType === "Recording" ? colors.primary : colors.border,
-                  backgroundColor: selectedSessionType === "Recording" 
-                    ? (isDark ? "rgba(124, 58, 237, 0.15)" : "rgba(124, 58, 237, 0.08)")
-                    : "transparent",
-                },
-              ]}
-              onPress={() => {
-                setSelectedSessionType("Recording");
-                // Reset booking state when switching types
-                setSelectedDate("");
-                setSelectedSlot(null);
-                setValidEndTimes([]);
-                setIsRecordingWholeDayAvailable(false);
-                setRecordingDaySlot(null);
-              }}
-            >
-              <Ionicons 
-                name="mic" 
-                size={20} 
-                color={selectedSessionType === "Recording" ? colors.primary : colors.textSecondary} 
-              />
-              <Text
-                style={{
-                  fontFamily: selectedSessionType === "Recording" ? "Poppins_600SemiBold" : "Poppins_500Medium",
-                  color: selectedSessionType === "Recording" ? colors.primary : colors.text,
-                  marginLeft: 8,
-                  fontSize: 14,
-                }}
-              >
-                Recording
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 16,
-        }}
-      >
-        <Text
-          style={[
-            styles.sectionTitle,
-            { color: colors.text, fontSize: 16, marginBottom: 0 },
-          ]}
-        >
-          {isRecordingMode ? "Select Recording Date" : "Select Date & Time"}
-        </Text>
-        {isRecordingMode ? (
-          <View
-            style={[
-              styles.durationBadge,
-              {
-                backgroundColor: isDark
-                  ? "rgba(124, 58, 237, 0.15)"
-                  : "rgba(124, 58, 237, 0.1)",
-              },
-            ]}
-          >
-            <Ionicons name="mic" size={14} color={colors.primary} />
-            <Text
-              style={{
-                fontFamily: "Poppins_600SemiBold",
-                color: colors.primary,
-                marginLeft: 4,
-                fontSize: 12,
-              }}
-            >
-              Whole Day
-            </Text>
-          </View>
-        ) : duration > 0 ? (
-          <View
-            style={[
-              styles.durationBadge,
-              {
-                backgroundColor: isDark
-                  ? "rgba(124, 58, 237, 0.15)"
-                  : "rgba(124, 58, 237, 0.1)",
-              },
-            ]}
-          >
-            <Ionicons name="time-outline" size={14} color={colors.primary} />
-            <Text
-              style={{
-                fontFamily: "Poppins_600SemiBold",
-                color: colors.primary,
-                marginLeft: 4,
-                fontSize: 12,
-              }}
-            >
-              {`${duration}h Session`}
-            </Text>
-          </View>
-        ) : null}
-      </View>
-
-      {/* Show lead time notice if applicable */}
-      {group?.settings?.lead_time_hours &&
-        group.settings.lead_time_hours > 0 && (
-          <View
-            style={{
-              backgroundColor: isDark ? "rgba(245, 158, 11, 0.15)" : "#FEF3C7",
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              borderRadius: 8,
-              marginBottom: 12,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Ionicons name="time" size={16} color="#F59E0B" />
-            <Text
-              style={{
-                color: "#D97706",
-                fontSize: 12,
-                fontFamily: "Poppins_500Medium",
-                flex: 1,
-              }}
-            >
-              Advance booking required: {group.settings.lead_time_hours} hours
-              before session
-            </Text>
-          </View>
-        )}
-
-      {/* 1. The Calendar (The Anchor) */}
-      <Calendar
-        current={new Date().toISOString().split("T")[0]}
-        minDate={(() => {
-          // Calculate minimum date based on lead_time_hours
-          const leadTimeHours = group?.settings?.lead_time_hours || 0;
-          const minDate = new Date();
-          minDate.setHours(minDate.getHours() + leadTimeHours);
-          // If lead time pushes us past today, use that date
-          return minDate.toISOString().split("T")[0];
-        })()}
-        markedDates={{
-          ...markedDates,
-          [selectedDate]: {
-            selected: true,
-            selectedColor: colors.primary,
-            selectedTextColor: "#FFFFFF",
-            customStyles: {
-              container: {
-                backgroundColor: colors.primary,
-                elevation: 2,
-              },
-              text: {
-                fontWeight: "bold",
-              },
-            },
-          },
-        }}
-        onDayPress={(day) => {
-          // Don't allow selecting disabled dates
-          if (markedDates[day.dateString]?.disabled) {
-            return;
-          }
-          setSelectedDate(day.dateString);
-          setSelectedSlot(null);
-          setValidEndTimes([]);
-          setEndTime(null as any); // Reset endTime to prevent stale booking state
-          fetchAvailableSlots(day.dateString);
-          // Update date state
-          const selectedDateObj = new Date(day.dateString);
-          setDate(selectedDateObj);
-        }}
-        theme={{
-          backgroundColor: "transparent",
-          calendarBackground: "transparent",
-          textSectionTitleColor: colors.textSecondary,
-          selectedDayBackgroundColor: colors.primary,
-          selectedDayTextColor: "#FFFFFF",
-          todayTextColor: colors.primary,
-          dayTextColor: colors.text,
-          textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
-          dotColor: colors.primary,
-          selectedDotColor: "#FFFFFF",
-          arrowColor: colors.primary,
-          monthTextColor: colors.text,
-          indicatorColor: colors.primary,
-          textDayFontFamily: "Poppins_500Medium",
-          textMonthFontFamily: "Poppins_600SemiBold",
-          textDayHeaderFontFamily: "Poppins_500Medium",
-          textDayFontSize: 14,
-          textMonthFontSize: 16,
-          textDayHeaderFontSize: 12,
-        }}
-        enableSwipeMonths={true}
-        style={{
-          marginBottom: selectedDate ? 16 : 0,
-        }}
-      />
-
-      {/* 2. The Slot Grid (The Action) - Reveals on Date Selection */}
-      {selectedDate && (
-        <View
-          style={[
-            styles.slotGridContainer,
-            {
-              borderTopWidth: 1,
-              borderTopColor: isDark ? "#374151" : "#F3F4F6",
-              paddingTop: 16,
-            },
-          ]}
-        >
-          {/* RECORDING STUDIO: Whole-Day Booking UI */}
-          {isRecordingMode ? (
-            <View>
-              <Text
-                style={{
-                  fontFamily: "Poppins_500Medium",
-                  color: colors.textSecondary,
-                  fontSize: 13,
-                  marginBottom: 12,
-                }}
-              >
-                Recording Session for{" "}
-                {new Date(selectedDate).toLocaleDateString(undefined, {
-                  weekday: "long",
-                  month: "short",
-                  day: "numeric",
-                })}
-              </Text>
-
-              {isRecordingWholeDayAvailable && recordingDaySlot ? (
-                <View>
-                  {/* Whole Day Booking Info */}
-                  <View
-                    style={{
-                      backgroundColor: isDark ? "rgba(124, 58, 237, 0.1)" : "rgba(124, 58, 237, 0.08)",
-                      borderRadius: 12,
-                      padding: 16,
-                      borderWidth: 2,
-                      borderColor: colors.primary,
-                      marginBottom: 16,
-                    }}
-                  >
-                    <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-                      <Ionicons name="calendar" size={20} color={colors.primary} />
-                      <Text
-                        style={{
-                          fontFamily: "Poppins_600SemiBold",
-                          fontSize: 16,
-                          color: colors.primary,
-                          marginLeft: 8,
-                        }}
-                      >
-                        Whole Day Recording Session
-                      </Text>
-                    </View>
-                    <Text
-                      style={{
-                        fontFamily: "Poppins_400Regular",
-                        fontSize: 13,
-                        color: colors.textSecondary,
-                        marginBottom: 8,
-                      }}
-                    >
-                      Recording studios are booked for the entire day to ensure uninterrupted sessions.
-                    </Text>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Ionicons name="time-outline" size={16} color={colors.text} />
-                      <Text
-                        style={{
-                          fontFamily: "Poppins_500Medium",
-                          fontSize: 14,
-                          color: colors.text,
-                        }}
-                      >
-                        {formatTime12(recordingDaySlot.start)} - {formatTime12(recordingDaySlot.end)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Calculate duration for display */}
-                  {(() => {
-                    const startParts = recordingDaySlot.start.split(":").map(Number);
-                    const endParts = recordingDaySlot.end.split(":").map(Number);
-                    const startMinutes = startParts[0] * 60 + startParts[1];
-                    const endMinutes = endParts[0] * 60 + endParts[1];
-                    const durationHours = (endMinutes - startMinutes) / 60;
-                    const rate = parseInt(displayRate.replace(/,/g, "")) || 0;
-                    const totalCost = rate * durationHours;
-
-                    return (
-                      <View
-                        style={{
-                          backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-                          borderRadius: 12,
-                          padding: 12,
-                          marginBottom: 16,
-                        }}
-                      >
-                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Duration</Text>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>{durationHours} hours</Text>
-                        </View>
-                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                          <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Rate</Text>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>₱{displayRate}/hr</Text>
-                        </View>
-                        <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 8 }} />
-                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold" }}>Total</Text>
-                          <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 16 }}>₱{totalCost.toLocaleString()}</Text>
-                        </View>
-                      </View>
-                    );
-                  })()}
-                </View>
-              ) : (
-                <View style={{ alignItems: "center", paddingVertical: 16 }}>
-                  <Ionicons name="calendar-outline" size={32} color={colors.textSecondary} style={{ marginBottom: 8 }} />
-                  <Text
-                    style={{
-                      color: colors.textSecondary,
-                      fontFamily: "Poppins_500Medium",
-                      fontSize: 14,
-                      textAlign: "center",
-                    }}
-                  >
-                    This date is not available
-                  </Text>
-                  <Text
-                    style={{
-                      color: colors.textSecondary,
-                      fontFamily: "Poppins_400Regular",
-                      fontSize: 12,
-                      textAlign: "center",
-                      marginTop: 4,
-                    }}
-                  >
-                    Recording studios require the full day. This date already has bookings.
-                  </Text>
-                </View>
-              )}
-            </View>
-          ) : (
-            /* REGULAR STUDIO: Time Slot Selection UI */
-            <View>
-              <Text
-                style={{
-                  fontFamily: "Poppins_500Medium",
-                  color: colors.textSecondary,
-                  fontSize: 13,
-                  marginBottom: 12,
-                }}
-              >
-                Available Slots for{" "}
-                {new Date(selectedDate).toLocaleDateString(undefined, {
-                  weekday: "long",
-                  month: "short",
-                  day: "numeric",
-                })}
-              </Text>
-
-              {availableSlots.length > 0 ? (
-                <View>
-                  {/* Helper to group slots */}
-                  {(() => {
-                    const grouped = {
-                      Morning: [] as string[],
-                      Afternoon: [] as string[],
-                      Evening: [] as string[],
-                    };
-                    availableSlots.forEach((slot) => {
-                      const hour = parseInt(slot.split(":")[0]);
-                      if (hour < 12) grouped.Morning.push(slot);
-                      else if (hour < 18) grouped.Afternoon.push(slot);
-                      else grouped.Evening.push(slot);
-                    });
-
-                    return (
-                      Object.keys(grouped) as Array<keyof typeof grouped>
-                    ).map((period) => {
-                      if (grouped[period].length === 0) return null;
-                      return (
-                        <View key={period} style={{ marginBottom: 16 }}>
-                          <Text
-                            style={{
-                              fontFamily: "Poppins_600SemiBold",
-                              color: colors.textSecondary,
-                              fontSize: 12,
-                              marginBottom: 8,
-                              textTransform: "uppercase",
-                              letterSpacing: 0.5,
-                            }}
-                          >
-                            {period}
-                          </Text>
-                          <View style={styles.slotGrid}>
-                            {grouped[period].map((slot) => {
-                              const isSelected = selectedSlot === slot;
-                              // Check if this slot is part of the selected duration range
-                              const slotHour = parseInt(slot.split(":")[0]);
-                              const startHour = selectedSlot
-                                ? parseInt(selectedSlot.split(":")[0])
-                                : -1;
-                              const endHour = endTime ? endTime.getHours() : -1;
-                              const isInRange =
-                                selectedSlot &&
-                                endTime &&
-                                slotHour >= startHour &&
-                                slotHour < endHour;
-
-                              return (
-                                <TouchableOpacity
-                                  key={slot}
-                                  style={[
-                                    styles.slotButton,
-                                    {
-                                      backgroundColor: isSelected
-                                        ? isDark
-                                          ? "rgba(124, 58, 237, 0.15)"
-                                          : "rgba(124, 58, 237, 0.1)"
-                                        : isInRange
-                                          ? isDark
-                                            ? "rgba(124, 58, 237, 0.05)"
-                                            : "rgba(124, 58, 237, 0.05)"
-                                          : isDark
-                                            ? "#374151"
-                                            : "#F3F4F6",
-                                      borderColor: isSelected
-                                        ? colors.primary
-                                        : "transparent",
-                                      borderWidth: isSelected ? 2 : 0,
-                                    },
-                                  ]}
-                                  onPress={() => {
-                                    setSelectedSlot(slot);
-
-                                    // 1. Update start date/time
-                                    const [hours, minutes] = slot.split(":");
-                                    const startDate = new Date(selectedDate);
-                                    startDate.setHours(
-                                      parseInt(hours),
-                                      parseInt(minutes),
-                                    );
-                                    setDate(startDate);
-
-                                    // 2. Calculate Valid Max Duration
-                                    const availableHours = new Set(
-                                      availableSlots.map((s) =>
-                                        parseInt(s.split(":")[0]),
-                                      ),
-                                    );
-                                    let maxDur = 0;
-                                    let currentH = parseInt(hours);
-
-                                    // Check up to 12 hours ahead
-                                    for (let i = 0; i < 12; i++) {
-                                      // Check if the slot *starts* at this hour is available
-                                      // (Except the first one, which we know is available since we clicked it)
-                                      if (i > 0 && !availableHours.has(currentH))
-                                        break;
-                                      maxDur++;
-                                      currentH++;
-                                      if (currentH >= 24) break;
-                                    }
-
-                                    // Store max available duration for this start time
-                                    // We can re-use validEndTimes state to store valid DURATIONS (numbers) as strings if we want,
-                                    // or just calculate valid durations on the fly.
-                                    // Let's store valid duration HOURS in validEndTimes as strings like "1", "2", "3" to reuse state.
-                                    const validDurs = [];
-                                    for (let i = 1; i <= maxDur; i++)
-                                      validDurs.push(i.toString());
-                                    setValidEndTimes(validDurs);
-
-                                    // 3. Auto-select 1 hour if available
-                                    if (maxDur >= 1) {
-                                      const endDate = new Date(startDate);
-                                      endDate.setHours(startDate.getHours() + 1);
-                                      setEndTime(endDate);
-                                    }
-                                  }}
-                                >
-                                  <Text
-                                    style={{
-                                      color: isSelected
-                                        ? colors.primary
-                                        : colors.text,
-                                      fontFamily: isSelected
-                                        ? "Poppins_600SemiBold"
-                                        : "Poppins_500Medium",
-                                      fontSize: 13,
-                                    }}
-                                  >
-                                    {formatTime12(slot)}
-                                  </Text>
-                                </TouchableOpacity>
-                              );
-                            })}
-                          </View>
-                        </View>
-                      );
-                    });
-                  })()}
-                </View>
-              ) : (
-                <View style={{ alignItems: "center", paddingVertical: 12 }}>
-                  <Text
-                    style={{
-                      color: colors.textSecondary,
-                      fontFamily: "Poppins_400Regular",
-                      fontSize: 13,
-                    }}
-                  >
-                    No available slots for this date.
-                  </Text>
-                </View>
-              )}
-
-              {/* Duration Selection (Chips) */}
-              {selectedSlot && validEndTimes.length > 0 && (
-                <View style={{ marginTop: 8 }}>
-                  <Text
-                    style={{
-                      fontFamily: "Poppins_500Medium",
-                      color: colors.textSecondary,
-                      fontSize: 13,
-                      marginBottom: 12,
-                    }}
-                  >
-                    Duration
-                  </Text>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                    {validEndTimes.map((durStr) => {
-                      const dur = parseInt(durStr);
-                      // Calculate if selected - safely check if date and endTime exist
-                      let currentDur = 0;
-                      if (date && endTime && date.getTime && endTime.getTime) {
-                        currentDur =
-                          (endTime.getTime() - date.getTime()) / (1000 * 60 * 60);
-                      }
-                      const isSelected = Math.abs(currentDur - dur) < 0.1;
-
-                      return (
-                        <TouchableOpacity
-                          key={durStr}
-                          style={[
-                            {
-                              paddingHorizontal: 16,
-                              paddingVertical: 8,
-                              borderRadius: 100,
-                              backgroundColor: isSelected
-                                ? colors.primary
-                                : isDark
-                                  ? "#374151"
-                                  : "#F3F4F6",
-                            },
-                          ]}
-                          onPress={() => {
-                            if (date) {
-                              const newEnd = new Date(date);
-                              newEnd.setHours(newEnd.getHours() + dur);
-                              setEndTime(newEnd);
-                            }
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: isSelected ? "#FFFFFF" : colors.text,
-                              fontFamily: isSelected
-                                ? "Poppins_600SemiBold"
-                                : "Poppins_500Medium",
-                              fontSize: 13,
-                            }}
-                          >
-                            {`${dur} hr${dur > 1 ? "s" : ""}`}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-      )}
-    </View>
+    <BookingControls
+      colors={colors}
+      isDark={isDark}
+      group={group}
+      selectedSessionType={selectedSessionType}
+      setSelectedSessionType={setSelectedSessionType}
+      setSelectedDate={setSelectedDate}
+      setSelectedSlot={setSelectedSlot}
+      setValidEndTimes={setValidEndTimes}
+      setIsRecordingWholeDayAvailable={setIsRecordingWholeDayAvailable}
+      setRecordingDaySlot={setRecordingDaySlot}
+      isRecordingMode={isRecordingMode}
+      duration={duration}
+      markedDates={markedDates}
+      selectedDate={selectedDate}
+      fetchAvailableSlots={fetchAvailableSlots}
+      setEndTime={setEndTime}
+      setDate={setDate}
+      availableSlots={availableSlots}
+      selectedSlot={selectedSlot}
+      validEndTimes={validEndTimes}
+      date={date}
+      endTime={endTime}
+      recordingDaySlot={recordingDaySlot}
+      isRecordingWholeDayAvailable={isRecordingWholeDayAvailable}
+      displayRate={displayRate}
+    />
   );
 
   const renderDurationControl = () => null; // Removed in favor of computed duration
 
   // --- SUB-SECTIONS ---
 
-  const renderGallery = () => {
-    if (!group.images || group.images.length === 0) return null;
-
-    return (
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Gallery
-        </Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.galleryContainer}
-        >
-          {group.images.map((img: string, i: number) => (
-            <Image key={i} source={{ uri: img }} style={styles.galleryImage} />
-          ))}
-        </ScrollView>
-      </View>
-    );
-  };
-
-  // Responsive Review Card Width
-  const CARD_WIDTH = width * 0.85;
-
   const renderReviews = () => (
-    <View style={[styles.tabContent, { paddingHorizontal: 0 }]}>
-      <View style={[styles.reviewHeader, { paddingHorizontal: 24 }]}>
-        <Text style={[styles.ratingBig, { color: colors.text }]}>
-          {group.rating ? group.rating.toFixed(1) : "0.0"}
-        </Text>
-        <View>
-          <View style={{ flexDirection: "row" }}>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <Ionicons
-                key={i}
-                name={
-                  i <= Math.round(group.rating || 0) ? "star" : "star-outline"
-                }
-                size={14}
-                color={colors.primary}
-              />
-            ))}
-          </View>
-          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-            {group.review_count || 0} reviews
-          </Text>
-        </View>
-      </View>
-
-      <View style={[styles.reviewsScroll, { paddingHorizontal: 24 }]}>
-        {reviews.length > 0 ? (
-          reviews.map((review) => (
-            <View
-              key={review.id}
-              style={[
-                styles.reviewCard,
-                { borderColor: colors.border, width: "100%" },
-              ]}
-            >
-              <View style={styles.reviewUser}>
-                <Image
-                  source={{
-                    uri:
-                      review.author?.avatar_url ||
-                      "https://via.placeholder.com/100",
-                  }}
-                  style={styles.reviewAvatar}
-                />
-                <View>
-                  <Text style={[styles.reviewName, { color: colors.text }]}>
-                    {review.author?.full_name || "Anonymous"}
-                  </Text>
-                  <Text
-                    style={[styles.reviewDate, { color: colors.textSecondary }]}
-                  >
-                    {new Date(review.created_at).toLocaleDateString()}
-                  </Text>
-                </View>
-              </View>
-              <Text style={[styles.reviewBody, { color: colors.text }]}>
-                {review.content}
-              </Text>
-            </View>
-          ))
-        ) : (
-          <Text style={{ color: colors.textSecondary, fontStyle: "italic" }}>
-            No reviews yet.
-          </Text>
-        )}
-      </View>
-
-      {/* Related Listings Section (AI Recommendations) */}
-      {relatedListings.length > 0 && (
-        <View style={[styles.section, { marginTop: 32 }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            You Might Also Like
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{
-              paddingLeft: 24,
-              paddingRight: 8,
-              gap: 12,
-            }}
-          >
-            {relatedListings.map((item) => {
-              // Normalize item for ListingCard
-              const normalizedItem = {
-                ...item,
-                type: group.type, // Assume same type for now or use item.type if available from view
-                image: item.images?.[0] || "https://via.placeholder.com/300",
-                rate:
-                  item.hourly_rate?.toString() ||
-                  item.budget?.toString() ||
-                  item.rate ||
-                  "0",
-                location: item.location || item.address || "",
-              };
-
-              // We need to import ListingCard or render a mini version
-              // Since ListingCard might not be imported, let's render a mini card inline/simple for now to avoid circular deps or complex imports if not already there.
-              // Actually, let's reuse the logic but render simple.
-              return (
-                <TouchableOpacity
-                  key={item.id}
-                  style={{ width: 160, marginRight: 0 }}
-                  onPress={() => {
-                    // Close current and open new? Or just push new?
-                    // Ideally we just update the listingId prop if possible, but that's controlled by parent.
-                    // For now, let's just log or try to navigate if we had navigation.
-                    console.log("Open related:", item.id);
-                    // In a real app we'd call a prop onListingPress(item.id)
-                  }}
-                >
-                  <Image
-                    source={{ uri: normalizedItem.image }}
-                    style={{
-                      width: 160,
-                      height: 100,
-                      borderRadius: 8,
-                      backgroundColor: colors.border,
-                    }}
-                  />
-                  <Text
-                    style={{
-                      fontFamily: "Poppins_600SemiBold",
-                      color: colors.text,
-                      marginTop: 8,
-                      fontSize: 13,
-                    }}
-                    numberOfLines={1}
-                  >
-                    {item.name}
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: "Poppins_400Regular",
-                      color: colors.textSecondary,
-                      fontSize: 11,
-                    }}
-                  >
-                    {normalizedItem.location}
-                  </Text>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      marginTop: 4,
-                    }}
-                  >
-                    <Ionicons name="star" size={12} color={colors.primary} />
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        color: colors.text,
-                        marginLeft: 4,
-                        fontFamily: "Poppins_500Medium",
-                      }}
-                    >
-                      {item.rating ? item.rating.toFixed(1) : "New"}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
-    </View>
+    <ReviewsTab
+      group={group}
+      colors={colors}
+      styles={styles}
+      reviews={reviews}
+      relatedListings={relatedListings}
+    />
   );
 
   // Studio: Setup Tab (also used for Venue Specs)
-  const renderStudioSetup = () => {
-    const amenities = group.amenities || [];
-    const studioEquipment = group.instruments || []; // New equipment field with full details
-    const legacyEquipment: string[] = [];
-
-    // Categorize amenities as equipment (legacy support)
-    if (amenities.length > 0 && studioEquipment.length === 0) {
-      amenities.forEach((item: string) => {
-        const lower = item.toLowerCase();
-        if (
-          lower.includes("mic") ||
-          lower.includes("drum") ||
-          lower.includes("guitar") ||
-          lower.includes("bass") ||
-          lower.includes("keyboard") ||
-          lower.includes("amp") ||
-          lower.includes("console") ||
-          lower.includes("interface")
-        ) {
-          legacyEquipment.push(item);
-        }
-      });
-    }
-
-    const title = group.type === "Venue" ? "Venue Specs" : "Studio Amenities";
-
-    return (
-      <View style={styles.tabContent}>
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            {title}
-          </Text>
-          <View style={styles.tagsContainer}>
-            {amenities.length > 0 ? (
-              amenities.map((tag: string, index: number) => (
-                <View
-                  key={`${tag}-${index}`}
-                  style={[
-                    styles.tag,
-                    {
-                      borderColor: colors.primary,
-                      backgroundColor: isDark
-                        ? "rgba(124, 58, 237, 0.1)"
-                        : "rgba(124, 58, 237, 0.05)",
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={14}
-                    color={colors.primary}
-                    style={{ marginRight: 4 }}
-                  />
-                  <Text
-                    style={{
-                      color: colors.text,
-                      fontSize: 13,
-                      fontFamily: "Poppins_500Medium",
-                    }}
-                  >
-                    {tag}
-                  </Text>
-                </View>
-              ))
-            ) : (
-              <Text
-                style={{ color: colors.textSecondary, fontStyle: "italic" }}
-              >
-                No specs listed for this{" "}
-                {group.type === "Venue" ? "venue" : "studio"}.
-              </Text>
-            )}
-          </View>
-        </View>
-
-        {/* New Equipment Section with full details */}
-        {studioEquipment.length > 0 && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Studio Equipment
-            </Text>
-            <View style={{ gap: 16 }}>
-              {studioEquipment.map(
-                (
-                  item: {
-                    name: string;
-                    quantity?: number;
-                    description?: string;
-                    image?: string;
-                  },
-                  i: number,
-                ) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.equipmentCard,
-                      {
-                        backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-                        borderColor: colors.border,
-                      },
-                    ]}
-                  >
-                    <View
-                      style={{ flexDirection: "row", alignItems: "center" }}
-                    >
-                      {item.image ? (
-                        <Image
-                          source={{ uri: item.image }}
-                          style={styles.equipmentImage}
-                        />
-                      ) : (
-                        <View
-                          style={[
-                            styles.equipmentIcon,
-                            {
-                              backgroundColor: isDark
-                                ? "rgba(124, 58, 237, 0.15)"
-                                : "rgba(124, 58, 237, 0.1)",
-                            },
-                          ]}
-                        >
-                          <Ionicons
-                            name="musical-notes"
-                            size={18}
-                            color={colors.primary}
-                          />
-                        </View>
-                      )}
-                      <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text
-                          style={{
-                            color: colors.text,
-                            fontFamily: "Poppins_600SemiBold",
-                            fontSize: 14,
-                          }}
-                        >
-                          {item.name}
-                        </Text>
-                        {item.quantity && item.quantity > 1 && (
-                          <Text
-                            style={{
-                              color: colors.textSecondary,
-                              fontFamily: "Poppins_400Regular",
-                              fontSize: 12,
-                            }}
-                          >
-                            Quantity: {item.quantity}
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-                    {item.description && (
-                      <Text
-                        style={{
-                          color: colors.textSecondary,
-                          fontFamily: "Poppins_400Regular",
-                          fontSize: 13,
-                          marginTop: 8,
-                        }}
-                      >
-                        {item.description}
-                      </Text>
-                    )}
-                  </View>
-                ),
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* Legacy Equipment Support */}
-        {legacyEquipment.length > 0 && studioEquipment.length === 0 && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Available Equipment
-            </Text>
-            <View style={{ gap: 12 }}>
-              {legacyEquipment.map((item: string, i: number) => (
-                <View key={i} style={styles.checkRow}>
-                  <View
-                    style={[
-                      styles.equipmentIcon,
-                      {
-                        backgroundColor: isDark
-                          ? "rgba(124, 58, 237, 0.15)"
-                          : "rgba(124, 58, 237, 0.1)",
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name="musical-notes"
-                      size={18}
-                      color={colors.primary}
-                    />
-                  </View>
-                  <Text
-                    style={{
-                      color: colors.text,
-                      marginLeft: 12,
-                      fontFamily: "Poppins_400Regular",
-                    }}
-                  >
-                    {item}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {group.description && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              About the Space
-            </Text>
-            <Text
-              style={{
-                color: colors.text,
-                lineHeight: 24,
-                fontFamily: "Poppins_400Regular",
-              }}
-            >
-              {group.description}
-            </Text>
-          </View>
-        )}
-      </View>
-    );
-  };
+  const renderStudioSetup = () => (
+    <StudioSetupTab
+      group={group}
+      colors={colors}
+      isDark={isDark}
+      styles={styles}
+    />
+  );
 
   // Studio: Book Tab
-  const renderStudioBook = () => {
-    const availability = group.availability || [];
-    const totalBookingsCost = bookings.reduce((sum, booking) => {
-      // Use calculated pricing if available, otherwise fallback to simple calculation
-      if (booking.pricing?.final_price) {
-        return sum + booking.pricing.final_price;
-      }
-      const start = new Date(booking.startTime).getTime();
-      const end = new Date(booking.endTime).getTime();
-      let hours = (end - start) / (1000 * 60 * 60);
-      if (hours < 0) hours += 24;
-      return sum + parseInt(displayRate.replace(/,/g, "")) * hours;
-    }, 0);
-
-    return (
-      <View style={styles.tabContent}>
-        {/* Unpaid Booking Warning - blocks new bookings until paid */}
-        {hasExistingStudioBooking &&
-          existingStudioBookingStatus === "unpaid" && (
-            <View
-              style={{
-                backgroundColor: isDark ? "#1F2937" : "#FFF7ED", // Very subtle orange tint in light mode
-                borderLeftWidth: 4,
-                borderLeftColor: "#F59700",
-                borderRadius: 8, // Slightly sharper corners for "card" feel
-                marginBottom: 20,
-                padding: 16,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 16,
-                // elevate slightly
-                shadowColor: "#000",
-                shadowOffset: {
-                  width: 0,
-                  height: 1,
-                },
-                shadowOpacity: 0.05,
-                shadowRadius: 2,
-                elevation: 2,
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    marginBottom: 4,
-                  }}
-                >
-                  <Ionicons
-                    name="alert-circle"
-                    size={16}
-                    color="#F59700"
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text
-                    style={{
-                      fontFamily: "Poppins_600SemiBold",
-                      fontSize: 14,
-                      color: isDark ? "#F59700" : "#D97706",
-                    }}
-                  >
-                    Payment Pending
-                  </Text>
-                </View>
-                <Text
-                  style={{
-                    fontFamily: "Poppins_400Regular",
-                    fontSize: 12,
-                    color: colors.textSecondary,
-                    lineHeight: 18,
-                  }}
-                >
-                  Complete payment for your existing booking to unlock new
-                  sessions.
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={{
-                  backgroundColor: "#F59700",
-                  paddingVertical: 10,
-                  paddingHorizontal: 16,
-                  borderRadius: 100, // Pill shape
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  shadowColor: "#F59700",
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.2,
-                  shadowRadius: 3,
-                  elevation: 3,
-                }}
-                onPress={() => {
-                  (ref as any)?.current?.dismiss();
-                  router.push("/bookings" as any);
-                }}
-              >
-                <Text
-                  style={{
-                    color: "#FFFFFF",
-                    fontFamily: "Poppins_600SemiBold",
-                    fontSize: 12,
-                  }}
-                >
-                  Pay Now
-                </Text>
-                <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          )}
-
-        {/* Bookings List */}
-        {bookings.length > 0 && (
-          <View style={[styles.section, { marginBottom: 16 }]}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Your Bookings ({bookings.length})
-            </Text>
-            {bookings.map((booking, index) => {
-              const start = new Date(booking.startTime).getTime();
-              const end = new Date(booking.endTime).getTime();
-              let hours = (end - start) / (1000 * 60 * 60);
-              if (hours < 0) hours += 24;
-
-              // Use calculated pricing or fallback
-              const cost =
-                booking.pricing?.final_price ||
-                parseInt(displayRate.replace(/,/g, "")) * hours;
-              const hasModifiers =
-                booking.pricing?.modifiers &&
-                Object.keys(booking.pricing.modifiers).length > 0;
-              const slots = booking.timeSlots || [
-                {
-                  start: booking.startTime.toTimeString().slice(0, 5),
-                  end: booking.endTime.toTimeString().slice(0, 5),
-                },
-              ];
-              const isMultiSlot = slots.length > 1;
-
-              return (
-                <View
-                  key={index}
-                  style={[
-                    styles.bookingCard,
-                    {
-                      backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-                      borderColor: colors.border,
-                      marginBottom: 8,
-                    },
-                  ]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        marginBottom: 4,
-                      }}
-                    >
-                      <Ionicons
-                        name="calendar"
-                        size={14}
-                        color={colors.primary}
-                      />
-                      <Text
-                        style={{
-                          color: colors.text,
-                          fontFamily: "Poppins_600SemiBold",
-                          marginLeft: 6,
-                          fontSize: 13,
-                        }}
-                      >
-                        {booking.date.toLocaleDateString("en-US", {
-                          weekday: "short",
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </Text>
-                      {isMultiSlot && (
-                        <View
-                          style={{
-                            marginLeft: 8,
-                            paddingHorizontal: 6,
-                            paddingVertical: 2,
-                            backgroundColor: "#10B98120",
-                            borderRadius: 4,
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color: "#10B981",
-                              fontSize: 10,
-                              fontFamily: "Poppins_600SemiBold",
-                            }}
-                          >
-                            {slots.length} slots
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    {/* Show all time slots */}
-                    {slots.map((slot, slotIndex) => (
-                      <View
-                        key={slotIndex}
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          marginBottom: slotIndex < slots.length - 1 ? 2 : 0,
-                        }}
-                      >
-                        <Ionicons
-                          name="time-outline"
-                          size={14}
-                          color={colors.textSecondary}
-                        />
-                        <Text
-                          style={{
-                            color: colors.textSecondary,
-                            marginLeft: 6,
-                            fontSize: 12,
-                          }}
-                        >
-                          {slot.start} - {slot.end}
-                        </Text>
-                      </View>
-                    ))}
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        marginTop: 4,
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: colors.primary,
-                          fontFamily: "Poppins_600SemiBold",
-                        }}
-                      >
-                        ₱{cost.toLocaleString()}
-                      </Text>
-                      <Text
-                        style={{
-                          color: colors.textSecondary,
-                          fontSize: 11,
-                          marginLeft: 8,
-                        }}
-                      >
-                        (
-                        {booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}
-                        h total)
-                      </Text>
-                      {hasModifiers && (
-                        <View
-                          style={{
-                            marginLeft: 8,
-                            paddingHorizontal: 6,
-                            paddingVertical: 2,
-                            backgroundColor: colors.primary + "20",
-                            borderRadius: 4,
-                          }}
-                        >
-                          <Text style={{ color: colors.primary, fontSize: 10 }}>
-                            Promo Applied
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => {
-                      const newBookings = [...bookings];
-                      newBookings.splice(index, 1);
-                      setBookings(newBookings);
-                    }}
-                  >
-                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {/* Add Booking Section - Hidden if user has unpaid booking */}
-        {!(
-          hasExistingStudioBooking && existingStudioBookingStatus === "unpaid"
-        ) &&
-          (showAddBooking || bookings.length === 0) ? (
-          <>
-            {/* Always show booking controls (session type selector + calendar) */}
-            {renderBookingControls()}
-
-            {/* RECORDING STUDIO: Simplified whole-day booking flow */}
-            {isRecordingMode ? (
-              <TouchableOpacity
-                style={[
-                  styles.secondaryBtn,
-                  {
-                    borderColor: !isRecordingWholeDayAvailable ? colors.border : colors.primary,
-                    backgroundColor: "transparent",
-                    marginBottom: 16,
-                    opacity: !isRecordingWholeDayAvailable || isCheckingAvailability ? 0.5 : 1,
-                  },
-                ]}
-                disabled={!isRecordingWholeDayAvailable || isCheckingAvailability}
-                activeOpacity={0.8}
-                onPress={async () => {
-                  if (selectedDate && recordingDaySlot) {
-                    setIsCheckingAvailability(true);
-                    try {
-                      const bookingDate = selectedDate;
-                      const startTime = recordingDaySlot.start;
-                      const endTimeStr = recordingDaySlot.end;
-
-                      // Check if we already have a booking for this date
-                      const existingBookingIndex = bookings.findIndex(
-                        (b) => b.date.toISOString().split("T")[0] === bookingDate,
-                      );
-
-                      if (existingBookingIndex >= 0) {
-                        alert("You already have a booking for this date.");
-                        setIsCheckingAvailability(false);
-                        return;
-                      }
-
-                      // Check availability for the whole day
-                      const { data: isAvailable, error: availError } =
-                        await supabase.rpc("is_slot_available", {
-                          p_studio_id: group.id,
-                          p_booking_date: bookingDate,
-                          p_start_time: startTime,
-                          p_end_time: endTimeStr,
-                          p_user_id: userId,
-                        });
-
-                      if (availError) {
-                        console.error("Availability check error:", availError);
-                        alert("Failed to check availability. Please try again.");
-                        setIsCheckingAvailability(false);
-                        return;
-                      }
-
-                      if (!isAvailable) {
-                        alert("This date is not available for booking.");
-                        setIsCheckingAvailability(false);
-                        return;
-                      }
-
-                      // Calculate pricing for whole day
-                      const { data: pricing, error: pricingError } =
-                        await supabase.rpc("calculate_booking_price", {
-                          p_studio_id: group.id,
-                          p_booking_date: bookingDate,
-                          p_start_time: startTime,
-                          p_end_time: endTimeStr,
-                        });
-
-                      if (pricingError || !pricing || pricing.length === 0) {
-                        console.error("Pricing error:", pricingError);
-                        alert("Failed to calculate price. Please try again.");
-                        setIsCheckingAvailability(false);
-                        return;
-                      }
-
-                      // Add whole-day booking
-                      const startDate = new Date(`${bookingDate}T${startTime}`);
-                      const endDate = new Date(`${bookingDate}T${endTimeStr}`);
-
-                      setBookings([
-                        ...bookings,
-                        {
-                          date: new Date(bookingDate),
-                          startTime: startDate,
-                          endTime: endDate,
-                          timeSlots: [{ start: startTime, end: endTimeStr }],
-                          pricing: pricing[0],
-                        },
-                      ]);
-
-                      setShowAddBooking(false);
-                      // Reset selection
-                      setSelectedDate("");
-                      setIsRecordingWholeDayAvailable(false);
-                      setRecordingDaySlot(null);
-                    } catch (e: any) {
-                      console.error("Error adding recording booking:", e);
-                      alert("An error occurred. Please try again.");
-                    } finally {
-                      setIsCheckingAvailability(false);
-                    }
-                  }
-                }}
-              >
-                {isCheckingAvailability ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <>
-                    <Ionicons
-                      name="mic-outline"
-                      size={20}
-                      color={colors.primary}
-                    />
-                    <Text
-                      style={[
-                        styles.secondaryBtnText,
-                        { color: colors.primary, marginLeft: 8 },
-                      ]}
-                    >
-                      {bookings.length > 0 ? "Add Recording Day" : "Book Recording Session"}
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            ) : (
-              /* REGULAR STUDIO: Time slot booking flow */
-              <>
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryBtn,
-                    {
-                      borderColor:
-                        !selectedSlot || !endTime ? colors.border : colors.primary,
-                      backgroundColor: "transparent",
-                      marginBottom: 16,
-                      opacity:
-                        !selectedSlot || !endTime || isCheckingAvailability
-                          ? 0.5
-                          : 1,
-                    },
-                  ]}
-                  disabled={!selectedSlot || !endTime || isCheckingAvailability}
-                  activeOpacity={0.8}
-                  onPress={async () => {
-                    if (date && endTime) {
-                      setIsCheckingAvailability(true);
-                      try {
-                        const bookingDate = date.toISOString().split("T")[0];
-                        const startTime = date.toTimeString().slice(0, 5);
-                        const endTime2 = endTime.toTimeString().slice(0, 5);
-
-                        // Build time slots array - current slot + any previously selected slots for same day
-                        const currentSlot = { start: startTime, end: endTime2 };
-                        const allSlots = [...selectedTimeSlots, currentSlot];
-
-                        // Check if we already have a booking for this date (merge slots)
-                        const existingBookingIndex = bookings.findIndex(
-                          (b) => b.date.toISOString().split("T")[0] === bookingDate,
-                        );
-
-                        // Check availability for the new slot
-                        const { data: isAvailable, error: availError } =
-                          await supabase.rpc("is_slot_available", {
-                            p_studio_id: group.id,
-                            p_booking_date: bookingDate,
-                            p_start_time: startTime,
-                            p_end_time: endTime2,
-                            p_user_id: userId,
-                          });
-
-                        if (availError) {
-                          console.error("Availability check error:", availError);
-                          alert("Failed to check availability. Please try again.");
-                          setIsCheckingAvailability(false);
-                          return;
-                        }
-
-                        if (!isAvailable) {
-                          alert(
-                            "This time slot is not available. Please choose a different time.",
-                          );
-                          setIsCheckingAvailability(false);
-                          return;
-                        }
-
-                        // Calculate accurate pricing for all slots
-                        const { data: pricing, error: pricingError } =
-                          await supabase.rpc("calculate_booking_price", {
-                            p_studio_id: group.id,
-                            p_booking_date: bookingDate,
-                            p_start_time: startTime,
-                            p_end_time: endTime2,
-                          });
-
-                        if (pricingError || !pricing || pricing.length === 0) {
-                          console.error("Pricing error:", pricingError);
-                          alert("Failed to calculate price. Please try again.");
-                          setIsCheckingAvailability(false);
-                          return;
-                        }
-
-                        if (existingBookingIndex >= 0) {
-                          // Merge with existing booking for this date
-                          const existingBooking = bookings[existingBookingIndex];
-                          const mergedSlots = [
-                            ...(existingBooking.timeSlots || [
-                              {
-                                start: existingBooking.startTime
-                                  .toTimeString()
-                                  .slice(0, 5),
-                                end: existingBooking.endTime
-                                  .toTimeString()
-                                  .slice(0, 5),
-                              },
-                            ]),
-                            currentSlot,
-                          ];
-
-                          // Sort slots by start time
-                          mergedSlots.sort((a, b) =>
-                            a.start.localeCompare(b.start),
-                          );
-
-                          // Calculate total pricing for all merged slots
-                          const existingPrice =
-                            existingBooking.pricing?.final_price || 0;
-                          const newPrice = pricing[0]?.final_price || 0;
-                          const totalHours =
-                            (existingBooking.pricing?.hours || 0) +
-                            (pricing[0]?.hours || 0);
-
-                          const updatedBookings = [...bookings];
-                          updatedBookings[existingBookingIndex] = {
-                            ...existingBooking,
-                            timeSlots: mergedSlots,
-                            pricing: {
-                              ...pricing[0],
-                              final_price: existingPrice + newPrice,
-                              hours: totalHours,
-                            },
-                          };
-                          setBookings(updatedBookings);
-                          alert(
-                            `Added time slot to your booking for ${new Date(bookingDate).toLocaleDateString()}. You now have ${mergedSlots.length} slot(s) for this day.`,
-                          );
-                        } else {
-                          // Add as new booking with single slot
-                          setBookings([
-                            ...bookings,
-                            {
-                              date: new Date(date),
-                              startTime: new Date(date),
-                              endTime: new Date(endTime),
-                              timeSlots: [currentSlot],
-                              pricing: pricing[0],
-                            },
-                          ]);
-                        }
-
-                        setShowAddBooking(false);
-                        setSelectedTimeSlots([]);
-                        // Reset form
-                        setDate(null as any);
-                        setEndTime(null as any);
-                        setSelectedSlot(null);
-                      } catch (e: any) {
-                        console.error("Error adding booking:", e);
-                        alert("An error occurred. Please try again.");
-                      } finally {
-                        setIsCheckingAvailability(false);
-                      }
-                    }
-                  }}
-                >
-                  {isCheckingAvailability ? (
-                    <ActivityIndicator size="small" color={colors.primary} />
-                  ) : (
-                    <>
-                      <Ionicons
-                        name="add-circle-outline"
-                        size={20}
-                        color={colors.primary}
-                      />
-                      <Text
-                        style={[
-                          styles.secondaryBtnText,
-                          { color: colors.primary, marginLeft: 8 },
-                        ]}
-                      >
-                        {bookings.length > 0 ? "Add Session" : "Add Booking"}
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </>
-            )}
-          </>
-        ) : !(
-          hasExistingStudioBooking && existingStudioBookingStatus === "unpaid"
-        ) ? (
-          <TouchableOpacity
-            style={[
-              styles.secondaryBtn,
-              {
-                borderColor: colors.primary,
-                backgroundColor: "transparent",
-                marginBottom: 16,
-              },
-            ]}
-            onPress={() => setShowAddBooking(true)}
-          >
-            <Ionicons
-              name={isRecordingMode ? "mic-outline" : "add-circle-outline"}
-              size={20}
-              color={colors.primary}
-            />
-            <Text
-              style={[
-                styles.secondaryBtnText,
-                { color: colors.primary, marginLeft: 8 },
-              ]}
-            >
-              {isRecordingMode ? "Add Another Recording Day" : "Add Another Session"}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-
-        {/* Notes */}
-        <View style={styles.inputContainer}>
-          <Text style={[styles.label, { color: colors.textSecondary }]}>
-            Notes (Optional)
-          </Text>
-          <View
-            style={[
-              styles.inputWrapper,
-              { backgroundColor: isDark ? "#374151" : "#F9FAFB", height: 80 },
-            ]}
-          >
-            <TextInput
-              style={[styles.input, { color: colors.text, height: "100%" }]}
-              placeholder="Tell us about your sessions..."
-              placeholderTextColor={colors.textSecondary}
-              multiline
-              textAlignVertical="top"
-              value={bookingNotes}
-              onChangeText={setBookingNotes}
-            />
-          </View>
-        </View>
-
-        {/* Payment Summary */}
-        {bookings.length > 0 &&
-          !(
-            hasExistingStudioBooking && existingStudioBookingStatus === "unpaid"
-          ) && (
-            <View
-              style={[
-                styles.paymentSummary,
-                { backgroundColor: isDark ? "#1F2937" : "#F9FAFB" },
-              ]}
-            >
-              <View style={styles.summaryRow}>
-                <Text style={{ color: colors.textSecondary }}>Rate</Text>
-                <Text
-                  style={{ color: colors.text }}
-                >{`₱${displayRate} / hr`}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={{ color: colors.textSecondary }}>
-                  Total Sessions
-                </Text>
-                <Text style={{ color: colors.text }}>
-                  {String(bookings.length)}
-                </Text>
-              </View>
-              <View style={[styles.divider, { marginVertical: 12 }]} />
-              <View style={styles.summaryRow}>
-                <Text
-                  style={{
-                    color: colors.text,
-                    fontFamily: "Poppins_600SemiBold",
-                  }}
-                >
-                  Total
-                </Text>
-                <Text
-                  style={{
-                    color: colors.primary,
-                    fontFamily: "Poppins_600SemiBold",
-                    fontSize: 18,
-                  }}
-                >
-                  ₱{totalBookingsCost.toLocaleString()}
-                </Text>
-              </View>
-            </View>
-          )}
-
-        {!(
-          hasExistingStudioBooking && existingStudioBookingStatus === "unpaid"
-        ) && (
-            <TouchableOpacity
-              style={[
-                styles.primaryBtn,
-                {
-                  backgroundColor:
-                    bookings.length > 0 ? colors.primary : colors.border,
-                  opacity: loading ? 0.6 : 1,
-                },
-              ]}
-              disabled={bookings.length === 0 || loading}
-              activeOpacity={0.8}
-              onPress={() =>
-                bookings.length > 0 &&
-                handleConfirm(
-                  async () => {
-                    // Double check profile just in case, though handleConfirm handles it
-                    if (!userId) {
-                      alert("Please sign in to book a studio");
-                      return;
-                    }
-
-                    try {
-                      setLoading(true);
-                      const results = [];
-                      const errors = [];
-
-                      console.log(
-                        "🛒 Total bookings to create:",
-                        bookings.length,
-                      );
-                      console.log("📋 Bookings array:", bookings);
-
-                      // Create each booking (now supports multi-slot per booking)
-                      for (const booking of bookings) {
-                        const bookingDate = booking.date
-                          .toISOString()
-                          .split("T")[0];
-
-                        // Use time_slots if available (multi-slot booking), otherwise fallback to single slot
-                        const timeSlots =
-                          booking.timeSlots && booking.timeSlots.length > 0
-                            ? booking.timeSlots
-                            : [
-                              {
-                                start: booking.startTime
-                                  .toTimeString()
-                                  .slice(0, 5),
-                                end: booking.endTime.toTimeString().slice(0, 5),
-                              },
-                            ];
-
-                        // Determine session type for booking
-                        const sessionType = group.studio_type === "Recording" ? "recording" 
-                          : group.studio_type === "Both" && selectedSessionType === "Recording" ? "recording" 
-                          : "rehearsal";
-
-                        console.log("📤 Creating multi-slot booking:", {
-                          studio_id: group.id,
-                          user_id: userId,
-                          date: bookingDate,
-                          time_slots: timeSlots,
-                          notes: bookingNotes,
-                          session_type: sessionType,
-                        });
-
-                        const { data, error } = await supabase.functions.invoke(
-                          "manage-bookings",
-                          {
-                            body: {
-                              action: "create",
-                              studio_id: group.id,
-                              user_id: userId,
-                              date: bookingDate,
-                              time_slots: timeSlots, // Send multi-slot array
-                              notes: bookingNotes,
-                              session_type: sessionType, // Include session type
-                            },
-                          },
-                        );
-
-                        console.log("📥 Booking response:", { data, error });
-
-                        if (error) {
-                          // Try to extract actual error message
-                          let errorMessage = error.message || "Unknown error";
-                          let serverError: any = null;
-
-                          // Check if error has context with response body
-                          if (
-                            error.context &&
-                            typeof error.context === "object"
-                          ) {
-                            try {
-                              // Try to read response body
-                              const response = error.context;
-                              console.log(
-                                "📥 Error response status:",
-                                response.status,
-                              );
-                              console.log("📥 Error response (raw):", response);
-
-                              // If it's a Response object, try to parse body
-                              if (
-                                response.json &&
-                                typeof response.json === "function"
-                              ) {
-                                serverError = await response.json();
-                                console.log(
-                                  "📥 Parsed server error:",
-                                  serverError,
-                                );
-                                if (serverError?.error) {
-                                  errorMessage = serverError.error;
-                                }
-                                if (serverError?.debug) {
-                                  console.log(
-                                    "📥 Debug info:",
-                                    serverError.debug,
-                                  );
-                                }
-                              } else if (
-                                response.text &&
-                                typeof response.text === "function"
-                              ) {
-                                const textBody = await response.text();
-                                console.log("📥 Error body (text):", textBody);
-                                try {
-                                  serverError = JSON.parse(textBody);
-                                  if (serverError?.error) {
-                                    errorMessage = serverError.error;
-                                  }
-                                } catch (e) {
-                                  console.log("📥 Could not parse as JSON");
-                                }
-                              }
-                            } catch (e) {
-                              console.error("Failed to parse error response:", e);
-                            }
-                          }
-
-                          errors.push({
-                            booking,
-                            error: { message: errorMessage, serverError },
-                          });
-                          console.error("❌ Booking error:", errorMessage);
-                          if (serverError) {
-                            console.error(
-                              "❌ Full server error:",
-                              JSON.stringify(serverError, null, 2),
-                            );
-                          }
-                        } else {
-                          results.push(data);
-                          console.log("✅ Booking created successfully");
-                        }
-                      }
-
-                      setLoading(false);
-
-                      if (errors.length > 0 && results.length === 0) {
-                        // All failed - check for specific constraint violations
-                        let errorMsg =
-                          errors[0].error?.message || "Failed to create bookings";
-                        
-                        // Handle overlapping bookings constraint error
-                        if (errorMsg.includes("no_overlapping_bookings") || errorMsg.includes("exclusion constraint")) {
-                          errorMsg = "This time slot was just booked by someone else. Please select a different time slot or refresh and try again.";
-                        }
-                        
-                        alert(`Error: ${errorMsg}`);
-                      } else if (errors.length > 0) {
-                        // Partial success
-                        alert(
-                          `${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`,
-                        );
-                        // Clear form and close
-                        setBookings([]);
-                        setSelectedTimeSlots([]);
-                        setBookingNotes("");
-                        setModalVisible(false);
-                        (ref as any)?.current?.dismiss();
-                      } else {
-                        // All success - AI LEARNING: Strong signal from booking
-                        if (group && group.embedding && userId) {
-                          try {
-                            await supabase.rpc("update_user_interest", {
-                              p_user_id: userId,
-                              p_item_vector: group.embedding,
-                              p_weight: 0.5, // Strongest learning signal for booking
-                            });
-                            console.log(
-                              "🤖 AI learned from studio booking:",
-                              group.name,
-                            );
-                          } catch (e) {
-                            console.log(
-                              "Error updating AI interest from booking:",
-                              e,
-                            );
-                          }
-                        }
-
-                        // All success - show payment option modal before PayMongo
-                        console.log(
-                          "✅ All bookings created, showing payment options...",
-                        );
-
-                        // For now, we process payment for the first booking
-                        const firstBooking = results[0];
-
-                        if (firstBooking?.requires_payment && firstBooking?.id) {
-                          // Store booking data and show payment option modal
-                          setPaymentBookingData({
-                            booking: firstBooking,
-                            studioName: group.name,
-                            totalAmount:
-                              firstBooking.payment_amount ||
-                              firstBooking.final_price,
-                          });
-                          setSelectedPaymentType("full"); // Reset to full payment
-                          setShowPaymentOptionModal(true);
-                        } else {
-                          alert(
-                            `Successfully created ${results.length} booking(s)! Please complete payment to confirm.`,
-                          );
-                          // Clear form and close
-                          setBookings([]);
-                          setSelectedTimeSlots([]);
-                          setBookingNotes("");
-                          setModalVisible(false);
-                          (ref as any)?.current?.dismiss();
-
-                          // Navigate to bookings page
-                          setTimeout(() => {
-                            router.push("/bookings" as any);
-                          }, 100);
-                        }
-                      }
-                    } catch (e: any) {
-                      setLoading(false);
-                      console.error("Booking creation error:", e);
-                      alert("An unexpected error occurred. Please try again.");
-                    }
-                  },
-                  isRecordingMode ? "Confirm Recording Booking" : "Confirm Session Booking",
-                  isRecordingMode
-                    ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording sessions occupy the full day. The studio owner will review and approve your booking request.`
-                    : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
-                )
-              }
-            >
-              {loading ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text
-                  style={[
-                    styles.primaryBtnText,
-                    {
-                      color:
-                        bookings.length > 0 ? "#FFFFFF" : colors.textSecondary,
-                    },
-                  ]}
-                >
-                  {bookings.length > 0
-                    ? isRecordingMode
-                      ? `Book ${bookings.length} Recording Date${bookings.length > 1 ? "s" : ""}`
-                      : `Book ${bookings.length} Session${bookings.length > 1 ? "s" : ""}`
-                    : isRecordingMode
-                      ? "Select a recording date"
-                      : "Add at least one session"}
-                </Text>
-              )}
-            </TouchableOpacity>
-          )}
-      </View>
-    );
-  };
+  const renderStudioBook = () => (
+    <StudioBookTab
+      group={group}
+      bookings={bookings}
+      setBookings={setBookings}
+      displayRate={displayRate}
+      isDark={isDark}
+      colors={colors}
+      hasExistingStudioBooking={hasExistingStudioBooking}
+      existingStudioBookingStatus={existingStudioBookingStatus}
+      sheetRef={ref}
+      router={router}
+      renderBookingControls={renderBookingControls}
+      isRecordingMode={isRecordingMode}
+      isRecordingWholeDayAvailable={isRecordingWholeDayAvailable}
+      isCheckingAvailability={isCheckingAvailability}
+      setIsCheckingAvailability={setIsCheckingAvailability}
+      selectedDate={selectedDate}
+      recordingDaySlot={recordingDaySlot}
+      userId={userId}
+      supabase={supabase}
+      setShowAddBooking={setShowAddBooking}
+      setSelectedDate={setSelectedDate}
+      setIsRecordingWholeDayAvailable={setIsRecordingWholeDayAvailable}
+      setRecordingDaySlot={setRecordingDaySlot}
+      date={date}
+      endTime={endTime}
+      selectedSlot={selectedSlot}
+      selectedTimeSlots={selectedTimeSlots}
+      setSelectedTimeSlots={setSelectedTimeSlots}
+      setDate={setDate}
+      setEndTime={setEndTime}
+      setSelectedSlot={setSelectedSlot}
+      showAddBooking={showAddBooking}
+      bookingNotes={bookingNotes}
+      setBookingNotes={setBookingNotes}
+      loading={loading}
+      setLoading={setLoading}
+      handleConfirm={handleConfirm}
+      setModalVisible={setModalVisible}
+      setPaymentBookingData={setPaymentBookingData}
+      setSelectedPaymentType={setSelectedPaymentType}
+      setShowPaymentOptionModal={setShowPaymentOptionModal}
+      selectedSessionType={selectedSessionType}
+      showAlert={showSheetAlert}
+    />
+  );
 
   // Gig: Info Tab
   const renderGigInfo = () => {
-    // Extract requirements data
-    const requirements = group.requirements || {};
-    const capacity = requirements.capacity || "Not specified";
-    const audioSetup =
-      requirements.audio || requirements.sound_system || "Standard PA";
-
-    // Get tech specs from requirements or amenities
-    const techSpecs = [];
-    if (requirements.lighting)
-      techSpecs.push(`Lighting: ${requirements.lighting}`);
-    if (requirements.stage_size)
-      techSpecs.push(`Stage Size: ${requirements.stage_size}`);
-    if (requirements.backline)
-      techSpecs.push(`Backline: ${requirements.backline}`);
-    if (requirements.sound_check) techSpecs.push("Sound Check Available");
-    if (requirements.green_room) techSpecs.push("Green Room Available");
-
-    // If no specific requirements, use amenities or generic items
-    if (techSpecs.length === 0 && group.amenities?.length > 0) {
-      group.amenities.forEach((amenity: string) => techSpecs.push(amenity));
-    }
-
     return (
-      <View style={styles.tabContent}>
-        <View style={{ flexDirection: "row", gap: 16 }}>
-          <View
-            style={[
-              styles.infoCard,
-              { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
-            ]}
-          >
-            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
-              Capacity
-            </Text>
-            <Text style={[styles.infoValue, { color: colors.text }]}>
-              {capacity}
-            </Text>
-          </View>
-          <View
-            style={[
-              styles.infoCard,
-              { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
-            ]}
-          >
-            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
-              Audio
-            </Text>
-            <Text
-              style={[styles.infoValue, { color: colors.text, fontSize: 13 }]}
-              numberOfLines={2}
-            >
-              {audioSetup}
-            </Text>
-          </View>
-        </View>
-
-        {requirements.experience_level && (
-          <View style={[styles.section, { marginTop: 16 }]}>
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-            >
-              <Ionicons
-                name="ribbon-outline"
-                size={20}
-                color={colors.primary}
-              />
-              <Text
-                style={{
-                  fontFamily: "Poppins_600SemiBold",
-                  color: colors.text,
-                  fontSize: 14,
-                }}
-              >
-                Experience Level:{" "}
-                <Text style={{ color: colors.primary }}>
-                  {requirements.experience_level}
-                </Text>
-              </Text>
-            </View>
-          </View>
-        )}
-
-        <View style={[styles.section, { marginTop: 24 }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Event Details
-          </Text>
-          {group.event_date && (
-            <View style={styles.checkRow}>
-              <Ionicons name="calendar" size={20} color={colors.primary} />
-              <Text style={{ color: colors.text, marginLeft: 12 }}>
-                {new Date(group.event_date).toLocaleDateString("en-US", {
-                  weekday: "long",
-                  month: "long",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </Text>
-            </View>
-          )}
-          {group.location && (
-            <View style={styles.checkRow}>
-              <Ionicons name="location" size={20} color={colors.primary} />
-              <Text style={{ color: colors.text, marginLeft: 12 }}>
-                {group.location}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {techSpecs.length > 0 && (
-          <View style={[styles.section, { marginTop: 24 }]}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Tech Specs & Amenities
-            </Text>
-            {techSpecs.map((spec: string, i: number) => (
-              <View key={i} style={styles.checkRow}>
-                <Ionicons
-                  name="checkmark-circle"
-                  size={20}
-                  color={colors.primary}
-                />
-                <Text style={{ color: colors.text, marginLeft: 12 }}>
-                  {spec}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {techSpecs.length === 0 && !group.event_date && (
-          <View style={{ marginTop: 24 }}>
-            <Text
-              style={{
-                color: colors.textSecondary,
-                fontStyle: "italic",
-                textAlign: "center",
-              }}
-            >
-              No additional specifications provided.
-            </Text>
-          </View>
-        )}
-      </View>
+      <GigInfoTab
+        group={group}
+        colors={colors}
+        isDark={isDark}
+        styles={styles}
+      />
     );
   };
 
   // Gig: Apply Tab
-  const renderGigApply = () => {
-    console.log("🎨 renderGigApply called");
-    console.log("Current state:", {
-      pitchMessage,
-      videoUrl,
-      isSubmittingApplication,
-      userId,
-      listingId,
-    });
-
-    return (
-      <View style={styles.tabContent}>
-        {/* SPAM BLOCK WARNING */}
-        {isBlocked && (
-          <View
-            style={[
-              styles.infoBox,
-              {
-                backgroundColor: "#EF444420",
-                borderColor: "#EF4444",
-                marginBottom: 32,
-              },
-            ]}
-          >
-            <Ionicons name="alert-circle" size={24} color="#EF4444" />
-            <View style={{ flex: 1 }}>
-              <Text
-                style={[
-                  styles.infoText,
-                  { color: colors.text, fontFamily: "Poppins_600SemiBold" },
-                ]}
-              >
-                Action Restricted
-              </Text>
-              <Text style={[styles.infoText, { color: colors.text }]}>
-                {blockReason ||
-                  "You are temporarily blocked from applying to this organizer."}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* Group Selection (if user has groups) - Conditional based on musician_type */}
-        {(() => {
-          const musicianTypeRequired =
-            group.requirements?.musician_type || "both";
-          const canApplyAsSolo =
-            musicianTypeRequired === "solo" || musicianTypeRequired === "both";
-          const canApplyAsGroup =
-            musicianTypeRequired === "group" || musicianTypeRequired === "both";
-          const hasGroups = userGroups.length > 0;
-
-          // Show restriction message if user can't apply (group-only gig but no groups)
-          if (!canApplyAsSolo && !hasGroups) {
-            return (
-              <View
-                style={[
-                  styles.infoBox,
-                  {
-                    backgroundColor: "#F59E0B20",
-                    borderColor: "#F59E0B",
-                    marginBottom: 16,
-                  },
-                ]}
-              >
-                <Ionicons name="information-circle" size={20} color="#F59E0B" />
-                <Text style={[styles.infoText, { color: colors.text }]}>
-                  This gig is looking for{" "}
-                  <Text style={{ fontFamily: "Poppins_600SemiBold" }}>
-                    bands/groups only
-                  </Text>
-                  . Create a group first to apply.
-                </Text>
-              </View>
-            );
-          }
-
-          // Show solo-only indicator
-          if (musicianTypeRequired === "solo") {
-            return (
-              <View style={styles.inputContainer}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>
-                  Apply as
-                </Text>
-                <View
-                  style={[
-                    styles.infoBox,
-                    {
-                      backgroundColor: colors.primary + "20",
-                      borderColor: colors.primary,
-                      marginBottom: 8,
-                    },
-                  ]}
-                >
-                  <Ionicons name="person" size={16} color={colors.primary} />
-                  <Text style={[styles.infoText, { color: colors.text }]}>
-                    This gig is for{" "}
-                    <Text style={{ fontFamily: "Poppins_600SemiBold" }}>
-                      solo artists only
-                    </Text>
-                  </Text>
-                </View>
-              </View>
-            );
-          }
-
-          // Show group-only selector (group required, user has groups)
-          if (musicianTypeRequired === "group" && hasGroups) {
-            return (
-              <View style={styles.inputContainer}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>
-                  Select Your Group *
-                </Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={{ marginBottom: 8 }}
-                >
-                  {userGroups.map((g) => (
-                    <TouchableOpacity
-                      key={g.id}
-                      style={[
-                        styles.groupSelectChip,
-                        {
-                          backgroundColor:
-                            selectedGroupId === g.id
-                              ? colors.primary
-                              : isDark
-                                ? "#374151"
-                                : "#F3F4F6",
-                          borderColor:
-                            selectedGroupId === g.id
-                              ? colors.primary
-                              : colors.border,
-                          marginRight: 8,
-                        },
-                      ]}
-                      onPress={() => setSelectedGroupId(g.id)}
-                    >
-                      <Ionicons
-                        name="people"
-                        size={16}
-                        color={
-                          selectedGroupId === g.id ? "#FFF" : colors.text
-                        }
-                      />
-                      <Text
-                        style={{
-                          color:
-                            selectedGroupId === g.id ? "#FFF" : colors.text,
-                          marginLeft: 8,
-                          fontFamily: "Poppins_500Medium",
-                        }}
-                      >
-                        {g.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            );
-          }
-
-          // Show full selection (both options available) - always show if user has groups
-          if (hasGroups && canApplyAsGroup) {
-            return (
-              <View style={styles.inputContainer}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>
-                  Apply as
-                </Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={{ marginBottom: 8 }}
-                >
-                  {canApplyAsSolo && (
-                    <TouchableOpacity
-                      style={[
-                        styles.groupSelectChip,
-                        {
-                          backgroundColor:
-                            selectedGroupId === null
-                              ? colors.primary
-                              : isDark
-                                ? "#374151"
-                                : "#F3F4F6",
-                          borderColor:
-                            selectedGroupId === null
-                              ? colors.primary
-                              : colors.border,
-                        },
-                      ]}
-                      onPress={() => setSelectedGroupId(null)}
-                    >
-                      <Ionicons
-                        name="person"
-                        size={16}
-                        color={selectedGroupId === null ? "#FFF" : colors.text}
-                      />
-                      <Text
-                        style={{
-                          color: selectedGroupId === null ? "#FFF" : colors.text,
-                          marginLeft: 8,
-                          fontFamily: "Poppins_500Medium",
-                        }}
-                      >
-                        Individual
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  {userGroups.map((g) => (
-                    <TouchableOpacity
-                      key={g.id}
-                      style={[
-                        styles.groupSelectChip,
-                        {
-                          backgroundColor:
-                            selectedGroupId === g.id
-                              ? colors.primary
-                              : isDark
-                                ? "#374151"
-                                : "#F3F4F6",
-                          borderColor:
-                            selectedGroupId === g.id
-                              ? colors.primary
-                              : colors.border,
-                          marginLeft: 8,
-                        },
-                      ]}
-                      onPress={() => setSelectedGroupId(g.id)}
-                    >
-                      <Ionicons
-                        name="people"
-                        size={16}
-                        color={selectedGroupId === g.id ? "#FFF" : colors.text}
-                      />
-                      <Text
-                        style={{
-                          color:
-                            selectedGroupId === g.id ? "#FFF" : colors.text,
-                          marginLeft: 8,
-                          fontFamily: "Poppins_500Medium",
-                        }}
-                      >
-                        {g.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            );
-          }
-
-          return null;
-        })()}
-
-        <View style={styles.inputContainer}>
-          <Text style={[styles.label, { color: colors.textSecondary }]}>
-            Pitch Message
-          </Text>
-          <View
-            style={[
-              styles.inputWrapper,
-              { backgroundColor: isDark ? "#374151" : "#F9FAFB", height: 100 },
-            ]}
-          >
-            <TextInput
-              style={[styles.input, { color: colors.text, height: "100%" }]}
-              placeholder="Why are you a good fit for this gig?"
-              placeholderTextColor={colors.textSecondary}
-              multiline
-              textAlignVertical="top"
-              value={pitchMessage}
-              onChangeText={(text) => {
-                console.log("📝 Pitch message changed to:", text);
-                setPitchMessage(text);
-              }}
-            />
-          </View>
-        </View>
-
-        <DocumentUploader
-          label="Upload CV/Resume"
-          onFileSelect={(file) => setCvFile(file)}
-          existingUrl={cvUrl || undefined}
-        />
-
-        <VideoUploader
-          videoUrl={videoUrl}
-          onVideoChange={(url) => setVideoUrl(url || "")}
-          userId={userId || ""}
-          bucketName="documents"
-          folder="performance-videos"
-          maxSizeMB={50}
-        />
-
-        {group?.contract_url ? (
-          <TouchableOpacity
-            onPress={() => Linking.openURL(group.contract_url)}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginBottom: 24,
-            }}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name="document-text-outline"
-              size={18}
-              color={colors.primary}
-            />
-            <Text
-              style={{
-                color: colors.primary,
-                marginLeft: 8,
-                textDecorationLine: "underline",
-                fontFamily: "Poppins_500Medium",
-              }}
-            >
-              Review Terms & Conditions
-            </Text>
-            <Ionicons
-              name="open-outline"
-              size={14}
-              color={colors.primary}
-              style={{ marginLeft: 6 }}
-            />
-          </TouchableOpacity>
-        ) : (
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginBottom: 24,
-              opacity: 0.5,
-            }}
-          >
-            <Ionicons
-              name="document-text-outline"
-              size={18}
-              color={colors.textSecondary}
-            />
-            <Text
-              style={{
-                color: colors.textSecondary,
-                marginLeft: 8,
-                fontFamily: "Poppins_400Regular",
-              }}
-            >
-              No Terms & Conditions uploaded
-            </Text>
-          </View>
-        )}
-
-        {/* Warning: Group Already Applied by Another Member */}
-        {groupAlreadyApplied && selectedGroupId && (
-          <View
-            style={[
-              styles.infoBox,
-              {
-                backgroundColor: "#F59E0B20",
-                borderColor: "#F59E0B",
-                marginBottom: 16,
-              },
-            ]}
-          >
-            <Ionicons name="warning" size={20} color="#F59E0B" />
-            <Text style={[styles.infoText, { color: colors.text }]}>
-              This group has already applied via{" "}
-              <Text style={{ fontFamily: "Poppins_600SemiBold" }}>
-                {groupApplicationBy}
-              </Text>
-              . Only one application per group is allowed.
-            </Text>
-          </View>
-        )}
-
-        <TouchableOpacity
-          style={[
-            styles.primaryBtn,
-            { backgroundColor: colors.primary },
-            (isSubmittingApplication ||
-              !pitchMessage.trim() ||
-              !videoUrl ||
-              groupAlreadyApplied ||
-              (group.requirements?.musician_type === "group" &&
-                !selectedGroupId)) && { opacity: 0.5 },
-          ]}
-          onPress={() => {
-            console.log("🟡 SUBMIT APPLICATION BUTTON PRESSED - Validating...");
-            handleSubmitApplication();
-          }}
-          disabled={
-            isSubmittingApplication ||
-            hasExistingApplication ||
-            isBlocked ||
-            groupAlreadyApplied ||
-            (group.requirements?.musician_type === "group" && !selectedGroupId)
-          }
-          activeOpacity={0.8}
-        >
-          {isSubmittingApplication ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.primaryBtnText}>
-              {hasExistingApplication
-                ? existingApplicationStatus === "rejected"
-                  ? "Application Declined"
-                  : existingApplicationStatus === "accepted" ||
-                    existingApplicationStatus === "approved"
-                    ? "Application Accepted"
-                    : "Already Applied"
-                : groupAlreadyApplied
-                  ? "Group Already Applied"
-                  : group.requirements?.musician_type === "group" &&
-                    !selectedGroupId
-                    ? "Select a Group to Apply"
-                    : "Submit Application"}
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
-    );
-  };
+  const renderGigApply = () => (
+    <GigApplyTab
+      colors={colors}
+      isDark={isDark}
+      group={group}
+      userId={userId}
+      pitchMessage={pitchMessage}
+      setPitchMessage={setPitchMessage}
+      cvUrl={cvUrl}
+      setCvFile={setCvFile}
+      videoUrl={videoUrl}
+      setVideoUrl={setVideoUrl}
+      isSubmittingApplication={isSubmittingApplication}
+      hasExistingApplication={hasExistingApplication}
+      existingApplicationStatus={existingApplicationStatus}
+      isBlocked={isBlocked}
+      blockReason={blockReason}
+      userGroups={userGroups}
+      selectedGroupId={selectedGroupId}
+      setSelectedGroupId={setSelectedGroupId}
+      selectedSlotType={selectedSlotType}
+      setSelectedSlotType={setSelectedSlotType}
+      groupAlreadyApplied={groupAlreadyApplied}
+      groupApplicationBy={groupApplicationBy}
+      handleSubmitApplication={handleSubmitApplication}
+    />
+  );
 
   // --- GROUP TABS ---
 
-  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [hasExistingVenue, setHasExistingVenue] = useState(false);
-  const [checkingVenue, setCheckingVenue] = useState(false);
-
-  // Fetch current user role and ID
-  useEffect(() => {
-    const fetchUserRole = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user) {
-        setCurrentUserId(user.id);
-        const { data } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
-        if (data) {
-          setCurrentUserRole(data.role);
-          // If venue-owner, check if they have any gigs uploaded
-          if (data.role === "venue-owner") {
-            checkForExistingVenue(user.id);
-          }
-        }
-      }
-    };
-    fetchUserRole();
-  }, []);
-
-  // Check if venue-owner has any gigs/venues uploaded
-  const checkForExistingVenue = async (userId: string) => {
-    setCheckingVenue(true);
-    try {
-      const { data, error } = await supabase
-        .from("gigs")
-        .select("id")
-        .eq("organizer_id", userId)
-        .limit(1);
-
-      if (!error && data && data.length > 0) {
-        setHasExistingVenue(true);
-      } else {
-        setHasExistingVenue(false);
-      }
-    } catch (e) {
-      console.log("Error checking venue:", e);
-      setHasExistingVenue(false);
-    } finally {
-      setCheckingVenue(false);
-    }
-  };
+  const {
+    currentUserRole,
+    currentUserId,
+    checkingVenue,
+  } = useCurrentUserVenueRole();
 
   const handleProfileNavigation = () => {
-    // Implementation for navigation
-    // If owner -> Edit/Manage
-    // If visitor -> View Profile
-    // For now, we'll just log the action as the routes might need to be confirmed
-    if (group.owner_id === currentUserId) {
-      console.log("Navigate to Manage Profile/Edit Listing");
-      // router.push('/profile/manage');
-    } else {
-      console.log("Navigate to Public Profile", group.owner_id);
-      // router.push(`/profile/${group.owner_id}`);
+    const targetProfileId = group?.owner_id || group?.organizer_id || null;
+
+    if (!targetProfileId) {
+      showSheetAlert(
+        "error",
+        "Profile Unavailable",
+        "We couldn't find this profile right now.",
+      );
+      return;
     }
+
+    if (ref && "current" in ref && ref.current) {
+      (ref as any).current.dismiss();
+    }
+
+    setTimeout(() => {
+      router.push({
+        pathname: "/profile",
+        params: {
+          userId: targetProfileId,
+          returnToHome: "1",
+          returnListingId: listingId || "",
+        },
+      });
+    }, 200);
   };
 
   // Helper to calculate profile completion
@@ -4794,666 +2072,96 @@ const ListingDetailsSheet = forwardRef<
   };
 
   // Group: About Tab
-  const renderGroupAbout = () => {
-    const completionRate = calculateCompletion();
-
-    return (
-      <View style={styles.tabContent}>
-        {/* Bio Card */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Bio</Text>
-          <Text style={[styles.description, { color: colors.textSecondary }]}>
-            {group.description || "No description provided."}
-          </Text>
-        </View>
-
-        {/* Stats Row */}
-        <View style={{ flexDirection: "row", gap: 12, marginBottom: 24 }}>
-          <View
-            style={[
-              styles.statCard,
-              { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
-            ]}
-          >
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              Genre
-            </Text>
-            <Text style={[styles.statValue, { color: colors.text }]}>
-              {group.genre || "Multi-Genre"}
-            </Text>
-          </View>
-          <View
-            style={[
-              styles.statCard,
-              { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
-            ]}
-          >
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              Rating
-            </Text>
-            <Text style={[styles.statValue, { color: colors.text }]}>
-              {group.rating ? group.rating.toFixed(1) : "-"}
-            </Text>
-          </View>
-        </View>
-
-        {/* Band Members Section */}
-        {group.members && group.members.length > 0 && (
-          <View style={[styles.section, { marginBottom: 24 }]}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Band Members ({group.members.length})
-            </Text>
-            <View style={{ gap: 12 }}>
-              {group.members.map((member: any, index: number) => {
-                const isLeader = member.role === "Leader" || index === 0;
-                const memberName =
-                  typeof member === "string" ? member : member.name;
-                const memberInstrument =
-                  typeof member === "string" ? member : member.instrument;
-                return (
-                  <View
-                    key={index}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 12,
-                      backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-                      padding: 12,
-                      borderRadius: 12,
-                    }}
-                  >
-                    <View
-                      style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 22,
-                        backgroundColor: isLeader ? colors.primary : "#E0E7FF",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      {member.avatar_url ? (
-                        <Image
-                          source={{ uri: member.avatar_url }}
-                          style={{ width: 44, height: 44, borderRadius: 22 }}
-                        />
-                      ) : (
-                        <Text
-                          style={{
-                            color: isLeader ? "#fff" : "#4F46E5",
-                            fontWeight: "bold",
-                            fontSize: 16,
-                          }}
-                        >
-                          {memberName?.charAt(0)}
-                        </Text>
-                      )}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={{
-                          color: colors.text,
-                          fontFamily: "Poppins_500Medium",
-                          fontSize: 14,
-                        }}
-                      >
-                        {memberName}
-                      </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
-                        <Ionicons
-                          name="musical-note"
-                          size={12}
-                          color={colors.primary}
-                        />
-                        <Text
-                          style={{ color: colors.textSecondary, fontSize: 12 }}
-                        >
-                          {memberInstrument}
-                        </Text>
-                        {isLeader && (
-                          <Text
-                            style={{
-                              color: colors.primary,
-                              fontSize: 10,
-                              marginLeft: 4,
-                            }}
-                          >
-                            • Leader
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-        )}
-
-        {/* Managed By & Completion Rate */}
-        <View
-          style={[
-            styles.managerCard,
-            {
-              backgroundColor: colors.surface,
-              borderColor: colors.border,
-              borderWidth: 1,
-            },
-          ]}
-        >
-          <View style={{ marginBottom: 16 }}>
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
-            >
-              <Image
-                source={{ uri: group.owner_avatar || null }}
-                style={[styles.hostAvatar, { backgroundColor: colors.border }]}
-              />
-              <View>
-                <Text
-                  style={[styles.managerLabel, { color: colors.textSecondary }]}
-                >
-                  Managed by
-                </Text>
-                <Text style={[styles.managerName, { color: colors.text }]}>
-                  {group.owner_name || "Unknown User"}
-                </Text>
-              </View>
-            </View>
-
-            {/* Completion Rate Indicator */}
-            <View
-              style={{
-                marginTop: 12,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <View
-                style={{
-                  flex: 1,
-                  height: 6,
-                  backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                  borderRadius: 3,
-                  overflow: "hidden",
-                }}
-              >
-                <View
-                  style={{
-                    width: `${completionRate}%`,
-                    height: "100%",
-                    backgroundColor:
-                      completionRate === 100 ? "#10B981" : colors.primary,
-                  }}
-                />
-              </View>
-              <Text
-                style={{
-                  fontSize: 11,
-                  fontFamily: "Poppins_600SemiBold",
-                  color:
-                    completionRate === 100 ? "#10B981" : colors.textSecondary,
-                }}
-              >
-                {`${completionRate}% Complete`}
-              </Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={[styles.visitBtn, { borderColor: colors.primary }]}
-            onPress={handleProfileNavigation}
-          >
-            <Text
-              style={{
-                color: colors.primary,
-                fontSize: 12,
-                fontFamily: "Poppins_600SemiBold",
-              }}
-            >
-              {group.owner_id === currentUserId
-                ? "Manage Profile"
-                : "Visit Profile"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
+  const renderGroupAbout = () => (
+    <GroupAboutTab
+      group={group}
+      colors={colors}
+      isDark={isDark}
+      styles={styles}
+      currentUserId={currentUserId}
+      onProfilePress={handleProfileNavigation}
+      calculateCompletion={calculateCompletion}
+      sheetRef={ref}
+      listingId={listingId}
+    />
+  );
 
   // Group: Timeline Tab - Shows pictures like Instagram
-  const renderGroupTimeline = () => {
-    const mediaItems = group.images || [];
-
-    // Show all images except the first one (cover photo)
-    const timelineItems = mediaItems.slice(1);
-
-    return (
-      <View style={styles.tabContent}>
-        {/* Photos Grid */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Posts
-          </Text>
-
-          {timelineItems.length > 0 ? (
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
-              {timelineItems.map((url: string, idx: number) => (
-                <View
-                  key={idx}
-                  style={{
-                    width: (width - 56) / 3,
-                    aspectRatio: 1,
-                    borderRadius: 8,
-                    overflow: "hidden",
-                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                  }}
-                >
-                  <Image
-                    source={{ uri: url }}
-                    style={{ width: "100%", height: "100%" }}
-                    resizeMode="cover"
-                  />
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View
-              style={{
-                padding: 40,
-                alignItems: "center",
-                backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-                borderRadius: 16,
-                borderWidth: 1,
-                borderColor: colors.border,
-                borderStyle: "dashed",
-              }}
-            >
-              <Ionicons
-                name="images-outline"
-                size={48}
-                color={colors.textSecondary}
-              />
-              <Text
-                style={{
-                  color: colors.textSecondary,
-                  marginTop: 12,
-                  fontFamily: "Poppins_500Medium",
-                  fontSize: 14,
-                }}
-              >
-                No posts yet
-              </Text>
-              <Text
-                style={{
-                  color: colors.textSecondary,
-                  marginTop: 4,
-                  fontFamily: "Poppins_400Regular",
-                  fontSize: 12,
-                  textAlign: "center",
-                }}
-              >
-                This artist hasn't shared any photos
-              </Text>
-            </View>
-          )}
-        </View>
-      </View>
-    );
-  };
+  const renderGroupTimeline = () => (
+    <GroupTimelineTab
+      group={group}
+      colors={colors}
+      isDark={isDark}
+      styles={styles}
+      width={width}
+    />
+  );
 
   // Group: Setup Tab (legacy - keeping for reference)
   const renderGroupSetup = () => (
-    <View style={styles.tabContent}>
-      {/* Stage Plot Placeholder */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Stage Plot
-        </Text>
-        <View
-          style={[
-            styles.stagePlotPlaceholder,
-            {
-              borderColor: colors.border,
-              backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-            },
-          ]}
-        >
-          <Ionicons
-            name="image-outline"
-            size={32}
-            color={colors.textSecondary}
-          />
-          <Text style={{ color: colors.textSecondary, marginTop: 8 }}>
-            Stage Layout Visual
-          </Text>
-        </View>
-      </View>
-
-      {/* Input List - Placeholder for now until DB field exists */}
-      {/* <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Input List</Text>
-             <Text style={{ color: colors.textSecondary }}>No input list available.</Text>
-        </View> */}
-
-      {/* Hospitality */}
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>
-          Hospitality Rider
-        </Text>
-        <Text style={[styles.description, { color: colors.textSecondary }]}>
-          No specific hospitality requirements listed.
-        </Text>
-      </View>
-    </View>
+    <GroupSetupTab
+      colors={colors}
+      isDark={isDark}
+      styles={styles}
+    />
   );
 
-  // Handler for Send Request button with venue check
-  const handleSendBookingRequest = () => {
-    // Check if venue-owner has a venue uploaded
-    if (currentUserRole === "venue-owner" && userVenues.length === 0) {
-      handleConfirm(
-        () => {
-          // Navigate to add gig/venue page
-          const router = require("expo-router").router;
-          router.push("/add_studio"); // Assuming add_studio handles venues
-        },
-        "No Venue Found",
-        "You need to create a venue first before sending booking requests. Would you like to create one now?",
-      );
-      return;
-    }
-
-    if (currentUserRole === "venue-owner" && !selectedVenueId) {
-      setAlertConfig({
-        type: "error",
-        title: "Select Venue",
-        message: "Please select which venue you are inviting the artist to.",
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    if (!requestMessage.trim()) {
-      setAlertConfig({
-        type: "error",
-        title: "Message Required",
-        message: "Please describe your event or offer.",
-      });
-      setAlertVisible(true);
-      return;
-    }
-
-    // Proceed with normal booking request
-    handleConfirm(
-      async () => {
-        setIsSendingRequest(true);
-        try {
-          const receiverId =
-            group.type === "Artist" ? group.id : group.owner_id;
-          const groupId = group.type === "Group" ? group.id : null;
-
-          const { error } = await supabase.from("booking_requests").insert({
-            sender_id: currentUserId,
-            receiver_id: receiverId,
-            group_id: groupId,
-            studio_id: selectedVenueId, // Include selected venue
-            message: requestMessage,
-            status: "pending",
-            event_details: {}, // Can be expanded later
-          });
-
-          if (error) throw error;
-
-          setAlertConfig({
-            type: "success",
-            title: "Request Sent",
-            message: "Your booking request has been sent successfully!",
-          });
-          setAlertVisible(true);
-          setRequestMessage("");
-
-          // Close sheet after delay
-          setTimeout(() => {
-            if (ref && "current" in ref && ref.current) {
-              (ref as any).current.dismiss();
-            }
-          }, 2000);
-        } catch (e) {
-          console.error("Error sending request:", e);
-          setAlertConfig({
-            type: "error",
-            title: "Error",
-            message: "Failed to send request. Please try again.",
-          });
-          setAlertVisible(true);
-        } finally {
-          setIsSendingRequest(false);
-        }
-      },
-      "Send Booking Request",
-      "Are you sure you want to send this booking request?",
-    );
-  };
+  const handleSendBookingRequest = useBookingRequestAction({
+    currentUserRole,
+    userVenues,
+    selectedVenueId,
+    requestMessage,
+    currentUserId,
+    group,
+    setAlertConfig,
+    setAlertVisible,
+    handleConfirm,
+    setIsSendingRequest,
+    setRequestMessage,
+    closeSheet: () => {
+      if (ref && "current" in ref && ref.current) {
+        (ref as any).current.dismiss();
+      }
+    },
+  });
 
   // Group: Connect Tab
   const renderGroupConnect = () => (
-    <View style={styles.tabContent}>
-      {/* Show Booking Request for Venues/Organizers OR if role is unknown/not logged in (fallback) */}
-      {(!currentUserRole || currentUserRole === "venue-owner") && (
-        <View style={styles.section}>
-          <View style={{ marginTop: 0 }}>
-            {renderBookingControls()}
-
-            {/* Venue Selection for Owners with Multiple Venues */}
-            {currentUserRole === "venue-owner" && userVenues.length > 0 && (
-              <View style={{ marginBottom: 16 }}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>
-                  Select Venue
-                </Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  {userVenues.map((v) => (
-                    <TouchableOpacity
-                      key={v.id}
-                      style={[
-                        styles.groupSelectChip,
-                        {
-                          backgroundColor:
-                            selectedVenueId === v.id
-                              ? colors.primary
-                              : isDark
-                                ? "#374151"
-                                : "#F3F4F6",
-                          borderColor:
-                            selectedVenueId === v.id
-                              ? colors.primary
-                              : colors.border,
-                          marginRight: 8,
-                        },
-                      ]}
-                      onPress={() => setSelectedVenueId(v.id)}
-                    >
-                      <Ionicons
-                        name="business"
-                        size={16}
-                        color={selectedVenueId === v.id ? "#FFF" : colors.text}
-                      />
-                      <Text
-                        style={{
-                          color:
-                            selectedVenueId === v.id ? "#FFF" : colors.text,
-                          marginLeft: 8,
-                          fontFamily: "Poppins_500Medium",
-                        }}
-                      >
-                        {v.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            {currentUserRole === "venue-owner" &&
-              userVenues.length === 0 &&
-              !checkingVenue && (
-                <View
-                  style={[
-                    styles.infoBox,
-                    {
-                      backgroundColor: "#FEE2E2",
-                      borderColor: "#EF4444",
-                      marginBottom: 16,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.infoText, { color: "#B91C1C" }]}>
-                    You don't have any venues listed. Please create a venue to
-                    send invites.
-                  </Text>
-                </View>
-              )}
-
-            <Text style={[styles.label, { color: colors.text }]}>
-              Send Booking Request
-            </Text>
-            <View
-              style={[
-                styles.inputWrapper,
-                {
-                  backgroundColor: isDark ? "#374151" : "#F9FAFB",
-                  height: 100,
-                  marginBottom: 16,
-                },
-              ]}
-            >
-              <TextInput
-                style={[styles.input, { color: colors.text, height: "100%" }]}
-                placeholder="Describe your event..."
-                placeholderTextColor={colors.textSecondary}
-                multiline
-                textAlignVertical="top"
-                value={requestMessage}
-                onChangeText={setRequestMessage}
-              />
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.uploadBox,
-                { borderColor: colors.border, height: 80, marginBottom: 16 },
-              ]}
-            >
-              <Ionicons
-                name="attach-outline"
-                size={24}
-                color={colors.primary}
-              />
-              <Text
-                style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}
-              >
-                Attach Event Proposal
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
-              onPress={handleSendBookingRequest}
-              disabled={checkingVenue || isSendingRequest}
-              activeOpacity={0.8}
-            >
-              {isSendingRequest ? (
-                <ActivityIndicator color="#FFF" />
-              ) : (
-                <Text style={styles.primaryBtnText}>
-                  {checkingVenue ? "Checking..." : "Send Request"}
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* Show Audition for Musicians OR if role is unknown */}
-      {(!currentUserRole || currentUserRole === "musician") &&
-        group.requirements?.audition && (
-          <View
-            style={[
-              styles.section,
-              (!currentUserRole || currentUserRole === "venue-owner") && {
-                marginTop: 32,
-              },
-            ]}
-          >
-            {currentUserRole === "musician" && (
-              <>
-                <View
-                  style={[
-                    styles.auditionBanner,
-                    { borderColor: isDark ? "#065F46" : "#86EFAC" },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      fontFamily: "Poppins_600SemiBold",
-                      color: colors.text,
-                    }}
-                  >
-                    Active Audition:{" "}
-                    {group.requirements.audition_role || "Musician"}
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      color: colors.textSecondary,
-                      marginTop: 4,
-                    }}
-                  >
-                    {group.requirements.audition_desc ||
-                      "Open audition for this project."}
-                  </Text>
-                </View>
-
-                <View style={{ marginTop: 16 }}>
-                  <TouchableOpacity
-                    style={[
-                      styles.primaryBtn,
-                      {
-                        backgroundColor: "transparent",
-                        borderWidth: 1,
-                        borderColor: colors.primary,
-                      },
-                    ]}
-                    onPress={() =>
-                      handleConfirm(
-                        () => console.log("Applied for Audition"),
-                        "Apply for Audition",
-                        `Confirm your application for the ${group.requirements.audition_role || "Musician"} position?`,
-                      )
-                    }
-                  >
-                    <Text
-                      style={[styles.primaryBtnText, { color: colors.primary }]}
-                    >
-                      Apply for Audition
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        )}
-    </View>
+    <GroupConnectTab
+      currentUserRole={currentUserRole}
+      userVenues={userVenues}
+      colors={colors}
+      isDark={isDark}
+      styles={styles}
+      selectedVenueId={selectedVenueId}
+      setSelectedVenueId={setSelectedVenueId}
+      checkingVenue={checkingVenue}
+      requestMessage={requestMessage}
+      setRequestMessage={setRequestMessage}
+      handleSendBookingRequest={handleSendBookingRequest}
+      isSendingRequest={isSendingRequest}
+      renderBookingControls={renderBookingControls}
+      group={group}
+      handleConfirm={handleConfirm}
+    />
   );
 
-  const scrollRef = useRef<any>(null);
+  const renderStudioGigVenueAbout = () => (
+    <StudioGigVenueAboutTab
+      group={group}
+      colors={colors}
+      isDark={isDark}
+      styles={styles}
+      hasDualPricing={Boolean(hasDualPricing)}
+      rehearsalRate={rehearsalRate || ""}
+      recordingRate={recordingRate || ""}
+      displayRate={displayRate}
+      labels={labels}
+      currentUserId={currentUserId}
+      calculateCompletion={calculateCompletion}
+      handleProfileNavigation={handleProfileNavigation}
+    />
+  );
 
   return (
     <>
@@ -5461,6 +2169,11 @@ const ListingDetailsSheet = forwardRef<
         ref={ref}
         index={0}
         snapPoints={snapPoints}
+        animationConfigs={animationConfigs}
+        animateOnMount={true}
+        enableDynamicSizing={false}
+        enableContentPanningGesture={false}
+        enableOverDrag={false}
         backdropComponent={renderBackdrop}
         backgroundStyle={{ backgroundColor: colors.background }}
         handleIndicatorStyle={{
@@ -5469,6 +2182,7 @@ const ListingDetailsSheet = forwardRef<
         }}
         enablePanDownToClose={true}
         onChange={handleSheetChanges}
+        onDismiss={onDismiss}
       >
         {loading ? (
           <View
@@ -5481,624 +2195,56 @@ const ListingDetailsSheet = forwardRef<
           </View>
         ) : group ? (
           <BottomSheetScrollView
-            ref={scrollRef}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             showsHorizontalScrollIndicator={false}
+            nestedScrollEnabled
           >
-            {/* Immersive Hero Image */}
-            <View style={styles.imageContainer}>
-              <Image
-                source={{
-                  uri: (group.images && group.images[0]) || group.image || null,
-                }}
-                style={[styles.image, { backgroundColor: colors.border }]}
-                resizeMode="cover"
-              />
-              <LinearGradient
-                colors={["rgba(0,0,0,0.5)", "transparent", "rgba(0,0,0,0.6)"]}
-                style={styles.gradient}
-              />
-
-              {/* Header Actions */}
-              <View style={[styles.headerActions, { paddingTop: 20 }]}>
-                <TouchableOpacity
-                  onPress={() => (ref as any)?.current?.dismiss()}
-                  style={styles.roundBtn}
-                >
-                  <Ionicons name="close" size={22} color="#000" />
-                </TouchableOpacity>
-
-                <View style={styles.rightActions}>
-                  <TouchableOpacity style={styles.roundBtn}>
-                    <Ionicons name="share-outline" size={22} color="#000" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={toggleFavorite}
-                    style={styles.roundBtn}
-                  >
-                    <Ionicons
-                      name={isFavorited ? "heart" : "heart-outline"}
-                      size={22}
-                      color={isFavorited ? "#EF4444" : "#000"}
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Hero Identity (Bottom Left of Image) */}
-              <View style={styles.heroIdentity}>
-                {/* Status Tags */}
-                <View style={styles.statusRow}>
-                  {/* Report button could be here */}
-                </View>
-                <Text style={styles.heroTitle}>{group.name}</Text>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    marginTop: 4,
-                  }}
-                >
-                  <Ionicons name="location" size={14} color="#FFF" />
-                  <Text style={styles.heroLocation}>
-                    {group.location || "Manila"}
-                  </Text>
-                  <Text style={[styles.heroLocation, { marginLeft: 12 }]}>
-                    • {group.genre || "Music"}
-                  </Text>
-                </View>
-              </View>
-            </View>
+            <ListingHeroSection
+              group={group}
+              colors={colors}
+              styles={styles}
+              isFavorited={isFavorited}
+              showReportButton={showReportButton}
+              onClose={() => (ref as any)?.current?.dismiss()}
+              onToggleFavorite={toggleFavorite}
+              onReport={handleReport}
+            />
 
             {/* TABS SELECTOR */}
             {showTabs && renderTabs()}
 
-            {/* CONTENT BODY */}
-            <View
-              style={[
-                styles.contentBody,
-                { backgroundColor: colors.background },
-              ]}
-            >
-              {/* GENERAL RENDERLOGIC */}
-
-              {/* Group/Artist Specific Tabs */}
-              {(group.type === "Group" ||
-                group.type === "Artist" ||
-                !group.type) && (
-                  <>
-                    {(activeTab === "About" || !showTabs) && renderGroupAbout()}
-                    {activeTab === "Timeline" && renderGroupTimeline()}
-                    {activeTab === "Review" && renderReviews()}
-                  </>
-                )}
-
-              {/* Existing Tabs for Studio/Gig */}
-              {(group.type === "Studio" ||
-                group.type === "Gig" ||
-                group.type === "Venue") && (
-                  <>
-                    {activeTab === "About" && (
-                      <View style={styles.tabContent}>
-                        {/* Stats Row (Gig) */}
-                        {group.type === "Gig" && (
-                          <View
-                            style={{
-                              flexDirection: "row",
-                              gap: 12,
-                              marginBottom: 24,
-                            }}
-                          >
-                            <View
-                              style={[
-                                styles.statCard,
-                                {
-                                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.statLabel,
-                                  { color: colors.textSecondary },
-                                ]}
-                              >
-                                Budget
-                              </Text>
-                              <Text
-                                style={[styles.statValue, { color: colors.text }]}
-                              >
-                                ₱{group.budget || "5,000"}
-                              </Text>
-                            </View>
-                            <View
-                              style={[
-                                styles.statCard,
-                                {
-                                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.statLabel,
-                                  { color: colors.textSecondary },
-                                ]}
-                              >
-                                Event Date
-                              </Text>
-                              <Text
-                                style={[styles.statValue, { color: colors.text }]}
-                              >
-                                {group.event_date
-                                  ? new Date(group.event_date).toLocaleDateString(
-                                    undefined,
-                                    {
-                                      weekday: "short",
-                                      month: "short",
-                                      day: "numeric",
-                                      year: "numeric",
-                                    },
-                                  )
-                                  : "TBA"}
-                              </Text>
-                            </View>
-                          </View>
-                        )}
-
-                        {/* Stats Row (Studio/Venue) */}
-                        {(group.type === "Studio" || group.type === "Venue") && (
-                          <View
-                            style={{
-                              flexDirection: "column",
-                              gap: 12,
-                              marginBottom: 24,
-                            }}
-                          >
-                            {/* Pricing Row */}
-                            <View style={{ flexDirection: "row", gap: 12 }}>
-                              {hasDualPricing ? (
-                                <>
-                                  <View
-                                    style={[
-                                      styles.statCard,
-                                      {
-                                        backgroundColor: isDark
-                                          ? "#1F2937"
-                                          : "#F3F4F6",
-                                        flex: 1,
-                                      },
-                                    ]}
-                                  >
-                                    <Text
-                                      style={[
-                                        styles.statLabel,
-                                        { color: colors.textSecondary },
-                                      ]}
-                                    >
-                                      Rehearsal Rate
-                                    </Text>
-                                    <Text
-                                      style={[
-                                        styles.statValue,
-                                        { color: colors.text },
-                                      ]}
-                                    >{`₱${rehearsalRate}/hr`}</Text>
-                                  </View>
-                                  <View
-                                    style={[
-                                      styles.statCard,
-                                      {
-                                        backgroundColor: isDark
-                                          ? "#1F2937"
-                                          : "#F3F4F6",
-                                        flex: 1,
-                                      },
-                                    ]}
-                                  >
-                                    <Text
-                                      style={[
-                                        styles.statLabel,
-                                        { color: colors.textSecondary },
-                                      ]}
-                                    >
-                                      Recording Rate
-                                    </Text>
-                                    <Text
-                                      style={[
-                                        styles.statValue,
-                                        { color: colors.text },
-                                      ]}
-                                    >{`₱${recordingRate}/song`}</Text>
-                                  </View>
-                                </>
-                              ) : (
-                                <View
-                                  style={[
-                                    styles.statCard,
-                                    {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "#F3F4F6",
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.statLabel,
-                                      { color: colors.textSecondary },
-                                    ]}
-                                  >
-                                    {recordingRate && !rehearsalRate
-                                      ? "Recording Rate"
-                                      : rehearsalRate && !recordingRate
-                                        ? "Rehearsal Rate"
-                                        : "Hourly Rate"}
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.statValue,
-                                      { color: colors.text },
-                                    ]}
-                                  >
-                                    {recordingRate && !rehearsalRate
-                                      ? `₱${recordingRate}/song`
-                                      : `₱${displayRate}/hr`}
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                            {/* Stats Row */}
-                            <View style={{ flexDirection: "row", gap: 12 }}>
-                              <View
-                                style={[
-                                  styles.statCard,
-                                  {
-                                    backgroundColor: isDark
-                                      ? "#1F2937"
-                                      : "#F3F4F6",
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.statLabel,
-                                    { color: colors.textSecondary },
-                                  ]}
-                                >
-                                  Rating
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.statValue,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {group.rating ? group.rating.toFixed(1) : "-"}
-                                </Text>
-                              </View>
-                              <View
-                                style={[
-                                  styles.statCard,
-                                  {
-                                    backgroundColor: isDark
-                                      ? "#1F2937"
-                                      : "#F3F4F6",
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.statLabel,
-                                    { color: colors.textSecondary },
-                                  ]}
-                                >
-                                  Completion
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.statValue,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {group.completion_rate !== undefined
-                                    ? `${group.completion_rate}%`
-                                    : "--"}
-                                </Text>
-                              </View>
-                              {group.type === "Studio" && group.studio_type && (
-                                <View
-                                  style={[
-                                    styles.statCard,
-                                    {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "#F3F4F6",
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.statLabel,
-                                      { color: colors.textSecondary },
-                                    ]}
-                                  >
-                                    Type
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.statValue,
-                                      { color: colors.text },
-                                    ]}
-                                  >
-                                    {group.studio_type === "Both"
-                                      ? "Rehearsal & Recording"
-                                      : group.studio_type}
-                                  </Text>
-                                </View>
-                              )}
-                              {group.type === "Studio" && group.pax && (
-                                <View
-                                  style={[
-                                    styles.statCard,
-                                    {
-                                      backgroundColor: isDark
-                                        ? "#1F2937"
-                                        : "#F3F4F6",
-                                    },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.statLabel,
-                                      { color: colors.textSecondary },
-                                    ]}
-                                  >
-                                    Capacity
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.statValue,
-                                      { color: colors.text },
-                                    ]}
-                                  >
-                                    {group.pax} pax
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                          </View>
-                        )}
-
-                        {/* Description */}
-                        <View style={styles.section}>
-                          <Text
-                            style={[styles.sectionTitle, { color: colors.text }]}
-                          >
-                            {labels.aboutTitle}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.description,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            {group.description || "No description provided."}
-                          </Text>
-                        </View>
-
-                        {/* Managed By & Completion Rate (Shared-like Component) */}
-                        <View
-                          style={[
-                            styles.managerCard,
-                            {
-                              backgroundColor: colors.surface,
-                              borderColor: colors.border,
-                              borderWidth: 1,
-                              marginBottom: 24,
-                            },
-                          ]}
-                        >
-                          <View style={{ marginBottom: 16 }}>
-                            <View
-                              style={{
-                                flexDirection: "row",
-                                alignItems: "center",
-                                gap: 12,
-                              }}
-                            >
-                              <Image
-                                source={{ uri: group.owner_avatar || undefined }}
-                                style={[
-                                  styles.hostAvatar,
-                                  { backgroundColor: colors.border },
-                                ]}
-                              />
-                              <View>
-                                <Text
-                                  style={[
-                                    styles.managerLabel,
-                                    { color: colors.textSecondary },
-                                  ]}
-                                >
-                                  {group.type === "Gig"
-                                    ? "Organized by"
-                                    : "Managed by"}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.managerName,
-                                    { color: colors.text },
-                                  ]}
-                                >
-                                  {group.owner_name || "Unknown User"}
-                                </Text>
-                              </View>
-                            </View>
-
-                            {/* Completion Rate Indicator - Unified */}
-                            <View
-                              style={{
-                                marginTop: 12,
-                                flexDirection: "row",
-                                alignItems: "center",
-                                gap: 8,
-                              }}
-                            >
-                              <View
-                                style={{
-                                  flex: 1,
-                                  height: 6,
-                                  backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                                  borderRadius: 3,
-                                  overflow: "hidden",
-                                }}
-                              >
-                                <View
-                                  style={{
-                                    width: `${group.completion_rate !== undefined ? group.completion_rate : calculateCompletion()}%`,
-                                    height: "100%",
-                                    backgroundColor:
-                                      (group.completion_rate !== undefined
-                                        ? group.completion_rate
-                                        : calculateCompletion()) >= 90
-                                        ? "#10B981"
-                                        : colors.primary,
-                                  }}
-                                />
-                              </View>
-                              <Text
-                                style={{
-                                  fontSize: 11,
-                                  fontFamily: "Poppins_600SemiBold",
-                                  color:
-                                    (group.completion_rate !== undefined
-                                      ? group.completion_rate
-                                      : calculateCompletion()) >= 90
-                                      ? "#10B981"
-                                      : colors.textSecondary,
-                                }}
-                              >
-                                {`${group.completion_rate !== undefined ? group.completion_rate : calculateCompletion()}% Complete`}
-                              </Text>
-                            </View>
-                          </View>
-
-                          <TouchableOpacity
-                            style={[
-                              styles.visitBtn,
-                              { borderColor: colors.primary },
-                            ]}
-                            onPress={handleProfileNavigation}
-                          >
-                            <Text
-                              style={{
-                                color: colors.primary,
-                                fontSize: 12,
-                                fontFamily: "Poppins_600SemiBold",
-                              }}
-                            >
-                              {group.owner_id === currentUserId
-                                ? "Manage Profile"
-                                : "Visit Profile"}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-
-                        {/* Deal Card (Gig) */}
-                        {group.type === "Gig" && (
-                          <View
-                            style={[
-                              styles.dealCard,
-                              {
-                                backgroundColor: isDark ? "#1e293b" : "#ECFDF5",
-                                borderColor: isDark ? "#064e3b" : "#10B981",
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_600SemiBold",
-                                color: isDark ? "#6ee7b7" : "#047857",
-                                marginBottom: 8,
-                              }}
-                            >
-                              The Deal
-                            </Text>
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_500Medium",
-                                color: isDark ? "#d1fae5" : "#065F46",
-                              }}
-                            >
-                              Guarantee + Door Split
-                            </Text>
-                            <Text
-                              style={{
-                                fontFamily: "Poppins_400Regular",
-                                color: isDark ? "#d1fae5" : "#065F46",
-                                fontSize: 13,
-                                marginTop: 4,
-                              }}
-                            >
-                              45 min set • Meal Included
-                            </Text>
-                          </View>
-                        )}
-
-                        {/* Gallery */}
-                        <View style={{ marginTop: 24 }}>{renderGallery()}</View>
-                      </View>
-                    )}
-                    {activeTab === "Setup" && renderStudioSetup()}
-                    {activeTab === "Specs" && renderStudioSetup()}
-                    {activeTab === "Book" && renderStudioBook()}
-                    {activeTab === "Info" && renderGigInfo()}
-                    {activeTab === "Apply" && renderGigApply()}
-                    {activeTab === "Review" && renderReviews()}
-                  </>
-                )}
-            </View>
+            <ListingContentBody
+              styles={styles}
+              colors={colors}
+              group={group}
+              activeTab={activeTab}
+              showTabs={showTabs}
+              renderGroupAbout={renderGroupAbout}
+              renderGroupTimeline={renderGroupTimeline}
+              renderReviews={renderReviews}
+              renderStudioGigVenueAbout={renderStudioGigVenueAbout}
+              renderStudioSetup={renderStudioSetup}
+              renderStudioBook={renderStudioBook}
+              renderGigInfo={renderGigInfo}
+              renderGigApply={renderGigApply}
+            />
 
             {/* Bottom Bar for GROUP/Default only - Tabs have their own CTAs */}
             {!showTabs && (
-              <View
-                style={[
-                  styles.bottomBar,
-                  {
-                    backgroundColor: colors.background,
-                    borderTopColor: colors.border,
-                  },
-                ]}
-              >
-                <View style={styles.priceContainer}>
-                  <Text style={[styles.priceText, { color: colors.text }]}>
-                    {`₱${displayRate} `}
-                    <Text
-                      style={{
-                        fontSize: 14,
-                        fontWeight: "400",
-                        color: colors.textSecondary,
-                      }}
-                    >
-                      {labels.unit}
-                    </Text>
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={[styles.bookBtn, { backgroundColor: colors.primary }]}
-                  onPress={() =>
-                    handleConfirm(
-                      () => console.log("Group Reserved"),
-                      "Reserve Artist",
-                      "Confirm reservation request?",
-                    )
-                  }
-                >
-                  <Text style={styles.bookBtnText}>Reserve</Text>
-                </TouchableOpacity>
-              </View>
+              <ListingBottomBar
+                styles={styles}
+                colors={colors}
+                displayRate={displayRate}
+                labels={labels}
+                onReserve={() =>
+                  handleConfirm(
+                    () => debugLog("Group Reserved"),
+                    "Reserve Artist",
+                    "Confirm reservation request?",
+                  )
+                }
+              />
             )}
           </BottomSheetScrollView>
         ) : null}
@@ -6119,19 +2265,29 @@ const ListingDetailsSheet = forwardRef<
         onClose={() => setAlertVisible(false)}
       />
 
+      <ReportModal
+        visible={showListingReportModal}
+        onClose={() => setShowListingReportModal(false)}
+        onSubmit={submitReport}
+        targetName={group?.name || 'this listing'}
+        title="Report Listing"
+      />
+
       <Modal
         visible={modalVisible}
         onClose={() => {
-          console.log("🔴 Modal closed without confirmation");
+          debugLog("🔴 Modal closed without confirmation");
+          setConfirmRequireTerms(false);
           setModalVisible(false);
         }}
         onConfirm={() => {
-          console.log("🟢 Modal CONFIRMED - executing action");
-          console.log("confirmAction:", confirmAction);
+          debugLog("🟢 Modal CONFIRMED - executing action");
+          debugLog("confirmAction:", confirmAction);
+          setConfirmRequireTerms(false);
           setModalVisible(false);
           try {
             confirmAction();
-            console.log("✅ confirmAction executed successfully");
+            debugLog("✅ confirmAction executed successfully");
           } catch (error) {
             console.error("❌ Error executing confirmAction:", error);
           }
@@ -6139,6 +2295,7 @@ const ListingDetailsSheet = forwardRef<
         title={confirmTitle}
         message={confirmMessage}
         buttonText="Confirm"
+        requireTermsAcceptance={confirmRequireTerms}
       />
 
       {/* Payment Option Modal */}
@@ -6196,7 +2353,7 @@ const ListingDetailsSheet = forwardRef<
               </Text>
 
               {/* Full Payment Option */}
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => setSelectedPaymentType("full")}
                 style={[
                   styles.paymentOptionCard,
@@ -6248,7 +2405,7 @@ const ListingDetailsSheet = forwardRef<
               </TouchableOpacity>
 
               {/* Downpayment Option */}
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => setSelectedPaymentType("downpayment")}
                 style={[
                   styles.paymentOptionCard,
@@ -6308,7 +2465,7 @@ const ListingDetailsSheet = forwardRef<
 
               {/* Action Buttons */}
               <View style={styles.paymentOptionButtons}>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={() => processPaymentWithType(selectedPaymentType)}
                   style={[
                     styles.paymentOptionConfirmBtn,
@@ -6328,7 +2485,7 @@ const ListingDetailsSheet = forwardRef<
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => {
                   setShowPaymentOptionModal(false);
                   // Clear form and navigate to bookings
@@ -7127,3 +3284,5 @@ const styles = StyleSheet.create({
 });
 
 export default ListingDetailsSheet;
+
+

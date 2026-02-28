@@ -9,6 +9,171 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
 };
 
+function getManilaNowParts() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value || "00";
+
+  return {
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+    time: `${get("hour")}:${get("minute")}:${get("second")}`,
+  };
+}
+
+function normalizeTime(value?: string | null) {
+  if (!value) return "00:00:00";
+  const cleaned = value.toString().trim().split(/[.+-]/)[0] || "00:00:00";
+  const segments = cleaned.split(":");
+
+  if (segments.length < 2) return "00:00:00";
+
+  const hours = (segments[0] || "00").padStart(2, "0").slice(0, 2);
+  const minutes = (segments[1] || "00").padStart(2, "0").slice(0, 2);
+  const seconds = (segments[2] || "00").padStart(2, "0").slice(0, 2);
+
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+function toManilaDateTime(dateValue: string, timeValue: string): Date | null {
+  if (!dateValue || !timeValue) return null;
+
+  const normalizedDate = String(dateValue).trim();
+  const normalizedTime = normalizeTime(timeValue);
+  const parsed = new Date(`${normalizedDate}T${normalizedTime}+08:00`);
+
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+async function insertNotificationIfMissing(
+  supabaseAdmin: any,
+  payload: {
+    user_id: string;
+    type: string;
+    title: string;
+    message: string;
+    image?: string | null;
+    meta?: Record<string, any>;
+  },
+) {
+  const eventType = payload.meta?.event_type;
+  const bookingId = payload.meta?.booking_id;
+
+  if (eventType && bookingId) {
+    const { data: existing } = await supabaseAdmin
+      .from("notifications")
+      .select("id")
+      .eq("user_id", payload.user_id)
+      .contains("meta", { event_type: eventType, booking_id: bookingId })
+      .limit(1);
+
+    if (existing && existing.length > 0) return;
+  }
+
+  await supabaseAdmin.from("notifications").insert({
+    ...payload,
+    read: false,
+  });
+}
+
+async function autoStartBookingsAndNotify(
+  supabaseAdmin: any,
+  userId: string,
+  userRole: string,
+) {
+  const { date: todayManila, time: nowManilaTime } = getManilaNowParts();
+
+  let studioIds: string[] = [];
+  if (userRole === "studio-owner") {
+    const { data: ownerStudios } = await supabaseAdmin
+      .from("studios")
+      .select("id")
+      .eq("owner_id", userId);
+
+    studioIds = (ownerStudios || []).map((studio: any) => studio.id);
+    if (studioIds.length === 0) return;
+  }
+
+  let bookingQuery = supabaseAdmin
+    .from("studio_bookings")
+    .select(
+      "id, user_id, studio_id, booking_date, start_time, end_time, status, studio:studios(name, owner_id)",
+    )
+    .eq("status", "confirmed")
+    .eq("booking_date", todayManila);
+
+  if (userRole === "musician") {
+    bookingQuery = bookingQuery.eq("user_id", userId);
+  } else if (userRole === "studio-owner") {
+    bookingQuery = bookingQuery.in("studio_id", studioIds);
+  } else {
+    return;
+  }
+
+  const { data: bookings, error: bookingError } = await bookingQuery;
+  if (bookingError || !bookings || bookings.length === 0) return;
+
+  for (const booking of bookings) {
+    const startTime = normalizeTime(booking.start_time);
+    const endTime = normalizeTime(booking.end_time);
+
+    if (nowManilaTime < startTime || nowManilaTime >= endTime) {
+      continue;
+    }
+
+    const { data: updatedBooking, error: updateError } = await supabaseAdmin
+      .from("studio_bookings")
+      .update({
+        status: "checked_in",
+        check_in_time: new Date().toISOString(),
+      })
+      .eq("id", booking.id)
+      .eq("status", "confirmed")
+      .select("id")
+      .maybeSingle();
+
+    if (updateError || !updatedBooking) {
+      continue;
+    }
+
+    const studioName = booking.studio?.name || "the studio";
+    const image = null;
+    const recipients = [booking.user_id, booking.studio?.owner_id].filter(
+      Boolean,
+    ) as string[];
+
+    for (const recipientId of [...new Set(recipients)]) {
+      const isCustomer = recipientId === booking.user_id;
+      await insertNotificationIfMissing(supabaseAdmin, {
+        user_id: recipientId,
+        type: "info",
+        title: "Booking Started",
+        message: isCustomer
+          ? `Your booking at ${studioName} has started.`
+          : `A booking at ${studioName} has started.`,
+        image,
+        meta: {
+          booking_id: booking.id,
+          studio_id: booking.studio_id,
+          booking_date: booking.booking_date,
+          event_type: "booking_auto_started",
+        },
+      });
+    }
+  }
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -52,6 +217,10 @@ serve(async (req: Request) => {
 
       const userRole = profile?.role;
 
+      if (userRole === "musician" || userRole === "studio-owner") {
+        await autoStartBookingsAndNotify(supabaseAdmin, userId, userRole);
+      }
+
       const categorized = {
         Pending: [],
         Upcoming: [],
@@ -65,7 +234,7 @@ serve(async (req: Request) => {
       if (userRole === "musician") {
         const { data: bookings, error: bookingError } = await supabaseClient
           .from("studio_bookings")
-          .select("*, studio:studios(name, images, amenities)")
+          .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
           .eq("user_id", userId)
           .order("booking_date", { ascending: false });
 
@@ -76,7 +245,7 @@ serve(async (req: Request) => {
         bookings?.forEach((b: any) => {
           const bookingDate = new Date(`${b.booking_date}T${b.start_time}`);
           const endDate = new Date(`${b.booking_date}T${b.end_time}`);
-          const isVenue = b.studio?.amenities?.includes("Stage") ?? false;
+          const isVenue = false;
 
           // DEBUG: Log date parsing for first few items
           // console.log(`[DEBUG] Booking ${b.id}: Status=${b.status}, End=${endDate.toISOString()}, Now=${now.toISOString()}`)
@@ -94,22 +263,34 @@ serve(async (req: Request) => {
             end_time: b.end_time,
             name: b.studio?.name || "Unknown Studio",
             date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
-            image: b.studio?.images?.[0] || "https://picsum.photos/400/300",
+            image:
+              b.studio?.studio_media
+                ?.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]
+                ?.media_url ||
+              "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop",
             status:
               b.status === "pending"
                 ? isUnpaid
                   ? "Awaiting Payment"
                   : "Paid - Waiting for Confirmation"
-                : b.status === "confirmed"
-                  ? "Confirmed"
-                  : b.status === "checked_in"
-                    ? "In Progress"
-                    : b.status === "cancelled"
-                      ? "Declined"
-                      : b.status,
+                : b.status === "pending_relocation"
+                  ? "Relocation Request"
+                  : b.status === "confirmed"
+                    ? "Confirmed"
+                    : b.status === "checked_in"
+                      ? "In Progress"
+                      : b.status === "cancelled"
+                        ? "Declined"
+                        : b.status,
             type: isVenue ? "Venue Booking" : "Studio Booking",
             isCancelled: b.status === "cancelled",
-            action: b.status === "pending" ? "View Details" : "Details",
+            action:
+              b.status === "pending_relocation"
+                ? "Respond"
+                : b.status === "pending"
+                  ? "View Details"
+                  : "Details",
+            raw_status: b.status,
             duration_hours: b.hours,
             base_rate: b.base_rate,
             total_cost: b.final_price,
@@ -123,9 +304,15 @@ serve(async (req: Request) => {
             payment_amount: b.payment_amount || b.final_price,
             payment_type: b.payment_type || null,
             remaining_balance: b.remaining_balance || 0,
+            studio_owner_id: b.studio?.owner_id || null,
+            relocation_requested_at: b.relocation_requested_at,
+            relocation_expires_at: b.relocation_expires_at,
+            relocation_proposed_date: b.relocation_proposed_date,
+            relocation_proposed_start_time: b.relocation_proposed_start_time,
+            relocation_proposed_end_time: b.relocation_proposed_end_time,
           };
 
-          if (b.status === "pending") {
+          if (b.status === "pending" || b.status === "pending_relocation") {
             // @ts-ignore
             categorized.Pending.push(item);
           } else if (b.status === "confirmed") {
@@ -133,6 +320,10 @@ serve(async (req: Request) => {
               // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
               // @ts-ignore
               categorized.Review.push({ ...item, status: "Completed" });
+            } else if (now >= bookingDate && now <= endDate) {
+              // AUTO-ONGOING: If current time is within the booking window, treat as In Progress
+              // @ts-ignore
+              categorized.Ongoing.push({ ...item, status: "In Progress" });
             } else {
               // @ts-ignore
               categorized.Upcoming.push(item);
@@ -174,7 +365,7 @@ serve(async (req: Request) => {
           const { data: bookings, error: bookingError } = await supabaseClient
             .from("studio_bookings")
             .select(
-              "*, studio:studios(name, images, amenities), profile:user_id(full_name, avatar_url, email, contact_number, address)",
+              "*, studio:studios(name, owner_id, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
             )
             .in("studio_id", studioIds)
             .order("booking_date", { ascending: false });
@@ -193,7 +384,7 @@ serve(async (req: Request) => {
               b.profile?.avatar_url ||
               "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop";
 
-            const isVenue = b.studio?.amenities?.includes("Stage") ?? false;
+            const isVenue = false;
 
             // For studio owner: show payment status for pending bookings
             const isUnpaid = b.status === "pending" && (!b.payment_status || b.payment_status === "unpaid" || b.payment_status === "pending" || b.payment_status === "failed");
@@ -208,22 +399,29 @@ serve(async (req: Request) => {
               end_time: b.end_time,
               name: `${b.studio?.name} - ${customerName}`,
               date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
-              image: b.studio?.images?.[0] || "https://picsum.photos/400/300",
+              image:
+                b.studio?.studio_media
+                  ?.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]
+                  ?.media_url ||
+                "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop",
               status:
                 b.status === "pending"
                   ? isUnpaid
                     ? "Awaiting Payment"
                     : "Paid - Waiting for Confirmation"
-                  : b.status === "confirmed"
-                    ? "Confirmed"
-                    : b.status === "checked_in"
-                      ? "In Progress"
-                      : b.status === "cancelled"
-                        ? "Declined"
-                        : b.status,
+                  : b.status === "pending_relocation"
+                    ? "Relocation Request"
+                    : b.status === "confirmed"
+                      ? "Confirmed"
+                      : b.status === "checked_in"
+                        ? "In Progress"
+                        : b.status === "cancelled"
+                          ? "Declined"
+                          : b.status,
               type: isVenue ? "Venue Booking" : "Studio Booking",
               isCancelled: b.status === "cancelled",
-              action: "Details", // No confirmation needed - payment auto-confirms
+              action: b.status === "pending_relocation" ? "Awaiting musician response" : "Details", // No confirmation needed - payment auto-confirms
+              raw_status: b.status,
               duration_hours: b.hours, // Use stored column
               base_rate: b.base_rate,
               total_cost: b.final_price, // Use stored column
@@ -242,9 +440,14 @@ serve(async (req: Request) => {
               payment_amount: b.payment_amount || b.final_price,
               payment_type: b.payment_type || null,
               remaining_balance: b.remaining_balance || 0,
+              relocation_requested_at: b.relocation_requested_at,
+              relocation_expires_at: b.relocation_expires_at,
+              relocation_proposed_date: b.relocation_proposed_date,
+              relocation_proposed_start_time: b.relocation_proposed_start_time,
+              relocation_proposed_end_time: b.relocation_proposed_end_time,
             };
 
-            if (b.status === "pending") {
+            if (b.status === "pending" || b.status === "pending_relocation") {
               // @ts-ignore
               categorized.Pending.push(item);
             } else if (b.status === "confirmed") {
@@ -252,6 +455,10 @@ serve(async (req: Request) => {
                 // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
                 // @ts-ignore
                 categorized.Review.push({ ...item, status: "Completed" });
+              } else if (now >= bookingDate && now <= endDate) {
+                // AUTO-ONGOING: If current time is within the booking window, treat as In Progress
+                // @ts-ignore
+                categorized.Ongoing.push({ ...item, status: "In Progress" });
               } else {
                 // @ts-ignore
                 categorized.Upcoming.push(item);
@@ -284,7 +491,7 @@ serve(async (req: Request) => {
         const { data: gigApps, error: gigError } = await supabaseClient
           .from("gig_applications")
           .select(
-            "*, gig:gig_id(name, event_date, images, location), group:group_id(name, images)",
+            "*, gig:gig_id(name, event_date, location, organizer:organizer_id(avatar_url), gig_media(media_url, sort_order)), group:group_id(name)",
           )
           .eq("applicant_id", userId)
           .order("created_at", { ascending: false });
@@ -318,7 +525,12 @@ serve(async (req: Request) => {
             start_time: gig?.event_date, // Add for consistency
             name: gig?.name || "Unknown Gig",
             date: dateStr,
-            image: gig?.images?.[0] || "https://picsum.photos/400/300",
+            image:
+              gig?.gig_media
+                ?.sort((a: any, b: any) => a.sort_order - b.sort_order)[0]
+                ?.media_url ||
+              gig?.organizer?.avatar_url ||
+              "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
             status:
               g.status === "pending"
                 ? "Applied"
@@ -367,6 +579,62 @@ serve(async (req: Request) => {
             // Declined applications - skip from main view
           }
         });
+
+        // Leader confirmation queue: applications submitted by members to leader-owned groups
+        const { data: leaderPendingApps, error: leaderPendingError } = await supabaseClient
+          .from("gig_applications")
+          .select(
+            "*, gig:gig_id(name, event_date, location), group:group_id(id, name, group_type, owner_id), submitter:submitted_by_user_id(full_name, avatar_url)",
+          )
+          .eq("status", "pending")
+          .eq("leader_approval_status", "pending")
+          .neq("submitted_by_user_id", userId)
+          .order("created_at", { ascending: false });
+
+        if (leaderPendingError) {
+          console.log("Error fetching leader pending apps:", leaderPendingError);
+        }
+
+        // @ts-ignore
+        leaderPendingApps?.forEach((app: any) => {
+          if (app.group?.owner_id !== userId) return;
+
+          const gig = app.gig;
+          const dateStr = gig?.event_date || app.created_at?.split("T")[0] || "TBA";
+          const performerName = app.group?.name || "Group";
+          const submitterName = app.submitter?.full_name || "Group Member";
+
+          const item = {
+            id: app.id,
+            type_id: "gig_application",
+            leader_approval_required: true,
+            gig_id: app.gig_id,
+            group_id: app.group_id,
+            applicant_id: app.applicant_id,
+            submitted_by_user_id: app.submitted_by_user_id,
+            performer: performerName,
+            customer_name: submitterName,
+            raw_date: dateStr,
+            start_time: gig?.event_date,
+            name: gig?.name || "Unknown Gig",
+            date: dateStr,
+            image:
+              app.submitter?.avatar_url ||
+              "https://picsum.photos/400/300",
+            status: "Awaiting Your Approval",
+            type: app.group?.group_type === "duo" ? "Duo Application" : "Group Application",
+            isCancelled: false,
+            action: "Review",
+            location: gig?.location,
+            pitch_message: app.pitch_message,
+            video_url: app.video_url,
+            cv_url: app.cv_url,
+            created_at: app.created_at,
+          };
+
+          // @ts-ignore
+          categorized.Pending.push(item);
+        });
       }
 
       // D. For Venue Owners: Fetch accepted applications for their gigs
@@ -374,7 +642,7 @@ serve(async (req: Request) => {
         // First get their gigs
         const { data: gigs } = await supabaseClient
           .from("gigs")
-          .select("id, name, event_date, images, location")
+          .select("id, name, event_date, location")
           .eq("organizer_id", userId);
 
         const gigIds = gigs?.map((g: any) => g.id) || [];
@@ -386,11 +654,12 @@ serve(async (req: Request) => {
               `
                             *,
                             applicant:applicant_id(full_name, avatar_url),
-                            group:group_id(name, images, members)
+                            group:group_id(name)
                         `,
             )
             .in("gig_id", gigIds)
-            .in("status", ["accepted", "pending"])
+            .in("status", ["accepted", "pending", "rejected", "cancelled", "completed"])
+            .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
             .order("created_at", { ascending: false });
 
           if (appError) {
@@ -422,25 +691,28 @@ serve(async (req: Request) => {
               name: `${gig?.name || "Gig"} - ${performerName}`,
               date: dateStr,
               image:
-                app.group?.images?.[0] ||
                 app.applicant?.avatar_url ||
-                gig?.images?.[0] ||
                 "https://picsum.photos/400/300",
               status:
-                app.status === "pending" ? "Action Required" : "Confirmed",
+                app.status === "pending"
+                  ? "Action Required"
+                  : app.status === "accepted"
+                    ? "Confirmed"
+                    : app.status === "rejected" || app.status === "cancelled"
+                      ? "Fired"
+                      : "Completed",
               type: app.group_id ? "Group Application" : "Solo Application",
-              isCancelled: false,
+              isCancelled: app.status === "rejected" || app.status === "cancelled",
               action: app.status === "pending" ? "Confirm Now" : "View Details",
               location: gig?.location,
               performer: performerName,
               customer_name: performerName,
-              customer_avatar:
-                app.group?.images?.[0] || app.applicant?.avatar_url,
+              customer_avatar: app.applicant?.avatar_url,
               video_url: app.video_url,
               cv_url: app.cv_url, // Added CV URL
               note: app.note,
               pitch_message: app.pitch_message, // Added pitch message
-              group_members: app.group?.members || [], // Include group members for display
+              group_members: [], // Include group members for display
               reviewed_by_organizer: app.reviewed_by_organizer || false,
             };
 
@@ -448,7 +720,7 @@ serve(async (req: Request) => {
               // @ts-ignore
               categorized.Pending.push(item);
             } else if (app.status === "accepted") {
-              // Time-based categorization for accepted gigs
+              // Accepted musicians always go to Active Musicians (Upcoming/Ongoing), never to Completed
               if (eventDate) {
                 const eventStart = new Date(gig.event_date);
                 eventStart.setHours(0, 0, 0, 0);
@@ -460,14 +732,8 @@ serve(async (req: Request) => {
                     ...item,
                     status: "Happening Now",
                   });
-                } else if (now > eventDate) {
-                  // Gig has ended - show in Review if not yet reviewed
-                  if (!app.reviewed_by_organizer) {
-                    // @ts-ignore
-                    categorized.Review.push({ ...item, status: "Completed" });
-                  }
                 } else {
-                  // Gig is in the future
+                  // Future or past-date accepted musicians stay in Upcoming (Active Musicians)
                   // @ts-ignore
                   categorized.Upcoming.push(item);
                 }
@@ -476,9 +742,14 @@ serve(async (req: Request) => {
                 // @ts-ignore
                 categorized.Upcoming.push(item);
               }
-            } else {
+            } else if (app.status === "rejected" || app.status === "cancelled") {
+              // Fired musicians go to Review (Completed tab)
               // @ts-ignore
-              categorized.Upcoming.push(item);
+              categorized.Review.push({ ...item, status: "Fired" });
+            } else if (app.status === "completed") {
+              // Completed contracts go to Review (Completed tab) - can be renewed
+              // @ts-ignore
+              categorized.Review.push({ ...item, status: "Completed" });
             }
           });
         }
@@ -551,6 +822,161 @@ serve(async (req: Request) => {
         );
       }
 
+      slots = slots
+        .map((slot) => ({
+          start: normalizeTime(slot?.start).slice(0, 5),
+          end: normalizeTime(slot?.end).slice(0, 5),
+        }))
+        .filter((slot) => slot.start && slot.end);
+
+      if (slots.length === 0) {
+        return new Response(
+          JSON.stringify({
+            error: "At least one valid time slot is required.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const bookingDateStartUtc = toManilaDateTime(date, "00:00:00");
+      const nowUtc = new Date();
+
+      if (!bookingDateStartUtc) {
+        return new Response(
+          JSON.stringify({
+            error: "Invalid booking date.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const { date: todayManilaDate } = getManilaNowParts();
+      const todayManilaStartUtc = toManilaDateTime(todayManilaDate, "00:00:00");
+
+      if (!todayManilaStartUtc) {
+        return new Response(
+          JSON.stringify({
+            error: "Server time validation failed. Please try again.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 500,
+          },
+        );
+      }
+
+      const { data: studioSettingsData, error: studioSettingsError } = await supabaseClient
+        .from("studio_settings")
+        .select("lead_time_hours, booking_horizon_days, min_booking_duration_hours")
+        .eq("studio_id", studio_id)
+        .maybeSingle();
+
+      if (studioSettingsError) {
+        console.warn("⚠️ Could not load studio settings, using defaults:", studioSettingsError);
+      }
+
+      const leadTimeHours = Math.max(0, Number(studioSettingsData?.lead_time_hours ?? 24));
+      const bookingHorizonDays = Math.max(1, Number(studioSettingsData?.booking_horizon_days ?? 90));
+      const minBookingDurationHours = Math.max(
+        0,
+        Number(studioSettingsData?.min_booking_duration_hours ?? 0),
+      );
+
+      const dayDiff = Math.floor(
+        (bookingDateStartUtc.getTime() - todayManilaStartUtc.getTime()) /
+          (24 * 60 * 60 * 1000),
+      );
+
+      if (dayDiff < 0) {
+        return new Response(
+          JSON.stringify({
+            error: "Cannot create a booking in the past.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      if (dayDiff > bookingHorizonDays) {
+        return new Response(
+          JSON.stringify({
+            error: `Bookings can only be made up to ${bookingHorizonDays} day(s) in advance.`,
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const minAllowedStartUtc = new Date(
+        nowUtc.getTime() + leadTimeHours * 60 * 60 * 1000,
+      );
+
+      for (const slot of slots) {
+        const slotStartUtc = toManilaDateTime(date, slot.start);
+        const slotEndUtc = toManilaDateTime(date, slot.end);
+
+        if (!slotStartUtc || !slotEndUtc || slotEndUtc <= slotStartUtc) {
+          return new Response(
+            JSON.stringify({
+              error: `Invalid time slot: ${slot.start} - ${slot.end}.`,
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 400,
+            },
+          );
+        }
+
+        if (slotStartUtc < nowUtc) {
+          return new Response(
+            JSON.stringify({
+              error: "Cannot create a booking for a past time slot.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 409,
+            },
+          );
+        }
+
+        if (slotStartUtc < minAllowedStartUtc) {
+          return new Response(
+            JSON.stringify({
+              error: `This studio requires at least ${leadTimeHours} hour(s) advance booking.`,
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 409,
+            },
+          );
+        }
+
+        const durationHours =
+          (slotEndUtc.getTime() - slotStartUtc.getTime()) / (60 * 60 * 1000);
+
+        if (minBookingDurationHours > 0 && durationHours < minBookingDurationHours) {
+          return new Response(
+            JSON.stringify({
+              error: `Each booking slot must be at least ${minBookingDurationHours} hour(s).`,
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 409,
+            },
+          );
+        }
+      }
+
       // Check if user already has a pending booking for this studio ON THIS DATE (prevent spam)
       const { data: existingPendingBooking, error: existingError } =
         await supabaseClient
@@ -579,9 +1005,6 @@ serve(async (req: Request) => {
           },
         );
       }
-
-      // Convert slots to JSONB format for database function
-      const slotsJsonb = JSON.stringify(slots);
 
       // Use multi-slot availability check
       console.log("🔍 Checking multi-slot availability...");
@@ -858,38 +1281,57 @@ serve(async (req: Request) => {
         final_price: pricingData.final_price || finalBaseRate * finalHours,
       });
 
-      const { data, error } = await supabaseClient
+      const bookingInsertPayload: Record<string, any> = {
+        studio_id,
+        user_id,
+        booking_date: date,
+        start_time: overallStart,
+        end_time: overallEnd,
+        notes: notes || null,
+        status: "pending",
+        session_type: session_type || "rehearsal",
+        base_rate: finalBaseRate,
+        hours: finalHours,
+        subtotal: pricingData.subtotal || finalBaseRate * finalHours,
+        modifiers_applied: pricingData.modifiers || {},
+        final_price: pricingData.final_price || finalBaseRate * finalHours,
+      };
+
+      const { data: insertData, error: insertError } = await supabaseClient
         .from("studio_bookings")
-        .insert({
-          studio_id,
-          user_id,
-          booking_date: date,
-          start_time: overallStart, // Overall range for backwards compatibility
-          end_time: overallEnd,
-          time_slots: slots, // Detailed slots
-          notes: notes || null,
-          status: "pending", // Await owner approval
-          session_type: session_type || "rehearsal", // Default to rehearsal if not specified
-          // Store pricing details - use validated values
-          base_rate: finalBaseRate,
-          hours: finalHours,
-          subtotal: pricingData.subtotal || finalBaseRate * finalHours,
-          modifiers_applied: pricingData.modifiers || {},
-          final_price: pricingData.final_price || finalBaseRate * finalHours,
-        })
+        .insert(bookingInsertPayload)
         .select()
         .single();
 
-      if (error) {
-        console.error("❌ Insert error:", error);
-        throw error;
+      if (insertError) {
+        console.error("❌ Insert error:", insertError);
+        throw insertError;
+      }
+
+      const data = insertData;
+
+      const slotRows = slots.map((slot, index) => ({
+        booking_id: data.id,
+        start_time: slot.start,
+        end_time: slot.end,
+        sort_order: index,
+      }));
+
+      const { error: slotInsertError } = await supabaseAdmin
+        .from("studio_booking_slots")
+        .insert(slotRows);
+
+      if (slotInsertError) {
+        console.error("❌ Slot insert error:", slotInsertError);
+        await supabaseAdmin.from("studio_bookings").delete().eq("id", data.id);
+        throw slotInsertError;
       }
 
       // Notify studio owner of new booking request
       try {
         const { data: studioInfo } = await supabaseClient
           .from("studios")
-          .select("owner_id, name, images")
+          .select("owner_id, name")
           .eq("id", studio_id)
           .single();
 
@@ -899,7 +1341,7 @@ serve(async (req: Request) => {
             type: "info",
             title: "New Booking Request",
             message: `New booking request for ${studioInfo.name} on ${date}.`,
-            image: studioInfo.images?.[0] || null,
+            image: null,
             read: false,
             meta: {
               studio_id,
@@ -936,6 +1378,64 @@ serve(async (req: Request) => {
       if (type_id === "gig_application") table = "gig_applications";
 
       console.log("📝 Updating table:", table);
+
+      const attendanceIssueStatuses = ["late", "not_attending", "no_show"];
+      const isAttendanceIssue =
+        table === "studio_bookings" &&
+        attendanceIssueStatuses.includes(new_status);
+
+      if (isAttendanceIssue) {
+        const { data: bookingInfo } = await supabaseClient
+          .from("studio_bookings")
+          .select("id, user_id, studio_id, booking_date, start_time, studio:studios(name, owner_id)")
+          .eq("id", booking_id)
+          .single();
+
+        if (bookingInfo) {
+          const reporterId = params.userId || null;
+          const studioName = bookingInfo.studio?.name || "the studio";
+          const eventLabel =
+            new_status === "late"
+              ? "reported late"
+              : "reported not attending";
+
+          const recipients = [bookingInfo.user_id, bookingInfo.studio?.owner_id]
+            .filter(Boolean) as string[];
+
+          for (const recipientId of [...new Set(recipients)]) {
+            await insertNotificationIfMissing(supabaseAdmin, {
+              user_id: recipientId,
+              type: "warning",
+              title: new_status === "late" ? "Late Arrival Alert" : "Attendance Alert",
+              message:
+                new_status === "late"
+                  ? `A participant for the booking at ${studioName} on ${bookingInfo.booking_date} (${bookingInfo.start_time}) has reported they will be late.`
+                  : `A participant for the booking at ${studioName} on ${bookingInfo.booking_date} (${bookingInfo.start_time}) has reported they cannot attend.`,
+              image: null,
+              meta: {
+                booking_id: bookingInfo.id,
+                studio_id: bookingInfo.studio_id,
+                booking_date: bookingInfo.booking_date,
+                issue_status: new_status,
+                event_type: `booking_${new_status}`,
+                reported_by_user_id: reporterId,
+                reporter_event: eventLabel,
+              },
+            });
+          }
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: "Attendance notification sent.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
 
       const updateData: any = { status: new_status };
 
@@ -975,12 +1475,12 @@ serve(async (req: Request) => {
             // For Studio Bookings
             const { data: bookingInfo } = await supabaseClient
               .from("studio_bookings")
-              .select("user_id, studio:studios(name, images)")
+              .select("user_id, studio:studios(name)")
               .eq("id", booking_id)
               .single();
 
             if (bookingInfo) {
-              notificationImage = bookingInfo.studio?.images?.[0] || null;
+              notificationImage = null;
               if (new_status === "cancelled") {
                 targetUserId = bookingInfo.user_id;
                 notificationTitle = "Booking Declined";
@@ -999,12 +1499,12 @@ serve(async (req: Request) => {
             // For Gig Applications
             const { data: gigInfo } = await supabaseClient
               .from("gig_applications")
-              .select("applicant_id, gig:gigs(name, images)")
+              .select("applicant_id, gig:gigs(name)")
               .eq("id", booking_id)
               .single();
 
             if (gigInfo) {
-              notificationImage = gigInfo.gig?.images?.[0] || null;
+              notificationImage = null;
               if (new_status === "rejected") {
                 targetUserId = gigInfo.applicant_id;
                 notificationTitle = "Application Declined";

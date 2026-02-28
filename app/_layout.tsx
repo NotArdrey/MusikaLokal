@@ -1,10 +1,10 @@
 import {
-  Poppins_300Light,
-  Poppins_400Regular,
-  Poppins_500Medium,
-  Poppins_600SemiBold,
-  Poppins_700Bold,
-  useFonts,
+    Poppins_300Light,
+    Poppins_400Regular,
+    Poppins_500Medium,
+    Poppins_600SemiBold,
+    Poppins_700Bold,
+    useFonts,
 } from "@expo-google-fonts/poppins";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import * as Linking from "expo-linking";
@@ -53,10 +53,14 @@ export default function RootLayout() {
 
 function RootContent() {
   const { colors } = useTheme();
-  const { session, loading, userId, userRole, subscriptionRequired, subscriptionChecked } =
+  const {
+    session,
+    loading,
+    subscriptionRequired,
+    subscriptionChecked,
+  } =
     useAuth();
   const segments = useSegments();
-  const pathname = segments.join("/");
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
 
   // Handle subscription gate for owners
@@ -76,13 +80,16 @@ function RootContent() {
         "privacy_policy",
         "terms_and_conditions",
       ];
+      const segmentStrings = segments.map((segment) => String(segment));
       // segments array can be empty on initial load or root
-      const currentScreen = segments.length > 0 ? segments[segments.length - 1] : "index";
+      const currentScreen = segmentStrings.length > 0 ? segmentStrings[segmentStrings.length - 1] : "index";
 
       console.log(`🔒 Layout Check: Screen=${currentScreen}, Segments=${JSON.stringify(segments)}, SubRequired=${subscriptionRequired}`);
 
       // Check if any part of the path is in allowed screens (better for nested routes)
-      const isAllowed = allowedScreens.some(screen => segments.includes(screen)) || allowedScreens.includes(currentScreen);
+      const isAllowed =
+        allowedScreens.some((screen) => segmentStrings.includes(screen)) ||
+        allowedScreens.includes(currentScreen);
 
       if (!isAllowed) {
         console.log(

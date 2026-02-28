@@ -1,17 +1,25 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function TermsAndConditionsScreen() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title="Terms and Conditions" />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: 190 + insets.bottom },
+        ]}
+      >
         <View style={styles.contentContainer}>
           <Text style={[styles.headerText, { color: colors.text }]}>
             Welcome to Musika Lokal!
@@ -99,7 +107,7 @@ export default function TermsAndConditionsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { paddingBottom: 120, paddingHorizontal: 24 },
+  scrollContent: { paddingBottom: 24, paddingHorizontal: 24 },
   contentContainer: { paddingTop: 24 },
   headerText: { fontSize: 20, fontWeight: '700', marginBottom: 12, fontFamily: 'Poppins_700Bold' },
   subHeader: { fontSize: 16, fontWeight: '600', marginTop: 20, marginBottom: 8, color: '#333' },

@@ -1,8 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    Image,
     Platform,
     Pressable,
     ScrollView,
@@ -10,11 +9,14 @@ import {
     StyleSheet,
     Text,
     TouchableOpacity,
-    useWindowDimensions,
     View,
 } from "react-native";
+import { PH_MUSIC_GROUP_TYPES } from "../constants/groupTypes";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import CachedImage from "./CachedImage";
+
+const debugLog = (..._args: unknown[]) => { };
 
 // Conditionally import PagerView only on native platforms
 let PagerView: any = null;
@@ -30,6 +32,7 @@ interface ListingCardProps {
   variant?: "horizontal" | "vertical";
   style?: any;
   hasGroups?: boolean;
+  showGigSummary?: boolean;
 }
 
 const ListingCard: React.FC<ListingCardProps> = ({
@@ -40,27 +43,37 @@ const ListingCard: React.FC<ListingCardProps> = ({
   variant = "horizontal",
   style,
   hasGroups,
+  showGigSummary = true,
 }) => {
   const { colors, isDark } = useTheme();
   const { userRole, userId } = useAuth(); // To avoid showing warning to owners
-  const { width } = useWindowDimensions();
   const [isLiked, setIsLiked] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
+  const horizontalWebScrollRef = useRef<ScrollView | null>(null);
+  const verticalWebScrollRef = useRef<ScrollView | null>(null);
+  const horizontalPagerRef = useRef<any>(null);
+  const verticalPagerRef = useRef<any>(null);
 
   // Check if current user can invite (ONLY venue-owner viewing a musician/Group)
-  const canInvite =
-    userRole === "venue-owner" &&
-    (item.type === "Group" || item.type === "Artist");
+  const canInvite = useMemo(
+    () =>
+      userRole === "venue-owner" &&
+      (item.type === "Group" || item.type === "Artist"),
+    [item.type, userRole],
+  );
 
   // Group Warning Logic
-  const showGroupWarning =
-    item.type === "Gig" &&
-    item.requirements?.musician_type === "group" &&
-    hasGroups === false &&
-    userRole === "musician";
+  const showGroupWarning = useMemo(
+    () =>
+      item.type === "Gig" &&
+      item.requirements?.musician_type === "group" &&
+      hasGroups === false &&
+      userRole === "musician",
+    [hasGroups, item.requirements?.musician_type, item.type, userRole],
+  );
 
   // Gig Application Deadline Logic (24hrs before event)
-  const getGigDeadlineInfo = () => {
+  const gigDeadlineInfo = useMemo(() => {
     if (item.type !== "Gig" || !item.event_date) return null;
     const eventDate = new Date(item.event_date);
     const eventStartTime = item.requirements?.event_start_time;
@@ -82,77 +95,90 @@ const ListingCard: React.FC<ListingCardProps> = ({
       isUrgent: hoursUntilDeadline > 0 && hoursUntilDeadline < 48,
       hoursLeft: Math.max(0, Math.floor(hoursUntilDeadline)),
     };
-  };
-  const gigDeadlineInfo = getGigDeadlineInfo();
+  }, [item.event_date, item.requirements?.event_start_time, item.type]);
 
   // Determine "Subtitle" (Location or Genre)
-  let subtitle = item.location || item.address;
-  if ((item.type === "Group" || item.type === "Artist") && item.genre) {
-    subtitle = item.genre;
-  }
+  const subtitle = useMemo(() => {
+    const baseSubtitle = item.location || item.address;
+    if ((item.type === "Group" || item.type === "Artist") && item.genre) {
+      return item.genre;
+    }
+    return baseSubtitle;
+  }, [item.address, item.genre, item.location, item.type]);
 
   // Determine "Price/Rate" Label - handle dynamic pricing for studios
   // Skip pricing for Groups
-  let priceLabel = "";
-  let secondaryPriceLabel = "";
-  const isGroup = item.type === "Group";
+  const { priceLabel, secondaryPriceLabel, isGroup } = useMemo(() => {
+    let nextPriceLabel = "";
+    let nextSecondaryPriceLabel = "";
+    const nextIsGroup = item.type === "Group";
 
-  // Check for dual pricing (Rehearsal + Recording) - skip for Groups
-  if (isGroup) {
-    // No pricing for Groups
-    priceLabel = "";
-  } else if (
-    item.type === "Studio" &&
-    item.rehearsal_rate &&
-    item.recording_rate &&
-    item.rehearsal_rate !== "0" &&
-    item.recording_rate !== "0"
-  ) {
-    priceLabel = `₱${parseInt(item.rehearsal_rate).toLocaleString()} / hr (Rehearsal)`;
-    secondaryPriceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / song (Recording)`;
-  } else if (item.hourly_rate && item.hourly_rate !== "0") {
-    priceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
-  } else if (item.rehearsal_rate && item.rehearsal_rate !== "0") {
-    priceLabel = `₱${parseInt(item.rehearsal_rate).toLocaleString()} / hr`;
-  } else if (item.recording_rate && item.recording_rate !== "0") {
-    priceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / song`;
-  } else if (item.budget && item.budget !== "0") {
-    priceLabel = `₱${parseInt(item.budget).toLocaleString()}`;
-  } else if (item.rate && item.rate !== "0") {
-    if (typeof item.rate === "string" && item.rate.includes("/")) {
-      priceLabel = `₱${item.rate}`;
+    if (nextIsGroup) {
+      nextPriceLabel = "";
+    } else if (
+      item.type === "Studio" &&
+      item.rehearsal_rate &&
+      item.recording_rate &&
+      item.rehearsal_rate !== "0" &&
+      item.recording_rate !== "0"
+    ) {
+      nextPriceLabel = `₱${parseInt(item.rehearsal_rate).toLocaleString()} / hr (Rehearsal)`;
+      nextSecondaryPriceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / song (Recording)`;
+    } else if (item.hourly_rate && item.hourly_rate !== "0") {
+      nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
+    } else if (item.rehearsal_rate && item.rehearsal_rate !== "0") {
+      nextPriceLabel = `₱${parseInt(item.rehearsal_rate).toLocaleString()} / hr`;
+    } else if (item.recording_rate && item.recording_rate !== "0") {
+      nextPriceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / song`;
+    } else if (item.budget && item.budget !== "0") {
+      nextPriceLabel = `₱${parseInt(item.budget).toLocaleString()}`;
+    } else if (item.rate && item.rate !== "0") {
+      if (typeof item.rate === "string" && item.rate.includes("/")) {
+        nextPriceLabel = `₱${item.rate}`;
+      } else {
+        nextPriceLabel = `₱${parseInt(item.rate).toLocaleString()}`;
+      }
     } else {
-      priceLabel = `₱${parseInt(item.rate).toLocaleString()}`;
+      nextPriceLabel = "Inquire for rates";
     }
-  } else {
-    priceLabel = "Inquire for rates"; // Fallback
-  }
+
+    return {
+      priceLabel: nextPriceLabel,
+      secondaryPriceLabel: nextSecondaryPriceLabel,
+      isGroup: nextIsGroup,
+    };
+  }, [item]);
 
   // Determine Badge Color & Label
-  let badgeLabel = item.type;
-  let badgeColor = "#7C3AED"; // Default Purple (Studio)
+  const { badgeLabel, badgeColor } = useMemo(() => {
+    let nextBadgeLabel = item.type;
+    let nextBadgeColor = "#7C3AED";
 
-  const normalizedType = item.type || (item.hourly_rate ? "Studio" : "Artist");
+    const normalizedType = item.type || (item.hourly_rate ? "Studio" : "Artist");
 
-  if (normalizedType === "Studio") {
-    badgeLabel =
-      item.studio_type === "Both"
-        ? "Rehearsal & Recording"
-        : item.studio_type || "Studio";
-    badgeColor = "#7C3AED"; // Purple
-  } else if (normalizedType === "Gig") {
-    badgeLabel = "Gig";
-    badgeColor = "#10B981"; // Emerald
-  } else if (normalizedType === "Group") {
-    badgeLabel = "Group";
-    badgeColor = "#3B82F6"; // Blue
-  } else if (normalizedType === "Artist") {
-    badgeLabel = "Artist";
-    badgeColor = "#EC4899"; // Pink
-  } else {
-    badgeLabel = normalizedType;
-    badgeColor = "#7C3AED";
-  }
+    if (normalizedType === "Studio") {
+      nextBadgeLabel =
+        item.studio_type === "Both"
+          ? "Rehearsal & Recording"
+          : item.studio_type || "Studio";
+      nextBadgeColor = "#7C3AED";
+    } else if (normalizedType === "Gig") {
+      nextBadgeLabel = "Gig";
+      nextBadgeColor = "#10B981";
+    } else if (normalizedType === "Group") {
+      const specificType = PH_MUSIC_GROUP_TYPES.find(t => t.id === item.group_type);
+      nextBadgeLabel = specificType ? specificType.label : "Group";
+      nextBadgeColor = "#3B82F6";
+    } else if (normalizedType === "Artist") {
+      nextBadgeLabel = "Artist";
+      nextBadgeColor = "#EC4899";
+    } else {
+      nextBadgeLabel = normalizedType;
+      nextBadgeColor = "#7C3AED";
+    }
+
+    return { badgeLabel: nextBadgeLabel, badgeColor: nextBadgeColor };
+  }, [item.hourly_rate, item.studio_type, item.type, item.group_type]);
 
   // Shared actions
   const handleShare = async () => {
@@ -161,32 +187,61 @@ const ListingCard: React.FC<ListingCardProps> = ({
         message: `Check out ${item.name} on MusikaLokal!`,
       });
     } catch (error) {
-      console.log("Error sharing:", error);
+      debugLog("Error sharing:", error);
     }
   };
 
-  const toggleLike = () => {
-    setIsLiked(!isLiked);
-  };
+  const toggleLike = useCallback(() => {
+    setIsLiked((prev) => !prev);
+  }, []);
 
-  const handleInviteAction = (e: any) => {
-    e.stopPropagation();
-    onInvite?.(item);
-  };
+  const handleInviteAction = useCallback(
+    (e: any) => {
+      e.stopPropagation();
+      onInvite?.(item);
+    },
+    [item, onInvite],
+  );
 
-  const handleChatAction = (e: any) => {
-    e.stopPropagation();
-    onChat?.(item);
-  };
+  const handleChatAction = useCallback(
+    (e: any) => {
+      e.stopPropagation();
+      onChat?.(item);
+    },
+    [item, onChat],
+  );
 
   // Determine if chat button should be shown (not for own items)
-  const canChat =
-    onChat && item.owner_id !== userId && item.organizer_id !== userId;
+  const canChat = useMemo(
+    () => onChat && item.owner_id !== userId && item.organizer_id !== userId,
+    [item.organizer_id, item.owner_id, onChat, userId],
+  );
+
+  const shouldShowGigSummary = useMemo(
+    () =>
+      showGigSummary &&
+      (item.type === "Group" || item.type === "Artist") &&
+      item.show_gig_statuses !== false,
+    [item.show_gig_statuses, item.type, showGigSummary],
+  );
+
+  const showOpenApplicationsBadge = useMemo(
+    () => item.type === "Group" && item.open_group_applications !== false,
+    [item.open_group_applications, item.type],
+  );
+
+  const gigSummary = useMemo(
+    () => [
+      { label: "Active", value: item.active_gigs || 0, color: "#10B981" },
+      { label: "Upcoming", value: item.upcoming_gigs || 0, color: "#3B82F6" },
+      { label: "Done", value: item.done_gigs || 0, color: "#6B7280" },
+    ],
+    [item.active_gigs, item.done_gigs, item.upcoming_gigs],
+  );
 
   // Robust Image Logic
-  const getImages = () => {
+  const images = useMemo(() => {
     if (item.images && Array.isArray(item.images) && item.images.length > 0) {
-      // Filter out empty strings
       return item.images.filter(
         (img: any) => typeof img === "string" && img.length > 0,
       );
@@ -195,10 +250,51 @@ const ListingCard: React.FC<ListingCardProps> = ({
       return [item.image];
     }
     return [];
-  };
-
-  const images = getImages();
+  }, [item.image, item.images]);
   const hasMultipleImages = images.length > 1;
+  const imageCacheVersion = useMemo(
+    () => item.updated_at || item.created_at || item.id,
+    [item.created_at, item.id, item.updated_at],
+  );
+
+  useEffect(() => {
+    if (!hasMultipleImages) {
+      setPageIndex(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setPageIndex((prev) => {
+        const next = (prev + 1) % images.length;
+
+        if (variant === "horizontal") {
+          if (Platform.OS === "web") {
+            horizontalWebScrollRef.current?.scrollTo({
+              x: next * 280,
+              y: 0,
+              animated: true,
+            });
+          } else {
+            horizontalPagerRef.current?.setPage?.(next);
+          }
+        } else {
+          if (Platform.OS === "web") {
+            verticalWebScrollRef.current?.scrollTo({
+              x: next * 320,
+              y: 0,
+              animated: true,
+            });
+          } else {
+            verticalPagerRef.current?.setPage?.(next);
+          }
+        }
+
+        return next;
+      });
+    }, 3200);
+
+    return () => clearInterval(interval);
+  }, [hasMultipleImages, images.length, variant]);
 
   // --- RENDER VARIANTS ---
 
@@ -231,10 +327,16 @@ const ListingCard: React.FC<ListingCardProps> = ({
             <View style={StyleSheet.absoluteFillObject}>
               {Platform.OS === "web" ? (
                 <ScrollView
+                  ref={horizontalWebScrollRef}
                   horizontal
                   pagingEnabled
                   showsHorizontalScrollIndicator={false}
                   style={StyleSheet.absoluteFillObject}
+                  nestedScrollEnabled
+                  directionalLockEnabled
+                  scrollEnabled
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
                   onMomentumScrollEnd={(e) => {
                     const newIndex = Math.round(
                       e.nativeEvent.contentOffset.x / cardWidth,
@@ -247,28 +349,34 @@ const ListingCard: React.FC<ListingCardProps> = ({
                       key={index}
                       style={[styles.pagerPage, { width: cardWidth }]}
                     >
-                      <Image
-                        source={{ uri: img }}
+                      <CachedImage
+                        uri={img}
                         style={StyleSheet.absoluteFillObject}
-                        resizeMode="cover"
+                        width={cardWidth}
+                        height={cardHeight}
+                        cacheVersion={imageCacheVersion}
                       />
                     </View>
                   ))}
                 </ScrollView>
               ) : (
                 <PagerView
+                  ref={horizontalPagerRef}
                   style={StyleSheet.absoluteFillObject}
                   initialPage={0}
+                  scrollEnabled
                   onPageSelected={(e: any) =>
                     setPageIndex(e.nativeEvent.position)
                   }
                 >
                   {images.map((img: string, index: number) => (
                     <View key={index} style={styles.pagerPage}>
-                      <Image
-                        source={{ uri: img }}
+                      <CachedImage
+                        uri={img}
                         style={StyleSheet.absoluteFillObject}
-                        resizeMode="cover"
+                        width={cardWidth}
+                        height={cardHeight}
+                        cacheVersion={imageCacheVersion}
                       />
                     </View>
                   ))}
@@ -276,10 +384,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
               )}
             </View>
           ) : (
-            <Image
-              source={images.length > 0 ? { uri: images[0] } : undefined}
+            <CachedImage
+              uri={images.length > 0 ? images[0] : undefined}
               style={StyleSheet.absoluteFillObject}
-              resizeMode="cover"
+              width={cardWidth}
+              height={cardHeight}
+              cacheVersion={imageCacheVersion}
             />
           )}
 
@@ -345,7 +455,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
             {/* Invite Button Glass */}
             {canInvite && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[
                   styles.glassIconBtn,
                   { marginRight: 8, backgroundColor: colors.primary },
@@ -358,7 +468,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
             {/* Chat Button Glass */}
             {canChat && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.glassIconBtn, { marginRight: 8 }]}
                 onPress={handleChatAction}
               >
@@ -367,7 +477,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
             )}
 
             {/* Like Button Glass */}
-            <TouchableOpacity style={styles.glassIconBtn} onPress={toggleLike}>
+            <TouchableOpacity activeOpacity={1} style={styles.glassIconBtn} onPress={toggleLike}>
               <Ionicons
                 name={isLiked ? "heart" : "heart-outline"}
                 size={20}
@@ -468,11 +578,27 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   {item.requirements.slots.band?.needed > 0 && (
                     <View style={[styles.tagBadge, { backgroundColor: "#3B82F6" }]}>
                       <Text style={styles.tagText}>
-                        {item.requirements.slots.band.needed} Band{item.requirements.slots.band.needed > 1 ? "s" : ""}
+                        {item.requirements.slots.band.needed} Group{item.requirements.slots.band.needed > 1 ? "s" : ""}
                       </Text>
                     </View>
                   )}
+                  {/* Preferred Group Types */}
+                  {item.requirements.slots.band?.preferred_group_types?.length > 0 &&
+                    item.requirements.slots.band.preferred_group_types.map((typeId: string) => {
+                      const type = PH_MUSIC_GROUP_TYPES.find(t => t.id === typeId);
+                      return type ? (
+                        <View key={typeId} style={[styles.tagBadge, { backgroundColor: "#6366F1" }]}>
+                          <Text style={styles.tagText}>{type.label}</Text>
+                        </View>
+                      ) : null;
+                    })
+                  }
                 </>
+              )}
+              {showOpenApplicationsBadge && (
+                <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
+                  <Text style={styles.tagText}>Open Applications</Text>
+                </View>
               )}
               {/* Total Slots Badge for Gigs without detailed slots */}
               {item.type === "Gig" && item.requirements?.total_slots_needed > 0 && !item.requirements?.slots && (
@@ -507,6 +633,24 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </Text>
             </View>
 
+            {shouldShowGigSummary && (
+              <View style={styles.gigSummaryRowImmersive}>
+                {gigSummary.map((summary) => (
+                  <View
+                    key={summary.label}
+                    style={[
+                      styles.gigSummaryChip,
+                      { backgroundColor: `${summary.color}CC` },
+                    ]}
+                  >
+                    <Text style={styles.gigSummaryChipText}>
+                      {summary.label}: {summary.value}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
             {/* Instruments/Equipment Display for Studios/Venues */}
             {item.instruments &&
               Array.isArray(item.instruments) &&
@@ -516,10 +660,14 @@ const ListingCard: React.FC<ListingCardProps> = ({
                     .slice(0, 4)
                     .map(
                       (inst: { name: string; image: string }, idx: number) => (
-                        <Image
+                        <CachedImage
                           key={inst.name + idx}
-                          source={{ uri: inst.image }}
+                          uri={inst.image}
                           style={styles.instrumentBadge}
+                          width={48}
+                          height={48}
+                          quality={68}
+                          cacheVersion={imageCacheVersion}
                         />
                       ),
                     )}
@@ -579,10 +727,16 @@ const ListingCard: React.FC<ListingCardProps> = ({
             <View style={{ flex: 1 }}>
               {Platform.OS === "web" ? (
                 <ScrollView
+                  ref={verticalWebScrollRef}
                   horizontal
                   pagingEnabled
                   showsHorizontalScrollIndicator={false}
                   style={{ flex: 1 }}
+                  nestedScrollEnabled
+                  directionalLockEnabled
+                  scrollEnabled
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
                   onMomentumScrollEnd={(e) => {
                     const containerWidth =
                       e.nativeEvent.layoutMeasurement.width;
@@ -597,28 +751,34 @@ const ListingCard: React.FC<ListingCardProps> = ({
                       key={index}
                       style={[styles.pagerPage, { width: "100%" }]}
                     >
-                      <Image
-                        source={{ uri: img }}
+                      <CachedImage
+                        uri={img}
                         style={styles.image}
-                        resizeMode="cover"
+                        width={640}
+                        height={360}
+                        cacheVersion={imageCacheVersion}
                       />
                     </View>
                   ))}
                 </ScrollView>
               ) : (
                 <PagerView
+                  ref={verticalPagerRef}
                   style={{ flex: 1 }}
                   initialPage={0}
+                  scrollEnabled
                   onPageSelected={(e: any) =>
                     setPageIndex(e.nativeEvent.position)
                   }
                 >
                   {images.map((img: string, index: number) => (
                     <View key={index} style={styles.pagerPage}>
-                      <Image
-                        source={{ uri: img }}
+                      <CachedImage
+                        uri={img}
                         style={styles.image}
-                        resizeMode="cover"
+                        width={640}
+                        height={360}
+                        cacheVersion={imageCacheVersion}
                       />
                     </View>
                   ))}
@@ -641,10 +801,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </View>
             </View>
           ) : (
-            <Image
-              source={images.length > 0 ? { uri: images[0] } : undefined}
+            <CachedImage
+              uri={images.length > 0 ? images[0] : undefined}
               style={styles.image}
-              resizeMode="cover"
+              width={640}
+              height={360}
+              cacheVersion={imageCacheVersion}
             />
           )}
 
@@ -760,7 +922,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
             <View style={{ flexDirection: "row", gap: 8 }}>
               {/* Invite Button Vertical */}
               {canInvite && (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[styles.iconBtn, { backgroundColor: colors.primary }]}
                   onPress={handleInviteAction}
                 >
@@ -769,14 +931,14 @@ const ListingCard: React.FC<ListingCardProps> = ({
               )}
               {/* Chat Button Vertical */}
               {canChat && (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[styles.iconBtn, { backgroundColor: colors.primary }]}
                   onPress={handleChatAction}
                 >
                   <Ionicons name="chatbubble-ellipses" size={18} color="#FFF" />
                 </TouchableOpacity>
               )}
-              <TouchableOpacity style={styles.iconBtn} onPress={toggleLike}>
+              <TouchableOpacity activeOpacity={1} style={styles.iconBtn} onPress={toggleLike}>
                 <Ionicons
                   name={isLiked ? "heart" : "heart-outline"}
                   size={20}
@@ -850,6 +1012,21 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   </Text>
                 </View>
               )}
+            {showOpenApplicationsBadge && (
+              <View
+                style={[
+                  styles.tagBadge,
+                  {
+                    backgroundColor: "#10B981",
+                    paddingVertical: 3,
+                    paddingHorizontal: 8,
+                    marginBottom: 0,
+                  },
+                ]}
+              >
+                <Text style={[styles.tagText, { fontSize: 10 }]}>Open Applications</Text>
+              </View>
+            )}
           </View>
 
           <View>
@@ -879,6 +1056,29 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 {subtitle}
               </Text>
             </View>
+
+            {shouldShowGigSummary && (
+              <View style={styles.gigSummaryRowVertical}>
+                {gigSummary.map((summary) => (
+                  <View
+                    key={summary.label}
+                    style={[
+                      styles.gigSummaryChip,
+                      { backgroundColor: `${summary.color}22` },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.gigSummaryChipText,
+                        { color: summary.color, textShadowColor: "transparent" },
+                      ]}
+                    >
+                      {summary.label}: {summary.value}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           {/* Hide entire price row for Groups */}
@@ -934,10 +1134,14 @@ const ListingCard: React.FC<ListingCardProps> = ({
                 {item.instruments
                   .slice(0, 4)
                   .map((inst: { name: string; image: string }, idx: number) => (
-                    <Image
+                    <CachedImage
                       key={inst.name + idx}
-                      source={{ uri: inst.image }}
+                      uri={inst.image}
                       style={styles.instrumentBadgeSmall}
+                      width={36}
+                      height={36}
+                      quality={68}
+                      cacheVersion={imageCacheVersion}
                     />
                   ))}
                 {item.instruments.length > 4 && (
@@ -1245,6 +1449,32 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: "Poppins_600SemiBold",
   },
+  gigSummaryRowImmersive: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  gigSummaryRowVertical: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  gigSummaryChip: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  gigSummaryChipText: {
+    color: "#FFFFFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 10,
+    textShadowColor: "rgba(0,0,0,0.25)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
 });
 
-export default ListingCard;
+export default memo(ListingCard);
+

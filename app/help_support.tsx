@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { LayoutAnimation, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -14,6 +15,7 @@ if (
 
 export default function HelpSupportScreen() {
     const { colors, isDark } = useTheme();
+    const insets = useSafeAreaInsets();
     const [expandedId, setExpandedId] = useState<number | null>(null);
 
     const toggleExpand = (id: number) => {
@@ -48,20 +50,26 @@ export default function HelpSupportScreen() {
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <Header title="Help & Support" />
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+            <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={[
+                    styles.scrollContent,
+                    { paddingBottom: 190 + insets.bottom },
+                ]}
+            >
 
                 {/* Contact Support Section */}
                 <View style={styles.contactSection}>
                     <Text style={[styles.contactTitle, { color: colors.text }]}>Contact Us</Text>
                     <View style={styles.contactButtons}>
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             style={[styles.contactButton, { backgroundColor: colors.card, borderColor: colors.border }]}
                             onPress={() => Linking.openURL('mailto:support@musikalokal.com')}
                         >
                             <Ionicons name="mail-outline" size={28} color={colors.primary} />
                             <Text style={[styles.contactButtonText, { color: colors.text }]}>Email</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             style={[styles.contactButton, { backgroundColor: colors.card, borderColor: colors.border }]}
                             onPress={() => Linking.openURL('tel:+1234567890')}
                         >
@@ -79,7 +87,7 @@ export default function HelpSupportScreen() {
                         const isExpanded = expandedId === faq.id;
                         return (
                             <View key={faq.id} style={styles.faqItem}>
-                                <TouchableOpacity
+                                <TouchableOpacity activeOpacity={1}
                                     onPress={() => toggleExpand(faq.id)}
                                     style={[
                                         styles.faqHeader,
@@ -112,10 +120,10 @@ export default function HelpSupportScreen() {
 
                 {/* Links */}
                 <View style={styles.linksSection}>
-                    <TouchableOpacity style={[styles.linkItem, { borderColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
+                    <TouchableOpacity activeOpacity={1} style={[styles.linkItem, { borderColor: isDark ? '#1F2937' : '#F3F4F6' }]}>
                         <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>Terms of Service</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.linkItemLast}>
+                    <TouchableOpacity activeOpacity={1} style={styles.linkItemLast}>
                         <Text style={{ fontFamily: 'Poppins_500Medium', color: colors.primary }}>Privacy Policy</Text>
                     </TouchableOpacity>
                 </View>
@@ -134,7 +142,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     scrollContent: {
-        paddingBottom: 100,
+        paddingBottom: 24,
     },
     contactSection: {
         padding: 24,

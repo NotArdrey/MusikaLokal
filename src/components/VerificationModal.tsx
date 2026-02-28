@@ -1,8 +1,10 @@
-import { Ionicons } from '@expo/vector-icons';
+﻿import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect } from 'react';
 import { ActivityIndicator, Modal, PermissionsAndroid, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../context/ThemeContext';
+
+const debugLog = (..._args: unknown[]) => {};
 
 interface VerificationModalProps {
     visible: boolean;
@@ -27,7 +29,7 @@ export default function VerificationModal({ visible, url, onClose, onSuccess }: 
                 PermissionsAndroid.PERMISSIONS.CAMERA,
                 PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
             ]);
-            console.log('Camera permission:', granted);
+            debugLog('Camera permission:', granted);
         } catch (err) {
             console.warn('Permission error:', err);
         }
@@ -53,7 +55,7 @@ export default function VerificationModal({ visible, url, onClose, onSuccess }: 
         >
             <View style={[styles.container, { backgroundColor: colors.background }]}>
                 <View style={[styles.header, { borderBottomColor: isDark ? '#333' : '#eee' }]}>
-                    <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                    <TouchableOpacity activeOpacity={1} onPress={onClose} style={styles.closeButton}>
                         <Ionicons name="close" size={28} color={colors.text} />
                     </TouchableOpacity>
                     <Text style={[styles.title, { color: colors.text }]}>Identity Verification</Text>
@@ -131,3 +133,4 @@ const styles = StyleSheet.create({
         zIndex: 10
     }
 });
+

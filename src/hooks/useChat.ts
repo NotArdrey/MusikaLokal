@@ -48,8 +48,6 @@ export interface ConversationParticipant {
 
 export interface Conversation {
     id: string;
-    participant_1: string | null;
-    participant_2: string | null;
     created_at: string;
     updated_at: string;
     studio_booking_id: string | null;
@@ -98,32 +96,58 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
             setLoading(true);
             setError(null);
 
-            // Sort participant IDs to ensure consistency
-            const [p1, p2] = [currentUserId, otherUserId].sort();
+            const { data: currentUserParticipations, error: currentPartError } = await supabase
+                .from('conversation_participants')
+                .select('conversation_id')
+                .eq('user_id', currentUserId);
 
-            // Try to find existing 1-on-1 conversation (not a group chat)
-            const { data: existing, error: fetchError } = await supabase
-                .from('conversations')
-                .select('*')
-                .eq('is_group', false)
-                .or(`and(participant_1.eq.${p1},participant_2.eq.${p2}),and(participant_1.eq.${p2},participant_2.eq.${p1})`)
-                .maybeSingle();
+            if (currentPartError) throw currentPartError;
 
-            if (fetchError && fetchError.code !== 'PGRST116') {
-                throw fetchError;
-            }
+            const candidateIds = currentUserParticipations?.map((p) => p.conversation_id) || [];
 
-            if (existing) {
-                setConversation(existing);
-                return existing;
+            if (candidateIds.length > 0) {
+                const { data: participantPairs, error: pairError } = await supabase
+                    .from('conversation_participants')
+                    .select('conversation_id, user_id')
+                    .in('conversation_id', candidateIds)
+                    .in('user_id', [currentUserId, otherUserId]);
+
+                if (pairError) throw pairError;
+
+                const userSets = new Map<string, Set<string>>();
+                for (const pair of participantPairs || []) {
+                    const set = userSets.get(pair.conversation_id) || new Set<string>();
+                    set.add(pair.user_id);
+                    userSets.set(pair.conversation_id, set);
+                }
+
+                const matchedConversationIds = Array.from(userSets.entries())
+                    .filter(([, users]) => users.has(currentUserId) && users.has(otherUserId))
+                    .map(([conversationId]) => conversationId);
+
+                if (matchedConversationIds.length > 0) {
+                    const { data: existingConversations, error: existingError } = await supabase
+                        .from('conversations')
+                        .select('*')
+                        .eq('is_group', false)
+                        .in('id', matchedConversationIds)
+                        .order('updated_at', { ascending: false })
+                        .limit(1);
+
+                    if (existingError) throw existingError;
+
+                    const existing = existingConversations?.[0];
+                    if (existing) {
+                        setConversation(existing);
+                        return existing;
+                    }
+                }
             }
 
             // Create new 1-on-1 conversation
             const { data: newConversation, error: createError } = await supabase
                 .from('conversations')
                 .insert({
-                    participant_1: p1,
-                    participant_2: p2,
                     is_group: false,
                     studio_booking_id: options?.studioBookingId || null,
                     gig_application_id: options?.gigApplicationId || null,
@@ -135,6 +159,23 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                 .single();
 
             if (createError) throw createError;
+
+            const { error: participantsError } = await supabase
+                .from('conversation_participants')
+                .upsert([
+                    {
+                        conversation_id: newConversation.id,
+                        user_id: currentUserId,
+                        role: 'member',
+                    },
+                    {
+                        conversation_id: newConversation.id,
+                        user_id: otherUserId,
+                        role: 'member',
+                    },
+                ], { onConflict: 'conversation_id,user_id' });
+
+            if (participantsError) throw participantsError;
 
             setConversation(newConversation);
             return newConversation;
@@ -179,8 +220,20 @@ export function useGroupConversation(groupId: string | null, currentUserId: stri
             }
 
             if (existing) {
-                setConversation(existing);
-                return existing;
+                const { data: existingDisplay } = await supabase
+                    .from('conversations_display_projection')
+                    .select('group_name, group_avatar_url')
+                    .eq('id', existing.id)
+                    .maybeSingle();
+
+                const existingWithDisplay = {
+                    ...existing,
+                    group_name: existingDisplay?.group_name || null,
+                    group_avatar_url: existingDisplay?.group_avatar_url || null,
+                };
+
+                setConversation(existingWithDisplay);
+                return existingWithDisplay;
             }
 
             // Create group conversation using the database function
@@ -201,8 +254,20 @@ export function useGroupConversation(groupId: string | null, currentUserId: stri
 
             if (getError) throw getError;
 
-            setConversation(newConversation);
-            return newConversation;
+            const { data: newConversationDisplay } = await supabase
+                .from('conversations_display_projection')
+                .select('group_name, group_avatar_url')
+                .eq('id', newConversation.id)
+                .maybeSingle();
+
+            const newConversationWithDisplay = {
+                ...newConversation,
+                group_name: newConversationDisplay?.group_name || null,
+                group_avatar_url: newConversationDisplay?.group_avatar_url || null,
+            };
+
+            setConversation(newConversationWithDisplay);
+            return newConversationWithDisplay;
         } catch (err: any) {
             console.error('Error getting/creating group conversation:', err);
             setError(err.message);
@@ -231,21 +296,7 @@ export function useConversations(currentUserId: string | null) {
             setLoading(true);
             setError(null);
 
-            // Fetch 1-on-1 conversations
-            const { data: directConversations, error: directError } = await supabase
-                .from('conversations')
-                .select(`
-                    *,
-                    participant_1_profile:profiles!conversations_participant_1_fkey(id, full_name, avatar_url),
-                    participant_2_profile:profiles!conversations_participant_2_fkey(id, full_name, avatar_url)
-                `)
-                .eq('is_group', false)
-                .or(`participant_1.eq.${currentUserId},participant_2.eq.${currentUserId}`)
-                .order('updated_at', { ascending: false });
-
-            if (directError) throw directError;
-
-            // Fetch group conversations where user is a participant
+            // Fetch conversations where user is a participant
             const { data: participations, error: partError } = await supabase
                 .from('conversation_participants')
                 .select('conversation_id')
@@ -253,27 +304,64 @@ export function useConversations(currentUserId: string | null) {
 
             if (partError) throw partError;
 
-            const groupConversationIds = participations?.map(p => p.conversation_id) || [];
+            const conversationIds = participations?.map((p) => p.conversation_id) || [];
+            if (conversationIds.length === 0) {
+                setConversations([]);
+                return;
+            }
 
-            let groupConversations: any[] = [];
-            if (groupConversationIds.length > 0) {
-                const { data: groups, error: groupError } = await supabase
+            const { data: rawConversations, error: conversationsError } = await supabase
                     .from('conversations')
                     .select('*')
-                    .eq('is_group', true)
-                    .in('id', groupConversationIds)
+                    .in('id', conversationIds)
                     .order('updated_at', { ascending: false });
 
-                if (groupError) throw groupError;
-                groupConversations = groups || [];
+            if (conversationsError) throw conversationsError;
+
+            const { data: displayRows, error: displayError } = await supabase
+                .from('conversations_display_projection')
+                .select('id, group_name, group_avatar_url')
+                .in('id', conversationIds);
+
+            if (displayError) throw displayError;
+
+            const { data: allParticipants, error: participantsError } = await supabase
+                .from('conversation_participants')
+                .select(`
+                    *,
+                    profile:profiles!conversation_participants_user_id_fkey(id, full_name, avatar_url)
+                `)
+                .in('conversation_id', conversationIds);
+
+            if (participantsError) throw participantsError;
+
+            const displayByConversationId = new Map(
+                (displayRows || []).map((row: any) => [row.id, row])
+            );
+            const participantsByConversationId = new Map<string, any[]>();
+            for (const participant of allParticipants || []) {
+                const current = participantsByConversationId.get(participant.conversation_id) || [];
+                current.push(participant);
+                participantsByConversationId.set(participant.conversation_id, current);
             }
+
+            const conversationsWithDisplay = (rawConversations || []).map((conversation: any) => {
+                const display = displayByConversationId.get(conversation.id);
+                return {
+                    ...conversation,
+                    group_name: display?.group_name || null,
+                    group_avatar_url: display?.group_avatar_url || null,
+                };
+            });
+
+            const directConversations = conversationsWithDisplay.filter((c: any) => !c.is_group);
+            const groupConversations = conversationsWithDisplay.filter((c: any) => c.is_group);
 
             // Process 1-on-1 conversations
             const processedDirectConversations = await Promise.all(
                 (directConversations || []).map(async (conv: any) => {
-                    const otherParticipant = conv.participant_1 === currentUserId
-                        ? conv.participant_2_profile
-                        : conv.participant_1_profile;
+                    const conversationParticipants = participantsByConversationId.get(conv.id) || [];
+                    const otherParticipant = conversationParticipants.find((participant) => participant.user_id !== currentUserId)?.profile;
 
                     // Get last message
                     const { data: lastMessage } = await supabase
@@ -305,14 +393,7 @@ export function useConversations(currentUserId: string | null) {
             // Process group conversations
             const processedGroupConversations = await Promise.all(
                 groupConversations.map(async (conv: any) => {
-                    // Get participants with profiles
-                    const { data: participants } = await supabase
-                        .from('conversation_participants')
-                        .select(`
-                            *,
-                            profile:profiles!conversation_participants_user_id_fkey(id, full_name, avatar_url)
-                        `)
-                        .eq('conversation_id', conv.id);
+                    const participants = participantsByConversationId.get(conv.id) || [];
 
                     // Get last message
                     const { data: lastMessage } = await supabase
@@ -667,22 +748,12 @@ export function useChat(conversationId: string | null, currentUserId: string | n
 // Helper to get total unread count (includes both 1-on-1 and group chats)
 export async function getUnreadMessageCount(userId: string): Promise<number> {
     try {
-        // Get all 1-on-1 conversations for user
-        const { data: directConversations } = await supabase
-            .from('conversations')
-            .select('id')
-            .eq('is_group', false)
-            .or(`participant_1.eq.${userId},participant_2.eq.${userId}`);
-
-        // Get all group conversations for user
         const { data: participations } = await supabase
             .from('conversation_participants')
             .select('conversation_id')
             .eq('user_id', userId);
 
-        const directIds = directConversations?.map(c => c.id) || [];
-        const groupIds = participations?.map(p => p.conversation_id) || [];
-        const allConversationIds = [...new Set([...directIds, ...groupIds])];
+        const allConversationIds = [...new Set((participations || []).map((p) => p.conversation_id))];
 
         if (allConversationIds.length === 0) return 0;
 

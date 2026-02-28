@@ -6,6 +6,135 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
+function getManilaNowParts() {
+    const now = new Date()
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    }).formatToParts(now)
+
+    const get = (type: string) => parts.find((part) => part.type === type)?.value || '00'
+
+    return {
+        date: `${get('year')}-${get('month')}-${get('day')}`,
+        time: `${get('hour')}:${get('minute')}:${get('second')}`,
+    }
+}
+
+function normalizeTime(value?: string | null) {
+    if (!value) return '00:00:00'
+    const cleaned = value.toString().trim().split(/[.+-]/)[0] || '00:00:00'
+    const segments = cleaned.split(':')
+    if (segments.length < 2) return '00:00:00'
+
+    const hours = (segments[0] || '00').padStart(2, '0').slice(0, 2)
+    const minutes = (segments[1] || '00').padStart(2, '0').slice(0, 2)
+    const seconds = (segments[2] || '00').padStart(2, '0').slice(0, 2)
+
+    return `${hours}:${minutes}:${seconds}`
+}
+
+async function insertNotificationIfMissing(supabaseClient: any, payload: {
+    user_id: string
+    type: string
+    title: string
+    message: string
+    image?: string | null
+    meta?: Record<string, any>
+}) {
+    const eventType = payload.meta?.event_type
+    const bookingId = payload.meta?.booking_id
+
+    if (eventType && bookingId) {
+        const { data: existing } = await supabaseClient
+            .from('notifications')
+            .select('id')
+            .eq('user_id', payload.user_id)
+            .contains('meta', { event_type: eventType, booking_id: bookingId })
+            .limit(1)
+
+        if (existing && existing.length > 0) return
+    }
+
+    await supabaseClient.from('notifications').insert({
+        ...payload,
+        read: false,
+    })
+}
+
+async function autoStartBookingsAndNotify(
+    supabaseClient: any,
+    scope: { studioId?: string; userId?: string }
+) {
+    const { date: todayManila, time: nowManilaTime } = getManilaNowParts()
+
+    let bookingQuery = supabaseClient
+        .from('studio_bookings')
+        .select('id, user_id, studio_id, booking_date, start_time, end_time, status, studio:studios(name, owner_id, images)')
+        .eq('status', 'confirmed')
+        .eq('booking_date', todayManila)
+
+    if (scope.studioId) {
+        bookingQuery = bookingQuery.eq('studio_id', scope.studioId)
+    }
+
+    if (scope.userId) {
+        bookingQuery = bookingQuery.eq('user_id', scope.userId)
+    }
+
+    const { data: bookings, error } = await bookingQuery
+    if (error || !bookings || bookings.length === 0) return
+
+    for (const booking of bookings) {
+        const startTime = normalizeTime(booking.start_time)
+        const endTime = normalizeTime(booking.end_time)
+
+        if (nowManilaTime < startTime || nowManilaTime >= endTime) continue
+
+        const { data: updatedBooking, error: updateError } = await supabaseClient
+            .from('studio_bookings')
+            .update({
+                status: 'checked_in',
+                check_in_time: new Date().toISOString(),
+            })
+            .eq('id', booking.id)
+            .eq('status', 'confirmed')
+            .select('id')
+            .maybeSingle()
+
+        if (updateError || !updatedBooking) continue
+
+        const studioName = booking.studio?.name || 'the studio'
+        const image = booking.studio?.images?.[0] || null
+        const recipients = [booking.user_id, booking.studio?.owner_id].filter(Boolean) as string[]
+
+        for (const recipientId of [...new Set(recipients)]) {
+            const isCustomer = recipientId === booking.user_id
+            await insertNotificationIfMissing(supabaseClient, {
+                user_id: recipientId,
+                type: 'info',
+                title: 'Booking Started',
+                message: isCustomer
+                    ? `Your booking at ${studioName} has started.`
+                    : `A booking at ${studioName} has started.`,
+                image,
+                meta: {
+                    booking_id: booking.id,
+                    studio_id: booking.studio_id,
+                    booking_date: booking.booking_date,
+                    event_type: 'booking_auto_started',
+                }
+            })
+        }
+    }
+}
+
 function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
     try {
         const parts = token.replace('Bearer ', '').split('.')
@@ -83,6 +212,9 @@ Deno.serve(async (req: Request) => {
         // FETCH STUDIO BOOKINGS
         if (action === 'fetch_studio_bookings') {
             const { studioId } = params;
+
+            await autoStartBookingsAndNotify(supabaseClient, { studioId })
+
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
                 .select(`
@@ -98,6 +230,8 @@ Deno.serve(async (req: Request) => {
 
         // FETCH MY BOOKINGS
         if (action === 'fetch_my_bookings') {
+            await autoStartBookingsAndNotify(supabaseClient, { userId: effectiveUserId })
+
             const { data, error } = await supabaseClient
                 .from('studio_bookings')
                 .select(`
@@ -114,6 +248,52 @@ Deno.serve(async (req: Request) => {
         // UPDATE BOOKING STATUS
         if (action === 'update_booking_status') {
             const { bookingId, status, cancellation_reason } = params;
+
+            if (['late', 'not_attending', 'no_show'].includes(status)) {
+                const { data: bookingDetails, error: bookingError } = await supabaseClient
+                    .from('studio_bookings')
+                    .select(`
+                        id,
+                        user_id,
+                        studio_id,
+                        booking_date,
+                        start_time,
+                        studio:studio_id(name, owner_id, images)
+                    `)
+                    .eq('id', bookingId)
+                    .single();
+
+                if (bookingError) throw bookingError;
+
+                const studioName = bookingDetails.studio?.name || 'the studio';
+                const recipients = [bookingDetails.user_id, bookingDetails.studio?.owner_id]
+                    .filter(Boolean) as string[];
+
+                for (const recipientId of [...new Set(recipients)]) {
+                    await insertNotificationIfMissing(supabaseClient, {
+                        user_id: recipientId,
+                        type: 'warning',
+                        title: status === 'late' ? 'Late Arrival Alert' : 'Attendance Alert',
+                        message: status === 'late'
+                            ? `A participant for the booking at ${studioName} on ${bookingDetails.booking_date} (${bookingDetails.start_time}) has reported they will be late.`
+                            : `A participant for the booking at ${studioName} on ${bookingDetails.booking_date} (${bookingDetails.start_time}) has reported they cannot attend.`,
+                        image: bookingDetails.studio?.images?.[0] || null,
+                        meta: {
+                            booking_id: bookingDetails.id,
+                            studio_id: bookingDetails.studio_id,
+                            booking_date: bookingDetails.booking_date,
+                            issue_status: status,
+                            event_type: `booking_${status}`,
+                            reported_by_user_id: effectiveUserId,
+                        }
+                    })
+                }
+
+                return new Response(JSON.stringify({
+                    success: true,
+                    message: 'Attendance notification sent.'
+                }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+            }
 
             const { data: bookingDetails, error: bookingError } = await supabaseClient
                 .from('studio_bookings')

@@ -1,47 +1,36 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { router, useFocusEffect, usePathname } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
-export default function Navbar() {
+function Navbar() {
     const { colors, isDark } = useTheme();
+    const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
-    const [role, setRole] = useState('');
 
-    useFocusEffect(
-        useCallback(() => {
-            fetchUserRole();
-        }, [])
-    );
-
-    const fetchUserRole = async () => {
+    const fetchUserRole = useCallback(async () => {
+        if (isGuest) return; // Skip for guests
         try {
-            // Check session first to avoid unnecessary API calls
             const { data: { session } } = await supabase.auth.getSession();
             if (!session?.access_token) return;
 
-            // Check if token is expired - don't make API call if it is
             const tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
             if (tokenExpiry && tokenExpiry < Date.now()) return;
 
-            // Fetch generic profile to get role
-            // This can fail with 401 if session is expired, which is fine
             const { data, error } = await supabase.functions.invoke('manage-profile', {
                 body: { action: 'fetch', userId: session.user.id }
             });
 
-            // If error (e.g., expired session), just return silently
             if (error) return;
 
             if (data && data.role) {
-                setRole(data.role);
-                // Determine route based on role
                 if (data.role === 'studio-owner') {
                     setManageRoute('/my_studio');
                 } else if (data.role === 'manager' || data.role === 'musician-member') {
@@ -49,44 +38,54 @@ export default function Navbar() {
                 } else if (data.role === 'venue-owner') {
                     setManageRoute('/my_venue');
                 } else {
-                    setManageRoute('/manage'); // Default fallback page
+                    setManageRoute('/manage');
                 }
             } else {
                 setManageRoute('/manage');
             }
         } catch (e) {
-            // Silently ignore errors - user likely not logged in
-            setManageRoute('/manage'); // Fallback on error
+            setManageRoute('/manage');
         }
-    };
+    }, [isGuest]);
 
-    let activeTab = 'home';
+    useFocusEffect(
+        useCallback(() => {
+            fetchUserRole();
+        }, [fetchUserRole])
+    );
 
-    if (pathname.includes('home')) {
-        activeTab = 'home';
-    } else if (pathname.includes('bookings')) {
-        activeTab = 'activity';
-    } else if (
-        pathname.includes('my_studio') ||
-        pathname.includes('my_venue') ||
-        pathname.includes('my_group') ||
-        pathname.includes('manage_') ||
-        pathname.includes('edit_')
-    ) {
-        activeTab = 'manage';
-    } else if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
-        activeTab = 'profile';
-    } else if (pathname.includes('ai_suggestions')) {
-        activeTab = 'ai-suggest';
-    }
+    const activeTab = useMemo(() => {
+        if (pathname.includes('home')) return 'home';
+        if (pathname.includes('bookings')) return 'activity';
+        if (pathname.includes('ai_suggestions')) return 'ai-suggest';
+        if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
+            return 'profile';
+        }
+        if (
+            pathname === '/manage' ||
+            pathname.startsWith('/manage/') ||
+            pathname.includes('my_studio') ||
+            pathname.includes('my_venue') ||
+            pathname.includes('my_group') ||
+            pathname.includes('manage_') ||
+            pathname.includes('edit_') ||
+            pathname.includes('add_')
+        ) {
+            return 'manage';
+        }
+        return 'home';
+    }, [pathname]);
 
-    const navItems = [
-        { id: 'home', icon: 'home', label: 'Home', route: '/home' },
-        { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
-        { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
-        { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
-        { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
-    ];
+    const navItems = useMemo(
+        () => [
+            { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+            { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
+            { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
+            { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
+            { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
+        ],
+        [manageRoute],
+    );
 
     return (
         <View style={[styles.navbarWrapper, { bottom: 24 + insets.bottom }]}>
@@ -105,7 +104,7 @@ export default function Navbar() {
                     {navItems.map((item) => {
                         const isActive = activeTab === item.id;
                         return (
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                                 key={item.id}
                                 style={[
                                     styles.tabButton,
@@ -133,6 +132,8 @@ export default function Navbar() {
         </View>
     );
 }
+
+export default memo(Navbar);
 
 const styles = StyleSheet.create({
     navbarWrapper: {
@@ -169,7 +170,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         padding: 16,
         borderRadius: 20,
-        // width: 64, 
     },
     iconWrapper: {
         alignItems: 'center',

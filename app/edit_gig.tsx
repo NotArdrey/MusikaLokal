@@ -1,24 +1,48 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
 import { router } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
+    BackHandler,
     Platform,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
-    View,
+    View
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
+import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+
+// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
+  const b64 = base64.replace(/=/g, "");
+  const bufLen = Math.floor(b64.length * 0.75);
+  const bytes = new Uint8Array(bufLen);
+  let p = 0;
+  for (let i = 0; i < b64.length; i += 4) {
+    const e1 = lookup[b64.charCodeAt(i)];
+    const e2 = lookup[b64.charCodeAt(i + 1)];
+    const e3 = lookup[b64.charCodeAt(i + 2)];
+    const e4 = lookup[b64.charCodeAt(i + 3)];
+    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
+    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+  }
+  return bytes;
+};
 
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
@@ -61,6 +85,12 @@ const formatTimeInput = (text: string): string => {
   return cleaned;
 };
 
+type EventSchedule = {
+  date: string;
+  start_time: string;
+  end_time: string;
+};
+
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
   const { id } = useLocalSearchParams();
@@ -74,6 +104,7 @@ export default function EditGigScreen() {
   const [eventDate, setEventDate] = useState("");
   const [eventStartTime, setEventStartTime] = useState("06:00 PM");
   const [eventEndTime, setEventEndTime] = useState("11:00 PM");
+  const [eventSchedules, setEventSchedules] = useState<EventSchedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [authorized, setAuthorized] = useState(false);
@@ -110,6 +141,20 @@ export default function EditGigScreen() {
     setAlertVisible(true);
   };
 
+  const handleAttemptLeave = useCallback(() => {
+    if (saving) return;
+
+    showAlert(
+      "warning",
+      "Leave edit gig?",
+      "Your current edits won't be saved unless you tap Save Changes.",
+      [
+        { text: "Stay", style: "cancel" },
+        { text: "Leave", style: "destructive", onPress: () => router.back() },
+      ],
+    );
+  }, [saving]);
+
   // Mock Data
   const [documents, setDocuments] = useState(["Contract.pdf", "Rider_v2.pdf"]);
   const [images, setImages] = useState<string[]>([]);
@@ -136,6 +181,9 @@ export default function EditGigScreen() {
   const [bandRolesNeeded, setBandRolesNeeded] = useState<string[]>([]);
   const [newBandRole, setNewBandRole] = useState("");
 
+  // Preferred group types for band slots
+  const [preferredGroupTypes, setPreferredGroupTypes] = useState<string[]>([]);
+
   // Anti-spam settings
   const [reapplicationCooldownDays, setReapplicationCooldownDays] = useState<number>(30);
 
@@ -150,6 +198,68 @@ export default function EditGigScreen() {
   const [businessPermitFileName, setBusinessPermitFileName] = useState<string>("");
   const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
+
+  const getNormalizedEventSchedules = (): EventSchedule[] => {
+    const cleanedSchedules = eventSchedules
+      .filter((item) => item.date && item.start_time && item.end_time)
+      .map((item) => ({
+        date: item.date,
+        start_time: item.start_time,
+        end_time: item.end_time,
+      }));
+
+    if (cleanedSchedules.length > 0) {
+      return cleanedSchedules;
+    }
+
+    if (eventDate.trim() && eventStartTime && eventEndTime) {
+      return [
+        {
+          date: eventDate,
+          start_time: eventStartTime,
+          end_time: eventEndTime,
+        },
+      ];
+    }
+
+    return [];
+  };
+
+  const handleAddEventCondition = () => {
+    if (!eventDate.trim()) {
+      showAlert("error", "Required Field", "Please select an event date first");
+      return;
+    }
+
+    if (!eventStartTime || !eventEndTime) {
+      showAlert("error", "Required Field", "Please set both start and end time first");
+      return;
+    }
+
+    const newCondition: EventSchedule = {
+      date: eventDate,
+      start_time: eventStartTime,
+      end_time: eventEndTime,
+    };
+
+    const alreadyExists = eventSchedules.some(
+      (item) =>
+        item.date === newCondition.date &&
+        item.start_time === newCondition.start_time &&
+        item.end_time === newCondition.end_time,
+    );
+
+    if (alreadyExists) {
+      showAlert("warning", "Already Added", "This event date and time condition is already in the list.");
+      return;
+    }
+
+    setEventSchedules((prev) => [...prev, newCondition]);
+  };
+
+  const removeEventCondition = (indexToRemove: number) => {
+    setEventSchedules((prev) => prev.filter((_, index) => index !== indexToRemove));
+  };
 
   // Role-based access control
   useEffect(() => {
@@ -195,6 +305,40 @@ export default function EditGigScreen() {
     }
   }, [id, authorized]);
 
+  useEffect(() => {
+    const backSubscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        handleAttemptLeave();
+        return true;
+      },
+    );
+
+    return () => backSubscription.remove();
+  }, [handleAttemptLeave]);
+
+  useEffect(() => {
+    const hasSolo = soloSlotsNeeded > 0;
+    const hasGroup = duoSlotsNeeded > 0 || bandSlotsNeeded > 0;
+
+    if (hasSolo && hasGroup) {
+      setMusicianType("both");
+      return;
+    }
+
+    if (hasSolo) {
+      setMusicianType("solo");
+      return;
+    }
+
+    if (hasGroup) {
+      setMusicianType("group");
+      return;
+    }
+
+    setMusicianType("both");
+  }, [soloSlotsNeeded, duoSlotsNeeded, bandSlotsNeeded]);
+
   const fetchGigDetails = async () => {
     try {
       const {
@@ -213,21 +357,75 @@ export default function EditGigScreen() {
         return;
       }
 
-      // Direct query to gigs table
-      const { data, error } = await supabase
+      // Base query + normalized child tables merge
+      const { data: baseData, error: baseError } = await supabase
         .from('gigs')
         .select('*')
         .eq('id', gigId)
         .eq('organizer_id', user.id)
         .single();
 
-      console.log('📥 ===== DATABASE QUERY RESPONSE =====');
-      console.log('📥 Error object:', error);
-      console.log('📥 Data object:', data);
-      console.log('📥 Data type:', typeof data);
-      console.log('📥 Data stringified:', JSON.stringify(data, null, 2));
+      const [
+        { data: requirementRows, error: requirementsError },
+        { data: mediaRows, error: mediaError },
+      ] = await Promise.all([
+        supabase
+          .from('gig_requirements')
+          .select('requirement_key, requirement_value')
+          .eq('gig_id', gigId),
+        supabase
+          .from('gig_media')
+          .select('media_type, media_url, sort_order, created_at')
+          .eq('gig_id', gigId)
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+      ]);
 
-      if (error) throw error;
+      console.log('📥 ===== DATABASE QUERY RESPONSE =====');
+      console.log('📥 Error object:', baseError);
+      console.log('📥 Data object:', baseData);
+      console.log('📥 Data type:', typeof baseData);
+      console.log('📥 Data stringified:', JSON.stringify(baseData, null, 2));
+
+      if (baseError) throw baseError;
+      if (requirementsError) throw requirementsError;
+      if (mediaError) throw mediaError;
+
+      if (!baseData) {
+        showAlert(
+          "error",
+          "Not Found",
+          "Gig not found or you do not have permission to edit it.",
+        );
+        router.replace("/home");
+        return;
+      }
+
+      const requirements = (requirementRows || []).reduce(
+        (acc: Record<string, any>, row: any) => {
+          if (!row?.requirement_key) return acc;
+          acc[row.requirement_key] = row.requirement_value;
+          return acc;
+        },
+        {},
+      );
+
+      const images = (mediaRows || [])
+        .filter((row: any) => row?.media_type === 'image')
+        .map((row: any) => row.media_url)
+        .filter(Boolean);
+
+      const documents = (mediaRows || [])
+        .filter((row: any) => row?.media_type === 'document')
+        .map((row: any) => row.media_url)
+        .filter(Boolean);
+
+      const data = {
+        ...baseData,
+        requirements,
+        images,
+        documents,
+      } as any;
 
       // If no data returned, user doesn't own this gig
       if (!data) {
@@ -272,10 +470,40 @@ export default function EditGigScreen() {
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
       setCost(data.budget?.toString() || "");
-      setEventDate(data.event_date || "");
-      // Read event times from requirements JSONB field
-      setEventStartTime(data.requirements?.event_start_time || "06:00 PM");
-      setEventEndTime(data.requirements?.event_end_time || "11:00 PM");
+      const schedulesFromRequirements = Array.isArray(data.requirements?.event_schedules)
+        ? data.requirements.event_schedules
+          .filter((item: any) => item?.date && item?.start_time && item?.end_time)
+          .map((item: any) => ({
+            date: item.date,
+            start_time: item.start_time,
+            end_time: item.end_time,
+          }))
+        : [];
+
+      if (schedulesFromRequirements.length > 0) {
+        setEventSchedules(schedulesFromRequirements);
+        setEventDate(schedulesFromRequirements[0].date);
+        setEventStartTime(schedulesFromRequirements[0].start_time);
+        setEventEndTime(schedulesFromRequirements[0].end_time);
+      } else {
+        const fallbackDate = data.event_date || "";
+        const fallbackStart = data.requirements?.event_start_time || "06:00 PM";
+        const fallbackEnd = data.requirements?.event_end_time || "11:00 PM";
+        setEventDate(fallbackDate);
+        setEventStartTime(fallbackStart);
+        setEventEndTime(fallbackEnd);
+        setEventSchedules(
+          fallbackDate
+            ? [
+              {
+                date: fallbackDate,
+                start_time: fallbackStart,
+                end_time: fallbackEnd,
+              },
+            ]
+            : [],
+        );
+      }
       setMusicianType(data.requirements?.musician_type || "both");
       setRequiredGenres(
         Array.isArray(data.requirements?.genres)
@@ -298,6 +526,7 @@ export default function EditGigScreen() {
         setDuoRolesNeeded(Array.isArray(slots.duo?.roles) ? slots.duo.roles : []);
         setBandSlotsNeeded(slots.band?.needed || 0);
         setBandRolesNeeded(Array.isArray(slots.band?.roles) ? slots.band.roles : []);
+        setPreferredGroupTypes(Array.isArray(slots.band?.preferred_group_types) ? slots.band.preferred_group_types : []);
       }
 
       // Load anti-spam settings
@@ -333,6 +562,8 @@ export default function EditGigScreen() {
   };
 
   const validateForm = (): boolean => {
+    const schedules = getNormalizedEventSchedules();
+
     if (!gigName.trim()) {
       showAlert("error", "Required Field", "Please enter a gig name");
       return false;
@@ -365,15 +596,11 @@ export default function EditGigScreen() {
       );
       return false;
     }
-    if (!eventDate.trim()) {
-      showAlert("error", "Required Field", "Please select an event date");
-      return false;
-    }
-    if (!eventStartTime || !eventEndTime) {
+    if (schedules.length === 0) {
       showAlert(
         "error",
         "Required Field",
-        "Please set event start and end times",
+        "Please add at least one event date and time condition",
       );
       return false;
     }
@@ -405,6 +632,9 @@ export default function EditGigScreen() {
         ? [images[thumbnailIndex], ...images.filter((_, i) => i !== thumbnailIndex)]
         : images;
 
+      const normalizedSchedules = getNormalizedEventSchedules();
+      const primarySchedule = normalizedSchedules[0];
+
       const payload = {
         name: gigName,
         description,
@@ -415,14 +645,15 @@ export default function EditGigScreen() {
         business_permit_url: businessPermitUrl || null,
         latitude,
         longitude,
-        event_date: eventDate,
+        event_date: primarySchedule?.date || eventDate,
         reapplication_cooldown_days: reapplicationCooldownDays,
         requirements: {
           genres: requiredGenres,
           instruments: requiredInstruments,
           experience_level: experienceLevel || null,
-          event_start_time: eventStartTime,
-          event_end_time: eventEndTime,
+          event_start_time: primarySchedule?.start_time || eventStartTime,
+          event_end_time: primarySchedule?.end_time || eventEndTime,
+          event_schedules: normalizedSchedules,
           musician_type: musicianType,
           // Detailed slots with counts
           slots: {
@@ -437,6 +668,7 @@ export default function EditGigScreen() {
             band: {
               needed: bandSlotsNeeded,
               roles: bandRolesNeeded,
+              preferred_group_types: preferredGroupTypes,
             },
           },
           total_slots_needed: soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded,
@@ -458,27 +690,27 @@ export default function EditGigScreen() {
         ),
       );
 
-      // Direct update to gigs table
-      const { data: responseData, error: updateError } = await supabase
-        .from('gigs')
-        .update({
-          name: payload.name,
-          description: payload.description,
-          location: payload.location,
-          budget: payload.budget,
-          images: payload.images,
-          contract_url: payload.contract_url,
-          business_permit_url: payload.business_permit_url,
-          latitude: payload.latitude,
-          longitude: payload.longitude,
-          event_date: payload.event_date,
-          reapplication_cooldown_days: payload.reapplication_cooldown_days,
-          requirements: payload.requirements,
-        })
-        .eq('id', gigId)
-        .eq('organizer_id', user.id)
-        .select()
-        .single();
+      const { data: responseData, error: updateError } = await supabase.rpc(
+        'update_gig_safely',
+        {
+          p_gig_id: gigId,
+          p_payload: {
+            name: payload.name,
+            description: payload.description,
+            location: payload.location,
+            budget: payload.budget,
+            images: payload.images,
+            contract_url: payload.contract_url,
+            business_permit_url: payload.business_permit_url,
+            latitude: payload.latitude,
+            longitude: payload.longitude,
+            event_date: payload.event_date,
+            reapplication_cooldown_days: payload.reapplication_cooldown_days,
+            requirements: payload.requirements,
+          },
+          p_reason: 'Updated from Edit Gig screen by organizer',
+        },
+      );
 
       console.log('📥 Update response data:', JSON.stringify(responseData, null, 2));
       console.log('📥 Update response error:', updateError);
@@ -490,12 +722,64 @@ export default function EditGigScreen() {
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
         if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
 
-        Alert.alert("Error", alertMessage);
+        showAlert("error", "Error", alertMessage);
         return;
       }
 
+      const rpcResult: any = responseData;
+      if (!rpcResult?.success) {
+        if (
+          rpcResult?.code === 'SLOT_CONFLICT_TOTAL' ||
+          rpcResult?.code === 'SLOT_CONFLICT_SOLO' ||
+          rpcResult?.code === 'SLOT_CONFLICT_DUO' ||
+          rpcResult?.code === 'SLOT_CONFLICT_BAND'
+        ) {
+          showAlert(
+            'warning',
+            'Slot Conflict',
+            rpcResult?.message || 'Accepted applications exceed the updated slot capacity.',
+          );
+          return;
+        }
+
+        if (rpcResult?.code === 'GIG_NOT_FOUND') {
+          showAlert('warning', 'Not Found', 'Gig not found. It may have been removed.');
+          return;
+        }
+
+        throw new Error(rpcResult?.message || 'Failed to update gig');
+      }
+
+      const reconfirmRequired = Number(rpcResult?.reconfirmation?.required_count || 0);
+      const systemRejectedPending = Number(rpcResult?.system_rejected_pending_count || 0);
+      const softClosed = Boolean(rpcResult?.soft_closed);
+      const softClosedRejected = Number(rpcResult?.soft_closed_rejected_count || 0);
+
+      let successMessage = 'Gig updated successfully!';
+      const updateNotes: string[] = [];
+
+      if (reconfirmRequired > 0) {
+        const hours = Number(rpcResult?.reconfirmation?.window_hours || 24);
+        updateNotes.push(`${reconfirmRequired} accepted applicant(s) moved to reconfirmation with a ${hours}-hour response window.`);
+      }
+
+      if (systemRejectedPending > 0) {
+        updateNotes.push(`${systemRejectedPending} pending applicant(s) were system-closed because requirements changed.`);
+      }
+
+      if (softClosed) {
+        updateNotes.push('Gig was soft-closed because accepted applicants now fill all available slots.');
+        if (softClosedRejected > 0) {
+          updateNotes.push(`${softClosedRejected} pending applicant(s) were notified that slots are full.`);
+        }
+      }
+
+      if (updateNotes.length > 0) {
+        successMessage += `\n\n${updateNotes.join('\n')}`;
+      }
+
       console.log("✅ Gig Updated successfully");
-      showAlert("success", "Success", "Gig updated successfully!", [
+      showAlert("success", "Success", successMessage, [
         {
           text: "OK",
           onPress: () => {
@@ -550,6 +834,7 @@ export default function EditGigScreen() {
     label: string,
     value: string,
     setValue: (text: string) => void,
+    placeholder = "",
     multiline = false,
     numeric = false,
   ) => (
@@ -569,15 +854,17 @@ export default function EditGigScreen() {
         <TextInput
           value={value}
           onChangeText={setValue}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textSecondary}
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
           keyboardType={numeric ? "numeric" : "default"}
           style={[
-            styles.input,
+            styles.textInput,
             {
-              fontFamily: "Poppins_400Regular",
               color: colors.text,
               height: multiline ? 120 : "auto",
+              textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
             },
           ]}
@@ -623,9 +910,8 @@ export default function EditGigScreen() {
         return;
       }
 
-      const response = await fetch(fileUri);
-      const arrayBuffer = await response.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
+      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = base64ToUint8Array(base64);
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
@@ -699,9 +985,8 @@ export default function EditGigScreen() {
         return;
       }
 
-      const response = await fetch(fileUri);
-      const arrayBuffer = await response.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
+      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = base64ToUint8Array(base64);
 
       const contentType = fileName.toLowerCase().endsWith('.pdf')
         ? 'application/pdf'
@@ -913,7 +1198,7 @@ export default function EditGigScreen() {
         />
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Edit Gig" />
+        <Header title="Edit Gig" onBackPress={handleAttemptLeave} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -921,14 +1206,31 @@ export default function EditGigScreen() {
           style={styles.flex1}
         >
           {renderSectionHeader("Basic Details", "information-circle")}
-          {renderInput("Gig Title", gigName, setGigName)}
-          {renderInput("Description", description, setDescription, true)}
+          {renderInput("Gig Title", gigName, setGigName, "e.g. Saturday Night Live")}
+          {renderInput("Description", description, setDescription, "Brief description of the gig", true)}
+
+          {/* Event Photos */}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Event Photos
+            </Text>
+            <ImageUploader
+              images={images}
+              onImagesChange={setImages}
+              thumbnailIndex={thumbnailIndex}
+              onThumbnailChange={setThumbnailIndex}
+              maxImages={10}
+              bucketName="listings"
+              userId={id as string}
+              folder="gigs"
+            />
+          </View>
 
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Location
             </Text>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={() => setLocationPickerVisible(true)}
               style={[
                 styles.inputWrapper,
@@ -959,11 +1261,11 @@ export default function EditGigScreen() {
               </View>
             </TouchableOpacity>
           </View>
-          {renderInput("Payout (₱)", cost, setCost, false, true)}
+          {renderInput("Payout (₱)", cost, setCost, "e.g. 5000", false, true)}
 
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Event Date
+              Event Date (for condition entry)
             </Text>
             <View
               style={[
@@ -976,7 +1278,6 @@ export default function EditGigScreen() {
             >
               <Calendar
                 current={eventDate || new Date().toISOString().split("T")[0]}
-                minDate={new Date().toISOString().split("T")[0]}
                 markedDates={{
                   [eventDate]: {
                     selected: true,
@@ -1041,7 +1342,7 @@ export default function EditGigScreen() {
 
           <View style={styles.inputContainer}>
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Event Time
+              Event Time (for condition entry)
             </Text>
             <View
               style={[
@@ -1090,11 +1391,12 @@ export default function EditGigScreen() {
                           backgroundColor: isDark ? "#374151" : "white",
                           borderColor: colors.border,
                           color: colors.text,
+                          textAlign: "center",
                           flex: 1,
                         },
                       ]}
                     />
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => {
                         const [time, period] = eventStartTime.split(" ");
                         setEventStartTime(
@@ -1158,11 +1460,12 @@ export default function EditGigScreen() {
                           backgroundColor: isDark ? "#374151" : "white",
                           borderColor: colors.border,
                           color: colors.text,
+                          textAlign: "center",
                           flex: 1,
                         },
                       ]}
                     />
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => {
                         const [time, period] = eventEndTime.split(" ");
                         setEventEndTime(
@@ -1187,67 +1490,75 @@ export default function EditGigScreen() {
                   </View>
                 </View>
               </View>
+
+              <TouchableOpacity activeOpacity={1}
+                onPress={handleAddEventCondition}
+                style={{
+                  marginTop: 12,
+                  backgroundColor: colors.primary,
+                  paddingVertical: 10,
+                  borderRadius: 10,
+                  alignItems: "center",
+                  flexDirection: "row",
+                  justifyContent: "center",
+                  gap: 8,
+                }}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#fff" />
+                <Text style={{ color: "#fff", fontFamily: "Poppins_600SemiBold", fontSize: 13 }}>
+                  Add Date & Time Condition
+                </Text>
+              </TouchableOpacity>
             </View>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Event Date & Time Conditions
+            </Text>
+            <Text style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 10, fontSize: 12 }]}>
+              Add one or more schedules. The first entry is used as the primary event date.
+            </Text>
+            {eventSchedules.length === 0 ? (
+              <View style={[styles.dayCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: colors.border, padding: 12 }]}>
+                <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 12 }}>
+                  No conditions added yet.
+                </Text>
+              </View>
+            ) : (
+              <View style={{ gap: 8 }}>
+                {eventSchedules.map((item, index) => (
+                  <View
+                    key={`${item.date}-${item.start_time}-${item.end_time}-${index}`}
+                    style={[styles.dayCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: colors.border, padding: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
+                  >
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+                        {new Date(item.date).toLocaleDateString("en-US", {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium", fontSize: 11, marginTop: 2 }}>
+                        {item.start_time} - {item.end_time}
+                      </Text>
+                    </View>
+                    <TouchableOpacity activeOpacity={1} onPress={() => removeEventCondition(index)}>
+                      <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
           {renderSectionHeader("Looking For", "people")}
           <View style={styles.inputContainer}>
             <Text style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 8 }]}>
-              Select types to accept
+              Configure Solo, Duo, and Group slots separately below.
             </Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              {[
-                { value: "solo", label: "Solo Artists", icon: "person" },
-                { value: "group", label: "Bands/Groups", icon: "people" },
-                { value: "both", label: "Both", icon: "people-circle" },
-              ].map((option) => (
-                <TouchableOpacity
-                  key={option.value}
-                  onPress={() =>
-                    setMusicianType(option.value as "solo" | "group" | "both")
-                  }
-                  style={[
-                    {
-                      flexDirection: "row",
-                      alignItems: "center",
-                      paddingHorizontal: 16,
-                      paddingVertical: 12,
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      gap: 8,
-                      backgroundColor:
-                        musicianType === option.value
-                          ? colors.primary
-                          : isDark
-                            ? "#1F2937"
-                            : "#F9FAFB",
-                      borderColor:
-                        musicianType === option.value
-                          ? colors.primary
-                          : isDark
-                            ? "#374151"
-                            : "#E5E7EB",
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={option.icon as any}
-                    size={18}
-                    color={musicianType === option.value ? "#fff" : colors.text}
-                  />
-                  <Text
-                    style={{
-                      fontFamily: "Poppins_500Medium",
-                      fontSize: 14,
-                      color:
-                        musicianType === option.value ? "#fff" : colors.text,
-                    }}
-                  >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
           </View>
 
           {/* Detailed Slots Configuration */}
@@ -1260,244 +1571,277 @@ export default function EditGigScreen() {
             </Text>
 
             {/* Solo Artists Slots */}
-            {(musicianType === "solo" || musicianType === "both") && (
-              <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-                <View style={styles.slotHeader}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Ionicons name="person" size={20} color="#EC4899" />
-                    <Text style={[styles.slotTitle, { color: colors.text }]}>Solo Artists</Text>
-                  </View>
-                  <View style={styles.counterContainer}>
-                    <TouchableOpacity
-                      onPress={() => setSoloSlotsNeeded(Math.max(0, soloSlotsNeeded - 1))}
-                      style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
-                    >
-                      <Ionicons name="remove" size={18} color={colors.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.counterValue, { color: colors.text }]}>{soloSlotsNeeded}</Text>
-                    <TouchableOpacity
-                      onPress={() => setSoloSlotsNeeded(soloSlotsNeeded + 1)}
-                      style={[styles.counterBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={18} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
+            <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+              <View style={styles.slotHeader}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Ionicons name="person" size={20} color="#EC4899" />
+                  <Text style={[styles.slotTitle, { color: colors.text }]}>Solo Artists</Text>
                 </View>
-                {soloSlotsNeeded > 0 && (
-                  <View style={{ marginTop: 12 }}>
-                    <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
-                      Specific roles/instruments needed (optional):
-                    </Text>
-                    <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                      <View
-                        style={[
-                          styles.inputWrapper,
-                          styles.flex1,
-                          { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
-                        ]}
-                      >
-                        <TextInput
-                          value={newSoloRole}
-                          onChangeText={setNewSoloRole}
-                          placeholder="e.g., Acoustic Guitarist, Singer..."
-                          placeholderTextColor={colors.textSecondary}
-                          style={[styles.textInput, { color: colors.text }]}
-                          onSubmitEditing={() => {
-                            if (newSoloRole.trim()) {
-                              setSoloRolesNeeded([...soloRolesNeeded, newSoloRole.trim()]);
-                              setNewSoloRole("");
-                            }
-                          }}
-                        />
-                      </View>
-                      <TouchableOpacity
-                        onPress={() => {
+                <View style={styles.counterContainer}>
+                  <TouchableOpacity activeOpacity={1}
+                    onPress={() => setSoloSlotsNeeded(Math.max(0, soloSlotsNeeded - 1))}
+                    style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
+                  >
+                    <Ionicons name="remove" size={18} color={colors.text} />
+                  </TouchableOpacity>
+                  <Text style={[styles.counterValue, { color: colors.text }]}>{soloSlotsNeeded}</Text>
+                  <TouchableOpacity activeOpacity={1}
+                    onPress={() => setSoloSlotsNeeded(soloSlotsNeeded + 1)}
+                    style={[styles.counterBtn, { backgroundColor: colors.primary }]}
+                  >
+                    <Ionicons name="add" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {soloSlotsNeeded > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
+                    Specific roles/instruments needed (optional):
+                  </Text>
+                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                    <View
+                      style={[
+                        styles.inputWrapper,
+                        styles.flex1,
+                        { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
+                      ]}
+                    >
+                      <TextInput
+                        value={newSoloRole}
+                        onChangeText={setNewSoloRole}
+                        placeholder="e.g., Acoustic Guitarist, Singer..."
+                        placeholderTextColor={colors.textSecondary}
+                        style={[styles.textInput, { color: colors.text }]}
+                        onSubmitEditing={() => {
                           if (newSoloRole.trim()) {
                             setSoloRolesNeeded([...soloRolesNeeded, newSoloRole.trim()]);
                             setNewSoloRole("");
                           }
                         }}
-                        style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                      >
-                        <Ionicons name="add" size={20} color="#fff" />
-                      </TouchableOpacity>
+                      />
                     </View>
-                    {soloRolesNeeded.length > 0 && (
-                      <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                        {soloRolesNeeded.map((role, index) => (
-                          <View key={index} style={[styles.chip, { backgroundColor: "#EC489920" }]}>
-                            <Text style={[styles.chipText, { color: "#EC4899" }]}>{role}</Text>
-                            <TouchableOpacity onPress={() => setSoloRolesNeeded(soloRolesNeeded.filter((_, i) => i !== index))}>
-                              <Ionicons name="close-circle" size={16} color="#EC4899" />
-                            </TouchableOpacity>
-                          </View>
-                        ))}
-                      </View>
-                    )}
+                    <TouchableOpacity activeOpacity={1}
+                      onPress={() => {
+                        if (newSoloRole.trim()) {
+                          setSoloRolesNeeded([...soloRolesNeeded, newSoloRole.trim()]);
+                          setNewSoloRole("");
+                        }
+                      }}
+                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                    >
+                      <Ionicons name="add" size={20} color="#fff" />
+                    </TouchableOpacity>
                   </View>
-                )}
-              </View>
-            )}
+                  {soloRolesNeeded.length > 0 && (
+                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                      {soloRolesNeeded.map((role, index) => (
+                        <View key={index} style={[styles.chip, { backgroundColor: "#EC489920" }]}>
+                          <Text style={[styles.chipText, { color: "#EC4899" }]}>{role}</Text>
+                          <TouchableOpacity activeOpacity={1} onPress={() => setSoloRolesNeeded(soloRolesNeeded.filter((_, i) => i !== index))}>
+                            <Ionicons name="close-circle" size={16} color="#EC4899" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
 
             {/* Duo Slots */}
-            {(musicianType === "group" || musicianType === "both") && (
-              <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
-                <View style={styles.slotHeader}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Ionicons name="people" size={20} color="#8B5CF6" />
-                    <Text style={[styles.slotTitle, { color: colors.text }]}>Duos (2 members)</Text>
-                  </View>
-                  <View style={styles.counterContainer}>
-                    <TouchableOpacity
-                      onPress={() => setDuoSlotsNeeded(Math.max(0, duoSlotsNeeded - 1))}
-                      style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
-                    >
-                      <Ionicons name="remove" size={18} color={colors.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.counterValue, { color: colors.text }]}>{duoSlotsNeeded}</Text>
-                    <TouchableOpacity
-                      onPress={() => setDuoSlotsNeeded(duoSlotsNeeded + 1)}
-                      style={[styles.counterBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={18} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
+            <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
+              <View style={styles.slotHeader}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Ionicons name="people" size={20} color="#8B5CF6" />
+                  <Text style={[styles.slotTitle, { color: colors.text }]}>Duos (2 members)</Text>
                 </View>
-                {duoSlotsNeeded > 0 && (
-                  <View style={{ marginTop: 12 }}>
-                    <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
-                      Specific roles/instruments needed (optional):
-                    </Text>
-                    <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                      <View
-                        style={[
-                          styles.inputWrapper,
-                          styles.flex1,
-                          { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
-                        ]}
-                      >
-                        <TextInput
-                          value={newDuoRole}
-                          onChangeText={setNewDuoRole}
-                          placeholder="e.g., Vocalist + Guitarist..."
-                          placeholderTextColor={colors.textSecondary}
-                          style={[styles.textInput, { color: colors.text }]}
-                          onSubmitEditing={() => {
-                            if (newDuoRole.trim()) {
-                              setDuoRolesNeeded([...duoRolesNeeded, newDuoRole.trim()]);
-                              setNewDuoRole("");
-                            }
-                          }}
-                        />
-                      </View>
-                      <TouchableOpacity
-                        onPress={() => {
+                <View style={styles.counterContainer}>
+                  <TouchableOpacity activeOpacity={1}
+                    onPress={() => setDuoSlotsNeeded(Math.max(0, duoSlotsNeeded - 1))}
+                    style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
+                  >
+                    <Ionicons name="remove" size={18} color={colors.text} />
+                  </TouchableOpacity>
+                  <Text style={[styles.counterValue, { color: colors.text }]}>{duoSlotsNeeded}</Text>
+                  <TouchableOpacity activeOpacity={1}
+                    onPress={() => setDuoSlotsNeeded(duoSlotsNeeded + 1)}
+                    style={[styles.counterBtn, { backgroundColor: colors.primary }]}
+                  >
+                    <Ionicons name="add" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {duoSlotsNeeded > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
+                    Specific roles/instruments needed (optional):
+                  </Text>
+                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                    <View
+                      style={[
+                        styles.inputWrapper,
+                        styles.flex1,
+                        { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
+                      ]}
+                    >
+                      <TextInput
+                        value={newDuoRole}
+                        onChangeText={setNewDuoRole}
+                        placeholder="e.g., Vocalist + Guitarist..."
+                        placeholderTextColor={colors.textSecondary}
+                        style={[styles.textInput, { color: colors.text }]}
+                        onSubmitEditing={() => {
                           if (newDuoRole.trim()) {
                             setDuoRolesNeeded([...duoRolesNeeded, newDuoRole.trim()]);
                             setNewDuoRole("");
                           }
                         }}
-                        style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                      >
-                        <Ionicons name="add" size={20} color="#fff" />
-                      </TouchableOpacity>
+                      />
                     </View>
-                    {duoRolesNeeded.length > 0 && (
-                      <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                        {duoRolesNeeded.map((role, index) => (
-                          <View key={index} style={[styles.chip, { backgroundColor: "#8B5CF620" }]}>
-                            <Text style={[styles.chipText, { color: "#8B5CF6" }]}>{role}</Text>
-                            <TouchableOpacity onPress={() => setDuoRolesNeeded(duoRolesNeeded.filter((_, i) => i !== index))}>
-                              <Ionicons name="close-circle" size={16} color="#8B5CF6" />
-                            </TouchableOpacity>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Band Slots */}
-            {(musicianType === "group" || musicianType === "both") && (
-              <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
-                <View style={styles.slotHeader}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Ionicons name="people-circle" size={20} color="#3B82F6" />
-                    <Text style={[styles.slotTitle, { color: colors.text }]}>Bands (3+ members)</Text>
-                  </View>
-                  <View style={styles.counterContainer}>
-                    <TouchableOpacity
-                      onPress={() => setBandSlotsNeeded(Math.max(0, bandSlotsNeeded - 1))}
-                      style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
+                    <TouchableOpacity activeOpacity={1}
+                      onPress={() => {
+                        if (newDuoRole.trim()) {
+                          setDuoRolesNeeded([...duoRolesNeeded, newDuoRole.trim()]);
+                          setNewDuoRole("");
+                        }
+                      }}
+                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
                     >
-                      <Ionicons name="remove" size={18} color={colors.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
-                    <TouchableOpacity
-                      onPress={() => setBandSlotsNeeded(bandSlotsNeeded + 1)}
-                      style={[styles.counterBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={18} color="#fff" />
+                      <Ionicons name="add" size={20} color="#fff" />
                     </TouchableOpacity>
                   </View>
+                  {duoRolesNeeded.length > 0 && (
+                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                      {duoRolesNeeded.map((role, index) => (
+                        <View key={index} style={[styles.chip, { backgroundColor: "#8B5CF620" }]}>
+                          <Text style={[styles.chipText, { color: "#8B5CF6" }]}>{role}</Text>
+                          <TouchableOpacity activeOpacity={1} onPress={() => setDuoRolesNeeded(duoRolesNeeded.filter((_, i) => i !== index))}>
+                            <Ionicons name="close-circle" size={16} color="#8B5CF6" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
-                {bandSlotsNeeded > 0 && (
-                  <View style={{ marginTop: 12 }}>
-                    <Text style={[styles.slotSubLabel, { color: colors.textSecondary }]}>
-                      Specific requirements/genres (optional):
-                    </Text>
-                    <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                      <View
-                        style={[
-                          styles.inputWrapper,
-                          styles.flex1,
-                          { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
-                        ]}
-                      >
-                        <TextInput
-                          value={newBandRole}
-                          onChangeText={setNewBandRole}
-                          placeholder="e.g., Rock Band, Jazz Ensemble..."
-                          placeholderTextColor={colors.textSecondary}
-                          style={[styles.textInput, { color: colors.text }]}
-                          onSubmitEditing={() => {
-                            if (newBandRole.trim()) {
-                              setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
-                              setNewBandRole("");
-                            }
+              )}
+            </View>
+
+            {/* Preferred Group Type Slots */}
+            <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
+              <View style={styles.slotHeader}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Ionicons name="musical-notes" size={20} color="#3B82F6" />
+                  <Text style={[styles.slotTitle, { color: colors.text }]}>Preferred Group Type</Text>
+                </View>
+                <View style={styles.counterContainer}>
+                  <TouchableOpacity activeOpacity={1}
+                    onPress={() => setBandSlotsNeeded(Math.max(0, bandSlotsNeeded - 1))}
+                    style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
+                  >
+                    <Ionicons name="remove" size={18} color={colors.text} />
+                  </TouchableOpacity>
+                  <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
+                  <TouchableOpacity activeOpacity={1}
+                    onPress={() => setBandSlotsNeeded(bandSlotsNeeded + 1)}
+                    style={[styles.counterBtn, { backgroundColor: colors.primary }]}
+                  >
+                    <Ionicons name="add" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {bandSlotsNeeded > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 12 }}>
+                    Select the type(s) of group you prefer for this gig (Max: {bandSlotsNeeded}).
+                  </Text>
+                  <View style={[styles.chipContainer, { marginTop: 0 }]}>
+                    {PH_MUSIC_GROUP_TYPES.map((type) => {
+                      const isSelected = preferredGroupTypes.includes(type.id);
+                      return (
+                        <TouchableOpacity
+                          key={type.id}
+                          activeOpacity={1}
+                          onPress={() => {
+                            setPreferredGroupTypes(prev => {
+                              if (isSelected) {
+                                return prev.filter(id => id !== type.id);
+                              } else {
+                                if (prev.length >= bandSlotsNeeded) {
+                                  return prev;
+                                }
+                                return [...prev, type.id];
+                              }
+                            });
                           }}
-                        />
-                      </View>
-                      <TouchableOpacity
-                        onPress={() => {
+                          style={[
+                            styles.chip,
+                            {
+                              backgroundColor: isSelected ? "rgba(59, 130, 246, 0.2)" : (isDark ? "#374151" : "#F3F4F6"),
+                              borderWidth: isSelected ? 1 : 0,
+                              borderColor: "#3B82F6",
+                            }
+                          ]}
+                        >
+                          <Text style={[styles.chipText, { color: isSelected ? "#3B82F6" : colors.textSecondary }]}>
+                            {type.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 16 }]}>
+                    Any other specific requirements/genres (optional):
+                  </Text>
+                  <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                    <View
+                      style={[
+                        styles.inputWrapper,
+                        styles.flex1,
+                        { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
+                      ]}
+                    >
+                      <TextInput
+                        value={newBandRole}
+                        onChangeText={setNewBandRole}
+                        placeholder="e.g., specific instruments..."
+                        placeholderTextColor={colors.textSecondary}
+                        style={[styles.textInput, { color: colors.text }]}
+                        onSubmitEditing={() => {
                           if (newBandRole.trim()) {
                             setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
                             setNewBandRole("");
                           }
                         }}
-                        style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                      >
-                        <Ionicons name="add" size={20} color="#fff" />
-                      </TouchableOpacity>
+                      />
                     </View>
-                    {bandRolesNeeded.length > 0 && (
-                      <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                        {bandRolesNeeded.map((role, index) => (
-                          <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
-                            <Text style={[styles.chipText, { color: "#3B82F6" }]}>{role}</Text>
-                            <TouchableOpacity onPress={() => setBandRolesNeeded(bandRolesNeeded.filter((_, i) => i !== index))}>
-                              <Ionicons name="close-circle" size={16} color="#3B82F6" />
-                            </TouchableOpacity>
-                          </View>
-                        ))}
-                      </View>
-                    )}
+                    <TouchableOpacity activeOpacity={1}
+                      onPress={() => {
+                        if (newBandRole.trim()) {
+                          setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
+                          setNewBandRole("");
+                        }
+                      }}
+                      style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                    >
+                      <Ionicons name="add" size={20} color="#fff" />
+                    </TouchableOpacity>
                   </View>
-                )}
-              </View>
-            )}
+                  {bandRolesNeeded.length > 0 && (
+                    <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                      {bandRolesNeeded.map((role, index) => (
+                        <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
+                          <Text style={[styles.chipText, { color: "#3B82F6" }]}>{role}</Text>
+                          <TouchableOpacity activeOpacity={1} onPress={() => setBandRolesNeeded(bandRolesNeeded.filter((_, i) => i !== index))}>
+                            <Ionicons name="close-circle" size={16} color="#3B82F6" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
 
             {/* Total Summary */}
             {(soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded) > 0 && (
@@ -1509,84 +1853,72 @@ export default function EditGigScreen() {
               </View>
             )}
 
-            {/* Reapplication Cooldown Setting */}
-            <View style={styles.inputContainer}>
-              <Text
-                style={[styles.inputLabel, { color: colors.textSecondary }]}
-              >
-                Rejected Musician Reapplication Cooldown
-              </Text>
-              <Text
-                style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 12, fontSize: 12 }]}
-              >
-                How long must a rejected musician wait before they can apply again?
-              </Text>
-              <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
-                <View style={styles.slotHeader}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <Ionicons name="time-outline" size={20} color={colors.primary} />
-                    <Text style={[styles.slotTitle, { color: colors.text }]}>Cooldown Period</Text>
-                  </View>
-                  <View style={styles.counterContainer}>
-                    <TouchableOpacity
-                      onPress={() => setReapplicationCooldownDays(Math.max(0, reapplicationCooldownDays - 7))}
-                      style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
-                    >
-                      <Ionicons name="remove" size={18} color={colors.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.counterValue, { color: colors.text, minWidth: 60, textAlign: "center" }]}>
-                      {reapplicationCooldownDays === 0 ? "None" : `${reapplicationCooldownDays} days`}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => setReapplicationCooldownDays(Math.min(365, reapplicationCooldownDays + 7))}
-                      style={[styles.counterBtn, { backgroundColor: colors.primary }]}
-                    >
-                      <Ionicons name="add" size={18} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
+          </View>
+
+          {/* Reapplication Cooldown Setting */}
+          <View style={styles.inputContainer}>
+            <Text
+              style={[styles.inputLabel, { color: colors.textSecondary }]}
+            >
+              Rejected Musician Reapplication Cooldown
+            </Text>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary, marginBottom: 12, fontSize: 12 }]}
+            >
+              How long must a rejected musician wait before they can apply again?
+            </Text>
+            <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+              <View style={styles.slotHeader}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Ionicons name="time-outline" size={20} color={colors.primary} />
+                  <Text style={[styles.slotTitle, { color: colors.text }]}>Cooldown Period</Text>
                 </View>
-                <View style={{ marginTop: 8 }}>
-                  <Text style={[styles.slotSubLabel, { color: colors.textSecondary, fontSize: 11 }]}>
-                    {reapplicationCooldownDays === 0
-                      ? "Musicians can reapply immediately after rejection."
-                      : `Musicians must wait ${reapplicationCooldownDays} days after rejection before reapplying.`}
+                <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: colors.primary + '20' }}>
+                  <Text style={{ color: colors.primary, fontFamily: 'Poppins_600SemiBold', fontSize: 14 }}>
+                    {reapplicationCooldownDays === 0 ? "None" : `${reapplicationCooldownDays} days`}
                   </Text>
                 </View>
-                {/* Quick preset buttons */}
-                <View style={{ flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                  {[
-                    { label: "None", value: 0 },
-                    { label: "7 days", value: 7 },
-                    { label: "14 days", value: 14 },
-                    { label: "30 days", value: 30 },
-                    { label: "90 days", value: 90 },
-                  ].map((preset) => (
-                    <TouchableOpacity
-                      key={preset.value}
-                      onPress={() => setReapplicationCooldownDays(preset.value)}
-                      style={[
-                        {
-                          paddingHorizontal: 12,
-                          paddingVertical: 6,
-                          borderRadius: 16,
-                          backgroundColor: reapplicationCooldownDays === preset.value
-                            ? colors.primary
-                            : isDark ? "#374151" : "#E5E7EB",
-                        },
-                      ]}
+              </View>
+              <View style={{ marginTop: 8 }}>
+                <Text style={[styles.slotSubLabel, { color: colors.textSecondary, fontSize: 11 }]}>
+                  {reapplicationCooldownDays === 0
+                    ? "Musicians can reapply immediately after rejection."
+                    : `Musicians must wait ${reapplicationCooldownDays} days after rejection before reapplying.`}
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                {[
+                  { label: "None", value: 0 },
+                  { label: "7 days", value: 7 },
+                  { label: "14 days", value: 14 },
+                  { label: "30 days", value: 30 },
+                  { label: "90 days", value: 90 },
+                ].map((preset) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={preset.value}
+                    onPress={() => setReapplicationCooldownDays(preset.value)}
+                    style={[
+                      {
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 16,
+                        backgroundColor: reapplicationCooldownDays === preset.value
+                          ? colors.primary
+                          : isDark ? "#374151" : "#E5E7EB",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 12,
+                        fontFamily: "Poppins_500Medium",
+                        color: reapplicationCooldownDays === preset.value ? "#fff" : colors.text,
+                      }}
                     >
-                      <Text
-                        style={{
-                          fontSize: 12,
-                          fontFamily: "Poppins_500Medium",
-                          color: reapplicationCooldownDays === preset.value ? "#fff" : colors.text,
-                        }}
-                      >
-                        {preset.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                      {preset.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
           </View>
@@ -1621,7 +1953,7 @@ export default function EditGigScreen() {
                   }}
                 />
               </View>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => {
                   if (newGenre.trim()) {
                     setRequiredGenres([...requiredGenres, newGenre.trim()]);
@@ -1646,7 +1978,7 @@ export default function EditGigScreen() {
                     <Text style={[styles.chipText, { color: colors.text }]}>
                       {genre}
                     </Text>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() =>
                         setRequiredGenres(
                           requiredGenres.filter((_, i) => i !== index),
@@ -1697,7 +2029,7 @@ export default function EditGigScreen() {
                   }}
                 />
               </View>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => {
                   if (newInstrument.trim()) {
                     setRequiredInstruments([
@@ -1725,7 +2057,7 @@ export default function EditGigScreen() {
                     <Text style={[styles.chipText, { color: colors.text }]}>
                       {instrument}
                     </Text>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() =>
                         setRequiredInstruments(
                           requiredInstruments.filter((_, i) => i !== index),
@@ -1751,7 +2083,7 @@ export default function EditGigScreen() {
             <View style={styles.experienceLevelContainer}>
               {["Beginner", "Intermediate", "Advanced", "Professional"].map(
                 (level) => (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     key={level}
                     onPress={() => setExperienceLevel(level)}
                     style={[
@@ -1788,18 +2120,6 @@ export default function EditGigScreen() {
               )}
             </View>
           </View>
-
-          {renderSectionHeader("Visuals", "image")}
-          <ImageUploader
-            images={images}
-            onImagesChange={setImages}
-            thumbnailIndex={thumbnailIndex}
-            onThumbnailChange={setThumbnailIndex}
-            maxImages={10}
-            bucketName="listings"
-            userId={id as string}
-            folder="gigs"
-          />
 
           {renderSectionHeader("Contract", "document-text")}
           <View style={styles.inputContainer}>
@@ -1851,7 +2171,7 @@ export default function EditGigScreen() {
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={removeContract}
                   style={styles.removeContractBtn}
                 >
@@ -1862,7 +2182,7 @@ export default function EditGigScreen() {
               <TouchableOpacity
                 onPress={handleContractUpload}
                 disabled={uploadingContract}
-                activeOpacity={0.8}
+                activeOpacity={1}
                 style={[
                   styles.uploadContractBtn,
                   {
@@ -1947,7 +2267,7 @@ export default function EditGigScreen() {
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={removeBusinessPermit}
                   style={styles.removeContractBtn}
                 >
@@ -1958,7 +2278,7 @@ export default function EditGigScreen() {
               <TouchableOpacity
                 onPress={handleBusinessPermitUpload}
                 disabled={uploadingBusinessPermit}
-                activeOpacity={0.8}
+                activeOpacity={1}
                 style={[
                   styles.uploadContractBtn,
                   {
@@ -2006,7 +2326,7 @@ export default function EditGigScreen() {
               ]}
               onPress={handleSave}
               disabled={saving}
-              activeOpacity={0.8}
+              activeOpacity={1}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -2015,9 +2335,9 @@ export default function EditGigScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.cancelButton, { borderColor: colors.border }]}
-              onPress={() => router.back()}
+              onPress={handleAttemptLeave}
             >
               <Text
                 style={{
@@ -2033,6 +2353,13 @@ export default function EditGigScreen() {
 
         <Navbar />
       </View>
+
+      <Modal
+        visible={saving}
+        loading
+        loadingMessage="Saving changes..."
+        onClose={() => { }}
+      />
 
       <CustomAlert
         visible={alertVisible}
@@ -2069,6 +2396,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   scrollContent: {
+    paddingTop: 16,
     paddingBottom: 160,
     paddingHorizontal: 24,
   },
@@ -2100,6 +2428,7 @@ const styles = StyleSheet.create({
   },
   input: {
     padding: 16,
+    textAlign: "left",
     textAlignVertical: "center",
   },
   documentItem: {
@@ -2332,6 +2661,78 @@ const styles = StyleSheet.create({
   },
   totalSummaryText: {
     fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  lookingForCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+  },
+  lookingForGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  lookingForOption: {
+    minWidth: "48%",
+    flexGrow: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
+  },
+  lookingForOptionLabel: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 14,
+  },
+  settingsCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 16,
+  },
+  settingHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  settingTitleWithIcon: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  settingTitle: {
+    fontSize: 16,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  cooldownValueText: {
+    minWidth: 120,
+    textAlign: "right",
+    fontSize: 18,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  cooldownHintText: {
+    fontSize: 13,
+    lineHeight: 20,
+    fontFamily: "Poppins_400Regular",
+  },
+  presetWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 14,
+  },
+  presetPill: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  presetPillText: {
+    fontSize: 13,
     fontFamily: "Poppins_600SemiBold",
   },
 });

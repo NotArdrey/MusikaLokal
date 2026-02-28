@@ -1,27 +1,54 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
 interface HeaderProps {
     title: string;
     transparent?: boolean;
+    onBackPress?: () => void;
 }
 
-export default function Header({ title, transparent }: HeaderProps) {
+function Header({ title, transparent, onBackPress }: HeaderProps) {
     const { colors, isDark } = useTheme();
+    const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
 
     const pathname = usePathname();
-    const [backVisible, setBackVisible] = useState(false);
-    const [notifVisible, setnotifVisible] = useState(false);
-    const [addbtnvisible, setaddbtnvisible] = useState(false);
     const [hasUnread, setHasUnread] = useState(false);
-    const addPath = usePathname();
-    const [btn, setBtn] = useState<'/add_gig' | '/add_studio' | '/add_group'>('/add_gig');
+    const isMainNavPath = useMemo(
+        () => pathname === "/explore" || pathname === "/home" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
+        [pathname],
+    );
+
+    const isSettingsOrProfile = useMemo(
+        () => pathname === "/settings" || pathname === "/profile",
+        [pathname],
+    );
+
+    const isMyListingPath = useMemo(
+        () => pathname === "/my_group" || pathname === "/my_venue" || pathname === "/my_studio",
+        [pathname],
+    );
+
+    const isManageDetailPath = useMemo(
+        () => pathname === "/manage_studio" || pathname === "/manage_gig" || pathname === "/manage_group",
+        [pathname],
+    );
+
+    const backVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isManageDetailPath);
+    const notifVisible = isMainNavPath && !isGuest;
+    const addbtnvisible = isMyListingPath;
+
+    const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group'>(() => {
+        if (pathname === "/my_venue") return '/add_gig';
+        if (pathname === "/my_studio") return '/add_studio';
+        return '/add_group';
+    }, [pathname]);
 
     useFocusEffect(
         useCallback(() => {
@@ -55,44 +82,6 @@ export default function Header({ title, transparent }: HeaderProps) {
         }
     };
 
-    useEffect(() => {
-        if (pathname === "/explore" || pathname === "/home" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions") {
-            setnotifVisible(true)
-            setBackVisible(false)
-            setaddbtnvisible(false)
-        } else if (pathname === "/settings" || pathname === "/profile") {
-            setnotifVisible(false)
-            setBackVisible(false)
-            setaddbtnvisible(false)
-        } else if (pathname === "/my_group" || pathname === "/my_venue" || pathname === "/my_studio") {
-            setnotifVisible(false)
-            setBackVisible(false)
-            setaddbtnvisible(true)
-        } else if (pathname === "/manage_studio" || pathname === "/manage_gig" || pathname === "/manage_group") {
-            // No back button for manage detail pages - users navigate via navbar
-            setnotifVisible(false)
-            setBackVisible(false)
-            setaddbtnvisible(false)
-        } else {
-            setBackVisible(true)
-            setnotifVisible(false)
-            setaddbtnvisible(false)
-        }
-    }, [pathname]);
-
-
-    useEffect(() => {
-
-        if (addPath === "/my_venue") {
-            setBtn("/add_gig")
-        } else if (addPath === "/my_studio") {
-            setBtn("/add_studio")
-        } else if (addPath === "/my_group") {
-            setBtn("/add_group")
-        }
-
-    }, [addPath])
-
     return (
         <View style={[styles.container, {
             backgroundColor: transparent ? 'transparent' : colors.background,
@@ -101,8 +90,8 @@ export default function Header({ title, transparent }: HeaderProps) {
             {/* Left Container - Only for Back Button */}
             {backVisible && (
                 <View style={styles.leftContainer}>
-                    <TouchableOpacity
-                        onPress={() => router.back()}
+                    <TouchableOpacity activeOpacity={1}
+                        onPress={() => (onBackPress ? onBackPress() : router.back())}
                         style={[styles.backButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}
                     >
                         <Ionicons name="arrow-back" size={20} color={colors.text} />
@@ -129,11 +118,11 @@ export default function Header({ title, transparent }: HeaderProps) {
                 {notifVisible ? (
                     <View style={styles.iconRow}>
                         {/* Chat Button */}
-                        <TouchableOpacity onPress={() => router.push('/chat')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>
+                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>
                             <Ionicons name="chatbubbles" size={24} color={colors.text} />
                         </TouchableOpacity>
                         {/* Notifications Button */}
-                        <TouchableOpacity onPress={() => router.push('/notifications')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>
+                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>
                             <Ionicons name="notifications" size={24} color={colors.text} />
                             {hasUnread && (
                                 <View style={styles.badge} />
@@ -141,7 +130,7 @@ export default function Header({ title, transparent }: HeaderProps) {
                         </TouchableOpacity>
                     </View>
                 ) : addbtnvisible ? (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                         onPress={() => router.push(btn)}
                         style={[styles.addButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}
                     >
@@ -152,6 +141,8 @@ export default function Header({ title, transparent }: HeaderProps) {
         </View>
     );
 }
+
+export default memo(Header);
 
 const styles = StyleSheet.create({
     container: {
@@ -168,7 +159,7 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
     },
     rightContainer: {
-        // minWidth: 48, 
+        minWidth: 40,
         justifyContent: 'center',
         alignItems: 'flex-end',
     },

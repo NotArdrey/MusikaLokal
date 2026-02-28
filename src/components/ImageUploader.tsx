@@ -1,9 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
+import CustomAlert, { AlertType } from './CustomAlert';
+
+const debugLog = (..._args: unknown[]) => {};
 
 interface ImageUploaderProps {
   images: string[];
@@ -28,20 +31,36 @@ export default function ImageUploader({
 }: ImageUploaderProps) {
   const { colors, isDark } = useTheme();
   const [uploading, setUploading] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
 
   const pickAndUploadImages = async () => {
     try {
       // Check authentication first
       const { data: { session }, error: authError } = await supabase.auth.getSession();
       if (authError || !session) {
-        Alert.alert('Authentication Required', 'Please log in to upload images.');
+        showAlert('warning', 'Authentication Required', 'Please log in to upload images.');
         console.error('Auth check failed:', authError?.message || 'No session');
         return;
       }
 
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
-        Alert.alert('Permission needed', 'Please allow access to your photos.');
+        showAlert('warning', 'Permission needed', 'Please allow access to your photos.');
         return;
       }
 
@@ -55,7 +74,7 @@ export default function ImageUploader({
 
       // Check if adding these images would exceed the limit
       if (images.length + result.assets.length > maxImages) {
-        Alert.alert('Limit Reached', `You can only upload up to ${maxImages} images.`);
+        showAlert('error', 'Limit Reached', `You can only upload up to ${maxImages} images.`);
         return;
       }
 
@@ -68,8 +87,8 @@ export default function ImageUploader({
           const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
           const fileName = `${userId}/${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-          console.log(`📤 Uploading to: ${bucketName}/${fileName}`);
-          console.log(`📍 Source URI: ${asset.uri}`);
+          debugLog(`📤 Uploading to: ${bucketName}/${fileName}`);
+          debugLog(`📍 Source URI: ${asset.uri}`);
 
           // For React Native, we need to use FormData or ArrayBuffer
           const response = await fetch(asset.uri);
@@ -79,7 +98,7 @@ export default function ImageUploader({
           
           const arrayBuffer = await response.arrayBuffer();
           const fileSize = arrayBuffer.byteLength;
-          console.log(`📦 File size: ${(fileSize / 1024).toFixed(2)} KB`);
+          debugLog(`📦 File size: ${(fileSize / 1024).toFixed(2)} KB`);
 
           if (fileSize === 0) {
             throw new Error('File is empty');
@@ -116,7 +135,7 @@ export default function ImageUploader({
             .from(bucketName)
             .getPublicUrl(data.path);
 
-          console.log(`✅ Upload successful: ${urlData.publicUrl}`);
+          debugLog(`✅ Upload successful: ${urlData.publicUrl}`);
           uploadedUrls.push(urlData.publicUrl);
         } catch (e: any) {
           console.error('❌ Error processing image:', e.message || e);
@@ -129,13 +148,13 @@ export default function ImageUploader({
         const message = uploadedUrls.length === result.assets.length
           ? `${uploadedUrls.length} image(s) uploaded successfully!`
           : `${uploadedUrls.length} of ${result.assets.length} image(s) uploaded. ${errors.length} failed.`;
-        Alert.alert('Upload Complete', message);
+        showAlert('success', 'Upload Complete', message);
       } else {
-        Alert.alert('Upload Failed', errors.length > 0 ? errors[0] : 'Please check your internet connection and try again.');
+        showAlert('error', 'Upload Failed', errors.length > 0 ? errors[0] : 'Please check your internet connection and try again.');
       }
     } catch (e: any) {
       console.error('❌ Upload error:', e.message || e);
-      Alert.alert('Error', e.message || 'Failed to upload images');
+      showAlert('error', 'Error', e.message || 'Failed to upload images');
     } finally {
       setUploading(false);
     }
@@ -158,7 +177,7 @@ export default function ImageUploader({
   const setAsThumbnail = (index: number) => {
     if (onThumbnailChange) {
       onThumbnailChange(index);
-      Alert.alert('Thumbnail Set', 'This image will be shown as the main thumbnail.');
+      showAlert('success', 'Thumbnail Set', 'This image will be shown as the main thumbnail.');
     }
   };
 
@@ -167,11 +186,11 @@ export default function ImageUploader({
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scrollView}>
         <View style={styles.imagesRow}>
           {/* Add Image Button */}
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6' }]}
             onPress={pickAndUploadImages}
             disabled={uploading || images.length >= maxImages}
-            activeOpacity={0.7}
+            activeOpacity={1}
           >
             {uploading ? (
               <ActivityIndicator size="small" color={colors.primary} />
@@ -186,7 +205,7 @@ export default function ImageUploader({
           {/* Display uploaded images */}
           {images.map((uri, index) => (
             <View key={`${uri}-${index}`} style={styles.imageWrapper}>
-              <TouchableOpacity onLongPress={() => setAsThumbnail(index)} activeOpacity={0.8} style={{ width: '100%', height: '100%' }}>
+              <TouchableOpacity activeOpacity={1} onLongPress={() => setAsThumbnail(index)} style={{ width: '100%', height: '100%' }}>
                 <Image source={{ uri }} style={styles.imageThumbnail} resizeMode="cover" />
                 {thumbnailIndex === index && (
                   <View style={[styles.thumbnailBadge, { backgroundColor: colors.primary }]}>
@@ -194,7 +213,7 @@ export default function ImageUploader({
                   </View>
                 )}
               </TouchableOpacity>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.removeImageButton, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
                 onPress={() => removeImage(index)}
               >
@@ -209,6 +228,15 @@ export default function ImageUploader({
           ? `${images.length}/${maxImages} images • Long press to set as thumbnail`
           : `Add up to ${maxImages} images`}
       </Text>
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
     </View>
   );
 }
@@ -277,3 +305,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+

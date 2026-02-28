@@ -312,6 +312,32 @@ serve(async (req: Request) => {
       }
     }
 
+    const publicActions = new Set([
+      "webhook",
+      "payment_success",
+      "payment_cancelled",
+      "subscription_success",
+      "subscription_cancelled",
+    ]);
+
+    let authenticatedUserId: string | null = null;
+
+    if (action && !publicActions.has(action)) {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabaseClient.auth.getUser();
+
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 401,
+        });
+      }
+
+      authenticatedUserId = user.id;
+    }
+
     // ====================================================================
     // 1. CREATE CHECKOUT SESSION
     // ====================================================================
@@ -331,6 +357,13 @@ serve(async (req: Request) => {
         redirect_url,
         cancel_redirect_url,
       } = params;
+
+      if (!authenticatedUserId || user_id !== authenticatedUserId) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
 
       console.log("📤 Creating PayMongo checkout session:", {
         booking_id,
@@ -511,6 +544,13 @@ serve(async (req: Request) => {
         redirect_url,
         cancel_redirect_url,
       } = params;
+
+      if (!authenticatedUserId || user_id !== authenticatedUserId) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
 
       console.log("📤 Creating subscription checkout:", {
         user_id,
@@ -723,12 +763,13 @@ serve(async (req: Request) => {
       }
 
       let sessionId = checkout_session_id;
+      let resolvedBookingId: string | null = booking_id || null;
 
       // If only booking_id provided, get checkout_session_id from booking
       if (!sessionId && booking_id) {
         const { data: booking } = await supabaseClient
           .from("studio_bookings")
-          .select("checkout_session_id, payment_status")
+          .select("id, checkout_session_id, payment_status")
           .eq("id", booking_id)
           .single();
 
@@ -747,6 +788,7 @@ serve(async (req: Request) => {
         }
 
         sessionId = booking?.checkout_session_id;
+        resolvedBookingId = booking?.id || resolvedBookingId;
       }
 
       if (!sessionId) {
@@ -759,6 +801,22 @@ serve(async (req: Request) => {
             status: 404,
           },
         );
+      }
+
+      if (resolvedBookingId && authenticatedUserId) {
+        const { data: ownershipBooking } = await supabaseAdmin
+          .from("studio_bookings")
+          .select("id")
+          .eq("id", resolvedBookingId)
+          .eq("user_id", authenticatedUserId)
+          .single();
+
+        if (!ownershipBooking) {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          });
+        }
       }
 
       // Get checkout session status from PayMongo
@@ -783,6 +841,10 @@ serve(async (req: Request) => {
         const paymentAmount = payment?.attributes?.amount
           ? payment.attributes.amount / 100
           : 0; // Convert from centavos
+        const metadata = sessionData.data.attributes.metadata || {};
+        const paymentType = metadata?.payment_type || "full";
+        const remainingBalance = Number(metadata?.remaining_balance || 0);
+        const isDownpayment = paymentType === "downpayment" && remainingBalance > 0;
 
         // ========================================
         // DEDUPLICATION: Check current status before updating to prevent race conditions
@@ -790,9 +852,11 @@ serve(async (req: Request) => {
         // ========================================
         const { data: currentBooking } = await supabaseAdmin
           .from("studio_bookings")
-          .select("payment_status")
+          .select("id, payment_status")
           .eq("checkout_session_id", sessionId)
           .single();
+
+        resolvedBookingId = resolvedBookingId || currentBooking?.id || null;
 
         if (currentBooking?.payment_status === "paid") {
           console.log("⏭️ check_status: Booking already paid by webhook, skipping duplicate notification");
@@ -811,19 +875,29 @@ serve(async (req: Request) => {
         }
 
         // Update booking to confirmed and paid
+        const updateData: any = {
+          payment_status: isDownpayment ? "partial" : "paid",
+          payment_intent_id: paymentIntentId,
+          payment_method: paymentMethod,
+          paid_at: new Date().toISOString(),
+          status: "confirmed",
+        };
+
+        if (!isDownpayment) {
+          updateData.remaining_balance = 0;
+        }
+
         const { error: updateError } = await supabaseAdmin
           .from("studio_bookings")
-          .update({
-            payment_status: "paid",
-            payment_intent_id: paymentIntentId,
-            payment_method: paymentMethod,
-            paid_at: new Date().toISOString(),
-            status: "confirmed", // Move to confirmed/upcoming when payment succeeds
-          })
+          .update(updateData)
           .eq("checkout_session_id", sessionId);
 
         if (updateError) {
           console.error("Error updating booking:", updateError);
+        }
+
+        if (resolvedBookingId) {
+          await creditOwnerWallet(supabaseAdmin, resolvedBookingId, paymentAmount);
         }
 
         // Get full booking details for notifications
@@ -832,7 +906,7 @@ serve(async (req: Request) => {
           .select(
             "id, user_id, studio_id, booking_date, studio:studios(name, owner_id, images), profile:user_id(avatar_url)",
           )
-          .eq("id", booking.id)
+          .eq("id", resolvedBookingId)
           .single();
 
         if (fullBooking) {
@@ -868,7 +942,7 @@ serve(async (req: Request) => {
         return new Response(
           JSON.stringify({
             success: true,
-            payment_status: "paid",
+            payment_status: isDownpayment ? "partial" : "paid",
             payment_method: paymentMethod,
             message: "Payment completed successfully",
           }),
@@ -1672,6 +1746,13 @@ serve(async (req: Request) => {
     if (action === "request_refund") {
       const { booking_id, user_id, reason } = params;
 
+      if (!authenticatedUserId || user_id !== authenticatedUserId) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
       console.log("💸 Refund requested for booking:", booking_id);
 
       if (!booking_id || !user_id) {
@@ -1966,6 +2047,20 @@ serve(async (req: Request) => {
     // ====================================================================
     if (action === "check_refund") {
       const { booking_id } = params;
+
+      const { data: ownedBooking } = await supabaseAdmin
+        .from("studio_bookings")
+        .select("id")
+        .eq("id", booking_id)
+        .eq("user_id", authenticatedUserId)
+        .single();
+
+      if (!ownedBooking) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
 
       const { data: booking } = await supabaseAdmin
         .from("studio_bookings")

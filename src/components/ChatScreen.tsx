@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Image,
     KeyboardAvoidingView,
+    Linking,
     Modal,
     Platform,
     Pressable,
@@ -20,6 +21,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
+import CustomAlert, { AlertType } from './CustomAlert';
+import ReportModal from './ReportModal';
 
 // Available reaction emojis
 const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '👍'];
@@ -35,6 +38,7 @@ interface ChatScreenProps {
     };
     // For group chats
     isGroupChat?: boolean;
+    groupId?: string | null;
     groupName?: string;
     groupAvatar?: string | null;
     onBack?: () => void;
@@ -45,6 +49,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     currentUserId,
     otherUser,
     isGroupChat = false,
+    groupId,
     groupName,
     groupAvatar,
     onBack,
@@ -59,6 +64,75 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const [showReactionPicker, setShowReactionPicker] = useState(false);
     const [showAttachmentPicker, setShowAttachmentPicker] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [alertVisible, setAlertVisible] = useState(false);
+    const [alertConfig, setAlertConfig] = useState<{
+        type: AlertType;
+        title: string;
+        message: string;
+        buttons?: any[];
+    }>({
+        type: 'info',
+        title: '',
+        message: '',
+    });
+    const [showReportModal, setShowReportModal] = useState(false);
+    const [showOptions, setShowOptions] = useState(false);
+
+    const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
+        setAlertConfig({ type, title, message, buttons });
+        setAlertVisible(true);
+    };
+
+    const openOtherUserProfile = () => {
+        if (isGroupChat || !otherUser?.id) return;
+        if (otherUser.id === currentUserId) return;
+
+        router.push({
+            pathname: '/profile',
+            params: { userId: otherUser.id },
+        } as any);
+    };
+
+    const submitChatReport = async (reason: string) => {
+        const reportType = isGroupChat ? 'group' : 'profile';
+        const reportTargetId = isGroupChat ? groupId : otherUser?.id;
+
+        if (!reportTargetId) {
+            showAlert('error', 'Unable to Report', 'Missing report target.');
+            return;
+        }
+
+        try {
+            const { error } = await supabase.functions.invoke('manage-details', {
+                body: {
+                    action: 'report',
+                    type: reportType,
+                    id: reportTargetId,
+                    userId: currentUserId,
+                    reason,
+                    details: null,
+                },
+            });
+
+            if (error) throw error;
+            // ReportModal shows its own built-in success screen
+        } catch (e: any) {
+            showAlert('error', 'Report Failed', e?.message || 'Failed to submit report.');
+        }
+    };
+
+    const handleOpenReport = () => {
+        setShowOptions(false);
+        if (isGroupChat && !groupId) {
+            showAlert('error', 'Unable to Report', 'Group information is missing.');
+            return;
+        }
+        if (!isGroupChat && !otherUser?.id) {
+            showAlert('error', 'Unable to Report', 'User information is missing.');
+            return;
+        }
+        setShowReportModal(true);
+    };
 
     // Create a map of user IDs to their profile info for quick lookup in group chats
     const participantMap = React.useMemo(() => {
@@ -125,44 +199,45 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
     const seenByUser = getSeenStatus();
 
-    // Pick and send image
-    const handlePickImage = async () => {
+    // Pick and send a file/document (5 MB limit)
+    const handlePickFile = async () => {
         setShowAttachmentPicker(false);
 
         try {
-            const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (!permissionResult.granted) {
-                Alert.alert('Permission needed', 'Please allow access to your photos.');
-                return;
-            }
-
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: 'images',
-                allowsMultipleSelection: false,
-                quality: 0.8,
+            const result = await DocumentPicker.getDocumentAsync({
+                type: '*/*',
+                copyToCacheDirectory: true,
             });
 
             if (result.canceled || !result.assets || result.assets.length === 0) return;
 
-            setUploading(true);
             const asset = result.assets[0];
-            const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+
+            // 5 MB size limit
+            const MAX_SIZE = 5 * 1024 * 1024;
+            if (asset.size && asset.size > MAX_SIZE) {
+                showAlert('warning', 'File Too Large', 'Please select a file smaller than 5 MB.');
+                return;
+            }
+
+            setUploading(true);
+            const fileExt = asset.name.split('.').pop()?.toLowerCase() || 'bin';
             const fileName = `chat/${conversationId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
             // Upload to Supabase storage
             const response = await fetch(asset.uri);
             const arrayBuffer = await response.arrayBuffer();
 
-            const { data, error } = await supabase.storage
+            const { error } = await supabase.storage
                 .from('chat-attachments')
                 .upload(fileName, arrayBuffer, {
-                    contentType: `image/${fileExt}`,
-                    upsert: false
+                    contentType: asset.mimeType || 'application/octet-stream',
+                    upsert: false,
                 });
 
             if (error) {
                 console.error('Upload error:', error);
-                Alert.alert('Upload Failed', error.message);
+                showAlert('error', 'Upload Failed', error.message);
                 setUploading(false);
                 return;
             }
@@ -172,68 +247,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 .from('chat-attachments')
                 .getPublicUrl(fileName);
 
-            // Send as image message
-            await sendMessage('📷 Image', 'image', urlData.publicUrl);
+            // Send as file message
+            await sendMessage(`📄 ${asset.name}`, 'file', urlData.publicUrl);
             setUploading(false);
         } catch (err: any) {
-            console.error('Error picking/uploading image:', err);
-            Alert.alert('Error', 'Failed to upload image');
-            setUploading(false);
-        }
-    };
-
-    // Take photo with camera
-    const handleTakePhoto = async () => {
-        setShowAttachmentPicker(false);
-
-        try {
-            const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-            if (!permissionResult.granted) {
-                Alert.alert('Permission needed', 'Please allow access to your camera.');
-                return;
-            }
-
-            const result = await ImagePicker.launchCameraAsync({
-                mediaTypes: 'images',
-                quality: 0.8,
-            });
-
-            if (result.canceled || !result.assets || result.assets.length === 0) return;
-
-            setUploading(true);
-            const asset = result.assets[0];
-            const fileExt = 'jpg';
-            const fileName = `chat/${conversationId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-
-            // Upload to Supabase storage
-            const response = await fetch(asset.uri);
-            const arrayBuffer = await response.arrayBuffer();
-
-            const { data, error } = await supabase.storage
-                .from('chat-attachments')
-                .upload(fileName, arrayBuffer, {
-                    contentType: 'image/jpeg',
-                    upsert: false
-                });
-
-            if (error) {
-                console.error('Upload error:', error);
-                Alert.alert('Upload Failed', error.message);
-                setUploading(false);
-                return;
-            }
-
-            // Get public URL
-            const { data: urlData } = supabase.storage
-                .from('chat-attachments')
-                .getPublicUrl(fileName);
-
-            // Send as image message
-            await sendMessage('📷 Photo', 'image', urlData.publicUrl);
-            setUploading(false);
-        } catch (err: any) {
-            console.error('Error taking/uploading photo:', err);
-            Alert.alert('Error', 'Failed to upload photo');
+            console.error('Error picking/uploading file:', err);
+            showAlert('error', 'Error', 'Failed to upload file');
             setUploading(false);
         }
     };
@@ -278,9 +297,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             <>
                 {showDate && (
                     <View style={styles.dateContainer}>
-                        <Text style={[styles.dateText, { color: colors.textSecondary }]}>
-                            {formatDate(item.created_at)}
-                        </Text>
+                        <View style={[styles.dateLine, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }]} />
+                        <View style={[styles.datePill, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
+                            <Text style={[styles.dateText, { color: colors.textSecondary }]}>
+                                {formatDate(item.created_at)}
+                            </Text>
+                        </View>
+                        <View style={[styles.dateLine, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }]} />
                     </View>
                 )}
                 <View style={[
@@ -324,8 +347,26 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                         resizeMode="cover"
                                     />
                                 )}
-                                {/* Text content - hide default text for image messages */}
-                                {item.message_type !== 'image' && (
+                                {/* File message */}
+                                {item.message_type === 'file' && item.attachment_url && (
+                                    <TouchableOpacity activeOpacity={1}
+                                        style={[styles.fileBubble, { borderColor: isMe ? 'rgba(255,255,255,0.3)' : colors.border }]}
+                                        onPress={() => Linking.openURL(item.attachment_url!)}
+                                        activeOpacity={1}
+                                    >
+                                        <Ionicons name="document-attach" size={28} color={isMe ? '#FFF' : colors.primary} />
+                                        <View style={{ flex: 1, marginLeft: 8 }}>
+                                            <Text style={[styles.fileName, { color: isMe ? '#FFF' : colors.text }]} numberOfLines={2}>
+                                                {item.content.replace('📄 ', '')}
+                                            </Text>
+                                            <Text style={[styles.fileSubtext, { color: isMe ? 'rgba(255,255,255,0.7)' : colors.textSecondary }]}>
+                                                Tap to open
+                                            </Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                )}
+                                {/* Text content - hide default text for image/file messages */}
+                                {item.message_type !== 'image' && item.message_type !== 'file' && (
                                     <Text style={[
                                         styles.messageText,
                                         { color: isMe ? '#FFF' : colors.text },
@@ -408,8 +449,10 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const displayName = isGroupChat ? groupName : otherUser?.full_name;
     const displayAvatar = isGroupChat ? groupAvatar : otherUser?.avatar_url;
     const displaySubtitle = isGroupChat
-        ? `${participants.length} members`
-        : 'Online';
+        ? `${participants.length} member${participants.length !== 1 ? 's' : ''}`
+        : null;
+    const reportTargetName = isGroupChat ? (groupName || 'this group') : (otherUser?.full_name || 'this user');
+    const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -418,55 +461,122 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 styles.header,
                 {
                     backgroundColor: colors.background,
-                    borderBottomColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-                    paddingTop: (insets.top || 16) + 12,
+                    borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+                    paddingTop: (insets.top || 16) + 8,
                 },
             ]}>
                 {onBack && (
-                    <TouchableOpacity onPress={onBack} style={styles.backButton}>
-                        <Ionicons name="arrow-back" size={24} color={colors.text} />
+                    <TouchableOpacity activeOpacity={1} onPress={onBack} style={styles.backButton} hitSlop={8}>
+                        <Ionicons name="chevron-back" size={26} color={colors.text} />
                     </TouchableOpacity>
                 )}
-                {isGroupChat ? (
-                    <View style={[styles.groupAvatarContainer, { backgroundColor: colors.primary }]}>
-                        {displayAvatar ? (
-                            <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
+                <TouchableOpacity
+                    onPress={openOtherUserProfile}
+                    disabled={isGroupChat || !otherUser?.id || otherUser.id === currentUserId}
+                    activeOpacity={1}
+                    style={styles.headerMainTouchable}
+                >
+                    {/* Avatar with online indicator */}
+                    <View style={styles.headerAvatarWrap}>
+                        {isGroupChat ? (
+                            <View style={[styles.groupAvatarContainer, { backgroundColor: colors.primary }]}>
+                                {displayAvatar ? (
+                                    <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
+                                ) : (
+                                    <Ionicons name="people" size={22} color="#FFF" />
+                                )}
+                            </View>
                         ) : (
-                            <Ionicons name="people" size={24} color="#FFF" />
+                            displayAvatar ? (
+                                <Image source={{ uri: displayAvatar }} style={styles.headerAvatar} />
+                            ) : (
+                                <View style={[styles.headerAvatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
+                                    <Ionicons name="person" size={20} color="#FFF" />
+                                </View>
+                            )
+                        )}
+                        {!isGroupChat && (
+                            <View style={styles.onlineDot} />
                         )}
                     </View>
-                ) : (
-                    displayAvatar ? (
-                        <Image
-                            source={{ uri: displayAvatar }}
-                            style={styles.headerAvatar}
-                        />
-                    ) : (
-                        <View style={[styles.headerAvatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
-                            <Ionicons name="person" size={20} color="#FFF" />
-                        </View>
-                    )
-                )}
-                <View style={styles.headerInfo}>
-                    <Text style={[styles.headerName, { color: colors.text }]}>
-                        {displayName || 'Chat'}
-                    </Text>
-                    <Text style={[styles.headerStatus, { color: colors.textSecondary }]}>
-                        {displaySubtitle}
-                    </Text>
-                </View>
+                    <View style={styles.headerInfo}>
+                        <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>
+                            {displayName || 'Chat'}
+                        </Text>
+                        <Text style={[styles.headerStatus, { color: '#10B981' }]}>
+                            {displaySubtitle ?? 'Active now'}
+                        </Text>
+                    </View>
+                </TouchableOpacity>
                 <View style={styles.headerActions}>
-                    <TouchableOpacity style={styles.headerAction}>
-                        <Ionicons name="call" size={24} color={colors.primary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.headerAction}>
-                        <Ionicons name="videocam" size={24} color={colors.primary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.headerAction}>
-                        <Ionicons name="information-circle" size={24} color={colors.primary} />
+                    <TouchableOpacity activeOpacity={1}
+                        style={[styles.headerActionBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
+                        onPress={() => setShowOptions(true)}
+                    >
+                        <Ionicons name="ellipsis-horizontal" size={20} color={colors.text} />
                     </TouchableOpacity>
                 </View>
             </View>
+
+            {/* Options Bottom Sheet */}
+            <Modal
+                visible={showOptions}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowOptions(false)}
+            >
+                <Pressable
+                    style={styles.modalOverlay}
+                    onPress={() => setShowOptions(false)}
+                >
+                    <View style={[styles.optionsSheet, { backgroundColor: isDark ? '#1E2530' : '#FFFFFF' }]}>
+                        <View style={styles.attachmentPickerHandle} />
+                        <Text style={[styles.optionsSheetTitle, { color: colors.text }]}>
+                            {displayName || 'Options'}
+                        </Text>
+                        {!isGroupChat && otherUser?.id !== currentUserId && (
+                        <TouchableOpacity activeOpacity={1}
+                            style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
+                            onPress={() => {
+                                setShowOptions(false);
+                                openOtherUserProfile();
+                            }}
+                        >
+                            <View style={[styles.optionIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
+                                <Ionicons name="person" size={20} color={colors.primary} />
+                            </View>
+                            <Text style={[styles.optionLabel, { color: colors.text }]}>View Profile</Text>
+                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                        )}
+                        <TouchableOpacity activeOpacity={1}
+                            style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
+                            onPress={handleOpenReport}
+                        >
+                            <View style={[styles.optionIconWrap, { backgroundColor: 'rgba(239,68,68,0.12)' }]}>
+                                <Ionicons name="flag" size={20} color="#EF4444" />
+                            </View>
+                            <Text style={[styles.optionLabel, { color: '#EF4444' }]}>Report</Text>
+                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                        <TouchableOpacity activeOpacity={1}
+                            style={styles.optionCancelBtn}
+                            onPress={() => setShowOptions(false)}
+                        >
+                            <Text style={[styles.optionCancelText, { color: colors.textSecondary }]}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                </Pressable>
+            </Modal>
+
+            {/* Report Modal */}
+            <ReportModal
+                visible={showReportModal}
+                onClose={() => setShowReportModal(false)}
+                onSubmit={async (reason) => { await submitChatReport(reason); }}
+                targetName={reportTargetName}
+                title={reportTitle}
+            />
 
             {/* Messages */}
             <KeyboardAvoidingView
@@ -504,36 +614,30 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     styles.inputContainer,
                     {
                         backgroundColor: colors.background,
-                        borderTopColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                        borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
                         paddingBottom: Math.max(insets.bottom, 10) + 8,
+                        borderTopWidth: 1,
                     },
                 ]}>
-                    <View style={styles.inputLeftActions}>
-                        <TouchableOpacity style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)}>
+                    {/* Media actions – collapse to single add when typing */}
+                    {text.trim().length === 0 ? (
+                        <View style={styles.inputLeftActions}>
+                            <TouchableOpacity activeOpacity={1} style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)}>
+                                <Ionicons name="add-circle" size={28} color={colors.primary} />
+                            </TouchableOpacity>
+                        </View>
+                    ) : (
+                        <TouchableOpacity activeOpacity={1} style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)}>
                             <Ionicons name="add-circle" size={28} color={colors.primary} />
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.inputAction} onPress={handlePickImage}>
-                            <Ionicons name="images" size={26} color={colors.primary} />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.inputAction} onPress={handleTakePhoto}>
-                            <Ionicons name="camera" size={26} color={colors.primary} />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.inputAction}>
-                            <Ionicons name="mic" size={26} color={colors.primary} />
-                        </TouchableOpacity>
-                    </View>
+                    )}
 
                     <View style={[
                         styles.textInputWrapper,
-                        { backgroundColor: isDark ? '#3A3B3C' : '#F0F2F5' }
+                        { backgroundColor: isDark ? '#2C2F3A' : '#F0F2F5' }
                     ]}>
                         <TextInput
-                            style={[
-                                styles.input,
-                                {
-                                    color: colors.text,
-                                },
-                            ]}
+                            style={[styles.input, { color: colors.text }]}
                             value={text}
                             onChangeText={setText}
                             placeholder="Aa"
@@ -541,26 +645,24 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             multiline
                             maxLength={1000}
                         />
-                        <TouchableOpacity style={styles.emojiButton}>
-                            <Ionicons name="happy-outline" size={24} color={colors.primary} />
-                        </TouchableOpacity>
+
                     </View>
 
                     {text.trim().length > 0 ? (
-                        <TouchableOpacity
+                        <TouchableOpacity activeOpacity={1}
                             onPress={handleSend}
                             disabled={!text.trim() || sending}
-                            style={styles.sendButton}
+                            style={[styles.sendButton, { backgroundColor: colors.primary }]}
                         >
                             {sending ? (
-                                <ActivityIndicator size="small" color={colors.primary} />
+                                <ActivityIndicator size="small" color="#FFF" />
                             ) : (
-                                <Ionicons name="send" size={24} color={colors.primary} />
+                                <Ionicons name="send" size={20} color="#FFF" />
                             )}
                         </TouchableOpacity>
                     ) : (
-                        <TouchableOpacity style={styles.thumbsUpButton} onPress={() => sendMessage('👍')}>
-                            <Ionicons name="thumbs-up" size={28} color={colors.primary} />
+                        <TouchableOpacity activeOpacity={1} style={styles.thumbsUpButton} onPress={() => sendMessage('👍')}>
+                            <Ionicons name="thumbs-up" size={27} color={colors.primary} />
                         </TouchableOpacity>
                     )}
                 </View>
@@ -582,7 +684,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         { backgroundColor: isDark ? '#1F2937' : '#FFFFFF' }
                     ]}>
                         {REACTION_EMOJIS.map((emoji) => (
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                                 key={emoji}
                                 style={styles.reactionOption}
                                 onPress={() => handleSelectReaction(emoji)}
@@ -614,32 +716,30 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             Share
                         </Text>
                         <View style={styles.attachmentOptions}>
-                            <TouchableOpacity
+                            <TouchableOpacity activeOpacity={1}
                                 style={styles.attachmentOption}
-                                onPress={handlePickImage}
+                                onPress={handlePickFile}
                             >
-                                <View style={[styles.attachmentOptionIcon, { backgroundColor: '#8B5CF6' }]}>
-                                    <Ionicons name="images" size={28} color="#FFF" />
+                                <View style={[styles.attachmentOptionIcon, { backgroundColor: '#3B82F6' }]}>
+                                    <Ionicons name="document-attach" size={28} color="#FFF" />
                                 </View>
                                 <Text style={[styles.attachmentOptionText, { color: colors.text }]}>
-                                    Gallery
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.attachmentOption}
-                                onPress={handleTakePhoto}
-                            >
-                                <View style={[styles.attachmentOptionIcon, { backgroundColor: '#EC4899' }]}>
-                                    <Ionicons name="camera" size={28} color="#FFF" />
-                                </View>
-                                <Text style={[styles.attachmentOptionText, { color: colors.text }]}>
-                                    Camera
+                                    Files
                                 </Text>
                             </TouchableOpacity>
                         </View>
                     </View>
                 </Pressable>
             </Modal>
+
+            <CustomAlert
+                visible={alertVisible}
+                type={alertConfig.type}
+                title={alertConfig.title}
+                message={alertConfig.message}
+                buttons={alertConfig.buttons}
+                onClose={() => setAlertVisible(false)}
+            />
         </View>
     );
 };
@@ -651,39 +751,64 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingBottom: 12,
+        paddingHorizontal: 12,
+        paddingBottom: 10,
         borderBottomWidth: 1,
+        gap: 4,
     },
     backButton: {
-        marginRight: 12,
+        padding: 4,
+    },
+    headerMainTouchable: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+    },
+    headerAvatarWrap: {
+        position: 'relative',
     },
     headerAvatar: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 42,
+        height: 42,
+        borderRadius: 21,
     },
     groupAvatarContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 42,
+        height: 42,
+        borderRadius: 21,
         justifyContent: 'center',
         alignItems: 'center',
     },
+    onlineDot: {
+        position: 'absolute',
+        bottom: 1,
+        right: 1,
+        width: 11,
+        height: 11,
+        borderRadius: 6,
+        backgroundColor: '#10B981',
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
+    },
     headerInfo: {
         flex: 1,
-        marginLeft: 12,
+        marginLeft: 10,
     },
     headerName: {
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: '700',
     },
     headerStatus: {
         fontSize: 12,
+        fontWeight: '500',
     },
-    headerAction: {
-        padding: 8,
-        marginLeft: 4,
+    headerActionBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginLeft: 6,
     },
     headerActions: {
         flexDirection: 'row',
@@ -718,12 +843,25 @@ const styles = StyleSheet.create({
         paddingBottom: 8,
     },
     dateContainer: {
+        flexDirection: 'row',
         alignItems: 'center',
         marginVertical: 16,
+        paddingHorizontal: 16,
+        gap: 10,
+    },
+    dateLine: {
+        flex: 1,
+        height: 1,
+    },
+    datePill: {
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 12,
     },
     dateText: {
-        fontSize: 12,
-        fontWeight: '500',
+        fontSize: 11,
+        fontWeight: '600',
+        letterSpacing: 0.3,
     },
     messageRow: {
         flexDirection: 'row',
@@ -810,15 +948,16 @@ const styles = StyleSheet.create({
         maxHeight: 100,
         paddingVertical: 4,
     },
-    emojiButton: {
-        marginLeft: 4,
-    },
     sendButton: {
-        marginLeft: 12,
-        padding: 4,
+        marginLeft: 8,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     thumbsUpButton: {
-        marginLeft: 12,
+        marginLeft: 8,
         padding: 4,
     },
     // Reaction styles
@@ -909,6 +1048,73 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 2,
         borderRadius: 10,
+    },
+    fileBubble: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 4,
+        borderWidth: 1,
+        borderRadius: 10,
+        maxWidth: 220,
+    },
+    fileName: {
+        fontSize: 13,
+        fontWeight: '500',
+    },
+    fileSubtext: {
+        fontSize: 11,
+        marginTop: 2,
+    },
+    // Options bottom sheet
+    optionsSheet: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        paddingHorizontal: 16,
+        paddingBottom: 32,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 12,
+        elevation: 16,
+    },
+    optionsSheetTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        textAlign: 'center',
+        marginBottom: 16,
+    },
+    optionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        borderBottomWidth: 1,
+        gap: 14,
+    },
+    optionIconWrap: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    optionLabel: {
+        fontSize: 15,
+        fontWeight: '500',
+        flex: 1,
+    },
+    optionCancelBtn: {
+        marginTop: 12,
+        alignItems: 'center',
+        paddingVertical: 14,
+    },
+    optionCancelText: {
+        fontSize: 15,
+        fontWeight: '600',
     },
     // Attachment picker styles
     attachmentPicker: {

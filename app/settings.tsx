@@ -2,20 +2,29 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function SettingsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const { theme, setTheme, colors, isDark } = useTheme();
+  const { isGuest, setGuestMode } = useAuth();
+  const insets = useSafeAreaInsets();
   const [userRole, setUserRole] = useState<string | null>(null);
 
   // Fetch user role on mount
   useFocusEffect(
     useCallback(() => {
       const fetchUserRole = async () => {
+        if (isGuest) {
+          setUserRole(null);
+          return;
+        }
+
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data: profile } = await supabase
@@ -29,7 +38,7 @@ export default function SettingsScreen() {
         }
       };
       fetchUserRole();
-    }, [])
+    }, [isGuest])
   );
 
   const handleLogout = async () => {
@@ -41,36 +50,50 @@ export default function SettingsScreen() {
   // Check if user is studio/venue owner (shows wallet & subscription)
   const isOwner = userRole === 'studio-owner' || userRole === 'venue-owner';
 
-  const SETTINGS_SECTIONS = [
-    {
+  const settingsSections: Array<{
+    title: string;
+    items: Array<{ label: string; icon: string; route: string }>;
+  }> = [];
+
+  if (!isGuest) {
+    settingsSections.push({
       title: 'Preferences',
       items: [
         { label: 'Account Security', icon: 'shield-outline', route: '/account_details' },
-        ...(isOwner ? [{ label: 'Wallet & Subscription', icon: 'wallet-outline', route: '/wallet' }] : [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }]),
-      ]
-    },
-    {
-      title: 'Support & Legal',
-      items: [
-        { label: 'Help & Support', icon: 'help-circle-outline', route: '/help_support' },
-        { label: 'Terms and Conditions', icon: 'document-text-outline', route: '/terms_and_conditions' },
-        { label: 'Privacy Policy', icon: 'shield-checkmark-outline', route: '/privacy_policy' },
-      ]
-    }
-  ];
+        ...(isOwner
+          ? [{ label: 'Wallet & Subscription', icon: 'wallet-outline', route: '/wallet' }]
+          : [{ label: 'Wallet', icon: 'wallet-outline', route: '/wallet' }]),
+      ],
+    });
+  }
+
+  settingsSections.push({
+    title: 'Support & Legal',
+    items: [
+      { label: 'Help & Support', icon: 'help-circle-outline', route: '/help_support' },
+      { label: 'Terms and Conditions', icon: 'document-text-outline', route: '/terms_and_conditions' },
+      { label: 'Privacy Policy', icon: 'shield-checkmark-outline', route: '/privacy_policy' },
+    ],
+  });
 
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         {/* Custom Header with Back Button */}
         <View style={[styles.header, { backgroundColor: colors.background }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity activeOpacity={1} onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Settings</Text>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: 190 + insets.bottom },
+          ]}
+        >
 
           {/* Section: Appearance */}
           <View style={styles.sectionContainer}>
@@ -86,7 +109,7 @@ export default function SettingsScreen() {
                 ].map((item) => {
                   const isActive = theme === item.id;
                   return (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={item.id}
                       onPress={() => setTheme(item.id as any)}
                       style={[
@@ -98,7 +121,13 @@ export default function SettingsScreen() {
                       ]}
                     >
                       <Ionicons name={item.icon as any} size={20} color={isActive ? colors.primary : colors.textSecondary} />
-                      <Text style={[styles.themeButtonText, { color: isActive ? colors.primary : colors.textSecondary }]}>{item.label}</Text>
+                      <Text
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                        style={[styles.themeButtonText, { color: isActive ? colors.primary : colors.textSecondary }]}
+                      >
+                        {item.label}
+                      </Text>
                     </TouchableOpacity>
                   )
                 })}
@@ -106,12 +135,12 @@ export default function SettingsScreen() {
             </View>
           </View>
 
-          {SETTINGS_SECTIONS.map((section, index) => (
+          {settingsSections.map((section) => (
             <View key={section.title} style={styles.sectionContainer}>
               <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{section.title}</Text>
               <View style={[styles.cardOverflow, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 {section.items.map((item, i) => (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     key={item.label}
                     onPress={() => router.push(item.route as any)}
                     style={[
@@ -125,7 +154,13 @@ export default function SettingsScreen() {
                     <View style={[styles.iconContainer, { backgroundColor: isDark ? colors.inputBackground : '#F3F4F6' }]}>
                       <Ionicons name={item.icon as any} size={18} color={colors.text} />
                     </View>
-                    <Text style={[styles.menuText, { color: colors.text }]}>{item.label}</Text>
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      style={[styles.menuText, { color: colors.text }]}
+                    >
+                      {item.label}
+                    </Text>
                     <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                 ))}
@@ -134,12 +169,28 @@ export default function SettingsScreen() {
           ))}
 
           <View style={styles.footerContainer}>
-            <TouchableOpacity
-              onPress={() => setModalVisible(true)}
-              style={[styles.logoutButton, { backgroundColor: '#FEE2E2' }]}
+            <TouchableOpacity activeOpacity={1}
+              onPress={async () => {
+                if (isGuest) {
+                  await setGuestMode(false);
+                  router.replace('/');
+                  return;
+                }
+                setModalVisible(true);
+              }}
+              style={[
+                styles.logoutButton,
+                { backgroundColor: isGuest ? colors.primary : '#FEE2E2' },
+              ]}
             >
-              <Ionicons name="log-out-outline" size={20} color="#DC2626" />
-              <Text style={styles.logoutText}>Log Out</Text>
+              <Ionicons
+                name={isGuest ? 'log-in-outline' : 'log-out-outline'}
+                size={20}
+                color={isGuest ? '#FFFFFF' : '#DC2626'}
+              />
+              <Text style={[styles.logoutText, { color: isGuest ? '#FFFFFF' : '#DC2626' }]}>
+                {isGuest ? 'Sign In' : 'Log Out'}
+              </Text>
             </TouchableOpacity>
 
             <Text style={[styles.versionText, { color: colors.textSecondary }]}>Version 1.0.0 (Build 52)</Text>
@@ -223,6 +274,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 12,
     fontFamily: 'Poppins_500Medium',
+    textAlign: 'center',
   },
   cardOverflow: {
     borderRadius: 16,
@@ -244,8 +296,10 @@ const styles = StyleSheet.create({
   },
   menuText: {
     flex: 1,
+    flexShrink: 1,
     fontSize: 14,
     fontFamily: 'Poppins_500Medium',
+    marginRight: 8,
   },
   footerContainer: {
     paddingHorizontal: 24,

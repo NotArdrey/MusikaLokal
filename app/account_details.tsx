@@ -120,7 +120,7 @@ export default function AccountDetailsScreen() {
 
           {renderSection('Actions', (
             <>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={styles.actionRow}
                 onPress={() => setModalVisible(true)}
               >

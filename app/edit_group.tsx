@@ -1,24 +1,32 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Modal as RNModal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  BackHandler,
+  Image,
+  Keyboard,
+  Modal as RNModal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
+import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+import {
+  getGroupMembersLabel,
+  getGroupTypeLabel,
+  isGroupLeaderMember,
+} from "../src/utils/groupMembers";
 
 import { useLocalSearchParams } from "expo-router";
 import { supabase } from "../lib/supabase";
@@ -105,6 +113,20 @@ export default function EditGroupScreen() {
     setAlertVisible(true);
   };
 
+  const handleAttemptLeave = useCallback(() => {
+    if (saving) return;
+
+    showAlert(
+      "warning",
+      "Leave edit group?",
+      "Your current edits won't be saved unless you tap Save Changes.",
+      [
+        { text: "Stay", style: "cancel" },
+        { text: "Leave", style: "destructive", onPress: () => router.back() },
+      ],
+    );
+  }, [saving]);
+
   // Enhanced member structure: { name, instrument, role?, user_id?, avatar_url? }
   interface MemberDetail {
     name: string;
@@ -114,12 +136,15 @@ export default function EditGroupScreen() {
     avatar_url?: string;
   }
   const [members, setMembers] = useState<MemberDetail[]>([]);
-  const [newMemberName, setNewMemberName] = useState("");
   const [newMemberInstrument, setNewMemberInstrument] = useState("");
-  const [showAddMemberForm, setShowAddMemberForm] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [pendingMember, setPendingMember] = useState<any>(null);
 
-  // Group type: duo (exactly 2 members) or band (3+ members)
-  const [groupType, setGroupType] = useState<"duo" | "band">("band");
+  // Group type based on the constants
+  const [groupType, setGroupType] = useState<string>("band");
+  const [groupTypeModalVisible, setGroupTypeModalVisible] = useState(false);
 
   // Leadership Transfer State
   const [transferModalVisible, setTransferModalVisible] = useState(false);
@@ -129,6 +154,13 @@ export default function EditGroupScreen() {
   const [transferMessage, setTransferMessage] = useState("");
   const [isTransferring, setIsTransferring] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [groupOwnerId, setGroupOwnerId] = useState<string | null>(null);
+  const [initialGroupType, setInitialGroupType] = useState<string>("band");
+  const [initialMemberUserIds, setInitialMemberUserIds] = useState<string[]>([]);
+  const [impactSummary, setImpactSummary] = useState({
+    activeApplications: 0,
+    activeBookings: 0,
+  });
 
   // Role-based access control
   useEffect(() => {
@@ -177,6 +209,70 @@ export default function EditGroupScreen() {
     }
   }, [id, authorized]);
 
+  useEffect(() => {
+    const backSubscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        handleAttemptLeave();
+        return true;
+      },
+    );
+
+    return () => backSubscription.remove();
+  }, [handleAttemptLeave]);
+
+  const getLeaderIndex = (list: MemberDetail[] = members) =>
+    list.findIndex((member) => isGroupLeaderMember(member, groupOwnerId));
+
+  const hasActiveEngagements =
+    impactSummary.activeApplications > 0 || impactSummary.activeBookings > 0;
+
+  const groupMembersLabel = getGroupMembersLabel(groupType);
+
+  const fetchGroupImpactSummary = async (groupId: string) => {
+    try {
+      const activeApplicationStatuses = [
+        "pending",
+        "applied",
+        "Pending",
+        "Applied",
+      ];
+
+      const activeBookingStatuses = [
+        "accepted",
+        "approved",
+        "confirmed",
+        "Accepted",
+        "Approved",
+        "Confirmed",
+        "Happening Now",
+        "happening_now",
+        "happening now",
+      ];
+
+      const { count: appCount, error: appError } = await supabase
+        .from("gig_applications")
+        .select("id", { count: "exact", head: true })
+        .eq("group_id", groupId)
+        .in("status", activeApplicationStatuses);
+
+      const { count: bookingCount, error: bookingError } = await supabase
+        .from("gig_applications")
+        .select("id", { count: "exact", head: true })
+        .eq("group_id", groupId)
+        .in("status", activeBookingStatuses);
+
+      if (!appError || !bookingError) {
+        setImpactSummary({
+          activeApplications: appError ? 0 : appCount || 0,
+          activeBookings: bookingError ? 0 : bookingCount || 0,
+        });
+      }
+    } catch (impactError) {
+      console.log("Unable to fetch impact summary:", impactError);
+    }
+  };
+
   const fetchGroupDetails = async () => {
     try {
       const {
@@ -195,15 +291,38 @@ export default function EditGroupScreen() {
         return;
       }
 
-      // Direct query to groups table
-      const { data, error } = await supabase
+      // Base query + legacy projection merge
+      const { data: baseData, error } = await supabase
         .from('groups')
         .select('*')
         .eq('id', groupId)
         .eq('owner_id', user.id)
         .single();
 
+      const { data: legacyData, error: legacyError } = await supabase
+        .from('groups_legacy_projection')
+        .select('members, images')
+        .eq('id', groupId)
+        .single();
+
       if (error) throw error;
+      if (legacyError) throw legacyError;
+
+      if (!baseData) {
+        showAlert(
+          "error",
+          "Not Found",
+          "Group not found or you do not have permission to edit it.",
+        );
+        router.replace("/home");
+        return;
+      }
+
+      const data = {
+        ...baseData,
+        members: legacyData?.members || [],
+        images: legacyData?.images || [],
+      } as any;
 
       // If no data returned, user doesn't own this group
       if (!data) {
@@ -226,32 +345,95 @@ export default function EditGroupScreen() {
         setSelectedGenres(genreArray);
       }
       setDescription(data.description);
+      setGroupOwnerId(data.owner_id || null);
       setAddress(data.location || "");
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
       // Load group type (default to 'band' for backward compatibility)
-      setGroupType(data.group_type || "band");
+      const loadedType = data.group_type || "band";
+      setGroupType(loadedType);
+      setInitialGroupType(loadedType);
       // Handle both old string[] format and new MemberDetail[] format
       const rawMembers = data.members || [];
       const parsedMembers: MemberDetail[] = rawMembers.map(
-        (m: any, index: number) => {
+        (m: any) => {
           if (typeof m === "string") {
             // Old format: just a string (instrument or name)
             return {
               name: m,
               instrument: m,
-              role: index === 0 ? "Leader" : undefined,
             };
           }
           // New format: already an object
           return m;
         },
       );
-      setMembers(parsedMembers);
+
+      const { data: dbMembers, error: dbMembersError } = await supabase
+        .from("group_members")
+        .select("user_id, role, profiles:user_id(full_name, avatar_url)")
+        .eq("group_id", groupId);
+
+      const membersFromDb: MemberDetail[] = [];
+      const addedUserIds = new Set<string>();
+      const dbRows = dbMembersError ? [] : dbMembers || [];
+
+      dbRows.forEach((row: any) => {
+        const matchedByUser = parsedMembers.find(
+          (member) => member.user_id && member.user_id === row.user_id,
+        );
+        const matchedByName = parsedMembers.find(
+          (member) =>
+            !member.user_id &&
+            member.name &&
+            row.profiles?.full_name &&
+            member.name.toLowerCase() ===
+            String(row.profiles.full_name).toLowerCase(),
+        );
+        const matchedMember = matchedByUser || matchedByName;
+
+        membersFromDb.push({
+          name: matchedMember?.name || row.profiles?.full_name || "Unknown",
+          instrument: matchedMember?.instrument || "",
+          role:
+            row.user_id === data.owner_id || row.role === "owner"
+              ? "Leader"
+              : matchedMember?.role,
+          user_id: row.user_id,
+          avatar_url: matchedMember?.avatar_url || row.profiles?.avatar_url,
+        });
+        if (row.user_id) {
+          addedUserIds.add(row.user_id);
+        }
+      });
+
+      const manualMembers = parsedMembers.filter(
+        (member) => !member.user_id || !addedUserIds.has(member.user_id),
+      );
+
+      const combinedMembers =
+        membersFromDb.length > 0
+          ? [...membersFromDb, ...manualMembers]
+          : parsedMembers.map((member) => ({
+            ...member,
+            role:
+              member.user_id && member.user_id === data.owner_id
+                ? "Leader"
+                : member.role,
+          }));
+
+      setMembers(combinedMembers);
+      setInitialMemberUserIds(
+        (membersFromDb.length > 0 ? membersFromDb : combinedMembers)
+          .map((member) => member.user_id)
+          .filter((memberId): memberId is string => !!memberId),
+      );
       setImages(data.images || []);
       if (data.images && data.images.length > 0) {
         setThumbnailIndex(0);
       }
+
+      fetchGroupImpactSummary(groupId);
     } catch (e) {
       console.log("Error fetching group details:", e);
       showAlert("error", "Error", "Failed to load group details.");
@@ -291,7 +473,7 @@ export default function EditGroupScreen() {
       return false;
     }
     // Validate leader has an instrument
-    const leader = members.find((m) => m.role === "Leader");
+    const leader = members.find((m) => isGroupLeaderMember(m, groupOwnerId));
     if (!leader?.instrument?.trim()) {
       showAlert(
         "error",
@@ -301,21 +483,13 @@ export default function EditGroupScreen() {
       return false;
     }
     // Validate member count based on group type
-    if (groupType === "duo") {
-      if (members.length !== 2) {
+    const selectedType = PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType);
+    if (selectedType) {
+      if (members.length < selectedType.minMembers) {
         showAlert(
           "warning",
-          "Duo Requirement",
-          "A duo must have exactly 2 members. Adjust members or change group type.",
-        );
-        return false;
-      }
-    } else {
-      if (members.length < 3) {
-        showAlert(
-          "warning",
-          "Band Requirement",
-          'A band must have at least 3 members. Add more members or change to "Duo" type.',
+          `${selectedType.label} Requirement`,
+          `A ${selectedType.label} must have at least ${selectedType.minMembers} members. Adjust members or change group type.`,
         );
         return false;
       }
@@ -374,8 +548,6 @@ export default function EditGroupScreen() {
           location: payload.location,
           latitude: payload.latitude,
           longitude: payload.longitude,
-          members: payload.members,
-          images: payload.images,
           group_type: payload.group_type,
         })
         .eq('id', groupId)
@@ -395,8 +567,96 @@ export default function EditGroupScreen() {
           alertMessage += `\n\nRaw: ${JSON.stringify(error)}`;
         }
 
-        Alert.alert("Error", alertMessage);
+        showAlert("error", "Error", alertMessage);
         return;
+      }
+
+      await supabase.from('group_roster_members').delete().eq('group_id', groupId);
+      const rosterRows = (payload.members || []).map((member: any, index: number) => ({
+        group_id: groupId,
+        user_id: member.user_id || null,
+        member_name: member.name || null,
+        member_role: member.role || null,
+        instrument: member.instrument || null,
+        avatar_url: member.avatar_url || null,
+        sort_order: index,
+        raw_member: member,
+      }));
+      if (rosterRows.length > 0) {
+        const { error: rosterError } = await supabase
+          .from('group_roster_members')
+          .insert(rosterRows);
+        if (rosterError) {
+          showAlert("error", "Error", `Group profile updated but failed to sync roster: ${rosterError.message || "Unknown error"}`);
+          return;
+        }
+      }
+
+      await supabase.from('group_media').delete().eq('group_id', groupId).eq('media_type', 'image');
+      const imageRows = (payload.images || []).map((media_url: string, index: number) => ({
+        group_id: groupId,
+        media_type: 'image',
+        media_url,
+        sort_order: index,
+      }));
+      if (imageRows.length > 0) {
+        const { error: mediaError } = await supabase
+          .from('group_media')
+          .insert(imageRows);
+        if (mediaError) {
+          showAlert("error", "Error", `Group profile updated but failed to sync images: ${mediaError.message || "Unknown error"}`);
+          return;
+        }
+      }
+
+      const desiredMemberUserIds = Array.from(
+        new Set(
+          [
+            user.id,
+            ...(members || [])
+              .map((member) => member?.user_id)
+              .filter((memberId): memberId is string =>
+                typeof memberId === "string" && memberId.trim().length > 0,
+              ),
+          ],
+        ),
+      );
+
+      const membershipRows = desiredMemberUserIds.map((memberId) => ({
+        group_id: groupId,
+        user_id: memberId,
+        role: memberId === user.id ? "owner" : "member",
+      }));
+
+      const { error: upsertMembersError } = await supabase
+        .from("group_members")
+        .upsert(membershipRows, { onConflict: "group_id,user_id" });
+
+      if (upsertMembersError) {
+        showAlert(
+          "error",
+          "Error",
+          `Group profile updated but failed to sync members: ${upsertMembersError.message || "Unknown error"}`,
+        );
+        return;
+      }
+
+      if (desiredMemberUserIds.length > 0) {
+        const inClause = `(${desiredMemberUserIds.map((id) => `"${id}"`).join(",")})`;
+        const { error: deleteStaleMembersError } = await supabase
+          .from("group_members")
+          .delete()
+          .eq("group_id", groupId)
+          .not("user_id", "in", inClause);
+
+        if (deleteStaleMembersError) {
+          showAlert(
+            "error",
+            "Error",
+            `Group profile updated but failed to remove stale members: ${deleteStaleMembersError.message || "Unknown error"}`,
+          );
+          return;
+        }
       }
 
       console.log("✅ Group Updated");
@@ -407,7 +667,7 @@ export default function EditGroupScreen() {
             if (router.canGoBack()) {
               router.back();
             } else {
-              router.replace("/manage_group");
+              router.replace({ pathname: "/manage_group", params: { id: groupId } });
             }
           },
         },
@@ -429,10 +689,46 @@ export default function EditGroupScreen() {
       return;
     }
 
+    const currentMemberUserIds = Array.from(
+      new Set(
+        members
+          .map((member) => member.user_id)
+          .filter((memberId): memberId is string =>
+            typeof memberId === "string" && memberId.trim().length > 0,
+          ),
+      ),
+    );
+    const removedMemberCount = initialMemberUserIds.filter(
+      (memberId) => !currentMemberUserIds.includes(memberId),
+    ).length;
+    const typeChanged = groupType !== initialGroupType;
+
+    const cautionPoints: string[] = [];
+    if (typeChanged) {
+      cautionPoints.push(
+        `- Group type will change from ${getGroupTypeLabel(initialGroupType)} to ${getGroupTypeLabel(groupType)}.`,
+      );
+    }
+    if (removedMemberCount > 0) {
+      cautionPoints.push(
+        `- ${removedMemberCount} synced member(s) will lose active membership access.`,
+      );
+    }
+    if (hasActiveEngagements && (typeChanged || removedMemberCount > 0)) {
+      cautionPoints.push(
+        `- This group has ${impactSummary.activeApplications} active application(s) and ${impactSummary.activeBookings} active booking(s).`,
+      );
+    }
+
+    const cautionMessage =
+      cautionPoints.length > 0
+        ? `Review impact before saving:\n\n${cautionPoints.join("\n")}`
+        : "Are you sure you want to update this group profile?";
+
     showAlert(
       "warning",
       "Save Changes",
-      "Are you sure you want to update this group profile?",
+      cautionMessage,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -444,22 +740,72 @@ export default function EditGroupScreen() {
     );
   };
 
-  const addMember = () => {
-    if (newMemberName.trim() && newMemberInstrument.trim()) {
+  const searchMusicians = async (query: string) => {
+    setSearchQuery(query);
+    if (query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, avatar_url, role")
+        .eq("role", "musician")
+        .ilike("full_name", `%${query}%`)
+        .limit(5);
+
+      if (error) throw error;
+      setSearchResults(data || []);
+    } catch (error) {
+      console.error("Error searching musicians:", error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const selectMember = (musician: any) => {
+    // Check if already added
+    if (
+      members.some(
+        (m) => m.user_id === musician.id || m.name === musician.full_name,
+      )
+    ) {
+      showAlert(
+        "warning",
+        "Already Added",
+        "This musician is already in the group.",
+      );
+      setSearchQuery("");
+      setSearchResults([]);
+      return;
+    }
+    setPendingMember(musician);
+    setSearchQuery("");
+    setSearchResults([]);
+  };
+
+  const confirmAddMember = (instrument: string) => {
+    if (pendingMember && instrument.trim()) {
       const newMember: MemberDetail = {
-        name: newMemberName.trim(),
-        instrument: newMemberInstrument.trim(),
+        name: pendingMember.full_name,
+        instrument: instrument.trim(),
+        user_id: pendingMember.id,
+        avatar_url: pendingMember.avatar_url,
       };
       setMembers([...members, newMember]);
-      setNewMemberName("");
+      setPendingMember(null);
       setNewMemberInstrument("");
-      setShowAddMemberForm(false);
     }
   };
 
   const removeMember = (index: number) => {
-    // Prevent removing the leader (first member)
-    if (index === 0) {
+    const member = members[index];
+    if (!member) return;
+
+    // Prevent removing the leader
+    if (isGroupLeaderMember(member, groupOwnerId)) {
       showAlert(
         "warning",
         "Cannot Remove",
@@ -467,13 +813,65 @@ export default function EditGroupScreen() {
       );
       return;
     }
-    setMembers(members.filter((_, i) => i !== index));
+
+    const memberName = member.name || "this member";
+    const impactLine = hasActiveEngagements
+      ? `\n\nThis group currently has ${impactSummary.activeApplications} active application(s) and ${impactSummary.activeBookings} active booking(s).`
+      : "";
+
+    showAlert(
+      "warning",
+      "Remove Member",
+      `Remove ${memberName} from this ${groupType === "duo" ? "duo" : "band"}?${impactLine}`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => setMembers(members.filter((_, i) => i !== index)),
+        },
+      ],
+    );
   };
 
   const updateMemberInstrument = (index: number, instrument: string) => {
-    const updated = [...members];
-    updated[index] = { ...updated[index], instrument };
-    setMembers(updated);
+    setMembers((prev) =>
+      prev.map((member, memberIndex) =>
+        memberIndex === index ? { ...member, instrument } : member,
+      ),
+    );
+  };
+
+  const handleGroupTypeChange = (nextType: string) => {
+    if (nextType === groupType) return;
+
+    const selectedType = PH_MUSIC_GROUP_TYPES.find((t) => t.id === nextType);
+    if (!selectedType) return;
+
+    const memberCount = members.length;
+    const typeMismatchWarning =
+      memberCount >= selectedType.minMembers
+        ? ""
+        : `\n\nA ${selectedType.label} requires at least ${selectedType.minMembers} members.`;
+    const impactLine = hasActiveEngagements
+      ? `\n\nThis group has ${impactSummary.activeApplications} active application(s) and ${impactSummary.activeBookings} active booking(s).`
+      : "";
+
+    showAlert(
+      "warning",
+      "Change Group Type",
+      `Switch this group from ${PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType)?.label || getGroupTypeLabel(groupType)} to ${selectedType.label}?${typeMismatchWarning}${impactLine}`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Continue",
+          onPress: () => {
+            setGroupType(nextType);
+            setGroupTypeModalVisible(false);
+          },
+        },
+      ],
+    );
   };
 
   // ============================================================
@@ -686,6 +1084,7 @@ export default function EditGroupScreen() {
               fontFamily: "Poppins_400Regular",
               color: colors.text,
               height: multiline ? 120 : "auto",
+              textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
             },
           ]}
@@ -750,7 +1149,7 @@ export default function EditGroupScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title="Edit Group" />
+        <Header title="Edit Group" onBackPress={handleAttemptLeave} />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -764,102 +1163,39 @@ export default function EditGroupScreen() {
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Group Type
             </Text>
-            <View style={{ flexDirection: "row", gap: 12 }}>
-              <TouchableOpacity
-                onPress={() => setGroupType("duo")}
-                style={[
-                  styles.typeButton,
-                  {
-                    backgroundColor:
-                      groupType === "duo"
-                        ? colors.primary
-                        : colors.inputBackground,
-                    borderColor:
-                      groupType === "duo"
-                        ? colors.primary
-                        : isDark
-                          ? "#374151"
-                          : "#E5E7EB",
-                    flex: 1,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name="people-outline"
-                  size={24}
-                  color={groupType === "duo" ? "#FFF" : colors.text}
-                />
-                <Text
-                  style={{
-                    color: groupType === "duo" ? "#FFF" : colors.text,
-                    fontFamily: "Poppins_600SemiBold",
-                    fontSize: 16,
-                    marginTop: 4,
-                  }}
-                >
-                  Duo
+
+            <TouchableOpacity activeOpacity={1}
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  paddingHorizontal: 16,
+                  paddingVertical: 16,
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }
+              ]}
+              onPress={() => setGroupTypeModalVisible(true)}
+            >
+              <Text style={{ color: colors.text, fontFamily: "Poppins_400Regular" }}>
+                {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.label || getGroupTypeLabel(groupType)}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            {/* Info about selected type */}
+            {groupType && PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType) && (
+              <View style={{ marginTop: 8, paddingHorizontal: 4 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular" }}>
+                  Minimum Members: {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.minMembers || 1}
                 </Text>
-                <Text
-                  style={{
-                    color:
-                      groupType === "duo"
-                        ? "rgba(255,255,255,0.8)"
-                        : colors.textSecondary,
-                    fontFamily: "Poppins_400Regular",
-                    fontSize: 12,
-                  }}
-                >
-                  Exactly 2 members
+                <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginTop: 2 }}>
+                  Roles: {PH_MUSIC_GROUP_TYPES.find(t => t.id === groupType)?.requiredRoles.join(", ")}
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setGroupType("band")}
-                style={[
-                  styles.typeButton,
-                  {
-                    backgroundColor:
-                      groupType === "band"
-                        ? colors.primary
-                        : colors.inputBackground,
-                    borderColor:
-                      groupType === "band"
-                        ? colors.primary
-                        : isDark
-                          ? "#374151"
-                          : "#E5E7EB",
-                    flex: 1,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name="musical-notes-outline"
-                  size={24}
-                  color={groupType === "band" ? "#FFF" : colors.text}
-                />
-                <Text
-                  style={{
-                    color: groupType === "band" ? "#FFF" : colors.text,
-                    fontFamily: "Poppins_600SemiBold",
-                    fontSize: 16,
-                    marginTop: 4,
-                  }}
-                >
-                  Band
-                </Text>
-                <Text
-                  style={{
-                    color:
-                      groupType === "band"
-                        ? "rgba(255,255,255,0.8)"
-                        : colors.textSecondary,
-                    fontFamily: "Poppins_400Regular",
-                    fontSize: 12,
-                  }}
-                >
-                  3 or more members
-                </Text>
-              </TouchableOpacity>
-            </View>
+              </View>
+            )}
           </View>
 
           {renderInput("Group Name", groupName, setGroupName)}
@@ -868,7 +1204,7 @@ export default function EditGroupScreen() {
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Based Location
             </Text>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={() => setLocationPickerVisible(true)}
               style={[
                 styles.inputWrapper,
@@ -909,7 +1245,7 @@ export default function EditGroupScreen() {
               {(showAllGenres ? GENRES : GENRES.slice(0, 8)).map((genre) => {
                 const selected = selectedGenres.includes(genre);
                 return (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     key={genre}
                     onPress={() => {
                       setSelectedGenres((prev) =>
@@ -944,7 +1280,7 @@ export default function EditGroupScreen() {
                 );
               })}
             </View>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={() => setShowAllGenres(!showAllGenres)}
               style={styles.showMoreButton}
             >
@@ -975,163 +1311,245 @@ export default function EditGroupScreen() {
             folder="groups"
           />
 
-          {renderSectionHeader("Band Members", "person")}
+          {renderSectionHeader(groupMembersLabel, "person")}
 
-          {/* Toggle Add Member Form */}
-          <TouchableOpacity
-            onPress={() => setShowAddMemberForm(!showAddMemberForm)}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginBottom: 12,
-              gap: 8,
-            }}
-          >
-            <Ionicons
-              name={showAddMemberForm ? "chevron-down" : "add-circle"}
-              size={20}
-              color={colors.primary}
-            />
-            <Text
-              style={{ color: colors.primary, fontFamily: "Poppins_500Medium" }}
-            >
-              {showAddMemberForm ? "Hide form" : "Add new member"}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Add Member Form */}
-          {showAddMemberForm && (
-            <View
-              style={[
-                styles.addMemberContainer,
-                {
-                  flexDirection: "column",
-                  gap: 8,
-                  marginBottom: 16,
-                  padding: 12,
-                  backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-                  borderRadius: 12,
-                },
-              ]}
-            >
-              <TextInput
-                value={newMemberName}
-                onChangeText={setNewMemberName}
-                placeholder="Member name"
-                placeholderTextColor={colors.textSecondary}
-                style={[
-                  styles.input,
-                  {
-                    fontFamily: "Poppins_400Regular",
-                    color: colors.text,
-                    backgroundColor: colors.inputBackground,
-                    borderRadius: 8,
-                    padding: 12,
-                    borderWidth: 1,
-                    borderColor: colors.border,
-                  },
-                ]}
-              />
-              <View style={{ flexDirection: "row", gap: 8 }}>
+          {/* Add Members Section */}
+          <View style={styles.addMemberSection}>
+            {/* Search Bar */}
+            {!pendingMember && (
+              <View style={styles.searchContainer}>
+                <Ionicons
+                  name="search"
+                  size={20}
+                  color={colors.textSecondary}
+                  style={styles.searchIcon}
+                />
                 <TextInput
-                  value={newMemberInstrument}
-                  onChangeText={setNewMemberInstrument}
-                  placeholder="Instrument (e.g., Vocals, Guitar)"
+                  value={searchQuery}
+                  onChangeText={searchMusicians}
+                  placeholder="Search musicians by name..."
                   placeholderTextColor={colors.textSecondary}
                   style={[
-                    styles.input,
+                    styles.searchInput,
                     {
-                      flex: 1,
-                      fontFamily: "Poppins_400Regular",
-                      color: colors.text,
                       backgroundColor: colors.inputBackground,
-                      borderRadius: 8,
-                      padding: 12,
-                      borderWidth: 1,
-                      borderColor: colors.border,
+                      color: colors.text,
+                      borderColor: isDark ? "#374151" : "#E5E7EB",
                     },
                   ]}
                 />
-                <TouchableOpacity
-                  onPress={addMember}
-                  disabled={
-                    !newMemberName.trim() || !newMemberInstrument.trim()
-                  }
-                  style={[
-                    styles.addMemberButton,
-                    {
-                      backgroundColor:
-                        !newMemberName.trim() || !newMemberInstrument.trim()
+                {isSearching && (
+                  <ActivityIndicator
+                    size="small"
+                    color={colors.primary}
+                    style={styles.searchSpinner}
+                  />
+                )}
+              </View>
+            )}
+
+            {/* Search Results */}
+            {searchResults.length > 0 && !pendingMember && (
+              <View
+                style={[
+                  styles.searchResults,
+                  {
+                    backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
+                {searchResults.map((musician) => (
+                  <TouchableOpacity activeOpacity={1}
+                    key={musician.id}
+                    style={[
+                      styles.searchResultItem,
+                      { borderBottomColor: isDark ? "#374151" : "#E5E7EB" },
+                    ]}
+                    onPress={() => selectMember(musician)}
+                  >
+                    <Image
+                      source={
+                        musician.avatar_url
+                          ? { uri: musician.avatar_url }
+                          : require("../assets/images/default_avatar.png")
+                      }
+                      style={styles.resultAvatar}
+                    />
+                    <View>
+                      <Text
+                        style={[styles.resultName, { color: colors.text }]}
+                      >
+                        {musician.full_name}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.resultRole,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        {musician.role}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Pending Member Instrument Input */}
+            {pendingMember && (
+              <View
+                style={[
+                  styles.pendingMemberCard,
+                  {
+                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                    borderColor: colors.primary,
+                  },
+                ]}
+              >
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_500Medium",
+                    marginBottom: 8,
+                  }}
+                >
+                  SET INSTRUMENT FOR:
+                </Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                    marginBottom: 16,
+                  }}
+                >
+                  <Image
+                    source={
+                      pendingMember.avatar_url
+                        ? { uri: pendingMember.avatar_url }
+                        : require("../assets/images/default_avatar.png")
+                    }
+                    style={{ width: 40, height: 40, borderRadius: 20 }}
+                  />
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontFamily: "Poppins_500Medium",
+                      fontSize: 16,
+                    }}
+                  >
+                    {pendingMember.full_name}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <TextInput
+                    value={newMemberInstrument}
+                    onChangeText={setNewMemberInstrument}
+                    placeholder="Enter instrument (e.g., Vocals)"
+                    placeholderTextColor={colors.textSecondary}
+                    style={[
+                      styles.input,
+                      {
+                        flex: 1,
+                        backgroundColor: colors.inputBackground,
+                        borderRadius: 8,
+                        height: 48,
+                        paddingHorizontal: 16,
+                        color: colors.text,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        borderWidth: 1,
+                      },
+                    ]}
+                  />
+                  <TouchableOpacity activeOpacity={1}
+                    onPress={() => confirmAddMember(newMemberInstrument)}
+                    disabled={!newMemberInstrument.trim()}
+                    style={[
+                      styles.addMemberButton,
+                      {
+                        backgroundColor: !newMemberInstrument.trim()
                           ? "#9CA3AF"
                           : colors.primary,
-                    },
-                  ]}
-                >
-                  <Ionicons name="add" size={24} color="#fff" />
-                </TouchableOpacity>
+                        width: 48,
+                        height: 48,
+                        borderRadius: 8,
+                        justifyContent: "center",
+                        alignItems: "center",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="checkmark" size={24} color="#fff" />
+                  </TouchableOpacity>
+                  <TouchableOpacity activeOpacity={1}
+                    onPress={() => {
+                      setPendingMember(null);
+                      setNewMemberInstrument("");
+                    }}
+                    style={[
+                      styles.addMemberButton,
+                      {
+                        backgroundColor: "#EF4444",
+                        width: 48,
+                        height: 48,
+                        borderRadius: 8,
+                        justifyContent: "center",
+                        alignItems: "center",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="close" size={24} color="#fff" />
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-          )}
+            )}
+          </View>
 
           <View style={styles.membersList}>
             {members.map((member, index) => {
-              const isLeader = member.role === "Leader" || index === 0;
+              const isLeader = isGroupLeaderMember(member, groupOwnerId);
+              const currentInstrument = member.instrument || "";
+              const needsInstrument = isLeader && !currentInstrument.trim();
               return (
                 <View
                   key={index}
                   style={[
                     styles.memberItem,
                     {
-                      backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                      borderColor: isDark ? "#374151" : "#E5E7EB",
-                      padding: 12,
-                      marginBottom: 8,
+                      backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                      borderColor: needsInstrument
+                        ? "#F59E0B"
+                        : isDark
+                          ? "#374151"
+                          : "#F3F4F6",
                     },
                   ]}
                 >
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      flex: 1,
-                      gap: 12,
-                    }}
-                  >
+                  <View style={styles.memberInfo}>
                     <View
                       style={[
                         styles.avatarPlaceholder,
                         {
                           backgroundColor: isLeader
                             ? colors.primary
-                            : isDark
-                              ? "#374151"
-                              : "#E0E7FF",
-                          width: 44,
-                          height: 44,
-                          borderRadius: 22,
-                          alignItems: "center",
-                          justifyContent: "center",
+                            : "#E0E7FF",
                         },
                       ]}
                     >
                       {member.avatar_url ? (
                         <Image
                           source={{ uri: member.avatar_url }}
-                          style={{ width: 44, height: 44, borderRadius: 22 }}
+                          style={{ width: 32, height: 32, borderRadius: 16 }}
                         />
                       ) : (
                         <Text
-                          style={{
-                            color: isLeader
-                              ? "#fff"
-                              : isDark
-                                ? "#A5B4FC"
-                                : "#4F46E5",
-                            fontWeight: "bold",
-                            fontSize: 16,
-                          }}
+                          style={[
+                            styles.avatarText,
+                            { color: isLeader ? "#fff" : "#4F46E5" },
+                          ]}
                         >
-                          {member.name?.charAt(0)?.toUpperCase() || "?"}
+                          {member.name?.charAt(0)}
                         </Text>
                       )}
                     </View>
@@ -1148,58 +1566,106 @@ export default function EditGroupScreen() {
                       >
                         {member.name || "Unnamed"}
                       </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                          marginTop: 2,
-                        }}
-                      >
-                        <Ionicons
-                          name="musical-note"
-                          size={12}
-                          color={colors.primary}
-                        />
-                        <Text
+                      {isLeader ? (
+                        <View
                           style={{
-                            fontSize: 12,
-                            color: colors.primary,
-                            fontFamily: "Poppins_500Medium",
+                            flexDirection: "row",
+                            gap: 8,
+                            marginTop: 6,
+                            alignItems: "center",
                           }}
                         >
-                          {member.instrument || "No instrument"}
-                        </Text>
-                        {isLeader && (
-                          <View
-                            style={{
-                              backgroundColor: colors.primary + "20",
-                              paddingHorizontal: 8,
-                              paddingVertical: 2,
-                              borderRadius: 10,
-                              marginLeft: 6,
+                          <TextInput
+                            placeholder="Enter instrument (e.g., Vocals, Guitar)"
+                            placeholderTextColor={colors.textSecondary}
+                            value={currentInstrument}
+                            onChangeText={(text) =>
+                              updateMemberInstrument(index, text)
+                            }
+                            style={[
+                              styles.input,
+                              {
+                                flex: 1,
+                                backgroundColor: colors.inputBackground,
+                                borderRadius: 8,
+                                height: 40,
+                                paddingHorizontal: 12,
+                                paddingVertical: 0,
+                                textAlign: "left",
+                                color: colors.text,
+                                borderWidth: 1,
+                                borderColor: isDark ? "#374151" : "#E5E7EB",
+                              },
+                            ]}
+                          />
+                          <TouchableOpacity activeOpacity={1}
+                            onPress={() => {
+                              updateMemberInstrument(index, currentInstrument.trim());
+                              Keyboard.dismiss();
                             }}
+                            disabled={!currentInstrument.trim()}
+                            style={[
+                              styles.addMemberButton,
+                              {
+                                width: 40,
+                                height: 40,
+                                borderRadius: 8,
+                                backgroundColor: !currentInstrument.trim()
+                                  ? "#9CA3AF"
+                                  : colors.primary,
+                              },
+                            ]}
                           >
-                            <Text
-                              style={{
-                                fontSize: 10,
-                                color: colors.primary,
-                                fontFamily: "Poppins_600SemiBold",
-                              }}
-                            >
-                              Leader
-                            </Text>
-                          </View>
-                        )}
-                      </View>
+                            <Ionicons name="checkmark" size={20} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TextInput
+                          placeholder="Enter instrument (e.g., Vocals, Guitar)"
+                          placeholderTextColor={colors.textSecondary}
+                          value={currentInstrument}
+                          onChangeText={(text) =>
+                            updateMemberInstrument(index, text)
+                          }
+                          style={[
+                            styles.input,
+                            {
+                              marginTop: 6,
+                              backgroundColor: colors.inputBackground,
+                              borderRadius: 8,
+                              height: 40,
+                              paddingHorizontal: 12,
+                              paddingVertical: 0,
+                              textAlign: "left",
+                              color: colors.text,
+                              borderWidth: 1,
+                              borderColor: isDark ? "#374151" : "#E5E7EB",
+                            },
+                          ]}
+                        />
+                      )}
+                      {isLeader && (
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            color: colors.textSecondary,
+                            marginTop: 4,
+                          }}
+                        >
+                          Leader
+                        </Text>
+                      )}
                     </View>
                   </View>
                   {!isLeader && (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => removeMember(index)}
-                      style={{ padding: 4 }}
                     >
-                      <Ionicons name="close-circle" size={24} color="#EF4444" />
+                      <Ionicons
+                        name="close-circle"
+                        size={20}
+                        color={colors.textSecondary}
+                      />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1242,7 +1708,7 @@ export default function EditGroupScreen() {
                   </Text>
                 </View>
               </View>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={cancelTransfer}
                 style={styles.cancelTransferButton}
               >
@@ -1261,7 +1727,7 @@ export default function EditGroupScreen() {
 
           {/* Transfer Leadership Button */}
           {!pendingTransfer && (
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.transferButton, { borderColor: "#F59E0B" }]}
               onPress={() => {
                 if (groupMembers.length === 0) {
@@ -1299,7 +1765,7 @@ export default function EditGroupScreen() {
               ]}
               onPress={handleSave}
               disabled={saving}
-              activeOpacity={0.8}
+              activeOpacity={1}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -1308,9 +1774,9 @@ export default function EditGroupScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.cancelButton, { borderColor: colors.border }]}
-              onPress={() => router.back()}
+              onPress={handleAttemptLeave}
             >
               <Text
                 style={{
@@ -1326,6 +1792,13 @@ export default function EditGroupScreen() {
 
         <Navbar />
       </View>
+
+      <Modal
+        visible={saving}
+        loading
+        loadingMessage="Saving changes..."
+        onClose={() => { }}
+      />
 
       <CustomAlert
         visible={alertVisible}
@@ -1403,7 +1876,7 @@ export default function EditGroupScreen() {
                 </Text>
               ) : (
                 groupMembers.map((member) => (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     key={member.user_id}
                     style={[
                       styles.memberSelectItem,
@@ -1476,7 +1949,7 @@ export default function EditGroupScreen() {
 
             {/* Actions */}
             <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[
                   styles.cancelButton,
                   { flex: 1, borderColor: colors.border },
@@ -1509,7 +1982,7 @@ export default function EditGroupScreen() {
                 ]}
                 onPress={initiateTransfer}
                 disabled={!selectedNewLeader || isTransferring}
-                activeOpacity={0.8}
+                activeOpacity={1}
               >
                 {isTransferring ? (
                   <ActivityIndicator color="white" size="small" />
@@ -1523,6 +1996,69 @@ export default function EditGroupScreen() {
           </View>
         </View>
       </RNModal>
+
+      {/* Group Type Selector Modal Native Implementation */}
+      {groupTypeModalVisible && (
+        <View style={StyleSheet.absoluteFillObject}>
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
+            activeOpacity={1}
+            onPress={() => setGroupTypeModalVisible(false)}
+          />
+          <View style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: colors.card,
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            maxHeight: "80%",
+            padding: 24,
+            paddingBottom: 24,
+          }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 18, fontFamily: "Poppins_600SemiBold", color: colors.text }}>
+                Select Group Type
+              </Text>
+              <TouchableOpacity activeOpacity={1} onPress={() => setGroupTypeModalVisible(false)}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {PH_MUSIC_GROUP_TYPES.map((type) => (
+                <TouchableOpacity activeOpacity={1}
+                  key={type.id}
+                  style={{
+                    flexDirection: "row",
+                    paddingVertical: 16,
+                    borderBottomWidth: 1,
+                    borderBottomColor: isDark ? "#374151" : "#F3F4F6",
+                    alignItems: "center"
+                  }}
+                  onPress={() => handleGroupTypeChange(type.id)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 16 }}>
+                      {type.label}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: 13, marginTop: 4 }}>
+                      {type.description}
+                    </Text>
+                    <Text style={{ color: colors.primary, fontFamily: "Poppins_500Medium", fontSize: 12, marginTop: 4 }}>
+                      Min: {type.minMembers} members
+                    </Text>
+                  </View>
+                  {groupType === type.id && (
+                    <Ionicons name="checkmark-circle" size={24} color={colors.primary} style={{ marginLeft: 16 }} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      )}
     </>
   );
 }
@@ -1566,6 +2102,7 @@ const styles = StyleSheet.create({
   },
   input: {
     padding: 16,
+    textAlign: "left",
     textAlignVertical: "center",
   },
   genreSelector: {
@@ -1605,22 +2142,70 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Poppins_500Medium",
   },
-  addMemberContainer: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 16,
-  },
-  addMemberInput: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: "hidden",
+  addMemberSection: {
+    marginBottom: 20,
   },
   addMemberButton: {
     width: 56,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,
+  },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    position: "relative",
+  },
+  searchIcon: {
+    position: "absolute",
+    left: 12,
+    zIndex: 1,
+  },
+  searchInput: {
+    flex: 1,
+    height: 48,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingLeft: 40,
+    paddingRight: 40,
+    fontFamily: "Poppins_400Regular",
+  },
+  searchSpinner: {
+    position: "absolute",
+    right: 12,
+  },
+  searchResults: {
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 16,
+    maxHeight: 200,
+    overflow: "hidden",
+  },
+  searchResultItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    borderBottomWidth: 1,
+  },
+  resultAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 12,
+  },
+  resultName: {
+    fontFamily: "Poppins_500Medium",
+    fontSize: 14,
+  },
+  resultRole: {
+    fontSize: 12,
+  },
+  pendingMemberCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
   },
   membersList: {
     flexDirection: "column",
@@ -1634,6 +2219,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
+  memberInfo: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
   memberText: {
     marginRight: 8,
     fontFamily: "Poppins_500Medium",
@@ -1644,6 +2235,10 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
+  },
+  avatarText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 16,
   },
   footerActions: {
     marginTop: 32,

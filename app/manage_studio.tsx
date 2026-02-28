@@ -2,19 +2,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Linking,
-  Modal as RNModal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Image,
+    Linking,
+    Modal as RNModal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
@@ -47,6 +47,52 @@ export default function StudioDetailsScreen() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: any[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: any[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
+
+  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+    const lowerTitle = (title || "").toLowerCase();
+    let type: AlertType = "info";
+    if (
+      lowerTitle.includes("error") ||
+      lowerTitle.includes("failed") ||
+      lowerTitle.includes("unauthorized") ||
+      lowerTitle.includes("invalid")
+    ) {
+      type = "error";
+    } else if (lowerTitle.includes("success")) {
+      type = "success";
+    } else if (
+      lowerTitle.includes("warning") ||
+      lowerTitle.includes("decline") ||
+      lowerTitle.includes("required") ||
+      lowerTitle.includes("incomplete")
+    ) {
+      type = "warning";
+    }
+    showAlert(type, title || "Notice", message || "", buttons);
+  };
+
+  const Alert = { alert: showAlertNative };
 
   // State for partial slot approval
   const [selectedBookingForPartial, setSelectedBookingForPartial] =
@@ -108,12 +154,18 @@ export default function StudioDetailsScreen() {
 
       console.log(`[manage_studio] Fetching data for studioId: ${studioId}, userId: ${userId}`);
 
-      // Direct query to studios table
+      // Base query + legacy projection merge
       const { data: studioData, error: studioError } = await supabase
         .from('studios')
         .select('*')
         .eq('id', studioId)
         .eq('owner_id', userId)
+        .single();
+
+      const { data: legacyStudio, error: legacyStudioError } = await supabase
+        .from('studios_legacy_projection')
+        .select('amenities, images, types, instruments')
+        .eq('id', studioId)
         .single();
 
       if (studioError) {
@@ -123,7 +175,60 @@ export default function StudioDetailsScreen() {
         // }
         throw studioError;
       }
-      setStudio(studioData);
+      if (legacyStudioError) {
+        throw legacyStudioError;
+      }
+
+      const { data: operatingRows } = await supabase
+        .from('studio_operating_hours')
+        .select('day_of_week, open_time, close_time, slot_order, is_open')
+        .eq('studio_id', studioId)
+        .order('day_of_week', { ascending: true })
+        .order('slot_order', { ascending: true });
+
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const availabilityMap = new Map<number, { day: string; slots: { start: string; end: string }[] }>();
+      (operatingRows || []).forEach((row: any) => {
+        if (!availabilityMap.has(row.day_of_week)) {
+          availabilityMap.set(row.day_of_week, {
+            day: dayNames[row.day_of_week] || `Day ${row.day_of_week}`,
+            slots: [],
+          });
+        }
+        if (row.is_open && row.open_time && row.close_time) {
+          availabilityMap.get(row.day_of_week)?.slots.push({
+            start: row.open_time,
+            end: row.close_time,
+          });
+        }
+      });
+
+      const { data: overrideRows } = await supabase
+        .from('studio_date_overrides')
+        .select('override_date, is_open, open_time, close_time')
+        .eq('studio_id', studioId)
+        .order('override_date', { ascending: true });
+
+      const calendarAvailability = (overrideRows || []).map((row: any) => ({
+        date: row.override_date,
+        slots:
+          row.is_open && row.open_time && row.close_time
+            ? [{ start: row.open_time, end: row.close_time }]
+            : [],
+      }));
+
+      setStudio({
+        ...studioData,
+        type:
+          Array.isArray(legacyStudio?.types) && legacyStudio.types.length > 1
+            ? 'Both'
+            : legacyStudio?.types?.[0] || 'Both',
+        amenities: legacyStudio?.amenities || [],
+        images: legacyStudio?.images || [],
+        instruments: legacyStudio?.instruments || [],
+        availability: Array.from(availabilityMap.values()),
+        calendar_availability: calendarAvailability,
+      });
 
       // Fetch Bookings
       try {
@@ -433,7 +538,7 @@ export default function StudioDetailsScreen() {
             ]}
           >
             {tabs.map((tab) => (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 key={tab}
                 onPress={() => setActiveTab(tab)}
                 style={[
@@ -589,7 +694,7 @@ export default function StudioDetailsScreen() {
                     Contract
                   </Text>
                   {studio?.contract_url ? (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={async () => {
                         try {
                           const supported = await Linking.canOpenURL(
@@ -686,7 +791,7 @@ export default function StudioDetailsScreen() {
                       >
                         No contract uploaded
                       </Text>
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() =>
                           router.push({
                             pathname: "/edit_studio",
@@ -955,7 +1060,7 @@ export default function StudioDetailsScreen() {
                   )}
                 </View>
 
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   onPress={() =>
                     router.push({
                       pathname: "/edit_studio",
@@ -1005,7 +1110,7 @@ export default function StudioDetailsScreen() {
                       padding: 2,
                     }}
                   >
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => setViewMode("list")}
                       style={{
                         paddingHorizontal: 12,
@@ -1029,7 +1134,7 @@ export default function StudioDetailsScreen() {
                         }
                       />
                     </TouchableOpacity>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => setViewMode("calendar")}
                       style={{
                         paddingHorizontal: 12,
@@ -1169,7 +1274,7 @@ export default function StudioDetailsScreen() {
                                 return aTime.localeCompare(bTime);
                               })
                               .map((booking, index) => (
-                                <TouchableOpacity
+                                <TouchableOpacity activeOpacity={1}
                                   key={booking.id}
                                   style={[
                                     styles.bookingCard,
@@ -1459,7 +1564,7 @@ export default function StudioDetailsScreen() {
                             {booking.time_slots &&
                               Array.isArray(booking.time_slots) &&
                               booking.time_slots.length > 1 && (
-                                <TouchableOpacity
+                                <TouchableOpacity activeOpacity={1}
                                   onPress={() => openPartialApproval(booking)}
                                   style={[
                                     styles.partialApprovalButton,
@@ -1487,7 +1592,7 @@ export default function StudioDetailsScreen() {
                               )}
 
                             <View style={styles.actionButtons}>
-                              <TouchableOpacity
+                              <TouchableOpacity activeOpacity={1}
                                 onPress={() =>
                                   confirmAction(booking.id, "cancelled")
                                 }
@@ -1505,7 +1610,7 @@ export default function StudioDetailsScreen() {
                                   Decline All
                                 </Text>
                               </TouchableOpacity>
-                              <TouchableOpacity
+                              <TouchableOpacity activeOpacity={1}
                                 onPress={() =>
                                   confirmAction(booking.id, "confirmed")
                                 }
@@ -1641,6 +1746,15 @@ export default function StudioDetailsScreen() {
         onInputChange={setCancellationReason}
       />
 
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
+
       {/* Partial Approval Modal for Multi-Slot Bookings */}
       <RNModal
         visible={partialModalVisible}
@@ -1663,7 +1777,7 @@ export default function StudioDetailsScreen() {
               <Text style={[styles.partialModalTitle, { color: colors.text }]}>
                 Review Time Slots
               </Text>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => {
                   setPartialModalVisible(false);
                   setSelectedBookingForPartial(null);
@@ -1713,7 +1827,7 @@ export default function StudioDetailsScreen() {
                       </Text>
                     </View>
                     <View style={styles.slotDecisionButtons}>
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() => toggleSlotSelection(index, "decline")}
                         style={[
                           styles.slotDecisionBtn,
@@ -1739,7 +1853,7 @@ export default function StudioDetailsScreen() {
                           }
                         />
                       </TouchableOpacity>
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         onPress={() => toggleSlotSelection(index, "accept")}
                         style={[
                           styles.slotDecisionBtn,
@@ -1811,7 +1925,7 @@ export default function StudioDetailsScreen() {
               </View>
             </View>
 
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={handlePartialApproval}
               style={[
                 styles.submitPartialBtn,
@@ -1844,7 +1958,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   scrollContent: {
-    paddingBottom: 150,
+    paddingBottom: 180,
   },
   headerContainer: {
     paddingHorizontal: 24,
