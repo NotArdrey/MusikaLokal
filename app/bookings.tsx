@@ -307,6 +307,143 @@ export default function BookingsScreen() {
   }, [userId]);
 
   useEffect(() => {
+    if (!isAuthenticated || !userId) return;
+
+    let isDisposed = false;
+    let channel: any = null;
+    let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const queueRealtimeRefresh = () => {
+      if (isDisposed || !userId) return;
+      if (realtimeRefreshTimer) return;
+
+      realtimeRefreshTimer = setTimeout(async () => {
+        realtimeRefreshTimer = null;
+
+        if (isDisposed || autoRefreshInFlightRef.current) return;
+
+        autoRefreshInFlightRef.current = true;
+        try {
+          await fetchBookings(userId);
+        } finally {
+          autoRefreshInFlightRef.current = false;
+        }
+      }, 700);
+    };
+
+    const setupRealtime = async () => {
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (isDisposed) return;
+
+      const role = profileData?.role || "";
+
+      let liveChannel = supabase
+        .channel(`bookings-live-${userId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            queueRealtimeRefresh();
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "studio_bookings",
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            queueRealtimeRefresh();
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "gig_applications",
+            filter: `applicant_id=eq.${userId}`,
+          },
+          () => {
+            queueRealtimeRefresh();
+          },
+        );
+
+      if (role === "studio-owner") {
+        const { data: ownerStudios } = await supabase
+          .from("studios")
+          .select("id")
+          .eq("owner_id", userId);
+
+        (ownerStudios || []).forEach((studio: any) => {
+          liveChannel = liveChannel.on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "studio_bookings",
+              filter: `studio_id=eq.${studio.id}`,
+            },
+            () => {
+              queueRealtimeRefresh();
+            },
+          );
+        });
+      }
+
+      if (role === "venue-owner") {
+        const { data: ownerGigs } = await supabase
+          .from("gigs")
+          .select("id")
+          .eq("organizer_id", userId);
+
+        (ownerGigs || []).forEach((gig: any) => {
+          liveChannel = liveChannel.on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "gig_applications",
+              filter: `gig_id=eq.${gig.id}`,
+            },
+            () => {
+              queueRealtimeRefresh();
+            },
+          );
+        });
+      }
+
+      channel = liveChannel.subscribe((status: string) => {
+        debugLog("📡 Realtime status:", status);
+      });
+    };
+
+    setupRealtime();
+
+    return () => {
+      isDisposed = true;
+      if (realtimeRefreshTimer) {
+        clearTimeout(realtimeRefreshTimer);
+      }
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [isAuthenticated, userId]);
+
+  useEffect(() => {
     if (isAuthenticated && userId) {
       fetchBookings(userId);
     }

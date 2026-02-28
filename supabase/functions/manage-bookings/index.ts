@@ -45,6 +45,14 @@ function normalizeTime(value?: string | null) {
   return `${hours}:${minutes}:${seconds}`;
 }
 
+function toHours(start: string, end: string) {
+  const [startHour, startMinute] = start.split(":").map(Number);
+  const [endHour, endMinute] = end.split(":").map(Number);
+  const startMinutes = startHour * 60 + startMinute;
+  const endMinutes = endHour * 60 + endMinute;
+  return (endMinutes - startMinutes) / 60;
+}
+
 function toManilaDateTime(dateValue: string, timeValue: string): Date | null {
   if (!dateValue || !timeValue) return null;
 
@@ -1541,6 +1549,229 @@ serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 200,
       });
+    }
+
+    // 3A. PARTIAL SLOT APPROVAL (Studio Owner)
+    if (action === "partial_slot_approval") {
+      const {
+        booking_id,
+        user_id,
+        accepted_slots,
+        declined_slots,
+        cancellation_reason,
+      } = params;
+
+      if (!booking_id || !user_id || !Array.isArray(accepted_slots)) {
+        return new Response(
+          JSON.stringify({
+            error: "booking_id, user_id, and accepted_slots are required.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const safeDeclinedSlots = Array.isArray(declined_slots)
+        ? declined_slots
+        : [];
+
+      const { data: bookingDetails, error: bookingError } = await supabaseClient
+        .from("studio_bookings")
+        .select(
+          "id, user_id, studio_id, booking_date, status, base_rate, hours, final_price, studio:studios(name, owner_id, hourly_rate)",
+        )
+        .eq("id", booking_id)
+        .single();
+
+      if (bookingError || !bookingDetails) {
+        return new Response(
+          JSON.stringify({ error: "Booking not found." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 404,
+          },
+        );
+      }
+
+      if (bookingDetails.studio?.owner_id !== user_id) {
+        return new Response(
+          JSON.stringify({ error: "Not authorized to update this booking." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          },
+        );
+      }
+
+      if (bookingDetails.status !== "pending") {
+        return new Response(
+          JSON.stringify({ error: "Only pending bookings can be partially approved." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      if (accepted_slots.length === 0) {
+        const declineReason =
+          cancellation_reason || "All requested time slots were declined by the studio owner.";
+
+        const { error: cancelError } = await supabaseAdmin
+          .from("studio_bookings")
+          .update({
+            status: "cancelled",
+            cancellation_reason: declineReason,
+          })
+          .eq("id", booking_id);
+
+        if (cancelError) throw cancelError;
+
+        await supabaseAdmin
+          .from("notifications")
+          .insert({
+            user_id: bookingDetails.user_id,
+            type: "warning",
+            title: "Booking Declined",
+            message: `Your booking request for ${bookingDetails.studio?.name || "this studio"} has been declined.`,
+            read: false,
+            meta: {
+              booking_id,
+              studio_id: bookingDetails.studio_id,
+              event_type: "booking_all_slots_declined",
+            },
+          });
+
+        return new Response(
+          JSON.stringify({ success: true, status: "cancelled" }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 200,
+          },
+        );
+      }
+
+      const normalizedAcceptedSlots = accepted_slots.map((slot: any) => ({
+        start: normalizeTime(slot?.start),
+        end: normalizeTime(slot?.end),
+      }));
+
+      const totalHours = normalizedAcceptedSlots.reduce(
+        (sum: number, slot: any) => sum + toHours(slot.start, slot.end),
+        0,
+      );
+
+      if (totalHours <= 0) {
+        return new Response(
+          JSON.stringify({ error: "Accepted slots must have a positive duration." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const sortedStarts = normalizedAcceptedSlots
+        .map((slot: any) => slot.start)
+        .sort();
+      const sortedEnds = normalizedAcceptedSlots
+        .map((slot: any) => slot.end)
+        .sort();
+
+      const overallStart = sortedStarts[0];
+      const overallEnd = sortedEnds[sortedEnds.length - 1];
+      const computedBaseRate =
+        bookingDetails.base_rate ||
+        bookingDetails.studio?.hourly_rate ||
+        (bookingDetails.hours && bookingDetails.hours > 0
+          ? bookingDetails.final_price / bookingDetails.hours
+          : 0);
+      const recomputedPrice = Number((computedBaseRate * totalHours).toFixed(2));
+
+      const { error: updateError } = await supabaseAdmin
+        .from("studio_bookings")
+        .update({
+          status: "confirmed",
+          start_time: overallStart,
+          end_time: overallEnd,
+          hours: totalHours,
+          subtotal: recomputedPrice,
+          final_price: recomputedPrice,
+          cancellation_reason:
+            safeDeclinedSlots.length > 0
+              ? cancellation_reason || "Some requested time slots were declined."
+              : null,
+        })
+        .eq("id", booking_id);
+
+      if (updateError) throw updateError;
+
+      const { error: clearSlotsError } = await supabaseAdmin
+        .from("studio_booking_slots")
+        .delete()
+        .eq("booking_id", booking_id);
+
+      if (clearSlotsError) throw clearSlotsError;
+
+      const slotRows = normalizedAcceptedSlots.map((slot: any, index: number) => ({
+        booking_id,
+        start_time: slot.start,
+        end_time: slot.end,
+        sort_order: index,
+      }));
+
+      const { error: insertSlotsError } = await supabaseAdmin
+        .from("studio_booking_slots")
+        .insert(slotRows);
+
+      if (insertSlotsError) throw insertSlotsError;
+
+      const slotLabel = normalizedAcceptedSlots
+        .map((slot: any) => `${slot.start.slice(0, 5)}-${slot.end.slice(0, 5)}`)
+        .join(", ");
+
+      await supabaseAdmin
+        .from("notifications")
+        .insert({
+          user_id: bookingDetails.user_id,
+          type: safeDeclinedSlots.length > 0 ? "info" : "success",
+          title:
+            safeDeclinedSlots.length > 0
+              ? "Booking Partially Approved"
+              : "Booking Confirmed!",
+          message:
+            safeDeclinedSlots.length > 0
+              ? `Your booking was partially approved. Accepted slots: ${slotLabel}.`
+              : `Your booking at ${bookingDetails.studio?.name || "the studio"} has been confirmed.`,
+          read: false,
+          meta: {
+            booking_id,
+            studio_id: bookingDetails.studio_id,
+            accepted_slots: normalizedAcceptedSlots,
+            declined_slots: safeDeclinedSlots,
+            event_type:
+              safeDeclinedSlots.length > 0
+                ? "booking_partial_slot_approval"
+                : "booking_confirmed",
+          },
+        });
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          status: "confirmed",
+          accepted_slots: normalizedAcceptedSlots,
+          declined_slots: safeDeclinedSlots,
+          hours: totalHours,
+          final_price: recomputedPrice,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
     }
 
     // 4. CREATE REVIEW

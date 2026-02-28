@@ -102,6 +102,58 @@ export default function StudioDetailsScreen() {
   }>({});
   const [partialModalVisible, setPartialModalVisible] = useState(false);
 
+  const toHourMinute = (value?: string | null) => {
+    if (!value) return "";
+    const segments = value.split(":");
+    if (segments.length >= 2) {
+      return `${segments[0]}:${segments[1]}`;
+    }
+    return value;
+  };
+
+  const updateBookingStatus = async (
+    bookingId: string,
+    status: "confirmed" | "cancelled",
+    userId: string,
+    cancellationReason?: string,
+  ) => {
+    const { data, error } = await supabase.functions.invoke("manage-bookings", {
+      body: {
+        action: "update_status",
+        booking_id: bookingId,
+        new_status: status,
+        type_id: "studio_booking",
+        cancellation_reason: cancellationReason,
+        userId,
+      },
+    });
+
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+  };
+
+  const processPartialSlotApproval = async (
+    bookingId: string,
+    userId: string,
+    acceptedSlots: Array<{ start: string; end: string }>,
+    declinedSlots: Array<{ start: string; end: string }>,
+    cancellationReason?: string,
+  ) => {
+    const { data, error } = await supabase.functions.invoke("manage-bookings", {
+      body: {
+        action: "partial_slot_approval",
+        booking_id: bookingId,
+        user_id: userId,
+        accepted_slots: acceptedSlots,
+        declined_slots: declinedSlots,
+        cancellation_reason: cancellationReason,
+      },
+    });
+
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+  };
+
   // Role-based access control
   useEffect(() => {
     checkAuthorization();
@@ -230,22 +282,50 @@ export default function StudioDetailsScreen() {
         calendar_availability: calendarAvailability,
       });
 
-      // Fetch Bookings
+      // Fetch Bookings (normalized-safe)
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) throw new Error("No active session");
+        const { data: bookingData, error: bookingError } = await supabase
+          .from("studio_bookings")
+          .select(
+            "*, user:profiles!user_id(full_name, avatar_url, email), studio:studios(name, owner_id, hourly_rate), slots:studio_booking_slots(start_time, end_time, sort_order)",
+          )
+          .eq("studio_id", studioId)
+          .order("booking_date", { ascending: false })
+          .order("created_at", { ascending: false });
 
-        const { data: bookingData, error: bookingError } =
-          await supabase.functions.invoke("bookings-manage", {
-            body: { action: "fetch_studio_bookings", studioId: studioId, userId },
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          });
         if (bookingError) {
           console.log('[manage_studio] Failed to fetch bookings:', bookingError);
         } else {
-          setBookings(bookingData || []);
+          const normalizedBookings = (bookingData || []).map((booking: any) => {
+            const orderedSlots = (booking.slots || [])
+              .slice()
+              .sort(
+                (a: any, b: any) =>
+                  (a.sort_order ?? 0) - (b.sort_order ?? 0),
+              );
+
+            const mappedSlots =
+              orderedSlots.length > 0
+                ? orderedSlots.map((slot: any) => ({
+                  start: toHourMinute(slot.start_time),
+                  end: toHourMinute(slot.end_time),
+                }))
+                : booking.start_time && booking.end_time
+                  ? [{
+                    start: toHourMinute(booking.start_time),
+                    end: toHourMinute(booking.end_time),
+                  }]
+                  : [];
+
+            return {
+              ...booking,
+              raw_date: booking.booking_date,
+              total_price: booking.final_price,
+              time_slots: mappedSlots,
+            };
+          });
+
+          setBookings(normalizedBookings);
         }
       } catch (bookingErr) {
         console.log('[manage_studio] Exception fetching bookings:', bookingErr);
@@ -299,16 +379,12 @@ export default function StudioDetailsScreen() {
         } = await supabase.auth.getUser();
         if (!user) return;
 
-        const { error } = await supabase.functions.invoke("bookings-manage", {
-          body: {
-            action: "update_booking_status",
-            bookingId,
-            status,
-            userId: user.id,
-            cancellation_reason: isDecline ? cancellationReason : undefined,
-          },
-        });
-        if (error) throw error;
+        await updateBookingStatus(
+          bookingId,
+          status as "confirmed" | "cancelled",
+          user.id,
+          isDecline ? cancellationReason : undefined,
+        );
 
         // Update local state
         setBookings(
@@ -392,15 +468,7 @@ export default function StudioDetailsScreen() {
 
       // If all slots are accepted, just confirm the booking
       if (acceptedSlots.length === slots.length) {
-        const { error } = await supabase.functions.invoke("bookings-manage", {
-          body: {
-            action: "update_booking_status",
-            bookingId: booking.id,
-            status: "confirmed",
-            userId: user.id,
-          },
-        });
-        if (error) throw error;
+        await updateBookingStatus(booking.id, "confirmed", user.id);
         setBookings(
           bookings.map((b) =>
             b.id === booking.id ? { ...b, status: "confirmed" } : b,
@@ -409,17 +477,12 @@ export default function StudioDetailsScreen() {
       }
       // If all slots are declined, just cancel the booking
       else if (declinedSlots.length === slots.length) {
-        const { error } = await supabase.functions.invoke("bookings-manage", {
-          body: {
-            action: "update_booking_status",
-            bookingId: booking.id,
-            status: "cancelled",
-            userId: user.id,
-            cancellation_reason:
-              "All requested time slots were declined by the studio owner.",
-          },
-        });
-        if (error) throw error;
+        await updateBookingStatus(
+          booking.id,
+          "cancelled",
+          user.id,
+          "All requested time slots were declined by the studio owner.",
+        );
         setBookings(
           bookings.map((b) =>
             b.id === booking.id ? { ...b, status: "cancelled" } : b,
@@ -428,20 +491,15 @@ export default function StudioDetailsScreen() {
       }
       // Partial approval - need to handle specially
       else {
-        const { error } = await supabase.functions.invoke("bookings-manage", {
-          body: {
-            action: "partial_slot_approval",
-            bookingId: booking.id,
-            userId: user.id,
-            acceptedSlots: acceptedSlots,
-            declinedSlots: declinedSlots,
-            cancellation_reason:
-              declinedSlots.length > 0
-                ? "Some time slots were declined by the studio owner."
-                : undefined,
-          },
-        });
-        if (error) throw error;
+        await processPartialSlotApproval(
+          booking.id,
+          user.id,
+          acceptedSlots,
+          declinedSlots,
+          declinedSlots.length > 0
+            ? "Some time slots were declined by the studio owner."
+            : undefined,
+        );
 
         // Refresh the bookings list
         if (user.id) fetchData(user.id);

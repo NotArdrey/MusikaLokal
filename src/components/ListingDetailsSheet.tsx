@@ -254,6 +254,22 @@ const ListingDetailsSheet = forwardRef<
   const [sheetIndex, setSheetIndex] = useState(-1);
   const previousSheetIndex = useRef(-1);
 
+  const fetchStudioBookings = useCallback(async (studioId: string) => {
+    const { data: bookingData, error: bookingError } = await supabase
+      .from("studio_bookings")
+      .select("id, studio_id, booking_date, start_time, end_time, status")
+      .eq("studio_id", studioId)
+      .order("booking_date", { ascending: true })
+      .order("start_time", { ascending: true });
+
+    if (bookingError) {
+      console.error("Error fetching studio bookings:", bookingError);
+      return [];
+    }
+
+    return Array.isArray(bookingData) ? bookingData : [];
+  }, []);
+
   const handleSheetChanges = useCallback(
     async (index: number) => {
       const wasHidden = previousSheetIndex.current < 0;
@@ -325,13 +341,7 @@ const ListingDetailsSheet = forwardRef<
           }
 
           // Fetch fresh bookings
-          const { data: bookingData } = await supabase.functions.invoke(
-            "bookings-manage",
-            {
-              body: { action: "fetch_studio_bookings", studioId: listingId },
-            },
-          );
-          const fetchedBookings = Array.isArray(bookingData) ? bookingData : [];
+          const fetchedBookings = await fetchStudioBookings(listingId);
           setExistingBookings(fetchedBookings);
 
           // Re-check user's latest payment-blocking booking status when sheet reopens
@@ -1272,13 +1282,7 @@ const ListingDetailsSheet = forwardRef<
 
         if (type === "Studio" || type === "Venue") {
           // Fetch existing bookings for availability calculation
-          const { data: bookingData } = await supabase.functions.invoke(
-            "bookings-manage",
-            {
-              body: { action: "fetch_studio_bookings", studioId: data.id },
-            },
-          );
-          const fetchedBookings = Array.isArray(bookingData) ? bookingData : [];
+          const fetchedBookings = await fetchStudioBookings(data.id);
           setExistingBookings(fetchedBookings);
 
           // Process availability (Availability + Bookings + Date Overrides)

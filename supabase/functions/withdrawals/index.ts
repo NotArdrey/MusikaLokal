@@ -8,8 +8,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// PayMongo API configuration
-const PAYMONGO_SECRET_KEY = Deno.env.get('PAYMONGO_SECRET_KEY') || '';
+// PayMongo API configuration - Using TEST API keys
+const PAYMONGO_SECRET_KEY = Deno.env.get('PAYMONGO_SECRET_KEY') || 'sk_test_yESi8KQWKn2mCE4ZnvKksGVk';
 const PAYMONGO_API_URL = 'https://api.paymongo.com/v1';
 
 // Minimum withdrawal amount in PHP

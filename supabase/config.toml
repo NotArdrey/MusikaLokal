@@ -18,13 +18,13 @@ verify_jwt = false
 
 [functions.login-redirect]
 [functions.manage-profile]
-verify_jwt = false
+verify_jwt = true
 [functions.manage-bookings]
-verify_jwt = false
+verify_jwt = true
 [functions.manage-notifications]
 verify_jwt = false
 [functions.manage-listings]
-verify_jwt = false
+verify_jwt = true
 [functions.manage-details]
 verify_jwt = false
 [functions.verify-identity]

@@ -1476,20 +1476,9 @@ serve(async (req: Request) => {
             if (appError) throw appError;
 
             // Update the application status
-            const updatePayload: Record<string, any> = { status };
-            if (status === 'accepted') {
-                updatePayload.system_status_reason = null;
-                updatePayload.reconfirmation_required_at = null;
-                updatePayload.reconfirmation_due_at = null;
-            } else if (status === 'rejected') {
-                updatePayload.system_status_reason = 'user_rejection';
-                updatePayload.reconfirmation_required_at = null;
-                updatePayload.reconfirmation_due_at = null;
-            }
-
             const { data, error } = await supabaseClient
                 .from('gig_applications')
-                .update(updatePayload)
+                .update({ status })
                 .eq('id', applicationId)
                 .select()
                 .single();
@@ -1526,8 +1515,7 @@ serve(async (req: Request) => {
                         meta: {
                             gig_id: appDetails.gig_id,
                             application_id: applicationId,
-                            status: status,
-                            status_reason: status === 'rejected' ? 'user_rejection' : null
+                            status: status
                         }
                     });
             }

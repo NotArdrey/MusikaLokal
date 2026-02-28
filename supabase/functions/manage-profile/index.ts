@@ -107,19 +107,9 @@ serve(async (req: Request) => {
                 })
             }
 
-            const { data: contactData, error: contactError } = await supabaseClient
-                .from('profiles')
-                .select('contact_number, address')
-                .eq('id', userId)
-                .maybeSingle()
-
-            if (contactError) throw contactError
-
             // Map computed fields to expected names for frontend compatibility
             const mappedProfile = {
                 ...profile,
-                contact_number: contactData?.contact_number ?? null,
-                address: contactData?.address ?? null,
                 // View columns are already named 'rating' and 'review_count'
                 // No mapping needed, kept for backwards compatibility
             }
@@ -210,8 +200,6 @@ serve(async (req: Request) => {
         if (action === 'create') {
             const { userId, email, full_name, role, is_verified, verification_status, didit_session_id, display_name } = params
 
-            const resolvedFullName = full_name ?? display_name ?? null
-
             // Validate required parameters
             if (!userId || !email || !role) {
                 return new Response(JSON.stringify({ error: 'Missing required parameters: userId, email, role' }), {
@@ -245,11 +233,12 @@ serve(async (req: Request) => {
                 .upsert({
                     id: userId,
                     email,
-                    full_name: resolvedFullName,
+                    full_name,
                     role,
                     is_verified,
                     verification_status,
                     didit_session_id,
+                    display_name // Save display_name correctly
                 })
                 .select()
                 .single()
