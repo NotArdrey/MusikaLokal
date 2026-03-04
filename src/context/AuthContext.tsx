@@ -6,9 +6,11 @@ import React, {
     useCallback,
     useContext,
     useEffect,
+    useRef,
     useState,
 } from "react";
-import { supabase } from "../../lib/supabase";
+import { AppState, AppStateStatus } from "react-native";
+import { clearSupabaseAuthStorage, supabase } from "../../lib/supabase";
 import CustomAlert, { AlertType } from "../components/CustomAlert";
 
 type UnpaidBooking = {
@@ -107,6 +109,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     title: "",
     message: "",
   });
+  const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const showAlert = useCallback(
     (
@@ -304,13 +307,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     // Helper to handle auth errors gracefully (e.g., invalid refresh tokens)
-    const handleAuthError = async (error: Error) => {
-      console.log("Auth error detected, clearing local session:", error.message);
-      try {
-        await supabase.auth.signOut({ scope: "local" });
-      } catch (signOutError) {
-        // Ignore sign out errors
+    const handleAuthError = async (error: unknown) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === "string"
+            ? error
+            : "Unknown auth error";
+
+      const isInvalidRefreshToken = /invalid refresh token|refresh token not found/i.test(
+        message,
+      );
+
+      if (!isInvalidRefreshToken) {
+        console.log("Auth error detected, clearing local session:", message);
       }
+
+      try {
+        await clearSupabaseAuthStorage();
+      } catch {
+        // Ignore storage-clear errors
+      }
+
       setSession(null);
       setIsAdmin(false);
       setUserRole(null);
@@ -323,32 +341,58 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(false);
     };
 
-    // Check active session
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      // Handle refresh token errors by clearing the session
-      if (error) {
-        console.log("Session error (expected on first launch):", error.message);
-        handleAuthError(error);
-        return;
+    const bootstrapAuth = async () => {
+      try {
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession();
+
+        // Handle refresh token errors by clearing the session
+        if (error) {
+          await handleAuthError(error);
+          return;
+        }
+
+        // Always refresh the session on bootstrap to guarantee a gateway-valid
+        // token is in memory. Avoids stale/cached tokens being used.
+        let secureSession = filterSession(session);
+
+        if (secureSession) {
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          if (!refreshError && refreshData.session) {
+            secureSession = filterSession(refreshData.session);
+          } else if (refreshError) {
+            // Refresh failed — session is truly expired, clear it
+            await handleAuthError(refreshError);
+            return;
+          }
+          // If refreshData.session is null but no error, keep existing session
+        }
+
+        setSession(secureSession);
+        if (secureSession) {
+          setGuestMode(false);
+          checkAdmin(secureSession.user.id);
+          fetchUserRole(secureSession.user.id);
+        }
+        setLoading(false);
+      } catch (error) {
+        // Catch any unexpected errors during session retrieval
+        await handleAuthError(error);
       }
-      const secureSession = filterSession(session);
-      setSession(secureSession);
-      if (secureSession) {
-        setGuestMode(false);
-        checkAdmin(secureSession.user.id);
-        fetchUserRole(secureSession.user.id);
-      }
-      setLoading(false);
-    }).catch((error) => {
-      // Catch any unexpected errors during session retrieval
-      handleAuthError(error);
-    });
+    };
+
+    bootstrapAuth();
 
     // Listen for changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth state change:", event);
+      const isNoisyStartupSignedOut = event === "SIGNED_OUT" && !session;
+      if (__DEV__ && event !== "INITIAL_SESSION" && !isNoisyStartupSignedOut) {
+        console.log("Auth state change:", event);
+      }
 
       // Handle sign out event
       if (event === "SIGNED_OUT") {
@@ -394,6 +438,57 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const activeUserId = session?.user?.id;
+
+    if (!activeUserId) {
+      if (presenceChannelRef.current) {
+        void presenceChannelRef.current.untrack();
+        supabase.removeChannel(presenceChannelRef.current);
+        presenceChannelRef.current = null;
+      }
+      return;
+    }
+
+    const channel = supabase.channel(`presence:user:${activeUserId}`);
+    presenceChannelRef.current = channel;
+    let isDisposed = false;
+
+    const trackOnline = async () => {
+      if (isDisposed) return;
+      await channel.track({ user_id: activeUserId, online_at: new Date().toISOString() });
+    };
+
+    const trackOffline = async () => {
+      if (isDisposed) return;
+      await channel.untrack();
+    };
+
+    channel.subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        await trackOnline();
+      }
+    });
+
+    const appStateSub = AppState.addEventListener("change", async (nextState: AppStateStatus) => {
+      if (nextState === "active") {
+        await trackOnline();
+      } else {
+        await trackOffline();
+      }
+    });
+
+    return () => {
+      isDisposed = true;
+      appStateSub.remove();
+      void channel.untrack();
+      supabase.removeChannel(channel);
+      if (presenceChannelRef.current === channel) {
+        presenceChannelRef.current = null;
+      }
+    };
+  }, [session?.user?.id]);
 
   // Check system lock when session changes
   useEffect(() => {

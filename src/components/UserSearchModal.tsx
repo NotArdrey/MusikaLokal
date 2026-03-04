@@ -176,7 +176,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
         <Modal
             visible={visible}
             animationType="slide"
-            presentationStyle="pageSheet"
+            presentationStyle="fullScreen"
             onRequestClose={onClose}
         >
             <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>

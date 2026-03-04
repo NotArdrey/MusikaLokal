@@ -14,15 +14,51 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
 
-export const REPORT_REASONS = [
-    'Spam or scam',
-    'Harassment or bullying',
-    'Inappropriate content',
-    'Fake profile or impersonation',
-    'Hate speech',
-    'Violence or dangerous behavior',
-    'Other',
-];
+export const REPORT_REASONS_BY_TYPE: Record<string, string[]> = {
+    group: [
+        'Spam or scam',
+        'Harassment or bullying',
+        'Inappropriate content',
+        'Fake profile or impersonation',
+        'Hate speech',
+        'Other',
+    ],
+    artist: [
+        'Spam or scam',
+        'Harassment or bullying',
+        'Inappropriate content',
+        'Fake profile or impersonation',
+        'Hate speech',
+        'Other',
+    ],
+    profile: [
+        'Spam or scam',
+        'Harassment or bullying',
+        'Inappropriate content',
+        'Fake profile or impersonation',
+        'Hate speech',
+        'Other',
+    ],
+    studio: [
+        'False or misleading information',
+        'Fake listing',
+        'Inappropriate content or photos',
+        'Price gouging or fraud',
+        'Spam or scam',
+        'Other',
+    ],
+    gig: [
+        'Suspicious or fake gig',
+        'Misleading job description',
+        'Inappropriate content',
+        'Non-payment or scam',
+        'Spam',
+        'Other',
+    ],
+};
+
+// Fallback list (generic)
+export const REPORT_REASONS = REPORT_REASONS_BY_TYPE.group;
 
 interface ReportModalProps {
     visible: boolean;
@@ -30,6 +66,7 @@ interface ReportModalProps {
     onSubmit: (reason: string, details?: string) => Promise<void>;
     targetName?: string;
     title?: string;
+    reportType?: string;
 }
 
 export default function ReportModal({
@@ -38,6 +75,7 @@ export default function ReportModal({
     onSubmit,
     targetName,
     title = 'Report',
+    reportType,
 }: ReportModalProps) {
     const { colors, isDark } = useTheme();
     const insets = useSafeAreaInsets();
@@ -45,6 +83,11 @@ export default function ReportModal({
     const [details, setDetails] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [submitted, setSubmitted] = useState(false);
+
+    // Pick reasons based on type; fallback to generic group reasons
+    const reasons = (reportType && REPORT_REASONS_BY_TYPE[reportType.toLowerCase()])
+        ? REPORT_REASONS_BY_TYPE[reportType.toLowerCase()]
+        : REPORT_REASONS;
 
     const handleClose = () => {
         setSelectedReason(null);
@@ -140,10 +183,10 @@ export default function ReportModal({
                                 showsVerticalScrollIndicator={false}
                                 keyboardShouldPersistTaps="handled"
                             >
-                                {REPORT_REASONS.map((reason) => {
+                                {reasons.map((reason) => {
                                     const isSelected = selectedReason === reason;
                                     return (
-                                        <TouchableOpacity activeOpacity={1}
+                                        <TouchableOpacity
                                             key={reason}
                                             style={[
                                                 styles.reasonRow,
@@ -153,7 +196,7 @@ export default function ReportModal({
                                                 },
                                             ]}
                                             onPress={() => setSelectedReason(reason)}
-                                            activeOpacity={1}
+                                            activeOpacity={0.7}
                                         >
                                             <Text
                                                 style={[
@@ -180,7 +223,7 @@ export default function ReportModal({
                                     );
                                 })}
 
-                                {/* Additional details field – only shown when "Other" selected */}
+                                {/* Additional details field – shown when "Other" is selected */}
                                 {selectedReason === 'Other' && (
                                     <TextInput
                                         style={[

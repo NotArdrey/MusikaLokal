@@ -4,14 +4,14 @@ import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -82,6 +82,9 @@ const formatTimeInput = (text: string): string => {
 
   return cleaned;
 };
+
+const TITLE_MAX_LENGTH = 120;
+const DESCRIPTION_MAX_LENGTH = 1000;
 
 type EventSchedule = {
   date: string;
@@ -775,8 +778,16 @@ export default function AddGigScreen() {
     placeholder: string,
     multiline = false,
     keyboardType: any = "default",
-  ) => (
-    <View style={styles.inputContainer}>
+  ) => {
+    const normalizedLabel = label.trim().toLowerCase();
+    const inputMaxLength = normalizedLabel.includes("description")
+      ? DESCRIPTION_MAX_LENGTH
+      : normalizedLabel.includes("name") || normalizedLabel.includes("title")
+        ? TITLE_MAX_LENGTH
+        : undefined;
+
+    return (
+      <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
       </Text>
@@ -792,6 +803,7 @@ export default function AddGigScreen() {
         <TextInput
           value={value}
           onChangeText={setValue}
+          maxLength={inputMaxLength}
           placeholder={placeholder}
           placeholderTextColor={colors.textSecondary}
           multiline={multiline}
@@ -808,8 +820,9 @@ export default function AddGigScreen() {
           ]}
         />
       </View>
-    </View>
-  );
+      </View>
+    );
+  };
 
   const handleContractUpload = async () => {
     try {

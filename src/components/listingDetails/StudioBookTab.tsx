@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import React from "react";
 import {
     ActivityIndicator,
@@ -9,7 +10,53 @@ import {
 } from "react-native";
 import styles from "../ListingDetailsSheet.styles";
 
-const debugLog = (..._args: unknown[]) => { };
+const debugLog = (...args: unknown[]) => {
+  if (__DEV__) {
+    console.log("[StudioBookTab]", ...args);
+  }
+};
+
+const warnLog = (...args: unknown[]) => {
+  if (__DEV__) {
+    console.warn("[StudioBookTab]", ...args);
+  }
+};
+
+const supabaseUrl =
+  Constants.expoConfig?.extra?.supabaseUrl ||
+  process.env.EXPO_PUBLIC_SUPABASE_URL ||
+  "";
+const supabaseAnonKey =
+  Constants.expoConfig?.extra?.supabaseAnonKey ||
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
+  "";
+
+const getProjectRefFromUrl = (url: string): string | null => {
+  try {
+    return new URL(url).hostname.split(".")[0] || null;
+  } catch {
+    return null;
+  }
+};
+
+const decodeJwtClaims = (token?: string | null): Record<string, any> | null => {
+  if (!token || typeof token !== "string") return null;
+
+  try {
+    const payloadSegment = token.split(".")[1];
+    if (!payloadSegment) return null;
+
+    const normalized = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+
+    if (typeof globalThis.atob !== "function") return null;
+
+    const decoded = globalThis.atob(padded);
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+};
 
 interface StudioBookTabProps {
   group: any;
@@ -53,6 +100,7 @@ interface StudioBookTabProps {
   setPaymentBookingData: (value: any) => void;
   setSelectedPaymentType: (value: "full" | "downpayment") => void;
   setShowPaymentOptionModal: (value: boolean) => void;
+  showPaymentOptionModal: boolean;
   selectedSessionType: "Rehearsal" | "Recording" | null;
   showAlert: (
     type: "success" | "error" | "warning" | "info",
@@ -103,6 +151,7 @@ const StudioBookTab = ({
   setPaymentBookingData,
   setSelectedPaymentType,
   setShowPaymentOptionModal,
+  showPaymentOptionModal,
   selectedSessionType,
   showAlert,
 }: StudioBookTabProps) => {
@@ -212,6 +261,256 @@ const StudioBookTab = ({
     if (hours < 0) hours += 24;
     return sum + parseInt(displayRate.replace(/,/g, "")) * hours;
   }, 0);
+
+  const isJwtLike = (token?: string | null): token is string => {
+    if (typeof token !== "string") return false;
+    const parts = token.split(".");
+    return parts.length === 3 && parts.every((part) => part.length > 0);
+  };
+
+  const summarizeToken = (token?: string | null) => {
+    if (typeof token !== "string") {
+      return {
+        present: false,
+      };
+    }
+
+    const parts = token.split(".");
+    const claims = decodeJwtClaims(token);
+
+    return {
+      present: true,
+      length: token.length,
+      isJwtLike: isJwtLike(token),
+      prefix: token.slice(0, 16),
+      segmentLengths: parts.map((part) => part.length),
+      claims: claims
+        ? {
+          iss: claims.iss || null,
+          aud: claims.aud || null,
+          sub: claims.sub || null,
+          role: claims.role || null,
+          exp: claims.exp || null,
+        }
+        : null,
+    };
+  };
+
+  const logAuthDiagnostics = async (phase: string) => {
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      debugLog(`🔐 Auth diagnostics (${phase})`, {
+        userId: user?.id || null,
+        userError: userError?.message || null,
+        sessionError: sessionError?.message || null,
+        expiresAt: session?.expires_at || null,
+        tokenSummary: summarizeToken(session?.access_token),
+      });
+    } catch (diagError: any) {
+      warnLog(`⚠️ Failed to collect auth diagnostics (${phase})`, {
+        message: diagError?.message || String(diagError),
+      });
+    }
+  };
+
+  /**
+   * Prefer current session/getUser first, then refresh as fallback.
+   * This avoids refresh-token rotation races while still recovering
+   * from stale sessions when needed.
+   */
+  const getFreshBookingAuth = async (): Promise<{
+    userId: string;
+    accessToken: string;
+  } | null> => {
+    try {
+      const expectedProjectRef = getProjectRefFromUrl(supabaseUrl);
+
+      const {
+        data: { session: currentSession },
+        error: currentSessionError,
+      } = await supabase.auth.getSession();
+      const {
+        data: { user: currentUser },
+        error: currentUserError,
+      } = await supabase.auth.getUser();
+
+      if (
+        !currentSessionError &&
+        !currentUserError &&
+        currentUser?.id &&
+        currentSession?.access_token &&
+        isJwtLike(currentSession.access_token)
+      ) {
+        const currentClaims = decodeJwtClaims(currentSession.access_token);
+        const currentIssuerProjectRef = currentClaims?.iss
+          ? getProjectRefFromUrl(String(currentClaims.iss))
+          : null;
+
+        debugLog("🔐 Current booking auth snapshot", {
+          userId: currentUser?.id || null,
+          expiresAt: currentSession?.expires_at || null,
+          tokenSummary: summarizeToken(currentSession?.access_token),
+          expectedProjectRef,
+          tokenIssuerProjectRef: currentIssuerProjectRef,
+        });
+
+        if (
+          expectedProjectRef &&
+          currentIssuerProjectRef &&
+          expectedProjectRef !== currentIssuerProjectRef
+        ) {
+          warnLog("⚠️ Session token issuer does not match configured Supabase project", {
+            expectedProjectRef,
+            tokenIssuerProjectRef: currentIssuerProjectRef,
+          });
+        } else {
+          return {
+            userId: currentUser.id,
+            accessToken: currentSession.access_token,
+          };
+        }
+      }
+
+      const {
+        data: { session: refreshedSession },
+        error: refreshError,
+      } = await supabase.auth.refreshSession();
+
+      if (refreshError) {
+        warnLog("⚠️ refreshSession failed before booking", {
+          message: refreshError.message,
+          code: (refreshError as any)?.code,
+          status: (refreshError as any)?.status,
+        });
+      }
+
+      const {
+        data: { user: refreshedUser },
+        error: refreshedUserError,
+      } = await supabase.auth.getUser();
+
+      if (refreshedUserError) {
+        warnLog("⚠️ getUser failed after refreshSession", {
+          message: refreshedUserError.message,
+          code: (refreshedUserError as any)?.code,
+          status: (refreshedUserError as any)?.status,
+        });
+      }
+
+      debugLog("🔐 Refreshed booking auth snapshot", {
+        userId: refreshedUser?.id || null,
+        expiresAt: refreshedSession?.expires_at || null,
+        tokenSummary: summarizeToken(refreshedSession?.access_token),
+      });
+
+      if (
+        !refreshError &&
+        refreshedUser?.id &&
+        refreshedSession?.access_token &&
+        isJwtLike(refreshedSession.access_token)
+      ) {
+        const refreshedClaims = decodeJwtClaims(refreshedSession.access_token);
+        const refreshedIssuerProjectRef = refreshedClaims?.iss
+          ? getProjectRefFromUrl(String(refreshedClaims.iss))
+          : null;
+
+        if (
+          expectedProjectRef &&
+          refreshedIssuerProjectRef &&
+          expectedProjectRef !== refreshedIssuerProjectRef
+        ) {
+          warnLog("⚠️ Refreshed token issuer does not match configured Supabase project", {
+            expectedProjectRef,
+            tokenIssuerProjectRef: refreshedIssuerProjectRef,
+          });
+          return null;
+        }
+
+        return {
+          userId: refreshedUser.id,
+          accessToken: refreshedSession.access_token,
+        };
+      }
+    } catch (authError: any) {
+      warnLog("⚠️ Unexpected auth exception before booking", {
+        message: authError?.message || String(authError),
+      });
+      // fall through to null — user must re-auth
+    }
+
+    return null;
+  };
+
+  const invokeManageBookingsCreate = async (payload: {
+    action: "create";
+    studio_id: string;
+    user_id: string;
+    date: string;
+    time_slots: { start: string; end: string }[];
+    notes: string | null;
+    session_type: "recording" | "rehearsal";
+  }, accessToken: string) => {
+    if (!supabaseUrl || !supabaseAnonKey) {
+      warnLog("⚠️ Missing Supabase URL/Anon key for direct function fetch; falling back to invoke().");
+      return await supabase.functions.invoke("manage-bookings", {
+        body: payload,
+      });
+    }
+
+    const endpoint = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/manage-bookings`;
+
+    debugLog("📡 Direct function fetch auth meta", {
+      endpoint,
+      hasAccessToken: Boolean(accessToken),
+      accessTokenSummary: summarizeToken(accessToken),
+      anonKeyPrefix: supabaseAnonKey.slice(0, 14),
+      anonKeyLength: supabaseAnonKey.length,
+      endpointProjectRef: getProjectRefFromUrl(endpoint),
+      configuredProjectRef: getProjectRefFromUrl(supabaseUrl),
+    });
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+        apikey: supabaseAnonKey,
+        "x-client-info": "musika-lokal",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    let responseData: any = null;
+    try {
+      responseData = await response.clone().json();
+    } catch {
+      responseData = null;
+    }
+
+    if (!response.ok) {
+      const httpError: any = new Error("Edge Function returned a non-2xx status code");
+      httpError.name = "FunctionsHttpError";
+      httpError.context = response;
+      httpError.status = response.status;
+      if (responseData && typeof responseData === "object") {
+        httpError.serverError = responseData;
+      }
+      throw httpError;
+    }
+
+    return {
+      data: responseData,
+      error: null,
+    };
+  };
 
   return (
     <View style={styles.tabContent}>
@@ -729,11 +1028,13 @@ const StudioBookTab = ({
           style={[
             styles.secondaryBtn,
             {
-              borderColor: colors.primary,
+              borderColor: showPaymentOptionModal ? colors.border : colors.primary,
               backgroundColor: "transparent",
               marginBottom: 16,
+              opacity: showPaymentOptionModal ? 0.5 : 1,
             },
           ]}
+          disabled={showPaymentOptionModal}
           onPress={() => setShowAddBooking(true)}
         >
           <Ionicons
@@ -821,12 +1122,24 @@ const StudioBookTab = ({
               bookings.length > 0 &&
               handleConfirm(
                 async () => {
-                  if (!userId) {
-                    showAlert("warning", "Sign In Required", "Please sign in to book a studio");
-                    return;
-                  }
-
                   try {
+                    await logAuthDiagnostics("before-confirm");
+                    const auth = await getFreshBookingAuth();
+
+                    if (!auth) {
+                      try {
+                        await supabase.auth.signOut({ scope: "local" });
+                      } catch {
+                        // no-op
+                      }
+                      showAlert("warning", "Session Expired", "Please sign in again to continue booking.");
+                      router.replace("/");
+                      return;
+                    }
+
+                    const bookingUserId = auth.userId;
+                    const bookingAccessToken = auth.accessToken;
+
                     setLoading(true);
                     const results = [];
                     const errors = [];
@@ -864,7 +1177,7 @@ const StudioBookTab = ({
 
                       debugLog("📤 Creating multi-slot booking:", {
                         studio_id: group.id,
-                        user_id: userId,
+                        user_id: bookingUserId,
                         date: bookingDate,
                         time_slots: timeSlots,
                         notes: bookingNotes,
@@ -889,17 +1202,23 @@ const StudioBookTab = ({
                         const sortedByStart = [...normalizedSlots].sort((a, b) =>
                           a.start.localeCompare(b.start),
                         );
-                        const invokeResult = await supabase.functions.invoke("manage-bookings", {
-                          body: {
-                            action: "create",
-                            studio_id: group.id,
-                            user_id: userId,
-                            date: bookingDate,
-                            time_slots: sortedByStart,
-                            notes: bookingNotes || null,
-                            session_type: sessionType,
-                          },
+
+                        debugLog("📡 Invoking manage-bookings:create", {
+                          bookingDate,
+                          studioId: group.id,
+                          userId: bookingUserId,
+                          slots: sortedByStart,
                         });
+
+                        const invokeResult = await invokeManageBookingsCreate({
+                          action: "create",
+                          studio_id: group.id,
+                          user_id: bookingUserId,
+                          date: bookingDate,
+                          time_slots: sortedByStart,
+                          notes: bookingNotes || null,
+                          session_type: sessionType,
+                        }, bookingAccessToken);
 
                         data = invokeResult.data;
                         error = invokeResult.error;
@@ -913,11 +1232,27 @@ const StudioBookTab = ({
                         let errorMessage = error.message || "Unknown error";
                         let serverError: any = null;
 
+                        console.error("❌ Booking invoke error details:", {
+                          name: error?.name,
+                          message: error?.message,
+                          status: error?.status,
+                          code: error?.code,
+                          details: error?.details,
+                          hint: error?.hint,
+                          hasContext: Boolean(error?.context),
+                          contextType: error?.context?.constructor?.name || null,
+                        });
+
                         if (error.context && typeof error.context === "object") {
                           try {
                             const response = error.context;
                             debugLog("📥 Error response status:", response.status);
                             debugLog("📥 Error response (raw):", response);
+
+                            if (response?.headers && typeof response.headers?.entries === "function") {
+                              const responseHeaders = Object.fromEntries(response.headers.entries());
+                              debugLog("📥 Error response headers:", responseHeaders);
+                            }
 
                             if (response.json && typeof response.json === "function") {
                               serverError = await response.json();
@@ -953,6 +1288,14 @@ const StudioBookTab = ({
                         if (serverError) {
                           console.error("❌ Full server error:", JSON.stringify(serverError, null, 2));
                         }
+
+                        if (
+                          String(errorMessage).toLowerCase().includes("invalid jwt") ||
+                          error?.status === 401 ||
+                          serverError?.message === "Invalid JWT"
+                        ) {
+                          await logAuthDiagnostics("after-401-invalid-jwt");
+                        }
                       } else {
                         results.push(data);
                         debugLog("✅ Booking created successfully");
@@ -978,10 +1321,10 @@ const StudioBookTab = ({
                       setModalVisible(false);
                       (sheetRef as any)?.current?.dismiss();
                     } else {
-                      if (group && group.embedding && userId) {
+                      if (group && group.embedding && bookingUserId) {
                         try {
                           await supabase.rpc("update_user_interest", {
-                            p_user_id: userId,
+                            p_user_id: bookingUserId,
                             p_item_vector: group.embedding,
                             p_weight: 0.5,
                           });

@@ -23,10 +23,10 @@ const CachedImage = ({
   height,
   quality = 72,
   resize = "cover",
-  format = "webp",
+  format = "origin",
   cacheVersion,
   contentFit = "cover",
-  transition = 120,
+  transition = 0,
   cachePolicy = "memory-disk",
 }: CachedImageProps) => {
   const sourceUri = useMemo(() => {

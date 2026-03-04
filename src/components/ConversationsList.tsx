@@ -67,6 +67,9 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
         const otherUser = item.other_participant;
         const lastMessage = item.last_message;
         const hasUnread = (item.unread_count || 0) > 0;
+        const isLastMessageFromMe = !!lastMessage && lastMessage.sender_id === currentUserId;
+        const isLastMessageSeen = !isGroup && isLastMessageFromMe && !!lastMessage?.read_at;
+        const showOutgoingStatus = !hasUnread && isLastMessageFromMe;
 
         // Determine display info based on chat type
         const displayName = isGroup
@@ -93,88 +96,83 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
         };
 
         return (
-            <TouchableOpacity activeOpacity={1}
-                style={styles.conversationItem}
+            <TouchableOpacity
+                style={[
+                    styles.conversationItem,
+                    hasUnread && { backgroundColor: isDark ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.04)' },
+                ]}
                 onPress={() => onSelectConversation(item)}
-                activeOpacity={1}
+                activeOpacity={0.7}
             >
+                {/* Avatar */}
                 <View style={styles.avatarContainer}>
                     {isGroup ? (
                         <View style={[styles.groupAvatar, { backgroundColor: colors.primary }]}>
                             {displayAvatar ? (
                                 <Image source={{ uri: displayAvatar }} style={styles.avatar} />
                             ) : (
-                                <Ionicons name="people" size={24} color="#FFF" />
+                                <Ionicons name="people" size={26} color="#FFF" />
                             )}
                         </View>
+                    ) : displayAvatar ? (
+                        <Image source={{ uri: displayAvatar }} style={styles.avatar} />
                     ) : (
-                        displayAvatar ? (
-                            <Image source={{ uri: displayAvatar }} style={styles.avatar} />
-                        ) : (
-                            <Image source={DEFAULT_AVATAR} style={styles.avatar} />
-                        )
+                        <Image source={DEFAULT_AVATAR} style={styles.avatar} />
                     )}
                     {hasUnread && (
-                        <View style={[styles.unreadDot, { backgroundColor: colors.primary, borderColor: isDark ? colors.background : '#FFFFFF' }]} />
+                        <View style={[styles.onlineDot, { backgroundColor: colors.primary, borderColor: colors.background }]} />
                     )}
                 </View>
+
+                {/* Content */}
                 <View style={styles.conversationContent}>
+                    {/* Name + Time row */}
                     <View style={styles.conversationHeader}>
                         <View style={styles.nameContainer}>
                             {isGroup && (
-                                <Ionicons
-                                    name="people"
-                                    size={13}
-                                    color={colors.textSecondary}
-                                    style={{ marginRight: 4 }}
-                                />
+                                <Ionicons name="people" size={12} color={colors.textSecondary} style={{ marginRight: 4, marginTop: 1 }} />
                             )}
                             <Text
-                                style={[
-                                    styles.conversationName,
-                                    {
-                                        color: colors.text,
-                                        fontWeight: hasUnread ? '700' : '500',
-                                    },
-                                ]}
+                                style={[styles.conversationName, { color: colors.text, fontWeight: hasUnread ? '700' : '600' }]}
                                 numberOfLines={1}
                             >
                                 {displayName || 'Chat'}
                             </Text>
                         </View>
-                        <View style={styles.timeAndBadgeRow}>
-                            <Text style={[
-                                styles.conversationTime,
-                                { color: hasUnread ? colors.primary : colors.textSecondary },
-                            ]}>
-                                {lastMessage ? formatTime(lastMessage.created_at) : ''}
-                            </Text>
-                            {hasUnread && (
-                                <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
-                                    <Text style={styles.unreadCount}>
-                                        {(item.unread_count || 0) > 99 ? '99+' : item.unread_count}
-                                    </Text>
-                                </View>
-                            )}
-                        </View>
-                    </View>
-                    <Text
-                        style={[
-                            styles.lastMessage,
-                            {
-                                color: hasUnread ? colors.text : colors.textSecondary,
-                                fontWeight: hasUnread ? '500' : '400',
-                            },
-                        ]}
-                        numberOfLines={1}
-                    >
-                        {getPreviewText()}
-                    </Text>
-                    {isGroup && (
-                        <Text style={[styles.memberCount, { color: colors.textSecondary }]}>
-                            {item.participant_count || 0} members
+                        <Text style={[styles.conversationTime, { color: hasUnread ? colors.primary : colors.textSecondary, fontWeight: hasUnread ? '700' : '400' }]}>
+                            {lastMessage ? formatTime(lastMessage.created_at) : ''}
                         </Text>
-                    )}
+                    </View>
+
+                    {/* Preview + badge row */}
+                    <View style={styles.previewRow}>
+                        <Text
+                            style={[
+                                styles.lastMessage,
+                                { color: hasUnread ? colors.text : colors.textSecondary, fontWeight: hasUnread ? '500' : '400' },
+                            ]}
+                            numberOfLines={1}
+                        >
+                            {getPreviewText()}
+                        </Text>
+                        {hasUnread ? (
+                            <View style={[styles.unreadBadge, { backgroundColor: colors.primary }]}>
+                                <Text style={styles.unreadCount}>
+                                    {(item.unread_count || 0) > 99 ? '99+' : item.unread_count}
+                                </Text>
+                            </View>
+                        ) : showOutgoingStatus ? (
+                            <View style={styles.outgoingStatusRow}>
+                                {isLastMessageSeen && otherUser?.avatar_url ? (
+                                    <Image source={{ uri: otherUser.avatar_url }} style={styles.seenAvatarIndicator} />
+                                ) : isLastMessageSeen ? (
+                                    <Ionicons name="checkmark-done" size={15} color={colors.primary} />
+                                ) : (
+                                    <Ionicons name="checkmark" size={15} color={colors.textSecondary} />
+                                )}
+                            </View>
+                        ) : null}
+                    </View>
                 </View>
             </TouchableOpacity>
         );
@@ -189,29 +187,29 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     {
                         backgroundColor: colors.background,
                         paddingTop: (insets.top || 16) + 12,
+                        borderBottomColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)',
                     },
                 ]}
             >
                 <View style={styles.headerTopRow}>
                     <Text style={[styles.headerTitle, { color: colors.text }]}>Messages</Text>
-                    <TouchableOpacity activeOpacity={1}
-                        style={[styles.composeBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)' }]}
+                    <TouchableOpacity
+                        style={styles.composeBtn}
                         onPress={() => setShowNewMessageModal(true)}
+                        activeOpacity={0.7}
                     >
-                        <Ionicons name="create-outline" size={22} color={colors.primary} />
+                        <Ionicons name="create-outline" size={26} color={colors.primary} />
                     </TouchableOpacity>
                 </View>
 
                 {/* Search Bar */}
-                <TouchableOpacity activeOpacity={1}
-                    style={styles.searchContainer}
+                <TouchableOpacity
+                    style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
                     onPress={() => setShowNewMessageModal(true)}
-                    activeOpacity={1}
+                    activeOpacity={0.7}
                 >
-                    <View style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
-                        <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
-                        <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start a new chat</Text>
-                    </View>
+                    <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
+                    <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start new chat…</Text>
                 </TouchableOpacity>
             </View>
 
@@ -222,18 +220,21 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                 </View>
             ) : conversations.length === 0 ? (
                 <View style={styles.emptyContainer}>
-                    <Ionicons name="chatbubbles-outline" size={64} color={colors.textSecondary} />
-                    <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                    <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
+                        <Ionicons name="chatbubbles-outline" size={40} color={colors.primary} />
+                    </View>
+                    <Text style={[styles.emptyText, { color: colors.text }]}>
                         No conversations yet
                     </Text>
                     <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-                        Start a conversation by messaging someone from their profile
+                        Message musicians, studios, or venue owners directly from their profiles
                     </Text>
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity
                         style={[styles.newMessageButton, { backgroundColor: colors.primary }]}
                         onPress={() => setShowNewMessageModal(true)}
+                        activeOpacity={0.85}
                     >
-                        <Ionicons name="create" size={20} color="#FFF" />
+                        <Ionicons name="create" size={18} color="#FFF" />
                         <Text style={styles.newMessageButtonText}>New Message</Text>
                     </TouchableOpacity>
                 </View>
@@ -242,12 +243,13 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     data={conversations}
                     keyExtractor={(item) => item.id}
                     renderItem={renderConversation}
-                    contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 24) + 80 }]}
+                    contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 16) + 80 }]}
                     refreshing={loading}
                     onRefresh={refetch}
                     ItemSeparatorComponent={() => (
-                        <View style={[styles.separator, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]} />
+                        <View style={[styles.separator, { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)' }]} />
                     )}
+                    showsVerticalScrollIndicator={false}
                 />
             )}
 
@@ -268,35 +270,30 @@ const styles = StyleSheet.create({
     },
     header: {
         paddingHorizontal: 20,
-        paddingBottom: 10,
-        borderBottomWidth: 0,
+        paddingBottom: 12,
+        borderBottomWidth: StyleSheet.hairlineWidth,
     },
     headerTopRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 14,
+        marginBottom: 12,
     },
     headerTitle: {
-        fontSize: 26,
+        fontSize: 28,
         fontWeight: '800',
+        letterSpacing: -0.5,
     },
     composeBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    searchContainer: {
-        marginBottom: 6,
+        padding: 4,
     },
     searchBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        height: 42,
-        borderRadius: 21,
+        height: 44,
+        borderRadius: 22,
         paddingHorizontal: 16,
+        marginBottom: 2,
     },
     loadingContainer: {
         flex: 1,
@@ -309,64 +306,67 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: 32,
     },
+    emptyIconWrap: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
     emptyText: {
-        fontSize: 18,
-        fontWeight: '600',
-        marginTop: 16,
+        fontSize: 19,
+        fontWeight: '700',
+        marginBottom: 8,
     },
     emptySubtext: {
         fontSize: 14,
-        marginTop: 8,
         textAlign: 'center',
-        paddingHorizontal: 32,
+        lineHeight: 20,
+        paddingHorizontal: 24,
     },
     list: {
-        paddingVertical: 8,
+        paddingTop: 6,
     },
     conversationItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingVertical: 10,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
     },
     avatarContainer: {
         position: 'relative',
+        marginRight: 12,
     },
     avatar: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-    },
-    avatarPlaceholder: {
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 56,
+        height: 56,
+        borderRadius: 28,
     },
     groupAvatar: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
         justifyContent: 'center',
         alignItems: 'center',
     },
-    unreadDot: {
+    onlineDot: {
         position: 'absolute',
-        bottom: 2,
-        right: 2,
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        borderWidth: 3,
-        borderColor: '#FFF', // Should match background, assumed white/black. 
+        bottom: 1,
+        right: 1,
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        borderWidth: 2.5,
     },
     conversationContent: {
         flex: 1,
-        marginLeft: 12,
+        gap: 3,
     },
     conversationHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 3,
     },
     nameContainer: {
         flexDirection: 'row',
@@ -375,30 +375,30 @@ const styles = StyleSheet.create({
         marginRight: 8,
     },
     conversationName: {
-        fontSize: 15,
+        fontSize: 15.5,
         flex: 1,
-    },
-    timeAndBadgeRow: {
-        flexDirection: 'column',
-        alignItems: 'flex-end',
-        gap: 4,
     },
     conversationTime: {
-        fontSize: 11,
-        fontWeight: '500',
+        fontSize: 12,
     },
-    conversationPreview: {
+    previewRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 2,
+        justifyContent: 'space-between',
     },
     lastMessage: {
-        fontSize: 13,
+        fontSize: 13.5,
         flex: 1,
+        marginRight: 8,
     },
-    memberCount: {
-        fontSize: 12,
-        marginTop: 2,
+    outgoingStatusRow: {
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    seenAvatarIndicator: {
+        width: 16,
+        height: 16,
+        borderRadius: 8,
     },
     unreadBadge: {
         minWidth: 20,
@@ -414,21 +414,21 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     separator: {
-        height: 1,
-        marginLeft: 80,
+        height: StyleSheet.hairlineWidth,
+        marginLeft: 84,
     },
     newMessageButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingVertical: 12,
+        paddingHorizontal: 24,
+        paddingVertical: 13,
         borderRadius: 24,
-        marginTop: 20,
+        marginTop: 24,
         gap: 8,
     },
     newMessageButtonText: {
         color: '#FFF',
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: '600',
     },
 });

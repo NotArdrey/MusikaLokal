@@ -2,17 +2,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  BackHandler,
-  Image,
-  Keyboard,
-  Modal as RNModal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    BackHandler,
+    Image,
+    Keyboard,
+    Modal as RNModal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import Header from "../src/components/header";
@@ -23,9 +23,9 @@ import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
 import {
-  getGroupMembersLabel,
-  getGroupTypeLabel,
-  isGroupLeaderMember,
+    getGroupMembersLabel,
+    getGroupTypeLabel,
+    isGroupLeaderMember,
 } from "../src/utils/groupMembers";
 
 import { useLocalSearchParams } from "expo-router";
@@ -63,6 +63,9 @@ const GENRES = [
   "Lo-Fi",
   "OPM",
 ];
+
+const TITLE_MAX_LENGTH = 120;
+const DESCRIPTION_MAX_LENGTH = 1000;
 
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
@@ -1059,8 +1062,16 @@ export default function EditGroupScreen() {
     value: string,
     setValue: (text: string) => void,
     multiline = false,
-  ) => (
-    <View style={styles.inputContainer}>
+  ) => {
+    const normalizedLabel = label.trim().toLowerCase();
+    const inputMaxLength = normalizedLabel.includes("description")
+      ? DESCRIPTION_MAX_LENGTH
+      : normalizedLabel.includes("name") || normalizedLabel.includes("title")
+        ? TITLE_MAX_LENGTH
+        : undefined;
+
+    return (
+      <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
       </Text>
@@ -1076,6 +1087,7 @@ export default function EditGroupScreen() {
         <TextInput
           value={value}
           onChangeText={setValue}
+          maxLength={inputMaxLength}
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
           style={[
@@ -1090,8 +1102,9 @@ export default function EditGroupScreen() {
           ]}
         />
       </View>
-    </View>
-  );
+      </View>
+    );
+  };
 
   // Show loading while checking authorization
   if (checkingAuth) {

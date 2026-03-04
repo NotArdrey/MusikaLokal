@@ -202,20 +202,6 @@ const StudioSetupTab = ({ group, colors, isDark, styles }: StudioSetupTabProps) 
         </View>
       )}
 
-      {group.description && (
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>About the Space</Text>
-          <Text
-            style={{
-              color: colors.text,
-              lineHeight: 24,
-              fontFamily: "Poppins_400Regular",
-            }}
-          >
-            {group.description}
-          </Text>
-        </View>
-      )}
     </View>
   );
 };

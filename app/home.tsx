@@ -4,17 +4,17 @@ import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  Dimensions,
-  InteractionManager,
-  RefreshControl,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    InteractionManager,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
@@ -136,6 +136,7 @@ export default function HomeScreen() {
   const [featured, setFeatured] = useState<any[]>([]);
   const [discover, setDiscover] = useState<any[]>([]);
   const [newArrivals, setNewArrivals] = useState<any[]>([]); // New Arrivals State
+  const [viewedNewArrivals, setViewedNewArrivals] = useState<Set<string>>(new Set());
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]); // Upcoming Events State (for musicians)
   const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
   const [userName, setUserName] = useState("Guest");
@@ -295,6 +296,11 @@ export default function HomeScreen() {
       fetchRecentlyViewed();
       fetchUpcomingEvents(); // Fetch upcoming events for musicians
       setTimeBasedGreeting();
+
+      // Load which New Arrivals have already been viewed
+      void AsyncStorage.getItem('viewed_new_arrivals').then(json => {
+        if (json) setViewedNewArrivals(new Set(JSON.parse(json)));
+      }).catch(() => {});
 
       const reopenListingId = Array.isArray(params.reopenListingId)
         ? params.reopenListingId[0]
@@ -835,6 +841,17 @@ export default function HomeScreen() {
     openListingDetails(item.id);
     debugLog("selectedListingId set to:", item.id);
     debugLog("openDetailsSheet called");
+
+    // Mark this item as viewed in the New Arrivals set
+    const isNewArrival = newArrivals.some((n: any) => n.id === item.id);
+    if (isNewArrival) {
+      setViewedNewArrivals(prev => {
+        const next = new Set(prev);
+        next.add(item.id);
+        AsyncStorage.setItem('viewed_new_arrivals', JSON.stringify([...next])).catch(() => {});
+        return next;
+      });
+    }
 
     // Defer storage work so sheet animation stays smooth
     InteractionManager.runAfterInteractions(() => {
@@ -1582,17 +1599,21 @@ export default function HomeScreen() {
           item.recording_rate && item.recording_rate !== "0"
             ? parseInt(item.recording_rate)
             : 0;
+        const isRecordingOnlyStudio = item.studio_type === "Recording";
+        const isRehearsalOnlyStudio = item.studio_type === "Rehearsal";
+        const hasRehearsalRate = rehearsalRate > 0 && !isRecordingOnlyStudio;
+        const hasRecordingRate = recordingRate > 0 && !isRehearsalOnlyStudio;
 
         // Both rates available
-        if (rehearsalRate && recordingRate) {
+        if (hasRehearsalRate && hasRecordingRate) {
           return `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
         }
         // Recording only
-        if (recordingRate) {
+        if (hasRecordingRate) {
           return `₱${recordingRate.toLocaleString()}/song`;
         }
         // Rehearsal only
-        if (rehearsalRate) {
+        if (hasRehearsalRate) {
           return `₱${rehearsalRate.toLocaleString()}/hr`;
         }
         // Fallback to hourly_rate
@@ -1718,11 +1739,13 @@ export default function HomeScreen() {
                     {item.type}
                   </Text>
                 </View>
-                {/* NEW Badge */}
-                <View style={styles.newArrivalNewBadge}>
-                  <Ionicons name="sparkles" size={10} color="#FFF" />
-                  <Text style={styles.newArrivalNewBadgeText}>NEW</Text>
-                </View>
+                {/* NEW Dot Badge – hidden once the listing has been viewed */}
+                {!viewedNewArrivals.has(item.id) && (
+                  <View style={styles.newArrivalNewBadge}>
+                    <View style={styles.newArrivalNewDot} />
+                    <Text style={styles.newArrivalNewBadgeText}>NEW</Text>
+                  </View>
+                )}
               </View>
 
               {/* Details Section */}
@@ -2302,13 +2325,21 @@ export default function HomeScreen() {
                         item.recording_rate && item.recording_rate !== "0"
                           ? parseInt(item.recording_rate)
                           : 0;
+                      const isRecordingOnlyStudio =
+                        item.studio_type === "Recording";
+                      const isRehearsalOnlyStudio =
+                        item.studio_type === "Rehearsal";
+                      const hasRehearsalRate =
+                        rehearsalRate > 0 && !isRecordingOnlyStudio;
+                      const hasRecordingRate =
+                        recordingRate > 0 && !isRehearsalOnlyStudio;
 
                       let priceText = null;
-                      if (rehearsalRate && recordingRate) {
+                      if (hasRehearsalRate && hasRecordingRate) {
                         priceText = `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
-                      } else if (recordingRate) {
+                      } else if (hasRecordingRate) {
                         priceText = `₱${recordingRate.toLocaleString()}/song`;
-                      } else if (rehearsalRate) {
+                      } else if (hasRehearsalRate) {
                         priceText = `₱${rehearsalRate.toLocaleString()}/hr`;
                       } else if (item.hourly_rate && item.hourly_rate !== "0") {
                         priceText = `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
@@ -3212,18 +3243,29 @@ const styles = StyleSheet.create({
   },
   newArrivalNewBadge: {
     position: "absolute",
-    top: 12,
-    right: 12,
+    top: 10,
+    right: 10,
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 100,
-    backgroundColor: "#F59E0B",
+    backgroundColor: "rgba(255,255,255,0.96)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  newArrivalNewDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#EF4444",
   },
   newArrivalNewBadgeText: {
-    color: "#FFF",
+    color: "#EF4444",
     fontFamily: "Poppins_700Bold",
     fontSize: 10,
   },

@@ -41,35 +41,72 @@ export const useListingSheetDerived = (group: any) => {
     [group],
   );
 
+  const isStudioLike = group?.type === "Studio" || group?.type === "Venue";
+  const studioMode =
+    group?.studio_type === "Rehearsal" ||
+    group?.studio_type === "Recording" ||
+    group?.studio_type === "Both"
+      ? group.studio_type
+      : null;
+
+  const rehearsalRateNumber = useMemo(() => {
+    const parsed = Number(group?.rehearsal_rate ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, [group?.rehearsal_rate]);
+
+  const recordingRateNumber = useMemo(() => {
+    const parsed = Number(group?.recording_rate ?? 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, [group?.recording_rate]);
+
+  const hasRehearsalRate = useMemo(() => {
+    if (isStudioLike && studioMode === "Recording") return false;
+    return rehearsalRateNumber > 0;
+  }, [isStudioLike, rehearsalRateNumber, studioMode]);
+
+  const hasRecordingRate = useMemo(() => {
+    if (isStudioLike && studioMode === "Rehearsal") return false;
+    return recordingRateNumber > 0;
+  }, [isStudioLike, recordingRateNumber, studioMode]);
+
   const rehearsalRate = useMemo(
-    () => (group?.rehearsal_rate ? parseInt(group.rehearsal_rate).toLocaleString() : null),
-    [group],
+    () => (hasRehearsalRate ? rehearsalRateNumber.toLocaleString() : null),
+    [hasRehearsalRate, rehearsalRateNumber],
   );
 
   const recordingRate = useMemo(
-    () => (group?.recording_rate ? parseInt(group.recording_rate).toLocaleString() : null),
-    [group],
+    () => (hasRecordingRate ? recordingRateNumber.toLocaleString() : null),
+    [hasRecordingRate, recordingRateNumber],
   );
 
   const hasDualPricing = useMemo(
-    () => Boolean(
-      group?.type === "Studio" &&
-        rehearsalRate &&
-        recordingRate &&
-        rehearsalRate !== "0" &&
-        recordingRate !== "0",
-    ),
-    [group, rehearsalRate, recordingRate],
+    () => Boolean(isStudioLike && hasRehearsalRate && hasRecordingRate),
+    [hasRecordingRate, hasRehearsalRate, isStudioLike],
   );
 
+  const displayRateNumber = useMemo(() => {
+    if (hasRehearsalRate) return rehearsalRateNumber;
+    if (hasRecordingRate) return recordingRateNumber;
+
+    const hourly = Number(group?.hourly_rate ?? 0);
+    if (Number.isFinite(hourly) && hourly > 0) return hourly;
+
+    const rate = Number(group?.rate ?? 0);
+    if (Number.isFinite(rate) && rate > 0) return rate;
+
+    return 0;
+  }, [
+    group?.hourly_rate,
+    group?.rate,
+    hasRecordingRate,
+    hasRehearsalRate,
+    recordingRateNumber,
+    rehearsalRateNumber,
+  ]);
+
   const displayRate = useMemo(
-    () =>
-      group?.rate
-        ? parseInt(group.rate).toLocaleString()
-        : rehearsalRate || recordingRate || group?.hourly_rate
-          ? parseInt(group?.hourly_rate || "0").toLocaleString()
-          : "0",
-    [group, rehearsalRate, recordingRate],
+    () => displayRateNumber.toLocaleString(),
+    [displayRateNumber],
   );
 
   const showTabs = labels.tabs.length > 0;

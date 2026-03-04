@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import React from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../context/ThemeContext";
@@ -90,11 +91,13 @@ export default function CustomAlert({
   return (
     <Modal
       transparent
+      statusBarTranslucent
+      navigationBarTranslucent
       visible={visible}
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
+      <BlurView intensity={60} tint="dark" style={styles.overlay}>
         <View
           style={[
             styles.container,
@@ -150,7 +153,7 @@ export default function CustomAlert({
             })}
           </View>
         </View>
-      </View>
+      </BlurView>
     </Modal>
   );
 }
@@ -158,7 +161,6 @@ export default function CustomAlert({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,

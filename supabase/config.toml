@@ -20,7 +20,7 @@ verify_jwt = false
 [functions.manage-profile]
 verify_jwt = true
 [functions.manage-bookings]
-verify_jwt = true
+verify_jwt = false
 [functions.manage-notifications]
 verify_jwt = false
 [functions.manage-listings]

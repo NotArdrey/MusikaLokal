@@ -17,20 +17,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Modal from '../src/components/modal';
+import ReportModal from '../src/components/ReportModal';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { getGroupMembersLabel, getGroupTypeLabel, isGroupLeaderMember } from '../src/utils/groupMembers';
 
 const { width, height } = Dimensions.get('window');
 const IMG_HEIGHT = height * 0.5;
-const REPORT_REASONS = [
-  'Spam or scam',
-  'Harassment',
-  'Inappropriate content',
-  'Fake listing/profile',
-  'Other',
-];
-
 export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
@@ -41,6 +34,7 @@ export default function GroupDetailsScreen() {
   const [isFavorited, setIsFavorited] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
     title: string;
@@ -86,7 +80,7 @@ export default function GroupDetailsScreen() {
     setAlertVisible(true);
   };
 
-  const submitGroupReport = async (reason: string) => {
+  const submitGroupReport = async (reason: string, details?: string) => {
     if (!userId) {
       showAlert('warning', 'Login Required', 'You need to be logged in to submit a report.');
       return;
@@ -96,22 +90,19 @@ export default function GroupDetailsScreen() {
       return;
     }
 
-    try {
-      const { error } = await supabase.functions.invoke('manage-details', {
-        body: {
-          action: 'report',
-          type: 'group',
-          id: group.id,
-          userId,
-          reason,
-          details: null,
-        },
-      });
+    const { error } = await supabase.functions.invoke('manage-details', {
+      body: {
+        action: 'report',
+        type: 'group',
+        id: group.id,
+        userId,
+        reason,
+        details: details || null,
+      },
+    });
 
-      if (error) throw error;
-      showAlert('success', 'Report Submitted', 'Thanks. We’ll review this report shortly.');
-    } catch (e: any) {
-      showAlert('error', 'Report Failed', e?.message || 'Failed to submit report.');
+    if (error) {
+      throw new Error(error.message || 'Failed to submit report.');
     }
   };
 
@@ -120,27 +111,7 @@ export default function GroupDetailsScreen() {
       showAlert('error', 'Unable to Report', 'Missing group details.');
       return;
     }
-
-    const reportButtons = [
-      ...REPORT_REASONS.map((reason) => ({
-        text: reason,
-        style: 'default' as const,
-        onPress: () => {
-          void submitGroupReport(reason);
-        },
-      })),
-      {
-        text: 'Cancel',
-        style: 'cancel' as const,
-      },
-    ];
-
-    showAlert(
-      'warning',
-      'Report Group',
-      `Why are you reporting ${group.name || 'this group'}?`,
-      reportButtons,
-    );
+    setShowReportModal(true);
   };
 
   if (loading) {
@@ -353,6 +324,14 @@ export default function GroupDetailsScreen() {
             message={alertConfig.message}
             buttons={alertConfig.buttons}
             onClose={() => setAlertVisible(false)}
+          />
+          <ReportModal
+            visible={showReportModal}
+            onClose={() => setShowReportModal(false)}
+            onSubmit={submitGroupReport}
+            targetName={group?.name || 'this group'}
+            title="Report Group"
+            reportType="group"
           />
         </View>
       </ScrollView>

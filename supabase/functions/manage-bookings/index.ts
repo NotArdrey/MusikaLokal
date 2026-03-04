@@ -188,6 +188,15 @@ serve(async (req: Request) => {
   }
 
   try {
+    const authHeader = req.headers.get("Authorization") || "";
+
+    if (!authHeader) {
+      return new Response(JSON.stringify({ code: 401, message: "Missing Authorization header" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401,
+      });
+    }
+
     const supabaseClient = createClient(
       // @ts-ignore
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -195,7 +204,7 @@ serve(async (req: Request) => {
       Deno.env.get("SUPABASE_ANON_KEY") ?? "",
       {
         global: {
-          headers: { Authorization: req.headers.get("Authorization")! },
+          headers: { Authorization: authHeader },
         },
       },
     );
@@ -208,17 +217,36 @@ serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
     );
 
+    const {
+      data: { user: authUser },
+      error: authUserError,
+    } = await supabaseClient.auth.getUser();
+
+    if (authUserError || !authUser) {
+      return new Response(JSON.stringify({ code: 401, message: "Invalid JWT" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 401,
+      });
+    }
+
     const { action, ...params } = await req.json();
 
     // 1. FETCH BOOKINGS & APPLICATIONS
     if (action === "fetch") {
       const { userId } = params;
 
+      if (userId && userId !== authUser.id) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
       // First, get user role to determine what to fetch
       const { data: profile, error: profileError } = await supabaseClient
         .from("profiles")
         .select("role")
-        .eq("id", userId)
+        .eq("id", userId || authUser.id)
         .single();
 
       if (profileError) throw profileError;
@@ -380,11 +408,43 @@ serve(async (req: Request) => {
 
           if (bookingError) throw bookingError;
 
+          const lateReportByBooking = new Map<string, { count: number; latestAt: string | null }>();
+          const bookingIds = (bookings || []).map((booking: any) => booking.id).filter(Boolean);
+
+          if (bookingIds.length > 0) {
+            const { data: lateEvents, error: lateEventsError } = await supabaseClient
+              .from("booking_attendance_events")
+              .select("booking_id, created_at")
+              .in("booking_id", bookingIds)
+              .eq("event_type", "late")
+              .order("created_at", { ascending: false });
+
+            if (lateEventsError) {
+              console.log("Error fetching late attendance events:", lateEventsError);
+            } else {
+              (lateEvents || []).forEach((event: any) => {
+                const existing = lateReportByBooking.get(event.booking_id);
+                if (existing) {
+                  existing.count += 1;
+                  if (event.created_at && (!existing.latestAt || event.created_at > existing.latestAt)) {
+                    existing.latestAt = event.created_at;
+                  }
+                } else {
+                  lateReportByBooking.set(event.booking_id, {
+                    count: 1,
+                    latestAt: event.created_at || null,
+                  });
+                }
+              });
+            }
+          }
+
           // Process Studio Bookings
           // @ts-ignore
           bookings?.forEach((b: any) => {
             const bookingDate = new Date(`${b.booking_date}T${b.start_time}`);
             const endDate = new Date(`${b.booking_date}T${b.end_time}`);
+            const lateReportMeta = lateReportByBooking.get(b.id);
 
             const customerName =
               b.profile?.full_name || b.profile?.email || "Guest";
@@ -453,6 +513,9 @@ serve(async (req: Request) => {
               relocation_proposed_date: b.relocation_proposed_date,
               relocation_proposed_start_time: b.relocation_proposed_start_time,
               relocation_proposed_end_time: b.relocation_proposed_end_time,
+              has_late_report: Boolean(lateReportMeta),
+              late_report_count: lateReportMeta?.count || 0,
+              late_reported_at: lateReportMeta?.latestAt || null,
             };
 
             if (b.status === "pending" || b.status === "pending_relocation") {
@@ -782,6 +845,13 @@ serve(async (req: Request) => {
         session_type, // "rehearsal" or "recording"
       } = params;
 
+      if (!user_id || user_id !== authUser.id) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
       // Support both old single-slot format and new multi-slot format
       let slots: Array<{ start: string; end: string }> = [];
 
@@ -891,10 +961,12 @@ serve(async (req: Request) => {
 
       const leadTimeHours = Math.max(0, Number(studioSettingsData?.lead_time_hours ?? 24));
       const bookingHorizonDays = Math.max(1, Number(studioSettingsData?.booking_horizon_days ?? 90));
-      const minBookingDurationHours = Math.max(
-        0,
-        Number(studioSettingsData?.min_booking_duration_hours ?? 0),
+      const configuredMinBookingDurationHours = Number(
+        studioSettingsData?.min_booking_duration_hours ?? 0,
       );
+      const minBookingDurationHours = Number.isFinite(configuredMinBookingDurationHours)
+        ? Math.max(0, Math.min(1, configuredMinBookingDurationHours))
+        : 1;
 
       const dayDiff = Math.floor(
         (bookingDateStartUtc.getTime() - todayManilaStartUtc.getTime()) /

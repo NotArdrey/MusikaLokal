@@ -98,6 +98,7 @@ const StudioGigVenueAboutTab = ({
       <View
         style={{
           flexDirection: "row",
+          flexWrap: "wrap",
           gap: 12,
           marginBottom: 24,
         }}
@@ -107,12 +108,17 @@ const StudioGigVenueAboutTab = ({
             styles.statCard,
             {
               backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-              flex: 1,
+              flexBasis: "47%",
+              flexGrow: 1,
             },
           ]}
         >
           <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Budget</Text>
-          <Text style={[styles.statValue, { color: colors.text }]}>
+          <Text
+            style={[styles.statValue, { color: colors.text }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
             ₱{group.budget || "5,000"}
           </Text>
         </View>
@@ -121,16 +127,17 @@ const StudioGigVenueAboutTab = ({
             styles.statCard,
             {
               backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-              flex: 1,
+              flexBasis: "47%",
+              flexGrow: 1,
             },
           ]}
         >
           <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Event Date</Text>
-          <Text style={[styles.statValue, { color: colors.text }]}>
-            {group.event_date
-              ? new Date(group.event_date).toLocaleDateString(undefined, {
-                weekday: "short",
-                month: "short",
+          <Text
+            style={[styles.statValue, { color: colors.text }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
                 day: "numeric",
                 year: "numeric",
               })
@@ -150,48 +157,47 @@ const StudioGigVenueAboutTab = ({
     )}
 
     {isStudioOrVenue && (
-      <View
-        style={{
-          flexDirection: "column",
-          gap: 12,
-          marginBottom: 24,
-        }}
-      >
+      <View style={{ gap: 12, marginBottom: 24 }}>
+        {/* Rate row — always full width so numbers never get squeezed */}
         <View style={{ flexDirection: "row", gap: 12 }}>
           {hasDualPricing ? (
             <>
               <View
                 style={[
                   styles.statCard,
-                  {
-                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                    flex: 1,
-                  },
+                  { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
                 ]}
               >
                 <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rehearsal Rate</Text>
-                <Text style={[styles.statValue, { color: colors.text }]}>{`₱${rehearsalRate}/hr`}</Text>
+                <Text
+                  style={[styles.statValue, { color: colors.text }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {`₱${rehearsalRate}/hr`}
+                </Text>
               </View>
               <View
                 style={[
                   styles.statCard,
-                  {
-                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                    flex: 1,
-                  },
+                  { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
                 ]}
               >
                 <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Recording Rate</Text>
-                <Text style={[styles.statValue, { color: colors.text }]}>{`₱${recordingRate}/song`}</Text>
+                <Text
+                  style={[styles.statValue, { color: colors.text }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {`₱${recordingRate}/song`}
+                </Text>
               </View>
             </>
           ) : (
             <View
               style={[
                 styles.statCard,
-                {
-                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                },
+                { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
               ]}
             >
               <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
@@ -203,7 +209,11 @@ const StudioGigVenueAboutTab = ({
                       ? "Rehearsal Rate"
                       : "Hourly Rate"}
               </Text>
-              <Text style={[styles.statValue, { color: colors.text }]}>
+              <Text
+                style={[styles.statValue, { color: colors.text }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+              >
                 {recordingRate && !rehearsalRate
                   ? `₱${recordingRate}/song`
                   : `₱${displayRate}/hr`}
@@ -212,66 +222,68 @@ const StudioGigVenueAboutTab = ({
           )}
         </View>
 
+        {/* Row 1: Rating + Completion — always shown */}
         <View style={{ flexDirection: "row", gap: 12 }}>
           <View
             style={[
               styles.statCard,
-              {
-                backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                flex: 1,
-              },
+              { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
             ]}
           >
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Rating</Text>
-            <Text style={[styles.statValue, { color: colors.text }]}>
+            <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
               {group.rating ? group.rating.toFixed(1) : "-"}
             </Text>
           </View>
           <View
             style={[
               styles.statCard,
-              {
-                backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                flex: 1,
-              },
+              { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
             ]}
           >
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Completion</Text>
-            <Text style={[styles.statValue, { color: colors.text }]}>
+            <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
               {`${completionRate}%`}
             </Text>
           </View>
-          {group.type === "Studio" && group.studio_type && (
-            <View
-              style={[
-                styles.statCard,
-                {
-                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                  flex: 1,
-                },
-              ]}
-            >
-              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Type</Text>
-              <Text style={[styles.statValue, { color: colors.text }]}>
-                {group.studio_type === "Both" ? "Rehearsal & Recording" : group.studio_type}
-              </Text>
-            </View>
-          )}
-          {(group.type === "Studio" || group.type === "Venue") && group.pax && (
-            <View
-              style={[
-                styles.statCard,
-                {
-                  backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-                  flex: 1,
-                },
-              ]}
-            >
-              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Capacity</Text>
-              <Text style={[styles.statValue, { color: colors.text }]}>{group.pax} pax</Text>
-            </View>
-          )}
         </View>
+
+        {/* Row 2: Type + Capacity — only render row if at least one exists */}
+        {((group.type === "Studio" && group.studio_type) ||
+          ((group.type === "Studio" || group.type === "Venue") && group.pax)) && (
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            {group.type === "Studio" && group.studio_type && (
+              <View
+                style={[
+                  styles.statCard,
+                  { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
+                ]}
+              >
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Type</Text>
+                <Text
+                  style={[styles.statValue, { color: colors.text }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {group.studio_type === "Both" ? "Rehearsal & Recording" : group.studio_type}
+                </Text>
+              </View>
+            )}
+            {(group.type === "Studio" || group.type === "Venue") && group.pax && (
+              <View
+                style={[
+                  styles.statCard,
+                  { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
+                ]}
+              >
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Capacity</Text>
+                <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
+                  {group.pax} pax
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
       </View>
     )}
 

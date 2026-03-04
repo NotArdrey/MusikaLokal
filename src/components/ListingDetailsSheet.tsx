@@ -5,6 +5,7 @@ import {
     BottomSheetScrollView,
     useBottomSheetTimingConfigs,
 } from "@gorhom/bottom-sheet";
+import { BlurView } from "expo-blur";
 import * as ExpoLinking from "expo-linking";
 import { router } from "expo-router";
 import React, {
@@ -22,6 +23,7 @@ import {
     InteractionManager,
     Linking,
     Modal as RNModal,
+    Share,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -38,7 +40,7 @@ import { useListingSheetDerived } from "../hooks/useListingSheetDerived";
 import { useListingSheetEffects } from "../hooks/useListingSheetEffects";
 import { useProfileCompletion } from "../hooks/useProfileCompletion";
 import CustomAlert from "./CustomAlert";
-import ReportModal, { REPORT_REASONS } from "./ReportModal";
+import ReportModal from "./ReportModal";
 import BookingControls from "./listingDetails/BookingControls";
 import GigApplyTab from "./listingDetails/GigApplyTab";
 import GigInfoTab from "./listingDetails/GigInfoTab";
@@ -471,7 +473,7 @@ const ListingDetailsSheet = forwardRef<
     return normalized || "profile";
   };
 
-  const submitReport = async (reason: string) => {
+  const submitReport = async (reason: string, details?: string) => {
     if (!userId) {
       showSheetAlert("warning", "Login Required", "You need to be logged in to submit a report.");
       return;
@@ -482,23 +484,19 @@ const ListingDetailsSheet = forwardRef<
       return;
     }
 
-    try {
-      const { error } = await supabase.functions.invoke("manage-details", {
-        body: {
-          action: "report",
-          type: getReportTargetType(group.type),
-          id: group.id,
-          userId,
-          reason,
-          details: null,
-        },
-      });
+    const { error } = await supabase.functions.invoke("manage-details", {
+      body: {
+        action: "report",
+        type: getReportTargetType(group.type),
+        id: group.id,
+        userId,
+        reason,
+        details: details || null,
+      },
+    });
 
-      if (error) throw error;
-
-      showSheetAlert("success", "Report Submitted", "Thanks. We’ll review this report shortly.");
-    } catch (e: any) {
-      showSheetAlert("error", "Report Failed", e?.message || "Failed to submit report.");
+    if (error) {
+      throw new Error(error.message || "Failed to submit report.");
     }
   };
 
@@ -507,27 +505,19 @@ const ListingDetailsSheet = forwardRef<
       showSheetAlert("error", "Unable to Report", "Missing listing details.");
       return;
     }
+    setShowListingReportModal(true);
+  };
 
-    const reportButtons = [
-      ...REPORT_REASONS.map((reason: string) => ({
-        text: reason,
-        style: "default" as const,
-        onPress: () => {
-          void submitReport(reason);
-        },
-      })),
-      {
-        text: "Cancel",
-        style: "cancel" as const,
-      },
-    ];
-
-    showSheetAlert(
-      "warning",
-      "Report Listing",
-      `Why are you reporting ${group.name || "this listing"}?`,
-      reportButtons,
-    );
+  const handleShare = async () => {
+    try {
+      const name = group?.name || 'this listing';
+      const type = group?.type || 'Listing';
+      await Share.share({
+        message: `Check out ${name} (${type}) on MusikaLokal!`,
+      });
+    } catch {
+      // user cancelled or share failed — no action needed
+    }
   };
 
   // Process payment with selected payment type (full or downpayment)
@@ -1160,6 +1150,17 @@ const ListingDetailsSheet = forwardRef<
           .single();
         debugLog("Owner profile:", ownerProfile);
 
+        const studioTypeFromData =
+          data?.type === "Rehearsal" ||
+          data?.type === "Recording" ||
+          data?.type === "Both"
+            ? data.type
+            : null;
+        const normalizedStudioType =
+          type === "Studio" || type === "Venue"
+            ? data?.studio_type || studioTypeFromData
+            : null;
+
         const normalizedData = {
           ...data,
           type,
@@ -1180,8 +1181,7 @@ const ListingDetailsSheet = forwardRef<
             "0",
           review_count: data.review_count || 0,
           rating: data.rating || 0,
-          // For studios, data.type contains the studio type ("Rehearsal", "Recording", "Both")
-          studio_type: type === "Studio" ? data.type : null,
+          studio_type: normalizedStudioType,
         };
 
         // If studio or venue, fetch availability from operating hours
@@ -1980,6 +1980,7 @@ const ListingDetailsSheet = forwardRef<
       setPaymentBookingData={setPaymentBookingData}
       setSelectedPaymentType={setSelectedPaymentType}
       setShowPaymentOptionModal={setShowPaymentOptionModal}
+      showPaymentOptionModal={showPaymentOptionModal}
       selectedSessionType={selectedSessionType}
       showAlert={showSheetAlert}
     />
@@ -2213,6 +2214,7 @@ const ListingDetailsSheet = forwardRef<
               onClose={() => (ref as any)?.current?.dismiss()}
               onToggleFavorite={toggleFavorite}
               onReport={handleReport}
+              onShare={handleShare}
             />
 
             {/* TABS SELECTOR */}
@@ -2274,7 +2276,8 @@ const ListingDetailsSheet = forwardRef<
         onClose={() => setShowListingReportModal(false)}
         onSubmit={submitReport}
         targetName={group?.name || 'this listing'}
-        title="Report Listing"
+        title={group?.type ? `Report ${group.type}` : 'Report Listing'}
+        reportType={group?.type?.toLowerCase()}
       />
 
       <Modal
@@ -2306,12 +2309,14 @@ const ListingDetailsSheet = forwardRef<
       <RNModal
         visible={showPaymentOptionModal}
         transparent
+        statusBarTranslucent
+        navigationBarTranslucent
         animationType="fade"
         onRequestClose={() =>
           !isProcessingPayment && setShowPaymentOptionModal(false)
         }
       >
-        <View style={styles.paymentModalOverlay}>
+        <BlurView intensity={60} tint="dark" style={styles.paymentModalOverlay}>
           {isProcessingPayment ? (
             // Loading Screen while PayMongo processes
             <View
@@ -2476,16 +2481,9 @@ const ListingDetailsSheet = forwardRef<
                     { backgroundColor: colors.primary },
                   ]}
                 >
-                  <Ionicons
-                    name="card-outline"
-                    size={20}
-                    color="white"
-                    style={{ marginRight: 8 }}
-                  />
                   <Text style={styles.paymentOptionConfirmText}>
                     Proceed to Payment
                   </Text>
-                  <Ionicons name="arrow-forward" size={18} color="white" style={{ marginLeft: 8 }} />
                 </TouchableOpacity>
               </View>
 
@@ -2508,7 +2506,7 @@ const ListingDetailsSheet = forwardRef<
               </TouchableOpacity>
             </View>
           )}
-        </View>
+        </BlurView>
       </RNModal>
     </>
   );
@@ -3170,7 +3168,6 @@ const styles = StyleSheet.create({
   // Payment Option Modal Styles
   paymentModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 20,

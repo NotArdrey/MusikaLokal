@@ -186,6 +186,20 @@ const BookingDetailsSheet = forwardRef<
     }
   };
 
+  const formatDateTime = (dateTime?: string | null) => {
+    if (!dateTime) return null;
+    try {
+      return new Date(dateTime).toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    } catch {
+      return null;
+    }
+  };
+
   if (!booking) return null;
 
   const isStudio = booking.type_id === "studio_booking" || !!booking.studio_id;
@@ -808,6 +822,43 @@ const BookingDetailsSheet = forwardRef<
                     </Text>
                   </View>
                 )}
+
+                {booking.has_late_report && (
+                  <View
+                    style={[
+                      styles.notesSection,
+                      {
+                        backgroundColor: isDark ? "rgba(180, 83, 9, 0.18)" : "#FFF7ED",
+                        borderColor: isDark ? "rgba(251, 191, 36, 0.35)" : "#FCD34D",
+                        borderWidth: 1,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.notesLabel,
+                        { color: isDark ? "#FCD34D" : "#B45309" },
+                      ]}
+                    >
+                      Musician Late Report
+                    </Text>
+                    <Text style={[styles.notesText, { color: colors.text }]}>
+                      {booking.latest_late_report_reason?.trim()
+                        ? booking.latest_late_report_reason
+                        : "The musician reported being late but did not provide a reason."}
+                    </Text>
+                    {formatDateTime(booking.latest_late_report_at) ? (
+                      <Text
+                        style={[
+                          styles.lateReportMeta,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Reported {formatDateTime(booking.latest_late_report_at)}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
               </View>
 
               {/* Pricing Card */}
@@ -1225,6 +1276,11 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(14),
     fontFamily: "Poppins_400Regular",
     lineHeight: moderateScale(20),
+  },
+  lateReportMeta: {
+    marginTop: moderateScale(8),
+    fontSize: moderateScale(12),
+    fontFamily: "Poppins_400Regular",
   },
   pricingRow: {
     flexDirection: "row",

@@ -316,7 +316,11 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
               const mapped = qData.map((item: any) => ({
                 ...item,
-                type: item.type || type,
+                type,
+                studio_type:
+                  type === "Studio"
+                    ? item.type || item.studio_type || null
+                    : item.studio_type || null,
                 name: item.name || item.full_name,
                 location: item.location || item.address,
                 image: item.images?.[0] || item.image || item.avatar_url,

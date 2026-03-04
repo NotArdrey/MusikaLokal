@@ -2,6 +2,13 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 
+const createUuidV4 = () =>
+    'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+        const randomValue = (Math.random() * 16) | 0;
+        const uuidValue = char === 'x' ? randomValue : (randomValue & 0x3) | 0x8;
+        return uuidValue.toString(16);
+    });
+
 export interface MessageReaction {
     id: string;
     message_id: string;
@@ -144,10 +151,12 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                 }
             }
 
-            // Create new 1-on-1 conversation
-            const { data: newConversation, error: createError } = await supabase
+            const newConversationId = createUuidV4();
+
+            const { error: createError } = await supabase
                 .from('conversations')
                 .insert({
+                    id: newConversationId,
                     is_group: false,
                     studio_booking_id: options?.studioBookingId || null,
                     gig_application_id: options?.gigApplicationId || null,
@@ -155,27 +164,37 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                     group_id: options?.groupId || null,
                     studio_id: options?.studioId || null,
                 })
-                .select()
-                .single();
+                ;
 
             if (createError) throw createError;
 
-            const { error: participantsError } = await supabase
+            const { error: creatorParticipantError } = await supabase
                 .from('conversation_participants')
-                .upsert([
-                    {
-                        conversation_id: newConversation.id,
-                        user_id: currentUserId,
-                        role: 'member',
-                    },
-                    {
-                        conversation_id: newConversation.id,
-                        user_id: otherUserId,
-                        role: 'member',
-                    },
-                ], { onConflict: 'conversation_id,user_id' });
+                .upsert({
+                    conversation_id: newConversationId,
+                    user_id: currentUserId,
+                    role: 'owner',
+                }, { onConflict: 'conversation_id,user_id' });
 
-            if (participantsError) throw participantsError;
+            if (creatorParticipantError) throw creatorParticipantError;
+
+            const { error: recipientParticipantError } = await supabase
+                .from('conversation_participants')
+                .upsert({
+                    conversation_id: newConversationId,
+                    user_id: otherUserId,
+                    role: 'member',
+                }, { onConflict: 'conversation_id,user_id' });
+
+            if (recipientParticipantError) throw recipientParticipantError;
+
+            const { data: newConversation, error: fetchCreatedError } = await supabase
+                .from('conversations')
+                .select('*')
+                .eq('id', newConversationId)
+                .single();
+
+            if (fetchCreatedError) throw fetchCreatedError;
 
             setConversation(newConversation);
             return newConversation;
@@ -504,6 +523,44 @@ export function useConversations(currentUserId: string | null) {
                     });
                 }
             )
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'messages',
+                },
+                async (payload) => {
+                    const updatedMessage = payload.new as Message;
+
+                    setConversations(prevConversations => {
+                        const conversationIndex = prevConversations.findIndex(
+                            (conversation) => conversation.id === updatedMessage.conversation_id
+                        );
+
+                        if (conversationIndex < 0) {
+                            return prevConversations;
+                        }
+
+                        const updatedConversations = [...prevConversations];
+                        const conversation = { ...updatedConversations[conversationIndex] };
+
+                        if (conversation.last_message?.id === updatedMessage.id) {
+                            conversation.last_message = {
+                                ...conversation.last_message,
+                                ...updatedMessage,
+                            };
+                        }
+
+                        if (updatedMessage.sender_id !== currentUserId && updatedMessage.read_at) {
+                            conversation.unread_count = Math.max(0, (conversation.unread_count || 0) - 1);
+                        }
+
+                        updatedConversations[conversationIndex] = conversation;
+                        return updatedConversations;
+                    });
+                }
+            )
             .subscribe();
 
         return () => {
@@ -587,7 +644,12 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                         sender: sender || undefined,
                     };
 
-                    setMessages((prev) => [...prev, newMessage]);
+                    setMessages((prev) => {
+                        if (prev.some((message) => message.id === newMessage.id)) {
+                            return prev;
+                        }
+                        return [...prev, newMessage];
+                    });
 
                     // Mark as read if not sent by current user
                     if (payload.new.sender_id !== currentUserId) {
@@ -597,6 +659,31 @@ export function useChat(conversationId: string | null, currentUserId: string | n
                             .eq('id', payload.new.id)
                             .then();
                     }
+                }
+            )
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'messages',
+                    filter: `conversation_id=eq.${conversationId}`,
+                },
+                (payload) => {
+                    const updatedMessage = payload.new as Message;
+
+                    setMessages((prev) =>
+                        prev.map((message) =>
+                            message.id === updatedMessage.id
+                                ? {
+                                    ...message,
+                                    ...updatedMessage,
+                                    sender: message.sender,
+                                    reactions: message.reactions,
+                                }
+                                : message
+                        )
+                    );
                 }
             )
             .subscribe();

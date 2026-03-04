@@ -5,15 +5,15 @@ import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Image,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -84,6 +84,9 @@ const formatTimeInput = (text: string): string => {
 
   return cleaned;
 };
+
+const TITLE_MAX_LENGTH = 120;
+const DESCRIPTION_MAX_LENGTH = 1000;
 
 export default function AddStudioScreen() {
   const { colors, isDark } = useTheme();
@@ -437,6 +440,21 @@ export default function AddStudioScreen() {
     else router.back();
   };
 
+  const toggleCalendarDate = (dateStr: string) => {
+    setSelectedDates((prev) => {
+      const next = { ...prev };
+      if (next[dateStr]?.selected) {
+        delete next[dateStr];
+      } else {
+        next[dateStr] = {
+          selected: true,
+          slots: [{ start: "09:00 AM", end: "05:00 PM" }],
+        };
+      }
+      return next;
+    });
+  };
+
   const createStudio = async () => {
     if (creating) return;
     setCreating(true);
@@ -507,6 +525,13 @@ export default function AddStudioScreen() {
           ]
           : images;
 
+      const parsedRehearsalRate = parseFloat(rehearsalRate) || 0;
+      const parsedRecordingRate = parseFloat(recordingRate) || 0;
+      const effectiveRehearsalRate =
+        studioType === "Recording" ? 0 : parsedRehearsalRate;
+      const effectiveRecordingRate =
+        studioType === "Rehearsal" ? 0 : parsedRecordingRate;
+
       const payload = {
         name: studioName,
         type: studioType,
@@ -515,10 +540,10 @@ export default function AddStudioScreen() {
         // Dynamic pricing based on studio type
         hourly_rate:
           studioType === "Recording"
-            ? parseFloat(recordingRate) || 0
-            : parseFloat(rehearsalRate) || 0,
-        rehearsal_rate: parseFloat(rehearsalRate) || 0,
-        recording_rate: parseFloat(recordingRate) || 0,
+            ? effectiveRecordingRate
+            : effectiveRehearsalRate,
+        rehearsal_rate: effectiveRehearsalRate,
+        recording_rate: effectiveRecordingRate,
         pax: pax ? parseInt(pax) : null,
         amenities,
         instruments: instrumentsPayload,
@@ -717,19 +742,9 @@ export default function AddStudioScreen() {
         }
       }
 
-      if (operatingHours.length === 0) {
-        for (let day = 0; day <= 6; day++) {
-          operatingHours.push({
-            studio_id: studioId,
-            day_of_week: day,
-            is_open: true,
-            open_time: '09:00',
-            close_time: '22:00'
-          });
-        }
+      if (operatingHours.length > 0) {
+        await supabase.from('studio_operating_hours').insert(operatingHours);
       }
-
-      await supabase.from('studio_operating_hours').insert(operatingHours);
 
       // Insert calendar date overrides if any
       if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
@@ -1291,15 +1306,13 @@ export default function AddStudioScreen() {
       const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-      const response = await fetch(asset.uri);
-      if (!response.ok) {
-        throw new Error("Failed to fetch image");
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const bytes = base64ToUint8Array(base64);
       const { data, error } = await supabase.storage
         .from("listings")
-        .upload(fileName, arrayBuffer, {
+        .upload(fileName, bytes, {
           contentType: `image/${fileExt}`,
           upsert: false,
         });
@@ -1377,8 +1390,16 @@ export default function AddStudioScreen() {
     placeholder: string,
     multiline = false,
     keyboardType: any = "default",
-  ) => (
-    <View style={styles.inputContainer}>
+  ) => {
+    const normalizedLabel = label.trim().toLowerCase();
+    const inputMaxLength = normalizedLabel.includes("description")
+      ? DESCRIPTION_MAX_LENGTH
+      : normalizedLabel.includes("name") || normalizedLabel.includes("title")
+        ? TITLE_MAX_LENGTH
+        : undefined;
+
+    return (
+      <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
       </Text>
@@ -1394,6 +1415,7 @@ export default function AddStudioScreen() {
         <TextInput
           value={value}
           onChangeText={setValue}
+          maxLength={inputMaxLength}
           placeholder={placeholder}
           placeholderTextColor={colors.textSecondary}
           multiline={multiline}
@@ -1410,8 +1432,9 @@ export default function AddStudioScreen() {
           ]}
         />
       </View>
-    </View>
-  );
+      </View>
+    );
+  };
 
   return (
     <>
@@ -2649,18 +2672,44 @@ export default function AddStudioScreen() {
                       },
                       {} as Record<string, any>,
                     )}
-                    onDayPress={(day) => {
-                      const dateStr = day.dateString;
-                      const newDates = { ...selectedDates };
-                      if (newDates[dateStr]?.selected) {
-                        delete newDates[dateStr];
-                      } else {
-                        newDates[dateStr] = {
-                          selected: true,
-                          slots: [{ start: "09:00 AM", end: "05:00 PM" }],
-                        };
-                      }
-                      setSelectedDates(newDates);
+                    onDayPress={(day) => toggleCalendarDate(day.dateString)}
+                    dayComponent={({ date, state, marking }) => {
+                      if (!date) return null;
+                      const isSelected = !!marking?.selected;
+                      const isDisabled = state === "disabled";
+
+                      return (
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          onPress={() => toggleCalendarDate(date.dateString)}
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 16,
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: isSelected
+                              ? colors.primary
+                              : "transparent",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: isSelected
+                                ? "#FFFFFF"
+                                : isDisabled
+                                  ? isDark
+                                    ? "#4B5563"
+                                    : "#D1D5DB"
+                                  : colors.text,
+                              fontFamily: "Poppins_500Medium",
+                              fontSize: 14,
+                            }}
+                          >
+                            {date.day}
+                          </Text>
+                        </TouchableOpacity>
+                      );
                     }}
                     theme={{
                       backgroundColor: "transparent",

@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import { BlurView } from "expo-blur";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ExpoLinking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
@@ -84,7 +85,7 @@ export default function BookingsScreen() {
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const { width } = useWindowDimensions();
   const [modalMode, setModalMode] = useState<
-    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "refund" | "clear_balance" | "late"
+    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm"
   >("confirm");
 
   // Renew Contract State
@@ -134,6 +135,8 @@ export default function BookingsScreen() {
   });
   const [loading, setLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>("");
+  const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
+  const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -181,6 +184,20 @@ export default function BookingsScreen() {
       router.replace("/");
     }
   }, [authLoading, isAuthenticated, isGuest]);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 30 * 1000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    setLocallyReportedLateBookings({});
+  }, [userId]);
 
   // Track if user went to payment page (to auto-refresh on return)
   const paymentInProgressRef = useRef(false);
@@ -287,10 +304,6 @@ export default function BookingsScreen() {
 
             if (paymentConfirmed) {
               setActiveTab("Upcoming");
-              Alert.alert(
-                "Payment Successful! 🎉",
-                "Your booking has been confirmed and moved to Upcoming.",
-              );
             }
           } else if (userId) {
             // Even if not in payment flow, refresh when returning to app
@@ -513,6 +526,50 @@ export default function BookingsScreen() {
 
     if (studioError) throw studioError;
 
+    const lateReportByBookingId = new Map<string, {
+      count: number;
+      latestReason: string | null;
+      latestCreatedAt: string | null;
+    }>();
+    if (role === "studio-owner" || role === "musician") {
+      const bookingIds = (studioRows || []).map((row: any) => row.id).filter(Boolean);
+
+      if (bookingIds.length > 0) {
+        const { data: lateEvents, error: lateEventsError } = await supabase
+          .from("booking_attendance_events")
+          .select("booking_id, reporter_user_id, notes, created_at")
+          .in("booking_id", bookingIds)
+          .eq("event_type", "late");
+
+        if (!lateEventsError) {
+          (lateEvents || []).forEach((event: any) => {
+            if (role === "musician" && event.reporter_user_id !== targetUserId) {
+              return;
+            }
+
+            const existing = lateReportByBookingId.get(event.booking_id) || {
+              count: 0,
+              latestReason: null,
+              latestCreatedAt: null,
+            };
+            const hasNewerTimestamp =
+              !existing.latestCreatedAt ||
+              (event.created_at && new Date(event.created_at).getTime() > new Date(existing.latestCreatedAt).getTime());
+
+            lateReportByBookingId.set(event.booking_id, {
+              count: existing.count + 1,
+              latestReason: hasNewerTimestamp
+                ? (event.notes || null)
+                : existing.latestReason,
+              latestCreatedAt: hasNewerTimestamp
+                ? (event.created_at || null)
+                : existing.latestCreatedAt,
+            });
+          });
+        }
+      }
+    }
+
     const now = new Date();
     const fallback = {
       Pending: [] as any[],
@@ -530,6 +587,8 @@ export default function BookingsScreen() {
           b.payment_status === "unpaid" ||
           b.payment_status === "pending" ||
           b.payment_status === "failed");
+
+      const lateReportMeta = lateReportByBookingId.get(b.id);
 
       const item = {
         id: b.id,
@@ -587,6 +646,10 @@ export default function BookingsScreen() {
         relocation_proposed_date: b.relocation_proposed_date,
         relocation_proposed_start_time: b.relocation_proposed_start_time,
         relocation_proposed_end_time: b.relocation_proposed_end_time,
+        has_late_report: (lateReportMeta?.count || 0) > 0,
+        late_report_count: lateReportMeta?.count || 0,
+        latest_late_report_reason: lateReportMeta?.latestReason || null,
+        latest_late_report_at: lateReportMeta?.latestCreatedAt || null,
       };
 
       if (b.status === "pending" || b.status === "pending_relocation") {
@@ -658,10 +721,83 @@ export default function BookingsScreen() {
 
       if (!effectiveBookings) throw error || new Error("Failed to fetch bookings");
 
+      const combinedBookingItems = [
+        ...(effectiveBookings?.Pending || []),
+        ...(effectiveBookings?.Upcoming || []),
+        ...(effectiveBookings?.Ongoing || []),
+        ...(effectiveBookings?.Review || []),
+      ];
+
+      const studioBookingIds = [...new Set(
+        combinedBookingItems
+          .filter((item: any) => item?.type_id === "studio_booking")
+          .map((item: any) => item?.id)
+          .filter(Boolean),
+      )];
+
+      const lateReportByBookingId = new Map<string, {
+        count: number;
+        latestReason: string | null;
+        latestCreatedAt: string | null;
+      }>();
+      if (
+        (role === "studio-owner" || role === "venue-owner" || role === "musician") &&
+        studioBookingIds.length > 0
+      ) {
+        const { data: lateEvents, error: lateEventsError } = await supabase
+          .from("booking_attendance_events")
+          .select("booking_id, reporter_user_id, notes, created_at")
+          .in("booking_id", studioBookingIds)
+          .eq("event_type", "late");
+
+        if (!lateEventsError) {
+          (lateEvents || []).forEach((event: any) => {
+            if (role === "musician" && event.reporter_user_id !== targetUserId) {
+              return;
+            }
+
+            const existing = lateReportByBookingId.get(event.booking_id) || {
+              count: 0,
+              latestReason: null,
+              latestCreatedAt: null,
+            };
+            const hasNewerTimestamp =
+              !existing.latestCreatedAt ||
+              (event.created_at && new Date(event.created_at).getTime() > new Date(existing.latestCreatedAt).getTime());
+
+            lateReportByBookingId.set(event.booking_id, {
+              count: existing.count + 1,
+              latestReason: hasNewerTimestamp
+                ? (event.notes || null)
+                : existing.latestReason,
+              latestCreatedAt: hasNewerTimestamp
+                ? (event.created_at || null)
+                : existing.latestCreatedAt,
+            });
+          });
+        }
+      }
+
+      const attachLateReportMeta = (items: any[] = []) =>
+        items.map((item: any) => {
+          if (item?.type_id !== "studio_booking") return item;
+
+          const lateReportMeta = lateReportByBookingId.get(item.id);
+          const lateReportCount = lateReportMeta?.count || 0;
+
+          return {
+            ...item,
+            has_late_report: lateReportCount > 0,
+            late_report_count: lateReportCount,
+            latest_late_report_reason: lateReportMeta?.latestReason || null,
+            latest_late_report_at: lateReportMeta?.latestCreatedAt || null,
+          };
+        });
+
       // Separate Items Logic
 
       // 1. Applicants (Pending Gig items)
-      const rawPending = effectiveBookings?.Pending || [];
+      const rawPending = attachLateReportMeta(effectiveBookings?.Pending || []);
       const pendingGigApplications = rawPending.filter(
         (item: any) => item.type_id === "gig_application",
       );
@@ -684,8 +820,8 @@ export default function BookingsScreen() {
       );
 
       // 2. Active Musicians (Confirmed Gig items from Upcoming & Ongoing)
-      const rawUpcoming = effectiveBookings?.Upcoming || [];
-      const rawOngoing = effectiveBookings?.Ongoing || [];
+      const rawUpcoming = attachLateReportMeta(effectiveBookings?.Upcoming || []);
+      const rawOngoing = attachLateReportMeta(effectiveBookings?.Ongoing || []);
 
       const activeGigMusicians = [
         ...rawUpcoming.filter(
@@ -703,7 +839,7 @@ export default function BookingsScreen() {
       const allOngoing = rawOngoing;
 
       // 4. History - Cancelled/Declined bookings + already-reviewed completed items (by current viewer)
-      const rawReview = effectiveBookings?.Review || [];
+      const rawReview = attachLateReportMeta(effectiveBookings?.Review || []);
       const cancelledFromUpcoming = rawUpcoming.filter(
         (item: any) => item.isCancelled || item.status === "Declined"
       );
@@ -830,7 +966,7 @@ export default function BookingsScreen() {
     newStatus: string,
     typeId: string = "studio_booking",
     reason?: string,
-  ) {
+  ): Promise<boolean> {
     try {
       debugLog("📤 handleStatusUpdate called with:", {
         bookingId,
@@ -853,6 +989,24 @@ export default function BookingsScreen() {
 
         data = rpcResult.data;
         error = rpcResult.error;
+
+        if (error) {
+          debugLog("⚠️ record_booking_attendance failed, falling back to manage-bookings:", error);
+
+          const invokeFallback = await supabase.functions.invoke("manage-bookings", {
+            body: {
+              action: "update_status",
+              booking_id: bookingId,
+              new_status: newStatus,
+              type_id: typeId,
+              cancellation_reason: reason,
+              userId,
+            },
+          });
+
+          data = invokeFallback.data;
+          error = invokeFallback.error;
+        }
       } else {
         const invokeResult = await supabase.functions.invoke("manage-bookings", {
           body: {
@@ -861,6 +1015,7 @@ export default function BookingsScreen() {
             new_status: newStatus,
             type_id: typeId,
             cancellation_reason: reason,
+            userId,
           },
         });
 
@@ -872,12 +1027,33 @@ export default function BookingsScreen() {
 
       if (error) throw error;
 
+      if (
+        typeId === "studio_booking" &&
+        attendanceStatuses.includes(newStatus) &&
+        data &&
+        typeof data === "object" &&
+        data.inserted === false
+      ) {
+        const duplicateMessage =
+          newStatus === "late"
+            ? "You already sent a late report for this booking."
+            : "You already sent this attendance report for this booking.";
+        showAlert("info", "Already Reported", duplicateMessage);
+        setModalVisible(false);
+        return false;
+      }
+
       // Refresh list
       if (userId) fetchBookings(userId);
       setModalVisible(false);
+      return true;
     } catch (e) {
       debugLog("Error updating status:", e);
-      showAlert("error", "Error", "Failed to update booking status.");
+      const errorMessage =
+        (e as any)?.message ||
+        (typeof e === "string" ? e : "Failed to update booking status.");
+      showAlert("error", "Error", errorMessage);
+      return false;
     }
   }
 
@@ -906,6 +1082,189 @@ export default function BookingsScreen() {
     setCancellationReason("");
     setModalMode("decline");
     setModalVisible(true);
+  };
+
+  const isReviewOrCompletedContext =
+    activeTab === "Review" ||
+    (userRole === "musician" &&
+      viewMode === "applications" &&
+      activeAppTab === "Completed");
+
+  const shouldShowLateReportDot = (item: any) => {
+    if (item?.type_id !== "studio_booking") return false;
+
+    const isOwnerView =
+      userRole === "studio-owner" || userRole === "venue-owner";
+
+    if (!isOwnerView) return false;
+
+    return Boolean(item?.has_late_report);
+  };
+
+  const hasLateReportAlready = (item: any) => {
+    if (item?.type_id !== "studio_booking") return false;
+
+    return Boolean(item?.has_late_report) || Boolean(locallyReportedLateBookings[item?.id]);
+  };
+
+  const isWithinLateReportWindow = (item: any) => {
+    if (item?.type_id !== "studio_booking") return false;
+    if (!item?.raw_date || !item?.start_time) return false;
+
+    const bookingStart = new Date(`${item.raw_date}T${item.start_time}`);
+    if (Number.isNaN(bookingStart.getTime())) return false;
+
+    const minutesUntilStart =
+      (bookingStart.getTime() - currentTime.getTime()) / (1000 * 60);
+
+    return minutesUntilStart <= 30 && minutesUntilStart >= 0;
+  };
+
+  const shouldShowLateReportButton = (item: any) => {
+    if (activeTab !== "Upcoming") return false;
+    if (item?.type_id !== "studio_booking") return false;
+    if (userRole !== "musician") return false;
+    if (item?.isCancelled) return false;
+    if (hasLateReportAlready(item)) return false;
+
+    return isWithinLateReportWindow(item);
+  };
+
+  const shouldShowMessageForItem = (item: any) => {
+    if (isReviewOrCompletedContext) return false;
+
+    if (item.type_id === "studio_booking") {
+      return userRole === "musician"
+        ? !!item.studio_owner_id
+        : !!item.user_id;
+    }
+
+    if (item.type_id === "gig_application") {
+      if (userRole === "venue-owner") {
+        return !!(item.applicant_id || item.user_id || item.submitted_by_user_id);
+      }
+
+      if (userRole === "musician") {
+        if (item.leader_approval_required) {
+          return !!(item.submitted_by_user_id || item.applicant_id);
+        }
+
+        return !!(item.organizer_id || item.gig_id);
+      }
+    }
+
+    return false;
+  };
+
+  const handleMessagePress = async (item: any) => {
+    if (!userId) {
+      showAlert("info", "Sign in required", "Please sign in to use chat.");
+      return;
+    }
+
+    try {
+      let recipientId: string | null = null;
+      let recipientName: string | null = null;
+      let recipientAvatar: string | null = null;
+
+      const chatContext: Record<string, string> = {};
+
+      if (item.type_id === "studio_booking") {
+        chatContext.studioBookingId = item.id;
+        if (item.studio_id) chatContext.studioId = item.studio_id;
+
+        if (userRole === "musician") {
+          recipientId = item.studio_owner_id || null;
+          recipientName = item.studio_name || item.name || "Studio Owner";
+        } else {
+          recipientId = item.user_id || null;
+          recipientName = item.customer_name || "Musician";
+          recipientAvatar = item.customer_avatar || null;
+        }
+      } else if (item.type_id === "gig_application") {
+        chatContext.gigApplicationId = item.id;
+        if (item.gig_id) chatContext.gigId = item.gig_id;
+        if (item.group_id) chatContext.groupId = item.group_id;
+
+        if (userRole === "venue-owner") {
+          recipientId =
+            item.applicant_id || item.user_id || item.submitted_by_user_id || null;
+          recipientName = item.customer_name || item.performer || "Musician";
+          recipientAvatar = item.customer_avatar || null;
+        } else if (userRole === "musician") {
+          if (item.leader_approval_required) {
+            recipientId = item.submitted_by_user_id || item.applicant_id || null;
+            recipientName = item.customer_name || "Group Member";
+            recipientAvatar = item.customer_avatar || null;
+          } else {
+            recipientId = item.organizer_id || null;
+            recipientName = item.organizer_name || "Venue Owner";
+            recipientAvatar = item.organizer_avatar || null;
+
+            if (!recipientId && item.gig_id) {
+              const { data: gigInfo } = await supabase
+                .from("gigs")
+                .select("organizer_id")
+                .eq("id", item.gig_id)
+                .maybeSingle();
+
+              recipientId = gigInfo?.organizer_id || null;
+            }
+          }
+        }
+      }
+
+      if (!recipientId) {
+        showAlert(
+          "warning",
+          "Unable to open chat",
+          "No recipient found for this booking.",
+        );
+        return;
+      }
+
+      if (recipientId === userId) {
+        showAlert(
+          "warning",
+          "Unable to open chat",
+          "You cannot message yourself.",
+        );
+        return;
+      }
+
+      if (!recipientName || !recipientAvatar) {
+        const { data: recipientProfile } = await supabase
+          .from("profiles")
+          .select("full_name, avatar_url")
+          .eq("id", recipientId)
+          .maybeSingle();
+
+        if (!recipientName) {
+          recipientName = recipientProfile?.full_name || "User";
+        }
+
+        if (!recipientAvatar) {
+          recipientAvatar = recipientProfile?.avatar_url || null;
+        }
+      }
+
+      router.push({
+        pathname: "/chat",
+        params: {
+          recipientId,
+          recipientName: recipientName || "User",
+          ...(recipientAvatar ? { recipientAvatar } : {}),
+          ...chatContext,
+        },
+      });
+    } catch (e) {
+      debugLog("Error opening chat from booking:", e);
+      showAlert(
+        "error",
+        "Chat unavailable",
+        "Could not open chat right now. Please try again.",
+      );
+    }
   };
 
   const handleLeaderApprovalDecision = async (
@@ -1036,17 +1395,11 @@ export default function BookingsScreen() {
           "You accepted the moved schedule.",
         );
       } else {
-        const nextPaymentStatus =
-          latestBooking.payment_status === "paid" ||
-            latestBooking.payment_status === "partial"
-            ? "refund_pending"
-            : latestBooking.payment_status;
-
         const { error: declineError } = await supabase
           .from("studio_bookings")
           .update({
             status: "cancelled",
-            payment_status: nextPaymentStatus,
+            payment_status: latestBooking.payment_status,
             cancellation_reason:
               "Musician declined the owner relocation request.",
             relocation_requested_at: null,
@@ -1496,105 +1849,6 @@ export default function BookingsScreen() {
       }
     } catch (e) {
       console.error("Check payment error:", e);
-    }
-  };
-
-  // Request Refund Handler
-  const handleRequestRefund = (item: any) => {
-    setSelectedItem(item);
-    setCancellationReason("");
-    setModalMode("refund");
-    setModalVisible(true);
-  };
-
-  const processRefund = async () => {
-    if (!selectedItem || !userId) return;
-
-    try {
-      setLoading(true);
-      debugLog("💸 Processing refund for booking:", selectedItem.id);
-
-      const { data: refundData, error: refundError } =
-        await supabase.functions.invoke("paymongo", {
-          body: {
-            action: "request_refund",
-            booking_id: selectedItem.id,
-            user_id: userId,
-            reason: cancellationReason || "Customer requested cancellation",
-          },
-        });
-
-      if (refundError) {
-        console.error("Refund error:", refundError);
-        Alert.alert("Error", "Failed to process refund. Please try again.");
-        return;
-      }
-
-      if (refundData?.success) {
-        Alert.alert(
-          "Refund Processed",
-          refundData.message ||
-          `Your refund of ₱${refundData.refund_amount?.toLocaleString()} has been processed.`,
-          [
-            {
-              text: "OK",
-              onPress: () => {
-                if (userId) fetchBookings(userId);
-              },
-            },
-          ],
-        );
-      } else {
-        Alert.alert("Error", refundData?.error || "Failed to process refund.");
-      }
-
-      setModalVisible(false);
-    } catch (e: any) {
-      console.error("Refund error:", e);
-      Alert.alert(
-        "Error",
-        e?.message || "Failed to process refund. Please try again.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Calculate refund amount for display
-  const getRefundInfo = (item: any) => {
-    if (!item?.raw_date || !item?.payment_amount)
-      return { percentage: 0, amount: 0, message: "" };
-
-    const bookingDate = new Date(item.raw_date);
-    const now = new Date();
-    const diffTime = bookingDate.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays > 7) {
-      return {
-        percentage: 80,
-        amount: Math.round(item.payment_amount * 0.8),
-        message: "You will receive an 80% refund (cancelled >7 days before).",
-      };
-    } else if (diffDays >= 3) {
-      return {
-        percentage: 70,
-        amount: Math.round(item.payment_amount * 0.7),
-        message: "You will receive a 70% refund (cancelled 3-7 days before).",
-      };
-    } else if (diffDays >= 0) {
-      return {
-        percentage: 0,
-        amount: 0,
-        message: "No refund available (cancelled <3 days before booking).",
-      };
-    } else {
-      return {
-        percentage: 100,
-        amount: item.payment_amount,
-        message:
-          "Full refund available (booking date passed without check-in).",
-      };
     }
   };
 
@@ -2203,32 +2457,62 @@ export default function BookingsScreen() {
                           },
                         ]}
                       >
-                        <View style={styles.statusContainer}>
-                          {item.status === "Happening Now" || item.status === "Accepted" || item.status === "Confirmed" || item.status === "Completed" ? (
-                            <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                          ) : item.status === "Declined" || item.status === "Fired" ? (
-                            <Ionicons name="close-circle" size={16} color="#EF4444" />
-                          ) : (
-                            <Ionicons name="time-outline" size={16} color="#F59E0B" />
+                        <View
+                          style={{
+                            width: "100%",
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: moderateScale(8),
+                          }}
+                        >
+                          <View style={styles.statusContainer}>
+                            {item.status === "Happening Now" || item.status === "Accepted" || item.status === "Confirmed" || item.status === "Completed" ? (
+                              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                            ) : item.status === "Declined" || item.status === "Fired" ? (
+                              <Ionicons name="close-circle" size={16} color="#EF4444" />
+                            ) : (
+                              <Ionicons name="time-outline" size={16} color="#F59E0B" />
+                            )}
+                            <Text
+                              style={[
+                                styles.statusText,
+                                {
+                                  color:
+                                    item.status === "Happening Now" ||
+                                      item.status === "Accepted" ||
+                                      item.status === "Confirmed" ||
+                                      item.status === "Completed"
+                                      ? "#10B981"
+                                      : item.status === "Declined" || item.status === "Fired"
+                                        ? "#EF4444"
+                                        : "#F59E0B",
+                                },
+                              ]}
+                            >
+                              {item.status}
+                            </Text>
+                          </View>
+
+                          {shouldShowMessageForItem(item) && (
+                            <TouchableOpacity
+                              activeOpacity={1}
+                              onPress={() => handleMessagePress(item)}
+                              style={[
+                                styles.messageIconButton,
+                                {
+                                  borderColor: colors.border,
+                                  backgroundColor: colors.card,
+                                },
+                              ]}
+                            >
+                              <Ionicons
+                                name="chatbubble-ellipses-outline"
+                                size={16}
+                                color={colors.primary}
+                              />
+                            </TouchableOpacity>
                           )}
-                          <Text
-                            style={[
-                              styles.statusText,
-                              {
-                                color:
-                                  item.status === "Happening Now" ||
-                                    item.status === "Accepted" ||
-                                    item.status === "Confirmed" ||
-                                    item.status === "Completed"
-                                    ? "#10B981"
-                                    : item.status === "Declined" || item.status === "Fired"
-                                      ? "#EF4444"
-                                      : "#F59E0B",
-                              },
-                            ]}
-                          >
-                            {item.status}
-                          </Text>
                         </View>
                         <View
                           style={[
@@ -2947,85 +3231,115 @@ export default function BookingsScreen() {
                     >
                       {/* Status Text with Icon - Now at the Top */}
                       <View
-                        style={[styles.statusContainer, { marginBottom: 0 }]}
+                        style={{
+                          width: "100%",
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: moderateScale(8),
+                        }}
                       >
-                        {item.isCancelled ? (
-                          <Ionicons
-                            name="close-circle"
-                            size={16}
-                            color="#EF4444"
-                          />
-                        ) : activeTab === "Ongoing" ? (
-                          <Ionicons
-                            name="play-circle"
-                            size={16}
-                            color="#10B981"
-                          />
-                        ) : activeTab === "Review" ? (
-                          <Ionicons
-                            name="checkmark-done-circle"
-                            size={16}
-                            color={colors.textSecondary}
-                          />
-                        ) : activeTab === "Pending" ? (
-                          <Ionicons
-                            name="time-outline"
-                            size={16}
-                            color="#F59E0B"
-                          />
-                        ) : (
-                          <Ionicons
-                            name="checkmark-circle"
-                            size={16}
-                            color="#10B981"
-                          />
-                        )}
-
-                        <Text
-                          style={[
-                            styles.statusText,
-                            {
-                              color: item.isCancelled
-                                ? "#EF4444"
-                                : activeTab === "Pending"
-                                  ? "#F59E0B"
-                                  : activeTab === "Ongoing"
-                                    ? "#10B981"
-                                    : activeTab === "Review"
-                                      ? colors.textSecondary
-                                      : "#10B981",
-                            },
-                          ]}
+                        <View
+                          style={[styles.statusContainer, { marginBottom: 0 }]}
                         >
-                          {item.status}
-                        </Text>
+                          {item.isCancelled ? (
+                            <Ionicons
+                              name="close-circle"
+                              size={16}
+                              color="#EF4444"
+                            />
+                          ) : activeTab === "Ongoing" ? (
+                            <Ionicons
+                              name="play-circle"
+                              size={16}
+                              color="#10B981"
+                            />
+                          ) : activeTab === "Review" ? (
+                            <Ionicons
+                              name="checkmark-done-circle"
+                              size={16}
+                              color={colors.textSecondary}
+                            />
+                          ) : activeTab === "Pending" ? (
+                            <Ionicons
+                              name="time-outline"
+                              size={16}
+                              color="#F59E0B"
+                            />
+                          ) : (
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={16}
+                              color="#10B981"
+                            />
+                          )}
 
-                        {/* Downpayment Badge - only show if balance remains AND not fully paid */}
-                        {item.payment_type === "downpayment" &&
-                          item.remaining_balance > 0 &&
-                          item.payment_status !== "paid" && (
-                            <View
-                              style={[
-                                styles.downpaymentBadge,
-                                { backgroundColor: "#F59E0B20" },
-                              ]}
-                            >
-                              <Ionicons
-                                name="warning"
-                                size={12}
-                                color="#F59E0B"
-                              />
-                              <Text
+                          <Text
+                            style={[
+                              styles.statusText,
+                              {
+                                color: item.isCancelled
+                                  ? "#EF4444"
+                                  : activeTab === "Pending"
+                                    ? "#F59E0B"
+                                    : activeTab === "Ongoing"
+                                      ? "#10B981"
+                                      : activeTab === "Review"
+                                        ? colors.textSecondary
+                                        : "#10B981",
+                              },
+                            ]}
+                          >
+                            {item.status}
+                          </Text>
+
+                          {/* Downpayment Badge - only show if balance remains AND not fully paid */}
+                          {item.payment_type === "downpayment" &&
+                            item.remaining_balance > 0 &&
+                            item.payment_status !== "paid" && (
+                              <View
                                 style={[
-                                  styles.downpaymentText,
-                                  { color: "#F59E0B" },
+                                  styles.downpaymentBadge,
+                                  { backgroundColor: "#F59E0B20" },
                                 ]}
                               >
-                                Balance: ₱
-                                {item.remaining_balance?.toLocaleString()}
-                              </Text>
-                            </View>
-                          )}
+                                <Ionicons
+                                  name="warning"
+                                  size={12}
+                                  color="#F59E0B"
+                                />
+                                <Text
+                                  style={[
+                                    styles.downpaymentText,
+                                    { color: "#F59E0B" },
+                                  ]}
+                                >
+                                  Balance: ₱
+                                  {item.remaining_balance?.toLocaleString()}
+                                </Text>
+                              </View>
+                            )}
+                        </View>
+
+                        {shouldShowMessageForItem(item) && (
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => handleMessagePress(item)}
+                            style={[
+                              styles.messageIconButton,
+                              {
+                                borderColor: colors.border,
+                                backgroundColor: colors.card,
+                              },
+                            ]}
+                          >
+                            <Ionicons
+                              name="chatbubble-ellipses-outline"
+                              size={16}
+                              color={colors.primary}
+                            />
+                          </TouchableOpacity>
+                        )}
                       </View>
 
                       <View
@@ -3175,77 +3489,97 @@ export default function BookingsScreen() {
                                 },
                               ]}
                             >
-                              <Text
-                                style={[
-                                  styles.outlineButtonText,
-                                  { color: colors.textSecondary },
-                                ]}
-                              >
-                                View Details
-                              </Text>
+                              <View style={styles.detailsButtonLabelContainer}>
+                                <Text
+                                  style={[
+                                    styles.outlineButtonText,
+                                    { color: colors.textSecondary },
+                                  ]}
+                                >
+                                  View Details
+                                </Text>
+                                {shouldShowLateReportDot(item) && (
+                                  <View
+                                    style={[
+                                      styles.lateReportBadge,
+                                      { borderColor: isDark ? colors.card : "#FFFFFF" },
+                                    ]}
+                                  >
+                                    <View style={styles.lateReportDot} />
+                                    {item?.late_report_count > 1 ? (
+                                      <Text style={styles.lateReportBadgeText}>
+                                        {item.late_report_count}
+                                      </Text>
+                                    ) : null}
+                                  </View>
+                                )}
+                              </View>
                             </TouchableOpacity>
                           </View>
                         ) : activeTab === "Pending" &&
                           item.type_id === "studio_booking" &&
-                          userRole === "musician" &&
-                          item.payment_status !== "paid" ? (
+                          userRole === "musician" ? (
                           <View
                             style={{
-                              flexDirection: "row",
-                              gap: scale(8),
+                              gap: scale(6),
                               flex: 1,
                             }}
                           >
-                            {/* Details Button */}
-                            <TouchableOpacity activeOpacity={1}
-                              onPress={() => handleDetailsPress(item)}
-                              style={[
-                                styles.outlineButton,
-                                {
-                                  borderColor: colors.border,
-                                  flex: 1,
-                                  justifyContent: "center",
-                                  alignItems: "center",
-                                },
-                              ]}
-                            >
-                              <Text
+                            {/* Row 1 — Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
+                            <View style={{ flexDirection: "row", gap: scale(8) }}>
+                              {/* Details Button */}
+                              <TouchableOpacity activeOpacity={1}
+                                onPress={() => handleDetailsPress(item)}
                                 style={[
-                                  styles.outlineButtonText,
-                                  { color: colors.textSecondary },
+                                  styles.outlineButton,
+                                  {
+                                    borderColor: colors.border,
+                                    flex: 1,
+                                    justifyContent: "center",
+                                    alignItems: "center",
+                                  },
                                 ]}
                               >
-                                Details
-                              </Text>
-                            </TouchableOpacity>
+                                <Text
+                                  style={[
+                                    styles.outlineButtonText,
+                                    { color: colors.textSecondary },
+                                  ]}
+                                >
+                                  Details
+                                </Text>
+                              </TouchableOpacity>
 
-                            {/* Pay Now Button - Shows Payment Options Modal or Pay Balance */}
-                            <TouchableOpacity activeOpacity={1}
-                              onPress={() => showPaymentOptions(item)}
-                              style={[
-                                styles.actionButton,
-                                {
-                                  backgroundColor: "#16A34A",
-                                  flex: 2,
-                                  justifyContent: "center",
-                                  alignItems: "center",
-                                  flexDirection: "row",
-                                  gap: 6,
-                                },
-                              ]}
-                            >
-                              <Ionicons name="card-outline" size={16} color="white" />
-                              <Text
-                                style={[
-                                  styles.actionButtonText,
-                                  { color: "white" },
-                                ]}
-                              >
-                                {item.payment_type === "downpayment" && item.remaining_balance > 0 && item.payment_status !== "paid"
-                                  ? `Pay Balance ₱${item.remaining_balance?.toLocaleString()}`
-                                  : "Pay Now"}
-                              </Text>
-                            </TouchableOpacity>
+                              {/* Pay Now / Pay Balance — only when payment is not fully settled */}
+                              {item.payment_status !== "paid" && (
+                                <TouchableOpacity activeOpacity={1}
+                                  onPress={() => showPaymentOptions(item)}
+                                  style={[
+                                    styles.actionButton,
+                                    {
+                                      backgroundColor: "#16A34A",
+                                      flex: 2,
+                                      justifyContent: "center",
+                                      alignItems: "center",
+                                      flexDirection: "row",
+                                      gap: 6,
+                                    },
+                                  ]}
+                                >
+                                  <Ionicons name="card-outline" size={16} color="white" />
+                                  <Text
+                                    style={[
+                                      styles.actionButtonText,
+                                      { color: "white" },
+                                    ]}
+                                  >
+                                    {item.payment_type === "downpayment" && item.remaining_balance > 0
+                                      ? `Pay Balance ₱${item.remaining_balance?.toLocaleString()}`
+                                      : "Pay Now"}
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
                           </View>
                         ) : activeTab === "Pending" &&
                           item.type_id === "studio_booking" &&
@@ -3302,10 +3636,7 @@ export default function BookingsScreen() {
                           <View
                             style={{ width: "100%", gap: moderateScale(8) }}
                           >
-                            {activeTab === "Upcoming" &&
-                              item.type_id === "studio_booking" &&
-                              userRole === "musician" &&
-                              !item.isCancelled && (
+                            {shouldShowLateReportButton(item) && (
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() => {
                                     setSelectedItem(item);
@@ -3431,14 +3762,31 @@ export default function BookingsScreen() {
                                   },
                                 ]}
                               >
-                                <Text
-                                  style={[
-                                    styles.outlineButtonText,
-                                    { color: colors.textSecondary },
-                                  ]}
-                                >
-                                  Details
-                                </Text>
+                                <View style={styles.detailsButtonLabelContainer}>
+                                  <Text
+                                    style={[
+                                      styles.outlineButtonText,
+                                      { color: colors.textSecondary },
+                                    ]}
+                                  >
+                                    Details
+                                  </Text>
+                                  {shouldShowLateReportDot(item) && (
+                                    <View
+                                      style={[
+                                        styles.lateReportBadge,
+                                        { borderColor: isDark ? colors.card : "#FFFFFF" },
+                                      ]}
+                                    >
+                                      <View style={styles.lateReportDot} />
+                                      {item?.late_report_count > 1 ? (
+                                        <Text style={styles.lateReportBadgeText}>
+                                          {item.late_report_count}
+                                        </Text>
+                                      ) : null}
+                                    </View>
+                                  )}
+                                </View>
                               </TouchableOpacity>
 
                               {activeTab === "Upcoming" &&
@@ -3515,6 +3863,8 @@ export default function BookingsScreen() {
                     ? "Renew Contract"
                     : modalMode === "clear_balance"
                       ? "Clear Remaining Balance"
+                      : modalMode === "late_confirm"
+                        ? "Confirm Late Report"
                       : modalMode === "late"
                         ? "Report Late"
                         : selectedItem?.type_id === "gig_application"
@@ -3542,8 +3892,10 @@ export default function BookingsScreen() {
                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
                     : modalMode === "clear_balance"
                       ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
+                      : modalMode === "late_confirm"
+                        ? `Send this late-arrival reason to the studio owner?\n\n${cancellationReason.trim()}`
                       : modalMode === "late"
-                        ? "Send a late-arrival notification to the studio owner for this booking?"
+                        ? "Please provide your reason for being late."
                         : (() => {
                           // Cancel mode
                           if (selectedItem?.type_id === "gig_application") {
@@ -3571,23 +3923,23 @@ export default function BookingsScreen() {
                               return "Are you sure you want to withdraw from this gig? The venue owner will be notified.";
                             }
                           } else {
-                            // For studio bookings - show refund policy
-                            if (selectedItem?.raw_date) {
-                              const eventDate = new Date(selectedItem.raw_date);
-                              const now = new Date();
-                              const diffTime =
-                                eventDate.getTime() - now.getTime();
-                              const diffDays = Math.ceil(
-                                diffTime / (1000 * 60 * 60 * 24),
-                              );
+                            // For studio bookings - strictly no-refund policy
+                            const isFullyPaid = selectedItem?.payment_status === "paid";
+                            const isPartialPaid = selectedItem?.payment_status === "partial";
 
-                              if (diffDays > 7)
-                                return "Cancellation Policy: You are cancelling with more than 7 days notice. You will receive an 80% refund.";
-                              if (diffDays >= 3)
-                                return "Cancellation Policy: You are cancelling within 3-7 days. You will receive a 70% refund.";
-                              return "Cancellation Policy: You are cancelling with less than 3 days notice. This is non-refundable (0% refund).";
+                            if (isFullyPaid) {
+                              const paidAmount = selectedItem?.payment_amount || selectedItem?.total_cost || 0;
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your paid amount of ₱${paidAmount.toLocaleString()} will be forfeited.`;
                             }
-                            return "Are you sure you want to cancel this booking? This action cannot be undone.";
+
+                            if (isPartialPaid) {
+                              const paidPortion =
+                                (selectedItem?.payment_amount || selectedItem?.total_cost || 0) -
+                                (selectedItem?.remaining_balance || 0);
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your downpayment of ₱${Math.max(0, paidPortion).toLocaleString()} will be forfeited.`;
+                            }
+
+                            return "Cancellation Policy: Booking cancellations are non-refundable. Any amount already paid will be forfeited.";
                           }
                         })()
         }
@@ -3610,18 +3962,19 @@ export default function BookingsScreen() {
                   ? "Complete & Review"
                   : modalMode === "renew"
                     ? "Send Renewal Offer"
-                    : modalMode === "refund"
-                      ? `Request Refund (₱${getRefundInfo(selectedItem).amount.toLocaleString()})`
-                      : modalMode === "clear_balance"
+                    : modalMode === "clear_balance"
                         ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
+                        : modalMode === "late_confirm"
+                          ? "Send Report"
                         : modalMode === "late"
-                          ? "Report Late"
+                          ? "Submit"
                           : "Yes, Cancel Booking"
         }
         showInput={
           modalMode !== "confirm" &&
           modalMode !== "complete" &&
           modalMode !== "renew" &&
+          modalMode !== "late_confirm" &&
           modalMode !== "clear_balance" &&
           !(modalMode === "decline" && selectedItem?.leader_approval_required)
         } // Show input for cancel AND decline AND fire
@@ -3636,11 +3989,18 @@ export default function BookingsScreen() {
           if (
             (modalMode === "cancel" ||
               modalMode === "decline" ||
-              modalMode === "fire") &&
+              modalMode === "fire" ||
+              modalMode === "late") &&
             !(modalMode === "decline" && selectedItem?.leader_approval_required) &&
             !cancellationReason.trim()
           ) {
-            Alert.alert("Required", "Please provide a reason.");
+            showAlert("warning", "Required", "Please provide a reason.");
+            return;
+          }
+
+          if (modalMode === "late_confirm" && selectedItem && hasLateReportAlready(selectedItem)) {
+            showAlert("info", "Already Reported", "You already sent a late report for this booking.");
+            setModalVisible(false);
             return;
           }
 
@@ -3676,6 +4036,11 @@ export default function BookingsScreen() {
               return;
             }
 
+            if (modalMode === "late") {
+              setModalMode("late_confirm");
+              return;
+            }
+
             let status = "cancelled"; // Default for studio bookings
             if (modalMode === "confirm") {
               status =
@@ -3695,7 +4060,7 @@ export default function BookingsScreen() {
                   : "cancelled";
             } else if (modalMode === "complete") {
               status = "completed";
-            } else if (modalMode === "late") {
+            } else if (modalMode === "late_confirm") {
               status = "late";
             }
 
@@ -3711,12 +4076,24 @@ export default function BookingsScreen() {
             );
 
             // For decline/cancel, we send cancellationReason
-            await handleStatusUpdate(
+            const didUpdate = await handleStatusUpdate(
               selectedItem.id,
               status,
               selectedItem?.type_id,
               cancellationReason,
             );
+
+            if (didUpdate && modalMode === "late_confirm") {
+              setLocallyReportedLateBookings((prev) => ({
+                ...prev,
+                [selectedItem.id]: true,
+              }));
+              showAlert(
+                "success",
+                "Late report sent",
+                "Studio owner has been notified.",
+              );
+            }
 
             // If FIRING or COMPLETED, redirect to review
             if (modalMode === "fire" || modalMode === "complete") {
@@ -3749,42 +4126,43 @@ export default function BookingsScreen() {
       <RNModal
         visible={showPaymentOptionModal}
         transparent
+        statusBarTranslucent
+        navigationBarTranslucent
         animationType="fade"
         onRequestClose={() => setShowPaymentOptionModal(false)}
       >
-        <View style={styles.modalOverlay}>
+        <BlurView intensity={60} tint="dark" style={styles.modalOverlay}>
           <View
             style={[
               styles.paymentOptionContainer,
               { backgroundColor: colors.card },
             ]}
           >
-            <View style={styles.paymentModalHeader}>
-              <View>
-                <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>
-                  Choose Payment Option
-                </Text>
-                <Text
-                  style={[
-                    styles.paymentOptionSubtitle,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  Total Amount: ₱
-                  {(
-                    paymentItem?.payment_amount ||
-                    paymentItem?.total_cost ||
-                    0
-                  ).toLocaleString()}
-                </Text>
-              </View>
-              <TouchableOpacity activeOpacity={1}
-                onPress={() => setShowPaymentOptionModal(false)}
-                style={styles.modalCloseIcon}
-              >
-                <Ionicons name="close" size={24} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
+            {/* Close button - absolutely positioned inside the card */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => setShowPaymentOptionModal(false)}
+              style={styles.modalCloseIcon}
+            >
+              <Ionicons name="close" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            <Text style={[styles.paymentOptionTitle, { color: colors.text }]}>
+              Payment Option
+            </Text>
+            <Text
+              style={[
+                styles.paymentOptionSubtitle,
+                { color: colors.textSecondary },
+              ]}
+            >
+              Total Amount: ₱
+              {(
+                paymentItem?.payment_amount ||
+                paymentItem?.total_cost ||
+                0
+              ).toLocaleString()}
+            </Text>
 
             {/* Full Payment Option */}
             <TouchableOpacity activeOpacity={1}
@@ -3803,12 +4181,6 @@ export default function BookingsScreen() {
               ]}
             >
               <View style={styles.paymentOptionRow}>
-                <Ionicons
-                  name={selectedPaymentType === 'full' ? "radio-button-on" : "radio-button-off"}
-                  size={24}
-                  color={selectedPaymentType === 'full' ? colors.primary : colors.textSecondary}
-                  style={{ marginRight: 12 }}
-                />
                 <View style={styles.paymentOptionInfo}>
                   <Text
                     style={[styles.paymentOptionLabel, { color: colors.text }]}
@@ -3857,12 +4229,6 @@ export default function BookingsScreen() {
               ]}
             >
               <View style={styles.paymentOptionRow}>
-                <Ionicons
-                  name={selectedPaymentType === 'downpayment' ? "radio-button-on" : "radio-button-off"}
-                  size={24}
-                  color={selectedPaymentType === 'downpayment' ? colors.primary : colors.textSecondary}
-                  style={{ marginRight: 12 }}
-                />
                 <View style={styles.paymentOptionInfo}>
                   <Text
                     style={[styles.paymentOptionLabel, { color: colors.text }]}
@@ -3912,16 +4278,9 @@ export default function BookingsScreen() {
                   { backgroundColor: colors.primary },
                 ]}
               >
-                <Ionicons
-                  name="card-outline"
-                  size={20}
-                  color="white"
-                  style={{ marginRight: 8 }}
-                />
                 <Text style={styles.paymentOptionConfirmText}>
                   Proceed to Payment
                 </Text>
-                <Ionicons name="arrow-forward" size={18} color="white" style={{ marginLeft: 8 }} />
               </TouchableOpacity>
             </View>
 
@@ -3932,7 +4291,7 @@ export default function BookingsScreen() {
               <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_500Medium' }}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </BlurView>
       </RNModal>
 
       {/* Scanner Modal (Studio Owner) */}
@@ -4162,9 +4521,16 @@ const styles = StyleSheet.create({
     width: "100%",
     justifyContent: "flex-end",
   },
+  messageIconButton: {
+    width: moderateScale(34),
+    height: moderateScale(34),
+    borderRadius: moderateScale(999),
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.8)",
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
@@ -4255,6 +4621,35 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_500Medium",
     textAlign: "center",
   },
+  detailsButtonLabelContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: scale(8),
+  },
+  lateReportBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: scale(4),
+    paddingHorizontal: scale(6),
+    paddingVertical: moderateScale(2),
+    borderRadius: moderateScale(10),
+    backgroundColor: "rgba(239, 68, 68, 0.14)",
+    borderWidth: 1,
+  },
+  lateReportDot: {
+    width: moderateScale(7),
+    height: moderateScale(7),
+    borderRadius: moderateScale(3.5),
+    backgroundColor: "#EF4444",
+  },
+  lateReportBadgeText: {
+    color: "#B91C1C",
+    fontSize: moderateScale(10),
+    fontFamily: "Poppins_600SemiBold",
+    lineHeight: moderateScale(12),
+  },
   defaultButtons: {
     flexDirection: "row",
     gap: scale(8),
@@ -4296,30 +4691,39 @@ const styles = StyleSheet.create({
     width: "90%",
     borderRadius: 24,
     padding: 24,
+    paddingTop: 20,
     backgroundColor: "white",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 20,
+    position: 'relative',
   },
   paymentModalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 20,
   },
   paymentOptionTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontFamily: "Poppins_700Bold",
     marginBottom: 4,
+    marginTop: 8,
+    paddingRight: 32,
   },
   paymentOptionSubtitle: {
     fontSize: 14,
     fontFamily: "Poppins_400Regular",
+    marginBottom: 20,
   },
   modalCloseIcon: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
     padding: 4,
+    zIndex: 10,
   },
   paymentOptionCard: {
     padding: 16,
@@ -4335,21 +4739,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    gap: 12,
+    gap: 8,
+    flexShrink: 1,
   },
   paymentOptionLabel: {
-    fontSize: 16,
+    fontSize: 14,
     fontFamily: "Poppins_600SemiBold",
     flex: 1,
+    flexShrink: 1,
   },
   paymentOptionAmount: {
-    fontSize: 18,
+    fontSize: 16,
     fontFamily: "Poppins_700Bold",
+    flexShrink: 0,
   },
   paymentOptionDesc: {
     fontSize: 12,
     fontFamily: "Poppins_400Regular",
-    marginLeft: 36, // space for icon + margin
     marginTop: 4,
   },
   paymentOptionButtons: {

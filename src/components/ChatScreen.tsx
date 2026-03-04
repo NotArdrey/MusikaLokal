@@ -77,11 +77,49 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     });
     const [showReportModal, setShowReportModal] = useState(false);
     const [showOptions, setShowOptions] = useState(false);
+    const [otherUserOnline, setOtherUserOnline] = useState(false);
+    const [otherUserLastSeen, setOtherUserLastSeen] = useState<Date | null>(null);
+    const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
     const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
         setAlertConfig({ type, title, message, buttons });
         setAlertVisible(true);
     };
+
+    // Real-time presence tracking for 1-on-1 chats (global user presence)
+    useEffect(() => {
+        if (isGroupChat || !otherUser?.id) return;
+
+        const channelName = `presence:user:${otherUser.id}`;
+        const channel = supabase.channel(channelName);
+        presenceChannelRef.current = channel;
+
+        channel
+            .on('presence', { event: 'sync' }, () => {
+                const state = channel.presenceState<{ user_id: string }>();
+                const isOnline = Object.values(state).some((presences) =>
+                    presences.some((p) => p.user_id === otherUser.id)
+                );
+                setOtherUserOnline(isOnline);
+            })
+            .on('presence', { event: 'join' }, ({ newPresences }) => {
+                if (newPresences.some((p: any) => p.user_id === otherUser.id)) {
+                    setOtherUserOnline(true);
+                }
+            })
+            .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+                if (leftPresences.some((p: any) => p.user_id === otherUser.id)) {
+                    setOtherUserOnline(false);
+                    setOtherUserLastSeen(new Date());
+                }
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+            presenceChannelRef.current = null;
+        };
+    }, [isGroupChat, otherUser?.id]);
 
     const openOtherUserProfile = () => {
         if (isGroupChat || !otherUser?.id) return;
@@ -188,16 +226,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         setSelectedMessageId(null);
     };
 
-    // Check if the last message was read by the other user (for 1-on-1 chats)
-    const getSeenStatus = () => {
-        if (isGroupChat) return null;
-        const myMessages = messages.filter(m => m.sender_id === currentUserId);
-        if (myMessages.length === 0) return null;
-        const lastMyMessage = myMessages[myMessages.length - 1];
-        return lastMyMessage.read_at ? otherUser : null;
-    };
-
-    const seenByUser = getSeenStatus();
+    // Index of the last message I sent that has been seen (read_at set) — Messenger-style
+    const lastSeenMessageIndex = React.useMemo(() => {
+        if (isGroupChat) return -1;
+        let lastIdx = -1;
+        messages.forEach((m, i) => {
+            if (m.sender_id === currentUserId && m.read_at) {
+                lastIdx = i;
+            }
+        });
+        return lastIdx;
+    }, [messages, currentUserId, isGroupChat]);
 
     // Pick and send a file/document (5 MB limit)
     const handlePickFile = async () => {
@@ -284,11 +323,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
         // For group chats, check if we should show sender name
         const prevMessage = index > 0 ? messages[index - 1] : null;
+        const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
         const showSenderName = isGroupChat && !isMe && (
             index === 0 ||
             prevMessage?.sender_id !== item.sender_id ||
             showDate
         );
+
+        // Tail: last message in a run (next message is from a different sender or date changes)
+        const isLastInRun = !nextMessage ||
+            nextMessage.sender_id !== item.sender_id ||
+            formatDate(nextMessage.created_at) !== formatDate(item.created_at);
 
         // Get sender info from message or participant map
         const senderProfile = item.sender || participantMap.get(item.sender_id);
@@ -309,6 +354,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 <View style={[
                     styles.messageRow,
                     isMe ? styles.messageRowRight : styles.messageRowLeft,
+                    { marginBottom: isLastInRun ? 8 : 2 },
                 ]}>
                     {!isMe && (
                         senderProfile?.avatar_url ? (
@@ -335,8 +381,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             <View style={[
                                 styles.messageBubble,
                                 isMe
-                                    ? [styles.myMessage, { backgroundColor: colors.primary }]
-                                    : [styles.theirMessage, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }],
+                                    ? [styles.myMessage, { backgroundColor: colors.primary }, !isLastInRun && { borderBottomRightRadius: 18 }]
+                                    : [styles.theirMessage, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }, !isLastInRun && { borderBottomLeftRadius: 18 }],
                                 item.message_type === 'image' && styles.imageBubble,
                             ]}>
                                 {/* Image message */}
@@ -385,11 +431,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                     ]}>
                                         {formatTime(item.created_at)}
                                     </Text>
-                                    {isMe && item.read_at && (
+                                    {isMe && (
                                         <Ionicons
-                                            name="checkmark-done"
+                                            name={index === lastSeenMessageIndex ? 'checkmark-done' : 'checkmark'}
                                             size={14}
-                                            color={item.message_type === 'image' ? '#FFF' : 'rgba(255,255,255,0.7)'}
+                                            color={
+                                                item.message_type === 'image'
+                                                    ? '#FFF'
+                                                    : index === lastSeenMessageIndex
+                                                        ? '#93C5FD'
+                                                        : 'rgba(255,255,255,0.55)'
+                                            }
                                             style={{ marginLeft: 4 }}
                                         />
                                     )}
@@ -428,21 +480,38 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         )}
                     </View>
                 </View>
-                {/* Seen indicator - show after last message sent by me */}
-                {isMe && index === messages.length - 1 && seenByUser && (
+                {/* Messenger-style seen indicator — avatar floats right below the last seen message */}
+                {isMe && index === lastSeenMessageIndex && otherUser && (
                     <View style={styles.seenContainer}>
-                        {seenByUser.avatar_url ? (
-                            <Image source={{ uri: seenByUser.avatar_url }} style={styles.seenAvatar} />
+                        {otherUser.avatar_url ? (
+                            <Image
+                                source={{ uri: otherUser.avatar_url }}
+                                style={[styles.seenAvatar, { borderColor: colors.background }]}
+                            />
                         ) : (
-                            <View style={[styles.seenAvatar, styles.avatarPlaceholder, { backgroundColor: colors.primary }]}>
-                                <Ionicons name="person" size={8} color="#FFF" />
+                            <View style={[
+                                styles.seenAvatar,
+                                styles.avatarPlaceholder,
+                                { backgroundColor: colors.primary, borderColor: colors.background },
+                            ]}>
+                                <Ionicons name="person" size={9} color="#FFF" />
                             </View>
                         )}
-                        <Text style={[styles.seenText, { color: colors.textSecondary }]}>Seen</Text>
                     </View>
                 )}
             </>
         );
+    };
+
+    const formatLastSeen = (date: Date | null) => {
+        if (!date) return 'Offline';
+        const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+        if (seconds < 60) return 'Last seen just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `Last seen ${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `Last seen ${hours}h ago`;
+        return `Last seen ${Math.floor(hours / 24)}d ago`;
     };
 
     // Get display info based on chat type
@@ -450,7 +519,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const displayAvatar = isGroupChat ? groupAvatar : otherUser?.avatar_url;
     const displaySubtitle = isGroupChat
         ? `${participants.length} member${participants.length !== 1 ? 's' : ''}`
-        : null;
+        : otherUserOnline
+            ? 'Active now'
+            : otherUserLastSeen
+                ? formatLastSeen(otherUserLastSeen)
+                : null;
     const reportTargetName = isGroupChat ? (groupName || 'this group') : (otherUser?.full_name || 'this user');
     const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
 
@@ -462,18 +535,23 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 {
                     backgroundColor: colors.background,
                     borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
-                    paddingTop: (insets.top || 16) + 8,
+                    paddingTop: (insets.top || 16) + 6,
                 },
             ]}>
                 {onBack && (
-                    <TouchableOpacity activeOpacity={1} onPress={onBack} style={styles.backButton} hitSlop={8}>
+                    <TouchableOpacity
+                        onPress={onBack}
+                        style={styles.backButton}
+                        hitSlop={{ top: 10, left: 10, right: 10, bottom: 10 }}
+                        activeOpacity={0.7}
+                    >
                         <Ionicons name="chevron-back" size={26} color={colors.text} />
                     </TouchableOpacity>
                 )}
                 <TouchableOpacity
                     onPress={openOtherUserProfile}
                     disabled={isGroupChat || !otherUser?.id || otherUser.id === currentUserId}
-                    activeOpacity={1}
+                    activeOpacity={0.75}
                     style={styles.headerMainTouchable}
                 >
                     {/* Avatar with online indicator */}
@@ -495,23 +573,29 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                 </View>
                             )
                         )}
-                        {!isGroupChat && (
-                            <View style={styles.onlineDot} />
+                        {!isGroupChat && otherUserOnline && (
+                            <View style={[styles.onlineDot, { borderColor: colors.background }]} />
                         )}
                     </View>
                     <View style={styles.headerInfo}>
                         <Text style={[styles.headerName, { color: colors.text }]} numberOfLines={1}>
                             {displayName || 'Chat'}
                         </Text>
-                        <Text style={[styles.headerStatus, { color: '#10B981' }]}>
-                            {displaySubtitle ?? 'Active now'}
-                        </Text>
+                        {displaySubtitle !== null && (
+                            <Text style={[
+                                styles.headerStatus,
+                                { color: !isGroupChat && otherUserOnline ? '#10B981' : colors.textSecondary },
+                            ]}>
+                                {displaySubtitle}
+                            </Text>
+                        )}
                     </View>
                 </TouchableOpacity>
                 <View style={styles.headerActions}>
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity
                         style={[styles.headerActionBtn, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
                         onPress={() => setShowOptions(true)}
+                        activeOpacity={0.7}
                     >
                         <Ionicons name="ellipsis-horizontal" size={20} color={colors.text} />
                     </TouchableOpacity>
@@ -526,7 +610,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 onRequestClose={() => setShowOptions(false)}
             >
                 <Pressable
-                    style={styles.modalOverlay}
+                    style={[styles.modalOverlay, styles.dimOverlay]}
                     onPress={() => setShowOptions(false)}
                 >
                     <View style={[styles.optionsSheet, { backgroundColor: isDark ? '#1E2530' : '#FFFFFF' }]}>
@@ -580,7 +664,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
             {/* Messages */}
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={styles.messagesContainer}
                 keyboardVerticalOffset={0}
             >
@@ -590,12 +674,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     </View>
                 ) : messages.length === 0 ? (
                     <View style={styles.emptyContainer}>
-                        <Ionicons name="chatbubbles-outline" size={64} color={colors.textSecondary} />
-                        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                        <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
+                            <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.primary} />
+                        </View>
+                        <Text style={[styles.emptyText, { color: colors.text }]}>
                             No messages yet
                         </Text>
                         <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-                            Say hi to start the conversation!
+                            Say hi to kick things off! 👋
                         </Text>
                     </View>
                 ) : (
@@ -606,6 +692,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         renderItem={renderMessage}
                         contentContainerStyle={styles.messagesList}
                         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+                        showsVerticalScrollIndicator={false}
                     />
                 )}
 
@@ -614,23 +701,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     styles.inputContainer,
                     {
                         backgroundColor: colors.background,
-                        borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                        paddingBottom: Math.max(insets.bottom, 10) + 8,
-                        borderTopWidth: 1,
+                        borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
+                        paddingBottom: Math.max(insets.bottom, 8) + (Platform.OS === 'ios' ? 4 : 2),
+                        borderTopWidth: StyleSheet.hairlineWidth,
                     },
                 ]}>
-                    {/* Media actions – collapse to single add when typing */}
-                    {text.trim().length === 0 ? (
-                        <View style={styles.inputLeftActions}>
-                            <TouchableOpacity activeOpacity={1} style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)}>
-                                <Ionicons name="add-circle" size={28} color={colors.primary} />
-                            </TouchableOpacity>
-                        </View>
-                    ) : (
-                        <TouchableOpacity activeOpacity={1} style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)}>
-                            <Ionicons name="add-circle" size={28} color={colors.primary} />
-                        </TouchableOpacity>
-                    )}
+                    <TouchableOpacity style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)} activeOpacity={0.7}>
+                        <Ionicons name="add-circle" size={30} color={colors.primary} />
+                    </TouchableOpacity>
 
                     <View style={[
                         styles.textInputWrapper,
@@ -640,29 +718,29 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             style={[styles.input, { color: colors.text }]}
                             value={text}
                             onChangeText={setText}
-                            placeholder="Aa"
+                            placeholder="Message…"
                             placeholderTextColor={colors.textSecondary}
                             multiline
                             maxLength={1000}
                         />
-
                     </View>
 
                     {text.trim().length > 0 ? (
-                        <TouchableOpacity activeOpacity={1}
+                        <TouchableOpacity
                             onPress={handleSend}
                             disabled={!text.trim() || sending}
-                            style={[styles.sendButton, { backgroundColor: colors.primary }]}
+                            style={[styles.sendButton, { backgroundColor: colors.primary, opacity: sending ? 0.7 : 1 }]}
+                            activeOpacity={0.8}
                         >
                             {sending ? (
                                 <ActivityIndicator size="small" color="#FFF" />
                             ) : (
-                                <Ionicons name="send" size={20} color="#FFF" />
+                                <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
                             )}
                         </TouchableOpacity>
                     ) : (
-                        <TouchableOpacity activeOpacity={1} style={styles.thumbsUpButton} onPress={() => sendMessage('👍')}>
-                            <Ionicons name="thumbs-up" size={27} color={colors.primary} />
+                        <TouchableOpacity style={styles.thumbsUpButton} onPress={() => sendMessage('👍')} activeOpacity={0.7}>
+                            <Ionicons name="thumbs-up" size={28} color={colors.primary} />
                         </TouchableOpacity>
                     )}
                 </View>
@@ -676,7 +754,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 onRequestClose={() => setShowReactionPicker(false)}
             >
                 <Pressable
-                    style={styles.modalOverlay}
+                    style={[styles.modalOverlay, styles.dimOverlay]}
                     onPress={() => setShowReactionPicker(false)}
                 >
                     <View style={[
@@ -704,7 +782,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 onRequestClose={() => setShowAttachmentPicker(false)}
             >
                 <Pressable
-                    style={styles.modalOverlay}
+                    style={[styles.modalOverlay, styles.dimOverlay]}
                     onPress={() => setShowAttachmentPicker(false)}
                 >
                     <View style={[
@@ -826,20 +904,29 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        padding: 32,
+        padding: 40,
+    },
+    emptyIconWrap: {
+        width: 72,
+        height: 72,
+        borderRadius: 36,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
     },
     emptyText: {
         fontSize: 18,
-        fontWeight: '600',
-        marginTop: 16,
+        fontWeight: '700',
+        marginBottom: 8,
     },
     emptySubtext: {
         fontSize: 14,
-        marginTop: 8,
         textAlign: 'center',
+        lineHeight: 20,
     },
     messagesList: {
-        padding: 16,
+        paddingHorizontal: 12,
+        paddingTop: 12,
         paddingBottom: 8,
     },
     dateContainer: {
@@ -865,8 +952,8 @@ const styles = StyleSheet.create({
     },
     messageRow: {
         flexDirection: 'row',
-        marginBottom: 8,
-        maxWidth: '80%',
+        marginBottom: 4,
+        maxWidth: '82%',
     },
     messageRowLeft: {
         alignSelf: 'flex-start',
@@ -896,14 +983,16 @@ const styles = StyleSheet.create({
     messageBubble: {
         paddingHorizontal: 12,
         paddingVertical: 8,
-        borderRadius: 20,
+        borderRadius: 18,
         maxWidth: '100%',
     },
     myMessage: {
-        backgroundColor: '#0084FF', // Classic Messenger Blue fallback if primary not set
+        backgroundColor: '#0084FF',
+        borderBottomRightRadius: 4,
     },
     theirMessage: {
-        backgroundColor: '#E4E6EB', // Classic Gray
+        backgroundColor: '#E4E6EB',
+        borderBottomLeftRadius: 4,
     },
     messageText: {
         fontSize: 15,
@@ -920,45 +1009,40 @@ const styles = StyleSheet.create({
     },
     inputContainer: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-end',
         paddingHorizontal: 8,
         paddingTop: 8,
-        borderTopWidth: 0, // Removed border for cleaner look
-    },
-    inputLeftActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginRight: 8,
+        gap: 6,
     },
     inputAction: {
-        padding: 4,
+        paddingBottom: 6,
     },
     textInputWrapper: {
         flex: 1,
         flexDirection: 'row',
-        alignItems: 'center',
-        borderRadius: 20,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        minHeight: 36,
+        alignItems: 'flex-end',
+        borderRadius: 22,
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        minHeight: 40,
     },
     input: {
         flex: 1,
         fontSize: 15,
-        maxHeight: 100,
-        paddingVertical: 4,
+        maxHeight: 120,
+        paddingVertical: Platform.OS === 'ios' ? 4 : 2,
+        lineHeight: 20,
     },
     sendButton: {
-        marginLeft: 8,
-        width: 38,
-        height: 38,
-        borderRadius: 19,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
+        marginBottom: 0,
     },
     thumbsUpButton: {
-        marginLeft: 8,
-        padding: 4,
+        paddingBottom: 6,
     },
     // Reaction styles
     reactionsContainer: {
@@ -987,30 +1071,29 @@ const styles = StyleSheet.create({
         fontSize: 11,
         marginLeft: 2,
     },
-    // Seen indicator styles
+    // Messenger-style seen indicator styles
     seenContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'flex-end',
-        marginTop: 4,
+        marginTop: 2,
         marginRight: 4,
-        marginBottom: 8,
+        marginBottom: 6,
     },
     seenAvatar: {
-        width: 14,
-        height: 14,
-        borderRadius: 7,
-        marginRight: 4,
-    },
-    seenText: {
-        fontSize: 11,
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        borderWidth: 1.5,
     },
     // Reaction picker modal styles
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    dimOverlay: {
+        backgroundColor: 'rgba(0,0,0,0.45)',
     },
     reactionPicker: {
         flexDirection: 'row',

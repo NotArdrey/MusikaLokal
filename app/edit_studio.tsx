@@ -90,6 +90,9 @@ const formatTimeInput = (text: string): string => {
   return cleaned;
 };
 
+const TITLE_MAX_LENGTH = 120;
+const DESCRIPTION_MAX_LENGTH = 1000;
+
 export default function EditStudioScreen() {
   const { colors, isDark } = useTheme();
   const { id } = useLocalSearchParams();
@@ -155,6 +158,21 @@ export default function EditStudioScreen() {
       ],
     );
   }, [saving]);
+
+  const toggleCalendarDate = (dateStr: string) => {
+    setSelectedDates((prev) => {
+      const next = { ...prev };
+      if (next[dateStr]?.selected) {
+        delete next[dateStr];
+      } else {
+        next[dateStr] = {
+          selected: true,
+          slots: [{ start: "09:00 AM", end: "05:00 PM" }],
+        };
+      }
+      return next;
+    });
+  };
 
   const [amenities, setAmenities] = useState<string[]>([]);
   const [newAmenity, setNewAmenity] = useState("");
@@ -443,7 +461,7 @@ export default function EditStudioScreen() {
           .eq('studio_id', studioId),
         supabase
           .from('studio_instruments')
-          .select('instrument_name, image_url')
+          .select('*')
           .eq('studio_id', studioId),
         supabase
           .from('studio_media')
@@ -522,8 +540,11 @@ export default function EditStudioScreen() {
 
       const normalizedInstruments = (studioInstrumentsData || []).map(
         (row: any) => ({
+          id: row.id,
           name: row.instrument_name,
           image: row.image_url || '',
+          quantity: row.quantity,
+          description: row.description,
         }),
       );
 
@@ -792,7 +813,10 @@ export default function EditStudioScreen() {
         });
       });
 
-      // Equipment items have quantity OR description properties (custom equipment)
+      const presetLookup = new Map(
+        INSTRUMENT_OPTIONS.map((item) => [item.name, item.image]),
+      );
+
       console.log("🎸 ===== FILTERING EQUIPMENT ITEMS =====");
       const equipmentItems = instrumentsData
         .filter((item: any) => {
@@ -800,19 +824,47 @@ export default function EditStudioScreen() {
             console.log("🎸 Skipping invalid item:", item);
             return false;
           }
-          // Check if 'quantity' or 'description' key exists in the object
-          const hasQuantity = "quantity" in item;
-          const hasDescription = "description" in item;
-          console.log(
-            `🎸 Evaluating item "${item.name}": hasQuantity=${hasQuantity}, hasDescription=${hasDescription}, willInclude=${hasQuantity || hasDescription}`,
-          );
-          return hasQuantity || hasDescription;
+
+          const name = typeof item.name === "string" ? item.name.trim() : "";
+          if (!name) return false;
+
+          const hasQuantity =
+            typeof item.quantity === "number" ||
+            (typeof item.quantity === "string" && item.quantity.trim() !== "");
+          const hasDescription =
+            typeof item.description === "string" &&
+            item.description.trim().length > 0;
+
+          if (hasQuantity || hasDescription) {
+            console.log(
+              `🎸 Treating "${name}" as equipment (has quantity/description)`
+            );
+            return true;
+          }
+
+          const presetImage = presetLookup.get(name);
+          if (!presetImage) {
+            console.log(`🎸 Treating "${name}" as equipment (not a preset)`);
+            return true;
+          }
+
+          const image = typeof item.image === "string" ? item.image.trim() : "";
+          const isCustomImage = image.length > 0 && image !== presetImage;
+          if (isCustomImage) {
+            console.log(
+              `🎸 Treating "${name}" as equipment (custom image)`
+            );
+          }
+          return isCustomImage;
         })
         .map((eq: any, index: number) => {
           const mapped = {
             id: eq.id || `eq-${index}`,
             name: eq.name || "",
-            quantity: typeof eq.quantity === "number" ? eq.quantity : 1,
+            quantity:
+              typeof eq.quantity === "number"
+                ? eq.quantity
+                : parseInt(eq.quantity, 10) || 1,
             description: eq.description || "",
             image: eq.image || "",
           };
@@ -828,7 +880,6 @@ export default function EditStudioScreen() {
         JSON.stringify(equipmentItems, null, 2),
       );
 
-      // Preset items do NOT have quantity or description (predefined instruments)
       console.log("🎸 ===== FILTERING PRESET ITEMS =====");
       const presetItems = instrumentsData
         .filter((item: any) => {
@@ -836,20 +887,25 @@ export default function EditStudioScreen() {
             console.log("🎸 Preset: Skipping invalid item:", item);
             return false;
           }
-          if (!item.name || !item.image) {
-            console.log("🎸 Preset: Skipping item without name/image:", item);
+          const name = typeof item.name === "string" ? item.name.trim() : "";
+          if (!name) {
+            console.log("🎸 Preset: Skipping item without name:", item);
             return false;
           }
-          const hasQuantity = "quantity" in item;
-          const hasDescription = "description" in item;
-          const willInclude = !hasQuantity && !hasDescription;
+
+          const image = typeof item.image === "string" ? item.image.trim() : "";
+          const presetImage = presetLookup.get(name);
+          const willInclude = !!presetImage && image === presetImage;
           console.log(
-            `🎸 Preset: Evaluating "${item.name}": hasQuantity=${hasQuantity}, hasDescription=${hasDescription}, willInclude=${willInclude}`,
+            `🎸 Preset: Evaluating "${name}": willInclude=${willInclude}`,
           );
           return willInclude;
         })
         .map((item: any) => {
-          const mapped = { name: item.name, image: item.image };
+          const mapped = {
+            name: item.name,
+            image: item.image,
+          };
           console.log("🎸 Preset: Mapped item:", mapped);
           return mapped;
         });
@@ -1943,6 +1999,13 @@ export default function EditStudioScreen() {
           ]
           : selectedImages;
 
+      const parsedRehearsalRate = parseFloat(rehearsalRate) || 0;
+      const parsedRecordingRate = parseFloat(recordingRate) || 0;
+      const effectiveRehearsalRate =
+        studioType === "Recording" ? 0 : parsedRehearsalRate;
+      const effectiveRecordingRate =
+        studioType === "Rehearsal" ? 0 : parsedRecordingRate;
+
       const payload = {
         name: studioName,
         type: studioType,
@@ -1951,10 +2014,10 @@ export default function EditStudioScreen() {
         // Dynamic pricing based on studio type
         hourly_rate:
           studioType === "Recording"
-            ? parseFloat(recordingRate) || 0
-            : parseFloat(rehearsalRate) || 0,
-        rehearsal_rate: parseFloat(rehearsalRate) || 0,
-        recording_rate: parseFloat(recordingRate) || 0,
+            ? effectiveRecordingRate
+            : effectiveRehearsalRate,
+        rehearsal_rate: effectiveRehearsalRate,
+        recording_rate: effectiveRecordingRate,
         pax: pax ? parseInt(pax) : null,
         amenities,
         instruments: instrumentsPayload,
@@ -2151,19 +2214,9 @@ export default function EditStudioScreen() {
         }
       }
 
-      if (operatingHours.length === 0) {
-        for (let day = 0; day <= 6; day++) {
-          operatingHours.push({
-            studio_id: studioId,
-            day_of_week: day,
-            is_open: true,
-            open_time: '09:00',
-            close_time: '22:00'
-          });
-        }
+      if (operatingHours.length > 0) {
+        await supabase.from('studio_operating_hours').insert(operatingHours);
       }
-
-      await supabase.from('studio_operating_hours').insert(operatingHours);
 
       // Update calendar date overrides
       await supabase.from('studio_date_overrides').delete().eq('studio_id', studioId);
@@ -2499,15 +2552,13 @@ export default function EditStudioScreen() {
       const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-      const response = await fetch(asset.uri);
-      if (!response.ok) {
-        throw new Error("Failed to fetch image");
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const bytes = base64ToUint8Array(base64);
       const { data, error } = await supabase.storage
         .from("listings")
-        .upload(fileName, arrayBuffer, {
+        .upload(fileName, bytes, {
           contentType: `image/${fileExt}`,
           upsert: false,
         });
@@ -2591,8 +2642,16 @@ export default function EditStudioScreen() {
     setValue: (text: string) => void,
     multiline = false,
     numeric = false,
-  ) => (
-    <View style={styles.inputContainer}>
+  ) => {
+    const normalizedLabel = label.trim().toLowerCase();
+    const inputMaxLength = normalizedLabel.includes("description")
+      ? DESCRIPTION_MAX_LENGTH
+      : normalizedLabel.includes("name") || normalizedLabel.includes("title")
+        ? TITLE_MAX_LENGTH
+        : undefined;
+
+    return (
+      <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
       </Text>
@@ -2608,6 +2667,7 @@ export default function EditStudioScreen() {
         <TextInput
           value={value}
           onChangeText={setValue}
+          maxLength={inputMaxLength}
           multiline={multiline}
           numberOfLines={multiline ? 4 : 1}
           keyboardType={numeric ? "numeric" : "default"}
@@ -2623,8 +2683,9 @@ export default function EditStudioScreen() {
           ]}
         />
       </View>
-    </View>
-  );
+      </View>
+    );
+  };
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -2987,7 +3048,7 @@ export default function EditStudioScreen() {
                   color: colors.text,
                   fontFamily: "Poppins_500Medium",
                   fontSize: 16,
-                  textAlign: "center",
+                  textAlign: "left",
                   paddingVertical: 16,
                 }}
               />
@@ -3544,18 +3605,44 @@ export default function EditStudioScreen() {
                   },
                   {} as Record<string, any>,
                 )}
-                onDayPress={(day) => {
-                  const dateStr = day.dateString;
-                  const newDates = { ...selectedDates };
-                  if (newDates[dateStr]?.selected) {
-                    delete newDates[dateStr];
-                  } else {
-                    newDates[dateStr] = {
-                      selected: true,
-                      slots: [{ start: "09:00 AM", end: "05:00 PM" }],
-                    };
-                  }
-                  setSelectedDates(newDates);
+                onDayPress={(day) => toggleCalendarDate(day.dateString)}
+                dayComponent={({ date, state, marking }) => {
+                  if (!date) return null;
+                  const isSelected = !!marking?.selected;
+                  const isDisabled = state === "disabled";
+
+                  return (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => toggleCalendarDate(date.dateString)}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: isSelected
+                          ? colors.primary
+                          : "transparent",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: isSelected
+                            ? "#FFFFFF"
+                            : isDisabled
+                              ? isDark
+                                ? "#4B5563"
+                                : "#D1D5DB"
+                              : colors.text,
+                          fontFamily: "Poppins_500Medium",
+                          fontSize: 14,
+                        }}
+                      >
+                        {date.day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
                 }}
                 theme={{
                   backgroundColor: "transparent",

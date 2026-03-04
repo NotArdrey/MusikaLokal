@@ -2,17 +2,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Image,
+    Keyboard,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -58,6 +58,9 @@ const GENRES = [
   "Lo-Fi",
   "OPM",
 ];
+
+const TITLE_MAX_LENGTH = 120;
+const DESCRIPTION_MAX_LENGTH = 1000;
 
 export default function AddGroupScreen() {
   const { colors, isDark } = useTheme();
@@ -610,8 +613,16 @@ export default function AddGroupScreen() {
     placeholder: string,
     multiline = false,
     keyboardType: any = "default",
-  ) => (
-    <View style={styles.inputContainer}>
+  ) => {
+    const normalizedLabel = label.trim().toLowerCase();
+    const inputMaxLength = normalizedLabel.includes("description")
+      ? DESCRIPTION_MAX_LENGTH
+      : normalizedLabel.includes("name") || normalizedLabel.includes("title")
+        ? TITLE_MAX_LENGTH
+        : undefined;
+
+    return (
+      <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
       </Text>
@@ -627,6 +638,7 @@ export default function AddGroupScreen() {
         <TextInput
           value={value}
           onChangeText={setValue}
+          maxLength={inputMaxLength}
           placeholder={placeholder}
           placeholderTextColor={colors.textSecondary}
           multiline={multiline}
@@ -644,8 +656,9 @@ export default function AddGroupScreen() {
           ]}
         />
       </View>
-    </View>
-  );
+      </View>
+    );
+  };
 
   return (
     <>

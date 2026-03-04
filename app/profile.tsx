@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import ReportModal from "../src/components/ReportModal";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
@@ -32,14 +33,6 @@ const ITEM_SIZE = Math.floor(
   (SCREEN_WIDTH - GRID_PADDING * 2 - GRID_GAP * (NUM_COLUMNS - 1)) /
   NUM_COLUMNS
 );
-
-const REPORT_REASONS = [
-  "Spam or scam",
-  "Harassment",
-  "Inappropriate content",
-  "Fake profile",
-  "Other",
-];
 
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
@@ -294,6 +287,7 @@ export default function ProfileScreen() {
   const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
   const [mediaModalVisible, setMediaModalVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
     title: string;
@@ -358,7 +352,7 @@ export default function ProfileScreen() {
     router.back();
   }, [params.returnListingId, params.returnToHome]);
 
-  const submitProfileReport = async (reason: string) => {
+  const submitProfileReport = async (reason: string, details?: string) => {
     if (!currentUserId) {
       showAlert("warning", "Login Required", "You need to be logged in to submit a report.");
       return;
@@ -368,46 +362,24 @@ export default function ProfileScreen() {
       return;
     }
 
-    try {
-      const { error } = await supabase.functions.invoke("manage-details", {
-        body: {
-          action: "report",
-          type: "profile",
-          id: profile.id,
-          userId: currentUserId,
-          reason,
-          details: null,
-        },
-      });
+    const { error } = await supabase.functions.invoke("manage-details", {
+      body: {
+        action: "report",
+        type: "profile",
+        id: profile.id,
+        userId: currentUserId,
+        reason,
+        details: details || null,
+      },
+    });
 
-      if (error) throw error;
-      showAlert("success", "Report Submitted", "Thanks. We’ll review this report shortly.");
-    } catch (e: any) {
-      showAlert("error", "Report Failed", e?.message || "Failed to submit report.");
+    if (error) {
+      throw new Error(error.message || "Failed to submit report.");
     }
   };
 
   const openReportModal = () => {
-    const reportButtons = [
-      ...REPORT_REASONS.map((reason) => ({
-        text: reason,
-        style: "default" as const,
-        onPress: () => {
-          void submitProfileReport(reason);
-        },
-      })),
-      {
-        text: "Cancel",
-        style: "cancel" as const,
-      },
-    ];
-
-    showAlert(
-      "warning",
-      "Report User",
-      `Why are you reporting ${profile?.full_name || profile?.name || "this user"}?`,
-      reportButtons,
-    );
+    setShowReportModal(true);
   };
 
   // Check if URL is a video
@@ -1025,6 +997,14 @@ export default function ProfileScreen() {
         message={alertConfig.message}
         buttons={alertConfig.buttons}
         onClose={() => setAlertVisible(false)}
+      />
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSubmit={submitProfileReport}
+        targetName={profile?.full_name || profile?.name || 'this user'}
+        title="Report User"
+        reportType="profile"
       />
     </>
   );

@@ -85,6 +85,9 @@ const formatTimeInput = (text: string): string => {
   return cleaned;
 };
 
+const TITLE_MAX_LENGTH = 120;
+const DESCRIPTION_MAX_LENGTH = 1000;
+
 type EventSchedule = {
   date: string;
   start_time: string;
@@ -837,8 +840,16 @@ export default function EditGigScreen() {
     placeholder = "",
     multiline = false,
     numeric = false,
-  ) => (
-    <View style={styles.inputContainer}>
+  ) => {
+    const normalizedLabel = label.trim().toLowerCase();
+    const inputMaxLength = normalizedLabel.includes("description")
+      ? DESCRIPTION_MAX_LENGTH
+      : normalizedLabel.includes("name") || normalizedLabel.includes("title")
+        ? TITLE_MAX_LENGTH
+        : undefined;
+
+    return (
+      <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
       </Text>
@@ -854,6 +865,7 @@ export default function EditGigScreen() {
         <TextInput
           value={value}
           onChangeText={setValue}
+          maxLength={inputMaxLength}
           placeholder={placeholder}
           placeholderTextColor={colors.textSecondary}
           multiline={multiline}
@@ -870,8 +882,9 @@ export default function EditGigScreen() {
           ]}
         />
       </View>
-    </View>
-  );
+      </View>
+    );
+  };
 
   const handleContractUpload = async () => {
     try {

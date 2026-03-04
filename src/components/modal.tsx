@@ -1,3 +1,4 @@
+import { BlurView } from 'expo-blur';
 import React from 'react';
 import { ActivityIndicator, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
@@ -63,10 +64,12 @@ const CustomModal: React.FC<CustomModalProps> = ({
     <RNModal
       animationType="fade"
       transparent={true}
+      statusBarTranslucent
+      navigationBarTranslucent
       visible={visible}
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
+      <BlurView intensity={60} tint="dark" style={styles.overlay}>
         <View
           style={[
             styles.modalContainer,
@@ -167,7 +170,6 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     styles.confirmButton,
                     {
                       backgroundColor: danger ? '#EF4444' : colors.primary,
-                      opacity: isConfirmDisabled ? 0.6 : 1
                     }
                   ]}
                   disabled={isConfirmDisabled}
@@ -186,11 +188,13 @@ const CustomModal: React.FC<CustomModalProps> = ({
             </>
           )}
         </View>
-      </View>
+      </BlurView>
 
       <RNModal
         animationType="slide"
         transparent={true}
+        statusBarTranslucent
+        navigationBarTranslucent
         visible={showTermsContent}
         onRequestClose={() => setShowTermsContent(false)}
       >
@@ -236,7 +240,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)', // bg-black/50
   },
   modalContainer: {
     width: '80%', // w-4/5

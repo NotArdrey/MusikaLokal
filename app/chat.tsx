@@ -4,7 +4,6 @@ import { ActivityIndicator, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import ChatScreen from '../src/components/ChatScreen';
 import ConversationsList from '../src/components/ConversationsList';
-import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { Conversation, useConversation, useGroupConversation } from '../src/hooks/useChat';
@@ -215,7 +214,6 @@ export default function ChatPage() {
                     onSelectConversation={handleSelectConversation}
                     onNewConversation={() => router.push('/home')}
                 />
-                <Navbar />
             </View>
         );
     }

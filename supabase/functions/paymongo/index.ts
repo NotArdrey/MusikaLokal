@@ -117,6 +117,8 @@ async function paymongoRequest(
 }
 
 // Helper to credit owner's wallet when a booking payment is received
+// Idempotent: safe to call multiple times for the same booking (e.g. both
+// the client-side forfeit path and the webhook path may trigger this).
 async function creditOwnerWallet(
   supabaseAdmin: any,
   bookingId: string,
@@ -129,6 +131,19 @@ async function creditOwnerWallet(
       "Amount:",
       paymentAmount,
     );
+
+    // IDEMPOTENCY: Skip if a wallet earning for this booking already exists.
+    const { data: existingTx } = await supabaseAdmin
+      .from("wallet_transactions")
+      .select("id")
+      .eq("reference_id", bookingId)
+      .eq("type", "earning")
+      .maybeSingle();
+
+    if (existingTx) {
+      console.log("⏭️ Owner wallet already credited for booking:", bookingId);
+      return;
+    }
 
     // Get booking details with studio owner
     const { data: booking, error: bookingError } = await supabaseAdmin
@@ -1338,7 +1353,7 @@ serve(async (req: Request) => {
         // ========================================
         const { data: existingBooking } = await supabaseAdmin
           .from("studio_bookings")
-          .select("payment_status, payment_type")
+          .select("payment_status, payment_type, status")
           .eq("id", bookingId)
           .single();
 
@@ -1354,6 +1369,27 @@ serve(async (req: Request) => {
         const isBalancePayment = paymentType === "balance";
 
         console.log("💰 Processing payment:", { bookingId, paymentType, remainingBalance, isDownpayment });
+
+        // -----------------------------------------------------------------------
+        // CANCELLATION RACE-CONDITION GUARD
+        // If a booking is cancelled in the brief window between payment capture
+        // and webhook processing, do NOT resurrect it back to "confirmed".
+        // Keep it cancelled, record payment fields for audit, and credit owner.
+        // -----------------------------------------------------------------------
+        if (existingBooking?.status === "cancelled") {
+          console.log("ℹ️ Webhook: Booking was cancelled before webhook completion. Crediting owner wallet without resurrecting booking.");
+          const paymentStatusValue = isDownpayment && remainingBalance > 0 ? "partial" : "paid";
+          await supabaseAdmin
+            .from("studio_bookings")
+            .update({
+              payment_status: paymentStatusValue,
+              paid_at: new Date().toISOString(),
+              ...(paymentMethod ? { payment_method: paymentMethod } : {}),
+            })
+            .eq("id", bookingId);
+          await creditOwnerWallet(supabaseAdmin, bookingId, paymentAmount || 0);
+          return; // No confirmation notifications — booking stays cancelled
+        }
 
         // Update booking - handle downpayment vs full/balance payment
         const updateData: any = {

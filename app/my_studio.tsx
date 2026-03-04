@@ -150,14 +150,43 @@ export default function MyStudioScreen() {
         }
         setDeleting(true);
         try {
-            const { data, error } = await supabase.rpc('delete_studio_safely', {
-                p_studio_id: selectedId,
-                p_reason: 'Deleted from My Studio screen by owner',
-            });
+            let result: any = null;
+            let invokeError: any = null;
+            const {
+                data: { session },
+            } = await supabase.auth.getSession();
+            const accessToken = session?.access_token;
 
-            if (error) throw error;
+            if (accessToken) {
+                try {
+                    const { data, error } = await supabase.functions.invoke('delete-studio-with-storage', {
+                        body: {
+                            studioId: selectedId,
+                            reason: 'Deleted from My Studio screen by owner',
+                        },
+                        headers: {
+                            Authorization: `Bearer ${accessToken}`,
+                        },
+                    });
 
-            const result: any = data;
+                    result = data;
+                    invokeError = error;
+                } catch (e) {
+                    invokeError = e;
+                }
+            } else {
+                invokeError = new Error('No active session token for edge invoke.');
+            }
+
+            if (invokeError) {
+                const { data: rpcData, error: rpcError } = await supabase.rpc('delete_studio_safely', {
+                    p_studio_id: selectedId,
+                    p_reason: 'Deleted from My Studio screen by owner (RPC fallback)',
+                });
+                if (rpcError) throw rpcError;
+                result = rpcData;
+            }
+
             if (!result?.success) {
                 if (result?.code === 'ACTIVE_BOOKINGS_EXIST') {
                     showAlert(
@@ -324,7 +353,6 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.1,
         shadowRadius: 16,
-        elevation: 4,
     },
     imageWrapper: {
         height: 192,

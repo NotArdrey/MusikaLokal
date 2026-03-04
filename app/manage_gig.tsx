@@ -2,15 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Dimensions,
-  Image,
-  Linking,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    Image,
+    Linking,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -323,18 +323,7 @@ export default function GigDetailsScreen() {
                 style={[styles.headerImage, { backgroundColor: colors.border }]}
                 resizeMode="cover"
               />
-              <View style={styles.headerImageGradient} />
-              {/* Note: In React Native, linear gradient requires expo-linear-gradient.
-                 Here we simulated it with a view, but without the library it's just a view.
-                 If you want a real gradient, install expo-linear-gradient.
-                 For now, keeping it as a styled view (maybe partially transparent black).
-               */}
-              <View
-                style={[
-                  styles.headerImageOverlay,
-                  { backgroundColor: "rgba(0,0,0,0.3)" },
-                ]}
-              />
+
             </View>
 
             <Text style={[styles.headerTitle, { color: colors.text }]}>
@@ -1614,20 +1603,7 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  headerImageGradient: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 96,
-  },
-  headerImageOverlay: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-  },
+
   headerTitle: {
     fontSize: 24,
     textAlign: "center",

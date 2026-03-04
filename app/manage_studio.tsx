@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, { useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -19,8 +19,6 @@ import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
-
-import { useLocalSearchParams } from "expo-router";
 
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
@@ -154,13 +152,16 @@ export default function StudioDetailsScreen() {
     if (data?.error) throw new Error(data.error);
   };
 
-  // Role-based access control
-  useEffect(() => {
-    checkAuthorization();
-  }, []);
+  // Role-based access control + refresh on screen focus (after edits)
+  useFocusEffect(
+    React.useCallback(() => {
+      checkAuthorization();
+    }, [id]),
+  );
 
   const checkAuthorization = async () => {
     try {
+      setCheckingAuth(true);
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -516,6 +517,35 @@ export default function StudioDetailsScreen() {
   };
 
   const tabs = ["About", "Setup", "Bookings", "Review"];
+  const isRecordingOnlyStudio = studio?.type === "Recording";
+  const isRehearsalOnlyStudio = studio?.type === "Rehearsal";
+  const rehearsalRateValue = Number(studio?.rehearsal_rate || 0);
+  const recordingRateValue = Number(studio?.recording_rate || 0);
+  const hourlyRateValue = Number(studio?.hourly_rate || 0);
+  const hasRehearsalRate = rehearsalRateValue > 0 && !isRecordingOnlyStudio;
+  const hasRecordingRate = recordingRateValue > 0 && !isRehearsalOnlyStudio;
+  const studioTypeLabel =
+    studio?.type === "Both" ? "Rehearsal & Recording" : studio?.type || "N/A";
+  const studioRateLabel =
+    hasRehearsalRate && hasRecordingRate
+      ? "Rates"
+      : hasRecordingRate
+        ? "Recording Rate"
+        : hasRehearsalRate
+          ? "Rehearsal Rate"
+          : hourlyRateValue > 0
+            ? "Hourly Rate"
+            : "Rate";
+  const studioRateDisplay =
+    hasRehearsalRate && hasRecordingRate
+      ? `₱${rehearsalRateValue.toLocaleString()}/hr | ₱${recordingRateValue.toLocaleString()}/song`
+      : hasRecordingRate
+        ? `₱${recordingRateValue.toLocaleString()}/song`
+        : hasRehearsalRate
+          ? `₱${rehearsalRateValue.toLocaleString()}/hr`
+          : hourlyRateValue > 0
+            ? `₱${hourlyRateValue.toLocaleString()}/hr`
+            : "N/A";
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -575,7 +605,6 @@ export default function StudioDetailsScreen() {
                 style={[styles.headerImage, { backgroundColor: colors.border }]}
                 resizeMode="cover"
               />
-              <View style={styles.headerImageGradient} />
             </View>
 
             <Text style={[styles.headerTitle, { color: colors.text }]}>
@@ -663,7 +692,7 @@ export default function StudioDetailsScreen() {
                       Type
                     </Text>
                     <Text style={[styles.infoValue, { color: colors.text }]}>
-                      {studio?.type || "N/A"}
+                      {studioTypeLabel}
                     </Text>
                   </View>
                   <View
@@ -699,10 +728,10 @@ export default function StudioDetailsScreen() {
                         { color: colors.textSecondary },
                       ]}
                     >
-                      Rehearsal Rate
+                      {studioRateLabel}
                     </Text>
                     <Text style={[styles.infoValue, { color: colors.text }]}>
-                      ₱{(studio?.rehearsal_rate || 0).toLocaleString()}/hr
+                      {studioRateDisplay}
                     </Text>
                   </View>
                 </View>
@@ -2039,16 +2068,7 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  headerImageGradient: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 96,
-    // Approximate gradient with transparent black
-    backgroundColor: "rgba(0,0,0,0.4)",
-    top: 100, // cheat to make it look like bottom gradient
-  },
+
   headerTitle: {
     fontSize: 24,
     textAlign: "center",

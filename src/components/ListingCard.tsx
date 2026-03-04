@@ -112,18 +112,36 @@ const ListingCard: React.FC<ListingCardProps> = ({
     let nextPriceLabel = "";
     let nextSecondaryPriceLabel = "";
     const nextIsGroup = item.type === "Group";
+    const rehearsalRateValue =
+      item.rehearsal_rate && item.rehearsal_rate !== "0"
+        ? parseInt(item.rehearsal_rate)
+        : 0;
+    const recordingRateValue =
+      item.recording_rate && item.recording_rate !== "0"
+        ? parseInt(item.recording_rate)
+        : 0;
+    const isRecordingOnlyStudio =
+      item.type === "Studio" && item.studio_type === "Recording";
+    const isRehearsalOnlyStudio =
+      item.type === "Studio" && item.studio_type === "Rehearsal";
+    const hasRehearsalRate = rehearsalRateValue > 0 && !isRecordingOnlyStudio;
+    const hasRecordingRate = recordingRateValue > 0 && !isRehearsalOnlyStudio;
 
     if (nextIsGroup) {
       nextPriceLabel = "";
-    } else if (
-      item.type === "Studio" &&
-      item.rehearsal_rate &&
-      item.recording_rate &&
-      item.rehearsal_rate !== "0" &&
-      item.recording_rate !== "0"
-    ) {
-      nextPriceLabel = `₱${parseInt(item.rehearsal_rate).toLocaleString()} / hr (Rehearsal)`;
-      nextSecondaryPriceLabel = `₱${parseInt(item.recording_rate).toLocaleString()} / song (Recording)`;
+    } else if (item.type === "Studio") {
+      if (hasRehearsalRate && hasRecordingRate) {
+        nextPriceLabel = `₱${rehearsalRateValue.toLocaleString()} / hr (Rehearsal)`;
+        nextSecondaryPriceLabel = `₱${recordingRateValue.toLocaleString()} / song (Recording)`;
+      } else if (hasRehearsalRate) {
+        nextPriceLabel = `₱${rehearsalRateValue.toLocaleString()} / hr`;
+      } else if (hasRecordingRate) {
+        nextPriceLabel = `₱${recordingRateValue.toLocaleString()} / song`;
+      } else if (item.hourly_rate && item.hourly_rate !== "0") {
+        nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
+      } else {
+        nextPriceLabel = "Inquire for rates";
+      }
     } else if (item.hourly_rate && item.hourly_rate !== "0") {
       nextPriceLabel = `₱${parseInt(item.hourly_rate).toLocaleString()} / hr`;
     } else if (item.rehearsal_rate && item.rehearsal_rate !== "0") {

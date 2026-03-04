@@ -13,6 +13,7 @@ interface ListingHeroSectionProps {
   onClose: () => void;
   onToggleFavorite: () => void;
   onReport?: () => void;
+  onShare?: () => void;
 }
 
 const ListingHeroSection = ({
@@ -24,6 +25,7 @@ const ListingHeroSection = ({
   onClose,
   onToggleFavorite,
   onReport,
+  onShare,
 }: ListingHeroSectionProps) => {
   const actionIconStyle = {
     lineHeight: 22,
@@ -50,7 +52,7 @@ const ListingHeroSection = ({
       </TouchableOpacity>
 
       <View style={styles.rightActions}>
-        <TouchableOpacity activeOpacity={1} style={styles.roundBtn}>
+        <TouchableOpacity activeOpacity={0.7} onPress={onShare} style={styles.roundBtn}>
           <Ionicons
             name="share-outline"
             size={22}

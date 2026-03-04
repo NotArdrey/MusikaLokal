@@ -499,7 +499,6 @@ export default function GroupDetailsScreen() {
                 style={[styles.headerImage, { backgroundColor: colors.border }]}
                 resizeMode="cover"
               />
-              <View style={styles.headerImageGradient} />
             </View>
 
             <Text style={[styles.headerTitle, { color: colors.text }]}>
@@ -1072,16 +1071,7 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  headerImageGradient: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 96,
-    // Approximate gradient with transparent black
-    backgroundColor: "rgba(0,0,0,0.4)",
-    top: 100, // cheat to make it look like bottom gradient
-  },
+
   headerTitle: {
     fontSize: 24,
     textAlign: "center",

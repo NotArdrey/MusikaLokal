@@ -44,18 +44,18 @@ export default function TermsAndConditionsScreen() {
             2. Cancellation & Force Majeure
           </Text>
           <Text style={[styles.smallHeader, { color: colors.text }]}>
-            Standard Penalties
+            Booking Cancellation Policy
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            • {'>'}7 days: 80% refund to client.{"\n"}
-            • 3–7 days: 70% refund to client.{"\n"}
-            • {'<'}3 days: No refund; 100% to provider.
+            • All booking cancellations are non-refundable.{"\n"}
+            • Any amount already paid (including downpayments and full payments) is forfeited upon cancellation.{"\n"}
+            • Forfeited amounts may be credited to the studio/provider wallet based on platform rules.
           </Text>
           <Text style={[styles.smallHeader, { color: colors.text }]}>
-            Acts of God (Force Majeure)
+            Force Majeure
           </Text>
           <Text style={[styles.text, { color: colors.textSecondary }]}>
-            In cases of extreme weather (typhoons), government-mandated lockdowns, or national emergencies, either party may cancel without penalty. Musika Lokal reserves the right to verify these claims.
+            In cases of extreme weather (typhoons), government-mandated lockdowns, or national emergencies, users may request rescheduling. Refunds are still not guaranteed and remain subject to this non-refundable cancellation policy.
           </Text>
 
           {/* 3. LIMITATION OF LIABILITY */}
