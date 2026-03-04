@@ -1,4 +1,5 @@
 ﻿import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import React, { useEffect, useRef, useState } from 'react'; // Added useEffect
 import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -17,6 +18,7 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
     const webviewRef = useRef<WebView>(null);
     const [searchText, setSearchText] = useState('');
     const [loading, setLoading] = useState(true);
+    const [gettingLocation, setGettingLocation] = useState(false);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
         type: AlertType;
@@ -208,6 +210,34 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
         }
     };
 
+    const handleGetCurrentAddress = async () => {
+        setGettingLocation(true);
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                showAlert('warning', 'Permission Required', 'Allow location permission to use current address.');
+                return;
+            }
+
+            const current = await Location.getCurrentPositionAsync({});
+            const latitude = current.coords.latitude;
+            const longitude = current.coords.longitude;
+
+            webviewRef.current?.postMessage(JSON.stringify({
+                type: 'updateLocation',
+                lat: latitude,
+                lng: longitude
+            }));
+
+            await fetchAddress(latitude, longitude);
+        } catch (error) {
+            console.error(error);
+            showAlert('error', 'Location Failed', 'Unable to get your current address.');
+        } finally {
+            setGettingLocation(false);
+        }
+    };
+
     const handleMessage = async (event: any) => {
         try {
             const data = JSON.parse(event.nativeEvent.data);
@@ -249,6 +279,19 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                         />
                         {loading && <ActivityIndicator size="small" color="#666" style={{ marginLeft: 8 }} />}
                     </View>
+                    <TouchableOpacity
+                        activeOpacity={1}
+                        onPress={handleGetCurrentAddress}
+                        style={styles.currentLocationBtn}
+                        disabled={gettingLocation}
+                    >
+                        {gettingLocation ? (
+                            <ActivityIndicator size="small" color="#4F46E5" />
+                        ) : (
+                            <Ionicons name="locate" size={16} color="#4F46E5" />
+                        )}
+                        <Text style={styles.currentLocationBtnText}>Get Current Address</Text>
+                    </TouchableOpacity>
                 </View>
 
                 {/* Map */}
@@ -272,7 +315,6 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                         style={[styles.confirmBtn, !currentSelection && styles.disabledBtn]}
                         onPress={() => currentSelection && onSelect(currentSelection)}
                         disabled={!currentSelection}
-                        activeOpacity={1}
                     >
                         <Text style={styles.confirmBtnText}>Confirm Location</Text>
                     </TouchableOpacity>
@@ -333,6 +375,27 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.2,
         shadowRadius: 4,
         elevation: 5,
+    },
+    currentLocationBtn: {
+        marginTop: 8,
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: '#fff',
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.15,
+        shadowRadius: 2,
+        elevation: 3,
+    },
+    currentLocationBtnText: {
+        color: '#4F46E5',
+        fontSize: 12,
+        fontWeight: '600',
     },
     searchInput: {
         flex: 1,

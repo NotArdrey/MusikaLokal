@@ -1,5 +1,10 @@
+import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
+import {
+  hasNavigationDestination,
+  openNavigationDirections,
+} from "../../utils/navigation";
 import CachedImage from "../CachedImage";
 import ListingMediaCarousel from "./ListingMediaCarousel";
 
@@ -38,6 +43,13 @@ const StudioGigVenueAboutTab = ({
     : calculateCompletion();
   const completionRate = Math.max(0, Math.min(100, Math.round(baseCompletionRate)));
   const managerId = group.owner_id || group.organizer_id;
+  const destinationText =
+    group?.location || group?.address || group?.name || "Destination";
+  const canNavigate = hasNavigationDestination({
+    latitude: group?.latitude,
+    longitude: group?.longitude,
+    destinationText,
+  });
   const isStudioOrVenue = group.type === "Studio" || group.type === "Venue";
   const isMediaCarouselType =
     group.type === "Studio" || group.type === "Venue" || group.type === "Gig";
@@ -83,6 +95,19 @@ const StudioGigVenueAboutTab = ({
     return merged.filter((value, index, arr) => arr.indexOf(value) === index);
   }, [group?.images, group?.media_urls, group?.media, isMediaCarouselType]);
 
+  const handleNavigate = async () => {
+    try {
+      await openNavigationDirections({
+        latitude: group?.latitude,
+        longitude: group?.longitude,
+        label: group?.name || `${group?.type || "Listing"} location`,
+        destinationText,
+      });
+    } catch (error) {
+      console.log("[StudioGigVenueAboutTab] Navigation error:", error);
+    }
+  };
+
   return (
     <View style={styles.tabContent}>
     {group.type === "Gig" && (
@@ -91,6 +116,34 @@ const StudioGigVenueAboutTab = ({
         <Text style={[styles.description, { color: colors.textSecondary }]}>
           {group.description || "No description provided."}
         </Text>
+        {canNavigate && (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={{
+              marginTop: 12,
+              alignSelf: "flex-start",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              borderRadius: 999,
+              backgroundColor: colors.primary,
+            }}
+            onPress={handleNavigate}
+          >
+            <Ionicons name="navigate-outline" size={15} color="#FFF" />
+            <Text
+              style={{
+                color: "#FFF",
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 12,
+              }}
+            >
+              Navigate
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     )}
 
@@ -153,6 +206,34 @@ const StudioGigVenueAboutTab = ({
         <Text style={[styles.description, { color: colors.textSecondary }]}>
           {group.description || "No description provided."}
         </Text>
+        {canNavigate && (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={{
+              marginTop: 12,
+              alignSelf: "flex-start",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              borderRadius: 999,
+              backgroundColor: colors.primary,
+            }}
+            onPress={handleNavigate}
+          >
+            <Ionicons name="navigate-outline" size={15} color="#FFF" />
+            <Text
+              style={{
+                color: "#FFF",
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 12,
+              }}
+            >
+              Navigate
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     )}
 

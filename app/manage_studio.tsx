@@ -19,6 +19,10 @@ import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useTheme } from "../src/context/ThemeContext";
+import {
+    hasValidCoordinates,
+    openNavigationDirections,
+} from "../src/utils/navigation";
 
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
@@ -91,6 +95,23 @@ export default function StudioDetailsScreen() {
   };
 
   const Alert = { alert: showAlertNative };
+
+  const handleNavigateToStudio = async () => {
+    try {
+      await openNavigationDirections({
+        latitude: studio?.latitude,
+        longitude: studio?.longitude,
+        label: studio?.address || studio?.name || "Studio location",
+      });
+    } catch (error) {
+      console.log("[manage_studio] Navigation error:", error);
+      showAlert(
+        "warning",
+        "Navigation Unavailable",
+        "This studio does not have pinned coordinates yet.",
+      );
+    }
+  };
 
   // State for partial slot approval
   const [selectedBookingForPartial, setSelectedBookingForPartial] =
@@ -615,6 +636,15 @@ export default function StudioDetailsScreen() {
             >
               {studio?.address || "Location N/A"}
             </Text>
+            {hasValidCoordinates(studio?.latitude, studio?.longitude) && (
+              <TouchableOpacity
+                style={[styles.navigateButton, { backgroundColor: colors.primary }]}
+                onPress={handleNavigateToStudio}
+              >
+                <Ionicons name="navigate-outline" size={16} color="#FFF" />
+                <Text style={styles.navigateButtonText}>Navigate</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Segmented Control Tabs */}
@@ -2078,6 +2108,20 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
     fontFamily: "Poppins_400Regular",
+  },
+  navigateButton: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  navigateButtonText: {
+    color: "#FFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
   },
   tabsContainer: {
     marginHorizontal: 24,

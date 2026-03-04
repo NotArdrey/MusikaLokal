@@ -19,6 +19,10 @@ import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { getGroupMembersLabel, isGroupLeaderMember } from "../src/utils/groupMembers";
+import {
+    hasValidCoordinates,
+    openNavigationDirections,
+} from "../src/utils/navigation";
 
 import { useLocalSearchParams } from "expo-router";
 
@@ -65,6 +69,23 @@ export default function GroupDetailsScreen() {
   ) => {
     setAlertConfig({ type, title, message, buttons });
     setAlertVisible(true);
+  };
+
+  const handleNavigateToGroup = async () => {
+    try {
+      await openNavigationDirections({
+        latitude: group?.latitude,
+        longitude: group?.longitude,
+        label: group?.location || group?.name || "Group location",
+      });
+    } catch (error) {
+      console.log("[manage_group] Navigation error:", error);
+      showAlert(
+        "warning",
+        "Navigation Unavailable",
+        "This group does not have pinned coordinates yet.",
+      );
+    }
   };
 
   // Role-based access control
@@ -510,6 +531,15 @@ export default function GroupDetailsScreen() {
               {group?.genre || "Genre N/A"} •{" "}
               {group?.location || "Location N/A"}
             </Text>
+            {hasValidCoordinates(group?.latitude, group?.longitude) && (
+              <TouchableOpacity
+                style={[styles.navigateButton, { backgroundColor: colors.primary }]}
+                onPress={handleNavigateToGroup}
+              >
+                <Ionicons name="navigate-outline" size={16} color="#FFF" />
+                <Text style={styles.navigateButtonText}>Navigate</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Segmented Control Tabs */}
@@ -1081,6 +1111,20 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 4,
     fontFamily: "Poppins_400Regular",
+  },
+  navigateButton: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  navigateButtonText: {
+    color: "#FFF",
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
   },
   tabsContainer: {
     marginHorizontal: 24,

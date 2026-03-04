@@ -3,6 +3,10 @@ import { router } from "expo-router";
 import React, { useMemo } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { getGroupMembersLabel, isGroupLeaderMember } from "../../utils/groupMembers";
+import {
+    hasNavigationDestination,
+    openNavigationDirections,
+} from "../../utils/navigation";
 import CachedImage from "../CachedImage";
 import ListingMediaCarousel from "./ListingMediaCarousel";
 
@@ -31,6 +35,13 @@ const GroupAboutTab = ({
 }: GroupAboutTabProps) => {
   const completionRate = calculateCompletion();
   const managerId = group.owner_id || group.organizer_id;
+  const destinationText =
+    group?.location || group?.address || group?.name || "Destination";
+  const canNavigate = hasNavigationDestination({
+    latitude: group?.latitude,
+    longitude: group?.longitude,
+    destinationText,
+  });
   const mediaItems = useMemo(() => {
     const normalizeMedia = (value: any): string[] => {
       if (Array.isArray(value)) {
@@ -103,6 +114,19 @@ const GroupAboutTab = ({
     return Math.round((score / total) * 100);
   };
 
+  const handleNavigate = async () => {
+    try {
+      await openNavigationDirections({
+        latitude: group?.latitude,
+        longitude: group?.longitude,
+        label: group?.name || "Group location",
+        destinationText,
+      });
+    } catch (error) {
+      console.log("[GroupAboutTab] Navigation error:", error);
+    }
+  };
+
   return (
     <View style={styles.tabContent}>
       <View style={styles.section}>
@@ -110,6 +134,34 @@ const GroupAboutTab = ({
         <Text style={[styles.description, { color: colors.textSecondary }]}>
           {group.description || "No description provided."}
         </Text>
+        {canNavigate && (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={{
+              marginTop: 12,
+              alignSelf: "flex-start",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              borderRadius: 999,
+              backgroundColor: colors.primary,
+            }}
+            onPress={handleNavigate}
+          >
+            <Ionicons name="navigate-outline" size={15} color="#FFF" />
+            <Text
+              style={{
+                color: "#FFF",
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 12,
+              }}
+            >
+              Navigate
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={{ flexDirection: "row", gap: 12, marginBottom: 24 }}>

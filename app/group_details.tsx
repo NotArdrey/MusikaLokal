@@ -21,6 +21,10 @@ import ReportModal from '../src/components/ReportModal';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { getGroupMembersLabel, getGroupTypeLabel, isGroupLeaderMember } from '../src/utils/groupMembers';
+import {
+    hasValidCoordinates,
+    openNavigationDirections,
+} from '../src/utils/navigation';
 
 const { width, height } = Dimensions.get('window');
 const IMG_HEIGHT = height * 0.5;
@@ -114,6 +118,23 @@ export default function GroupDetailsScreen() {
     setShowReportModal(true);
   };
 
+  const handleNavigate = async () => {
+    try {
+      await openNavigationDirections({
+        latitude: group?.latitude,
+        longitude: group?.longitude,
+        label: group?.location || group?.name || 'Group location',
+      });
+    } catch (error) {
+      console.log('[group_details] Navigation error:', error);
+      showAlert(
+        'warning',
+        'Navigation Unavailable',
+        'This group does not have pinned coordinates yet.',
+      );
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -192,6 +213,15 @@ export default function GroupDetailsScreen() {
             <Text style={[styles.locationText, { color: colors.textSecondary }]}>
               {group.location || 'Manila, Philippines'}
             </Text>
+            {hasValidCoordinates(group?.latitude, group?.longitude) && (
+              <TouchableOpacity
+                style={[styles.navigatePill, { backgroundColor: colors.primary }]}
+                onPress={handleNavigate}
+              >
+                <Ionicons name="navigate-outline" size={15} color="#FFF" />
+                <Text style={styles.navigatePillText}>Navigate</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
@@ -421,6 +451,21 @@ const styles = StyleSheet.create({
   locationText: {
     fontFamily: 'Poppins_400Regular',
     fontSize: 14,
+  },
+  navigatePill: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  navigatePillText: {
+    color: '#FFF',
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 13,
   },
   divider: {
     height: 1,

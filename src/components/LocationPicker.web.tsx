@@ -15,6 +15,7 @@ interface LocationPickerProps {
 export default function LocationPicker({ visible, onClose, onSelect, initialLocation }: LocationPickerProps) {
     const [searchText, setSearchText] = useState('');
     const [loading, setLoading] = useState(false);
+    const [gettingLocation, setGettingLocation] = useState(false);
     const [currentSelection, setCurrentSelection] = useState<{ address: string; lat: number; lng: number } | null>(null);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
@@ -79,6 +80,58 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
         }
     };
 
+    const handleGetCurrentAddress = async () => {
+        setGettingLocation(true);
+        try {
+            const maybeNavigator =
+                typeof globalThis !== 'undefined' ? (globalThis as any).navigator : undefined;
+            if (!maybeNavigator?.geolocation) {
+                showAlert('warning', 'Not Supported', 'Geolocation is not available in this browser.');
+                return;
+            }
+
+            const position = await new Promise<any>((resolve, reject) => {
+                maybeNavigator.geolocation.getCurrentPosition(resolve, reject, {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 60000,
+                });
+            });
+
+            const latitude = position.coords.latitude;
+            const longitude = position.coords.longitude;
+
+            const response = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`,
+                {
+                    headers: {
+                        'User-Agent': 'MusikaLokalApp/1.0 (internal-test)'
+                    }
+                }
+            );
+
+            const text = await response.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseError) {
+                debugLog('Error parsing reverse geocode JSON:', parseError);
+                data = null;
+            }
+
+            setCurrentSelection({
+                lat: latitude,
+                lng: longitude,
+                address: data?.display_name || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+            });
+        } catch (error) {
+            console.error(error);
+            showAlert('error', 'Location Failed', 'Unable to get your current address.');
+        } finally {
+            setGettingLocation(false);
+        }
+    };
+
     return (
         <>
         <Modal visible={visible} animationType="fade" transparent={true} onRequestClose={onClose}>
@@ -114,6 +167,19 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                         <TouchableOpacity activeOpacity={1} onPress={handleSearch} style={styles.searchBtn}>
                             <Text style={styles.searchBtnText}>Search</Text>
                         </TouchableOpacity>
+                        <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={handleGetCurrentAddress}
+                            style={styles.currentLocationBtn}
+                            disabled={gettingLocation}
+                        >
+                            {gettingLocation ? (
+                                <ActivityIndicator size="small" color="#4F46E5" />
+                            ) : (
+                                <Ionicons name="locate" size={18} color="#4F46E5" />
+                            )}
+                            <Text style={styles.currentLocationBtnText}>Get Current Address</Text>
+                        </TouchableOpacity>
 
                         {currentSelection && (
                             <View style={styles.resultContainer}>
@@ -132,7 +198,6 @@ export default function LocationPicker({ visible, onClose, onSelect, initialLoca
                             style={[styles.confirmBtn, !currentSelection && styles.disabledBtn]}
                             onPress={() => currentSelection && onSelect(currentSelection)}
                             disabled={!currentSelection}
-                            activeOpacity={1}
                         >
                             <Text style={styles.confirmBtnText}>Confirm Location</Text>
                         </TouchableOpacity>
@@ -217,6 +282,24 @@ const styles = StyleSheet.create({
     searchBtnText: {
         color: '#4F46E5',
         fontWeight: '600',
+    },
+    currentLocationBtn: {
+        marginTop: 8,
+        alignSelf: 'center',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: '#C7D2FE',
+        backgroundColor: '#EEF2FF',
+    },
+    currentLocationBtnText: {
+        color: '#4F46E5',
+        fontWeight: '600',
+        fontSize: 12,
     },
     resultContainer: {
         marginTop: 24,
