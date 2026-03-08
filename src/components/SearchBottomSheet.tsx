@@ -360,7 +360,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
             const visibilityMap = new Map<string, boolean>();
             (groupVisibilityRows || []).forEach((row: any) => {
-              visibilityMap.set(row.id, row.open_group_applications !== false);
+              visibilityMap.set(row.id, row.open_group_applications === true);
             });
 
             results = results.map((item) =>
@@ -369,7 +369,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     ...item,
                     open_group_applications:
                       visibilityMap.get(item.id) ??
-                      item.open_group_applications !== false,
+                      item.open_group_applications === true,
                   }
                 : item,
             );

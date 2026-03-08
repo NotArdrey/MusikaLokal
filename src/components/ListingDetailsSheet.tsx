@@ -104,7 +104,7 @@ const ListingDetailsSheet = forwardRef<
   ListingDetailsSheetProps
 >(function ListingDetailsSheet({ listingId, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
-  const { userId, isSystemLocked, showLockAlert } = useAuth();
+  const { userId, userRole, isSystemLocked, showLockAlert } = useAuth();
   const { isProfileComplete } = useProfileCompletion();
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
@@ -663,7 +663,40 @@ const ListingDetailsSheet = forwardRef<
 
   // Check if user has already applied to this gig
   const checkExistingApplication = async () => {
-    if (!userId || !listingId || !group || group.type !== "Gig") return;
+    if (!userId || !listingId || !group) return;
+
+    if (group.type === "Group") {
+      try {
+        const { data, error } = await supabase
+          .from("notifications")
+          .select("id, created_at")
+          .eq("user_id", userId)
+          .eq("title", "Group Application Submitted")
+          .contains("meta", { group_listing_id: listingId })
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error) {
+          console.error("Error checking existing group application:", error);
+          return;
+        }
+
+        if (data) {
+          setHasExistingApplication(true);
+          setExistingApplicationStatus("pending");
+        } else {
+          setHasExistingApplication(false);
+          setExistingApplicationStatus(null);
+        }
+      } catch (err) {
+        console.error("Error checking group application:", err);
+      }
+
+      return;
+    }
+
+    if (group.type !== "Gig") return;
 
     try {
       // Check for any existing application to this specific gig
@@ -899,11 +932,7 @@ const ListingDetailsSheet = forwardRef<
     userGroups,
     setAlertConfig,
     setAlertVisible,
-    setConfirmTitle,
-    setConfirmMessage,
-    setConfirmAction,
-    setConfirmRequireTerms,
-    setModalVisible,
+    requestConfirmation: handleConfirm,
     setIsSubmittingApplication,
     setHasExistingApplication,
     setExistingApplicationStatus,
@@ -966,9 +995,11 @@ const ListingDetailsSheet = forwardRef<
 
   // Check for existing application when group data is loaded
   useEffect(() => {
-    if (group && userId && group.type === "Gig") {
+    if (group && userId && (group.type === "Gig" || group.type === "Group")) {
       checkExistingApplication();
-      fetchUserGroups();
+      if (group.type === "Gig") {
+        fetchUserGroups();
+      }
     }
   }, [group, userId]);
 
@@ -1083,6 +1114,8 @@ const ListingDetailsSheet = forwardRef<
           name: data.name || data.full_name,
         });
 
+        let resolvedOpenGroupApplications: boolean | null = null;
+
         const normalizeImageArray = (value: any): string[] => {
           if (Array.isArray(value)) {
             return value
@@ -1121,12 +1154,27 @@ const ListingDetailsSheet = forwardRef<
         let resolvedImages = normalizeImageArray(data.images);
 
         if (type === "Group") {
-          const { data: mediaRows, error: mediaError } = await supabase
-            .from("group_media")
-            .select("media_url, sort_order")
-            .eq("group_id", data.id)
-            .eq("media_type", "image")
-            .order("sort_order", { ascending: true });
+          const [
+            mediaRowsResult,
+            groupSettingsResult,
+          ] = await Promise.all([
+            supabase
+              .from("group_media")
+              .select("media_url, sort_order")
+              .eq("group_id", data.id)
+              .eq("media_type", "image")
+              .order("sort_order", { ascending: true }),
+            supabase
+              .from("groups")
+              .select("open_group_applications")
+              .eq("id", data.id)
+              .single(),
+          ]);
+
+          const mediaRows = mediaRowsResult.data;
+          const mediaError = mediaRowsResult.error;
+          const groupSettings = groupSettingsResult.data;
+          const groupSettingsError = groupSettingsResult.error;
 
           if (!mediaError && Array.isArray(mediaRows)) {
             const groupMediaImages = mediaRows
@@ -1140,6 +1188,11 @@ const ListingDetailsSheet = forwardRef<
             }
           } else if (mediaError) {
             debugLog("⚠️ group_media fetch failed, using fallback images:", mediaError);
+          }
+
+          if (!groupSettingsError && groupSettings) {
+            resolvedOpenGroupApplications =
+              groupSettings.open_group_applications === true;
           }
         }
         // Fetch owner profile separately
@@ -1182,6 +1235,10 @@ const ListingDetailsSheet = forwardRef<
           review_count: data.review_count || 0,
           rating: data.rating || 0,
           studio_type: normalizedStudioType,
+          open_group_applications:
+            typeof data.open_group_applications === "boolean"
+              ? data.open_group_applications
+              : resolvedOpenGroupApplications ?? true,
         };
 
         // If studio or venue, fetch availability from operating hours
@@ -1842,20 +1899,73 @@ const ListingDetailsSheet = forwardRef<
   );
 
   const {
+    currentUserRole,
+    currentUserId,
+    checkingVenue,
+  } = useCurrentUserVenueRole();
+
+  const {
     labels,
     rehearsalRate,
     recordingRate,
     hasDualPricing,
     displayRate,
-    showTabs,
+    showTabs: hasDefaultTabs,
   } = useListingSheetDerived(group);
+
+  const isGroupListing = group?.type === "Group";
+  const effectiveUserRole = userRole || currentUserRole;
+  const canApplyToGroup =
+    isGroupListing &&
+    group?.open_group_applications === true &&
+    !!userId &&
+    effectiveUserRole === "musician" &&
+    group?.owner_id !== userId;
+
+  const tabsToRender = useMemo(() => {
+    const baseTabs = Array.isArray(labels.tabs) ? [...labels.tabs] : [];
+
+    if (!isGroupListing) {
+      return baseTabs;
+    }
+
+    const withoutApply = baseTabs.filter((tab) => tab !== "Apply");
+    if (!canApplyToGroup) {
+      return withoutApply;
+    }
+
+    if (withoutApply.includes("Apply")) {
+      return withoutApply;
+    }
+
+    const reviewTabIndex = withoutApply.indexOf("Review");
+    if (reviewTabIndex === -1) {
+      return [...withoutApply, "Apply"];
+    }
+
+    const nextTabs = [...withoutApply];
+    nextTabs.splice(reviewTabIndex, 0, "Apply");
+    return nextTabs;
+  }, [canApplyToGroup, isGroupListing, labels.tabs]);
+
+  const showTabs = hasDefaultTabs && tabsToRender.length > 0;
+
+  useEffect(() => {
+    if (!tabsToRender.length) {
+      return;
+    }
+
+    if (!tabsToRender.includes(activeTab)) {
+      setActiveTab(tabsToRender[0]);
+    }
+  }, [activeTab, tabsToRender]);
 
   const listingOwnerId = group?.owner_id || group?.organizer_id || group?.id;
   const showReportButton = !!group && !!userId && listingOwnerId !== userId;
 
   const renderTabs = () => (
     <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>
-      {labels.tabs.map((tab) => (
+      {tabsToRender.map((tab) => (
         <TouchableOpacity activeOpacity={1}
           key={tab}
           style={[
@@ -2004,9 +2114,41 @@ const ListingDetailsSheet = forwardRef<
       colors={colors}
       isDark={isDark}
       group={group}
+      applicationContext="gig"
       userId={userId}
       pitchMessage={pitchMessage}
       setPitchMessage={setPitchMessage}
+      cvFile={cvFile}
+      cvUrl={cvUrl}
+      setCvFile={setCvFile}
+      videoUrl={videoUrl}
+      setVideoUrl={setVideoUrl}
+      isSubmittingApplication={isSubmittingApplication}
+      hasExistingApplication={hasExistingApplication}
+      existingApplicationStatus={existingApplicationStatus}
+      isBlocked={isBlocked}
+      blockReason={blockReason}
+      userGroups={userGroups}
+      selectedGroupId={selectedGroupId}
+      setSelectedGroupId={setSelectedGroupId}
+      selectedSlotType={selectedSlotType}
+      setSelectedSlotType={setSelectedSlotType}
+      groupAlreadyApplied={groupAlreadyApplied}
+      groupApplicationBy={groupApplicationBy}
+      handleSubmitApplication={handleSubmitApplication}
+    />
+  );
+
+  const renderGroupApply = () => (
+    <GigApplyTab
+      colors={colors}
+      isDark={isDark}
+      group={group}
+      applicationContext="group"
+      userId={userId}
+      pitchMessage={pitchMessage}
+      setPitchMessage={setPitchMessage}
+      cvFile={cvFile}
       cvUrl={cvUrl}
       setCvFile={setCvFile}
       videoUrl={videoUrl}
@@ -2028,12 +2170,6 @@ const ListingDetailsSheet = forwardRef<
   );
 
   // --- GROUP TABS ---
-
-  const {
-    currentUserRole,
-    currentUserId,
-    checkingVenue,
-  } = useCurrentUserVenueRole();
 
   const handleProfileNavigation = () => {
     const targetProfileId = group?.owner_id || group?.organizer_id || null;
@@ -2227,6 +2363,7 @@ const ListingDetailsSheet = forwardRef<
               activeTab={activeTab}
               showTabs={showTabs}
               renderGroupAbout={renderGroupAbout}
+              renderGroupApply={renderGroupApply}
               renderGroupTimeline={renderGroupTimeline}
               renderReviews={renderReviews}
               renderStudioGigVenueAbout={renderStudioGigVenueAbout}
@@ -2285,15 +2422,22 @@ const ListingDetailsSheet = forwardRef<
         onClose={() => {
           debugLog("🔴 Modal closed without confirmation");
           setConfirmRequireTerms(false);
+          setConfirmAction(() => () => { });
+          setConfirmTitle("");
+          setConfirmMessage("");
           setModalVisible(false);
         }}
         onConfirm={() => {
           debugLog("🟢 Modal CONFIRMED - executing action");
           debugLog("confirmAction:", confirmAction);
+          const actionToRun = confirmAction;
           setConfirmRequireTerms(false);
+          setConfirmAction(() => () => { });
+          setConfirmTitle("");
+          setConfirmMessage("");
           setModalVisible(false);
           try {
-            confirmAction();
+            actionToRun();
             debugLog("✅ confirmAction executed successfully");
           } catch (error) {
             console.error("❌ Error executing confirmAction:", error);

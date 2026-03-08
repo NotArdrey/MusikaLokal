@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { supabase } from "../../lib/supabase";
+import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 
 interface AlertConfig {
   type: "success" | "error" | "warning" | "info";
@@ -22,11 +23,12 @@ interface UseApplicationSubmissionActionParams {
   userGroups: any[];
   setAlertConfig: (config: AlertConfig) => void;
   setAlertVisible: (visible: boolean) => void;
-  setConfirmTitle: (value: string) => void;
-  setConfirmMessage: (value: string) => void;
-  setConfirmAction: (action: () => void) => void;
-  setConfirmRequireTerms: (value: boolean) => void;
-  setModalVisible: (visible: boolean) => void;
+  requestConfirmation: (
+    action: () => void,
+    title: string,
+    message: string,
+    options?: { requireTerms?: boolean },
+  ) => void;
   setIsSubmittingApplication: (value: boolean) => void;
   setHasExistingApplication: (value: boolean) => void;
   setExistingApplicationStatus: (value: string | null) => void;
@@ -52,11 +54,7 @@ export const useApplicationSubmissionAction = ({
   userGroups,
   setAlertConfig,
   setAlertVisible,
-  setConfirmTitle,
-  setConfirmMessage,
-  setConfirmAction,
-  setConfirmRequireTerms,
-  setModalVisible,
+  requestConfirmation,
   setIsSubmittingApplication,
   setHasExistingApplication,
   setExistingApplicationStatus,
@@ -66,6 +64,30 @@ export const useApplicationSubmissionAction = ({
   setCvUrl,
   closeSheet,
 }: UseApplicationSubmissionActionParams) => {
+  const invokeListingsCrudAction = useCallback(
+    async (body: Record<string, unknown>) => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      const sessionUserId = user?.id;
+
+      if (!sessionUserId) {
+        throw new Error("Session expired. Please log in again.");
+      }
+
+      const payload = {
+        ...body,
+        userId: sessionUserId,
+      };
+
+      return supabase.functions.invoke("listings-crud", {
+        body: payload,
+      });
+    },
+    [],
+  );
+
   const uploadDocument = useCallback(async (file: any) => {
     try {
       console.log("📤 Uploading CV:", file.name);
@@ -101,6 +123,7 @@ export const useApplicationSubmissionAction = ({
     console.log("Inserting application into database...");
 
     try {
+      const isGroupListing = group?.type === "Group";
       let uploadedCvUrl = null;
       const selectedGroup = selectedGroupId
         ? userGroups.find((g) => g.id === selectedGroupId)
@@ -125,6 +148,125 @@ export const useApplicationSubmissionAction = ({
         }
       } else if (cvUrl) {
         uploadedCvUrl = cvUrl;
+      }
+
+      console.log("[AppSubmit] isGroupListing:", isGroupListing, "group.type:", group?.type);
+
+      if (isGroupListing) {
+        if (!group?.owner_id) {
+          setAlertConfig({
+            type: "error",
+            title: "Application Failed",
+            message: "This group cannot receive applications right now.",
+          });
+          setAlertVisible(true);
+          return;
+        }
+
+        console.log("[AppSubmit] Sending notification to group owner:", group.owner_id);
+
+        const applicationMeta = {
+          application_scope: "group_member",
+          group_listing_id: listingId,
+          group_listing_name: group?.name || "Group",
+          target_group_type: group?.group_type || null,
+          applicant_id: userId,
+          selected_group_id: selectedGroupId || null,
+          pitch_message: pitchMessage,
+          video_url: videoUrl || null,
+          cv_url: uploadedCvUrl,
+          submitted_at: new Date().toISOString(),
+          status: "pending",
+        };
+
+        const { error: ownerNotificationError } = await invokeListingsCrudAction(
+          {
+            action: "create_notification",
+            targetUserId: group.owner_id,
+            type: "info",
+            title: "New Group Application",
+            message: `You have a new application for "${group.name}".`,
+            meta: applicationMeta,
+          },
+        );
+
+        console.log("[AppSubmit] invokeListingsCrudAction returned.", {
+          hasError: !!ownerNotificationError,
+          errorMessage: ownerNotificationError?.message,
+        });
+
+        if (ownerNotificationError) {
+          console.error("Failed to notify group owner:", ownerNotificationError);
+          setAlertConfig({
+            type: "error",
+            title: "Submission Failed",
+            message:
+              ownerNotificationError.message ||
+              "Failed to send your application. Please try again.",
+          });
+          setAlertVisible(true);
+          return;
+        }
+
+        console.log("[AppSubmit] Owner notification sent OK. Inserting self-notification (non-blocking)...");
+
+        // Non-blocking: self-notification should not stall the success flow
+        supabase
+          .from("notifications")
+          .insert({
+            user_id: userId,
+            type: "info",
+            title: "Group Application Submitted",
+            message: `You applied to join "${group.name}".`,
+            meta: applicationMeta,
+          })
+          .then(({ error: selfNotificationError }) => {
+            if (selfNotificationError) {
+              console.error("Failed to persist group application receipt:", selfNotificationError);
+            } else {
+              console.log("[AppSubmit] Self-notification inserted OK.");
+            }
+          })
+          .catch((err) => {
+            console.error("[AppSubmit] Self-notification insert crashed:", err);
+          });
+
+        if (group && group.embedding) {
+          try {
+            await supabase.rpc("update_user_interest", {
+              p_user_id: userId,
+              p_item_vector: group.embedding,
+              p_weight: 0.4,
+            });
+            console.log("🤖 AI learned from group application:", group.name);
+          } catch (e) {
+            console.log("Error updating AI interest from group application:", e);
+          }
+        }
+
+        console.log("[AppSubmit] Showing success alert for group application.");
+
+        setHasExistingApplication(true);
+        setExistingApplicationStatus("pending");
+
+        setAlertConfig({
+          type: "success",
+          title: "Application Submitted!",
+          message:
+            "Your application has been sent to the group leader. They can review your pitch, CV, and video.",
+        });
+        setAlertVisible(true);
+
+        setPitchMessage("");
+        setVideoUrl("");
+        setCvFile(null);
+        setCvUrl("");
+
+        setTimeout(() => {
+          closeSheet();
+        }, 2500);
+
+        return;
       }
 
       const applicationPayload = {
@@ -194,20 +336,17 @@ export const useApplicationSubmissionAction = ({
       if (group?.organizer_id && data && !needsLeaderApproval) {
         try {
           if (group.organizer_id !== userId) {
-            await supabase.functions.invoke("listings-crud", {
-              body: {
-                action: "create_notification",
-                userId,
-                targetUserId: group.organizer_id,
-                type: "info",
-                title: "New Gig Application",
-                message: `You have a new application for "${group.name}".`,
-                meta: {
-                  gig_id: listingId,
-                  application_id: data.id,
-                  applicant_id: userId,
-                  group_id: selectedGroupId || null,
-                },
+            await invokeListingsCrudAction({
+              action: "create_notification",
+              targetUserId: group.organizer_id,
+              type: "info",
+              title: "New Gig Application",
+              message: `You have a new application for "${group.name}".`,
+              meta: {
+                gig_id: listingId,
+                application_id: data.id,
+                applicant_id: userId,
+                group_id: selectedGroupId || null,
               },
             });
           }
@@ -235,12 +374,9 @@ export const useApplicationSubmissionAction = ({
               meta: { gig_id: listingId, application_id: data.id },
             }));
 
-            await supabase.functions.invoke("listings-crud", {
-              body: {
-                action: "create_notifications",
-                userId,
-                notifications,
-              },
+            await invokeListingsCrudAction({
+              action: "create_notifications",
+              notifications,
             });
             console.log("📬 Notified group members:", members.length);
           }
@@ -313,6 +449,7 @@ export const useApplicationSubmissionAction = ({
     setPitchMessage,
     setVideoUrl,
     uploadDocument,
+    invokeListingsCrudAction,
     userGroups,
     userId,
     videoUrl,
@@ -330,11 +467,88 @@ export const useApplicationSubmissionAction = ({
       return;
     }
 
+    const isGroupListing = group.type === "Group";
+
+    if (isGroupListing) {
+      if (group.owner_id === userId) {
+        setAlertConfig({
+          type: "warning",
+          title: "Action Not Allowed",
+          message: "You cannot apply to your own group listing.",
+        });
+        setAlertVisible(true);
+        return;
+      }
+
+      if (group.open_group_applications !== true) {
+        setAlertConfig({
+          type: "error",
+          title: "Applications Closed",
+          message: "This group is not accepting applications right now.",
+        });
+        setAlertVisible(true);
+        return;
+      }
+
+      if (!pitchMessage.trim()) {
+        setAlertConfig({
+          type: "error",
+          title: "Pitch Required",
+          message: "Please tell the group leader why you are a good fit.",
+        });
+        setAlertVisible(true);
+        return;
+      }
+
+      if (!cvFile && !cvUrl) {
+        setAlertConfig({
+          type: "error",
+          title: "CV Required",
+          message: "Please upload your CV/Resume to apply.",
+        });
+        setAlertVisible(true);
+        return;
+      }
+
+      if (!videoUrl) {
+        setAlertConfig({
+          type: "error",
+          title: "Video Required",
+          message:
+            "Please upload a performance video before submitting your application.",
+        });
+        setAlertVisible(true);
+        return;
+      }
+
+      requestConfirmation(
+        () => {
+          void processApplicationSubmission();
+        },
+        "Submit Application?",
+        "Are you sure you want to submit this group application? This action cannot be undone.",
+        { requireTerms: true },
+      );
+      return;
+    }
+
     if (groupAlreadyApplied) {
       setAlertConfig({
         type: "warning",
         title: "Group Already Applied",
         message: `This group has already applied via ${groupApplicationBy}. Only one application per group is allowed.`,
+      });
+      setAlertVisible(true);
+      return;
+    }
+
+    const gigDeadlineInfo = getGigApplicationDeadlineInfo(group);
+    if (gigDeadlineInfo?.isPassed) {
+      setAlertConfig({
+        type: "error",
+        title: "Applications Closed",
+        message:
+          "Applications for this gig are already closed (deadline is 24 hours before the event).",
       });
       setAlertVisible(true);
       return;
@@ -493,13 +707,14 @@ export const useApplicationSubmissionAction = ({
       }
     }
 
-    setConfirmTitle("Submit Application?");
-    setConfirmMessage(
+    requestConfirmation(
+      () => {
+        void processApplicationSubmission();
+      },
+      "Submit Application?",
       "Are you sure you want to submit this application? This action cannot be undone.",
+      { requireTerms: true },
     );
-    setConfirmAction(() => processApplicationSubmission);
-    setConfirmRequireTerms(true);
-    setModalVisible(true);
   }, [
     cvFile,
     cvUrl,
@@ -513,11 +728,7 @@ export const useApplicationSubmissionAction = ({
     selectedSlotType,
     setAlertConfig,
     setAlertVisible,
-    setConfirmAction,
-    setConfirmRequireTerms,
-    setConfirmMessage,
-    setConfirmTitle,
-    setModalVisible,
+    requestConfirmation,
     userId,
     videoUrl,
   ]);

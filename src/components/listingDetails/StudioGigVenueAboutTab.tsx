@@ -2,8 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useMemo } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import {
-  hasNavigationDestination,
-  openNavigationDirections,
+    hasNavigationDestination,
+    openNavigationDirections,
 } from "../../utils/navigation";
 import CachedImage from "../CachedImage";
 import ListingMediaCarousel from "./ListingMediaCarousel";
@@ -191,9 +191,12 @@ const StudioGigVenueAboutTab = ({
             numberOfLines={1}
             adjustsFontSizeToFit
           >
-                day: "numeric",
-                year: "numeric",
-              })
+            {group.event_date
+              ? new Date(group.event_date).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })
               : "TBA"}
           </Text>
         </View>

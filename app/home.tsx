@@ -540,7 +540,7 @@ export default function HomeScreen() {
           .in("id", groupIds);
 
         (groupVisibilityRows || []).forEach((row: any) => {
-          groupOpenApplicationsMap.set(row.id, row.open_group_applications !== false);
+          groupOpenApplicationsMap.set(row.id, row.open_group_applications === true);
         });
       }
 
@@ -710,7 +710,7 @@ export default function HomeScreen() {
                 : true,
           open_group_applications:
             type === "Group"
-              ? groupOpenApplicationsMap.get(item.id) ?? item.open_group_applications !== false
+              ? groupOpenApplicationsMap.get(item.id) ?? item.open_group_applications === true
               : undefined,
           // Seasonal pricing fields for studios
           has_seasonal_pricing: item.has_seasonal_pricing || false,

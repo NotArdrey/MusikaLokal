@@ -17,14 +17,16 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.login-redirect]
+[functions.listings-crud]
+verify_jwt = false
 [functions.manage-profile]
-verify_jwt = true
+verify_jwt = false
 [functions.manage-bookings]
 verify_jwt = false
 [functions.manage-notifications]
 verify_jwt = false
 [functions.manage-listings]
-verify_jwt = true
+verify_jwt = false
 [functions.manage-details]
 verify_jwt = false
 [functions.verify-identity]

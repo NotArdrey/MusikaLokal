@@ -261,6 +261,21 @@ const withSessionAuthorization = async (
     };
 };
 
+const withoutAuthorizationHeader = (options?: InvokeOptions): InvokeOptions | undefined => {
+    if (!options?.headers) {
+        return options;
+    }
+
+    const filteredHeaders = Object.fromEntries(
+        Object.entries(options.headers).filter(([header]) => header.toLowerCase() !== 'authorization'),
+    );
+
+    return {
+        ...options,
+        headers: Object.keys(filteredHeaders).length > 0 ? filteredHeaders : undefined,
+    };
+};
+
 (supabase.functions as any).invoke = async function<T = any>(
     functionName: string,
     options?: InvokeOptions,
@@ -288,7 +303,7 @@ const withSessionAuthorization = async (
                 // ignore refresh errors; retry invoke anyway so caller receives final error context
             }
 
-            const retryOptions = await withSessionAuthorization(options);
+            const retryOptions = await withSessionAuthorization(withoutAuthorizationHeader(options));
             result = (await originalInvoke(functionName, retryOptions)) as {
                 data: T | null;
                 error: any;

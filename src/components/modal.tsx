@@ -49,16 +49,28 @@ const CustomModal: React.FC<CustomModalProps> = ({
   const { colors } = useTheme();
   const [isTermsAccepted, setIsTermsAccepted] = React.useState(false);
   const [showTermsContent, setShowTermsContent] = React.useState(false);
+  const [canInteract, setCanInteract] = React.useState(false);
 
   React.useEffect(() => {
     if (!visible) {
       setIsTermsAccepted(false);
       setShowTermsContent(false);
+      setCanInteract(false);
+      return;
     }
+
+    setCanInteract(false);
+    const timeout = setTimeout(() => {
+      setCanInteract(true);
+    }, 250);
+
+    return () => clearTimeout(timeout);
   }, [visible]);
 
   const isConfirmDisabled =
-    confirmDisabled || (requireTermsAcceptance && !isTermsAccepted);
+    !canInteract ||
+    confirmDisabled ||
+    (requireTermsAcceptance && !isTermsAccepted);
 
   return (
     <RNModal
@@ -119,7 +131,6 @@ const CustomModal: React.FC<CustomModalProps> = ({
                 <>
                   <TouchableOpacity activeOpacity={1}
                     onPress={() => setIsTermsAccepted((prev) => !prev)}
-                    activeOpacity={1}
                     style={styles.termsRow}
                   >
                     <View
@@ -153,7 +164,6 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   {!onTermsPress && (
                     <TouchableOpacity activeOpacity={1}
                       onPress={() => setShowTermsContent(true)}
-                      activeOpacity={1}
                       style={styles.termsLinkButton}
                     >
                       <Text style={[styles.termsLinkText, { color: colors.primary }]}>
@@ -180,6 +190,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
                 <TouchableOpacity activeOpacity={1}
                   style={styles.cancelButton}
+                  disabled={!canInteract}
                   onPress={onClose}
                 >
                   <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>
@@ -217,7 +228,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
               <Text style={[styles.termsBody, { color: colors.textSecondary }]}>• {'>'}7 days: 80% refund to client.{"\n"}• 3–7 days: 70% refund to client.{"\n"}• {'<'}3 days: No refund; 100% to provider.{"\n\n"}In cases of extreme weather, government-mandated lockdowns, or national emergencies, either party may cancel without penalty, subject to verification.</Text>
 
               <Text style={[styles.termsSectionTitle, { color: colors.text }]}>3. Limitation of Liability</Text>
-              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>Musika Lokal is provided "as-is" and is not liable for personal injury or property damage during sessions/events, external payment network failures, or loss of income due to app downtime.</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>Musika Lokal is provided &quot;as-is&quot; and is not liable for personal injury or property damage during sessions/events, external payment network failures, or loss of income due to app downtime.</Text>
 
               <Text style={[styles.termsSectionTitle, { color: colors.text }]}>4. User Content and Intellectual Property</Text>
               <Text style={[styles.termsBody, { color: colors.textSecondary }]}>You retain ownership of uploaded content and grant Musika Lokal a non-exclusive license to display it for platform operations and promotion.</Text>

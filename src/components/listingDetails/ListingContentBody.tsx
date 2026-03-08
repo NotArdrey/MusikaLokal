@@ -8,6 +8,7 @@ interface ListingContentBodyProps {
   activeTab: string;
   showTabs: boolean;
   renderGroupAbout: () => React.ReactNode;
+  renderGroupApply: () => React.ReactNode;
   renderGroupTimeline: () => React.ReactNode;
   renderReviews: () => React.ReactNode;
   renderStudioGigVenueAbout: () => React.ReactNode;
@@ -24,6 +25,7 @@ const ListingContentBody = ({
   activeTab,
   showTabs,
   renderGroupAbout,
+  renderGroupApply,
   renderGroupTimeline,
   renderReviews,
   renderStudioGigVenueAbout,
@@ -36,6 +38,7 @@ const ListingContentBody = ({
     {(group.type === "Group" || group.type === "Artist" || !group.type) && (
       <>
         {(activeTab === "About" || !showTabs) && renderGroupAbout()}
+        {group.type === "Group" && activeTab === "Apply" && renderGroupApply()}
         {activeTab === "Timeline" && renderGroupTimeline()}
         {activeTab === "Review" && renderReviews()}
       </>

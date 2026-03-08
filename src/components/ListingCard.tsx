@@ -14,6 +14,7 @@ import {
 import { PH_MUSIC_GROUP_TYPES } from "../constants/groupTypes";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import CachedImage from "./CachedImage";
 
 const debugLog = (..._args: unknown[]) => { };
@@ -74,27 +75,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // Gig Application Deadline Logic (24hrs before event)
   const gigDeadlineInfo = useMemo(() => {
-    if (item.type !== "Gig" || !item.event_date) return null;
-    const eventDate = new Date(item.event_date);
-    const eventStartTime = item.requirements?.event_start_time;
-    if (eventStartTime) {
-      const [time, period] = eventStartTime.split(" ");
-      const [hours, minutes] = time.split(":").map(Number);
-      let hour24 = hours;
-      if (period === "PM" && hours !== 12) hour24 += 12;
-      if (period === "AM" && hours === 12) hour24 = 0;
-      eventDate.setHours(hour24, minutes, 0, 0);
-    }
-    const deadline = new Date(eventDate.getTime() - 24 * 60 * 60 * 1000);
-    const now = new Date();
-    const hoursUntilDeadline =
-      (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);
-    return {
-      deadline,
-      isPassed: hoursUntilDeadline <= 0,
-      isUrgent: hoursUntilDeadline > 0 && hoursUntilDeadline < 48,
-      hoursLeft: Math.max(0, Math.floor(hoursUntilDeadline)),
-    };
+    return getGigApplicationDeadlineInfo(item);
   }, [item.event_date, item.requirements?.event_start_time, item.type]);
 
   // Determine "Subtitle" (Location or Genre)
@@ -244,8 +225,13 @@ const ListingCard: React.FC<ListingCardProps> = ({
   );
 
   const showOpenApplicationsBadge = useMemo(
-    () => item.type === "Group" && item.open_group_applications !== false,
-    [item.open_group_applications, item.type],
+    () =>
+      item.type === "Group" &&
+      item.open_group_applications === true &&
+      !!userId &&
+      userRole === "musician" &&
+      item.owner_id !== userId,
+    [item.open_group_applications, item.owner_id, item.type, userId, userRole],
   );
 
   const gigSummary = useMemo(
@@ -422,14 +408,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
           {/* Top Row: Floating Badges */}
           <View style={styles.immersiveTopRow}>
-            {/* Rating Glass Badge */}
-            <View style={styles.glassBadge}>
-              <Ionicons name="star" size={12} color="#FCD34D" />
-              <Text style={styles.glassBadgeText}>
-                {item.rating > 0 ? item.rating.toFixed(1) : "New"}
-              </Text>
-            </View>
-
             {/* Group Required Warning Badge (Horizontal) */}
             {showGroupWarning && (
               <View
@@ -528,102 +506,118 @@ const ListingCard: React.FC<ListingCardProps> = ({
             <View
               style={{
                 flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
+                alignItems: "flex-start",
                 marginBottom: 8,
-                flexWrap: "wrap",
               }}
             >
-              <View style={[styles.tagBadge, { backgroundColor: badgeColor }]}>
-                <Text style={styles.tagText}>{badgeLabel}</Text>
-              </View>
-              {item.pax && (item.type === "Studio" || item.hourly_rate) && (
-                <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
-                  <Text style={styles.tagText}>{item.pax} pax</Text>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  flex: 1,
+                  paddingRight: 8,
+                }}
+              >
+                <View style={[styles.tagBadge, { backgroundColor: badgeColor }]}>
+                  <Text style={styles.tagText}>{badgeLabel}</Text>
                 </View>
-              )}
-              {/* Special Schedule Badge for Studios with date overrides */}
-              {item.has_special_dates &&
-                (item.type === "Studio" || item.hourly_rate) && (
-                  <View
-                    style={[styles.tagBadge, { backgroundColor: "#F59E0B" }]}
-                  >
-                    <Text style={styles.tagText}>Special Hours</Text>
+                {item.pax && (item.type === "Studio" || item.hourly_rate) && (
+                  <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
+                    <Text style={styles.tagText}>{item.pax} pax</Text>
                   </View>
                 )}
-              {/* Seasonal Pricing Badge for Studios */}
-              {item.has_seasonal_pricing &&
-                (item.type === "Studio" || item.hourly_rate) && (
-                  <View
-                    style={[styles.tagBadge, { backgroundColor: "#8B5CF6" }]}
-                  >
-                    <Text style={styles.tagText}>Seasonal Rates</Text>
+                {/* Special Schedule Badge for Studios with date overrides */}
+                {item.has_special_dates &&
+                  (item.type === "Studio" || item.hourly_rate) && (
+                    <View
+                      style={[styles.tagBadge, { backgroundColor: "#F59E0B" }]}
+                    >
+                      <Text style={styles.tagText}>Special Hours</Text>
+                    </View>
+                  )}
+                {/* Seasonal Pricing Badge for Studios */}
+                {item.has_seasonal_pricing &&
+                  (item.type === "Studio" || item.hourly_rate) && (
+                    <View
+                      style={[styles.tagBadge, { backgroundColor: "#8B5CF6" }]}
+                    >
+                      <Text style={styles.tagText}>Seasonal Rates</Text>
+                    </View>
+                  )}
+                {/* Weekend Rate Badge */}
+                {item.weekend_multiplier &&
+                  parseFloat(item.weekend_multiplier) > 1 &&
+                  (item.type === "Studio" || item.hourly_rate) && (
+                    <View
+                      style={[styles.tagBadge, { backgroundColor: "#EC4899" }]}
+                    >
+                      <Text style={styles.tagText}>
+                        Weekend +
+                        {Math.round(
+                          (parseFloat(item.weekend_multiplier) - 1) * 100,
+                        )}
+                        %
+                      </Text>
+                    </View>
+                  )}
+                {/* Slots Needed Badge for Gigs */}
+                {item.type === "Gig" && item.requirements?.slots && (
+                  <>
+                    {item.requirements.slots.solo?.needed > 0 && (
+                      <View style={[styles.tagBadge, { backgroundColor: "#EC4899" }]}>
+                        <Text style={styles.tagText}>
+                          {item.requirements.slots.solo.needed} Solo
+                        </Text>
+                      </View>
+                    )}
+                    {item.requirements.slots.duo?.needed > 0 && (
+                      <View style={[styles.tagBadge, { backgroundColor: "#8B5CF6" }]}>
+                        <Text style={styles.tagText}>
+                          {item.requirements.slots.duo.needed} Duo{item.requirements.slots.duo.needed > 1 ? "s" : ""}
+                        </Text>
+                      </View>
+                    )}
+                    {item.requirements.slots.band?.needed > 0 && (
+                      <View style={[styles.tagBadge, { backgroundColor: "#3B82F6" }]}>
+                        <Text style={styles.tagText}>
+                          {item.requirements.slots.band.needed} Group{item.requirements.slots.band.needed > 1 ? "s" : ""}
+                        </Text>
+                      </View>
+                    )}
+                    {/* Preferred Group Types */}
+                    {item.requirements.slots.band?.preferred_group_types?.length > 0 &&
+                      item.requirements.slots.band.preferred_group_types.map((typeId: string) => {
+                        const type = PH_MUSIC_GROUP_TYPES.find(t => t.id === typeId);
+                        return type ? (
+                          <View key={typeId} style={[styles.tagBadge, { backgroundColor: "#6366F1" }]}>
+                            <Text style={styles.tagText}>{type.label}</Text>
+                          </View>
+                        ) : null;
+                      })
+                    }
+                  </>
+                )}
+                {showOpenApplicationsBadge && (
+                  <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
+                    <Text style={styles.tagText}>Open Applications</Text>
                   </View>
                 )}
-              {/* Weekend Rate Badge */}
-              {item.weekend_multiplier &&
-                parseFloat(item.weekend_multiplier) > 1 &&
-                (item.type === "Studio" || item.hourly_rate) && (
-                  <View
-                    style={[styles.tagBadge, { backgroundColor: "#EC4899" }]}
-                  >
+                {/* Total Slots Badge for Gigs without detailed slots */}
+                {item.type === "Gig" && item.requirements?.total_slots_needed > 0 && !item.requirements?.slots && (
+                  <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
                     <Text style={styles.tagText}>
-                      Weekend +
-                      {Math.round(
-                        (parseFloat(item.weekend_multiplier) - 1) * 100,
-                      )}
-                      %
+                      {item.requirements.total_slots_needed} Slot{item.requirements.total_slots_needed > 1 ? "s" : ""}
                     </Text>
                   </View>
                 )}
-              {/* Slots Needed Badge for Gigs */}
-              {item.type === "Gig" && item.requirements?.slots && (
-                <>
-                  {item.requirements.slots.solo?.needed > 0 && (
-                    <View style={[styles.tagBadge, { backgroundColor: "#EC4899" }]}>
-                      <Text style={styles.tagText}>
-                        {item.requirements.slots.solo.needed} Solo
-                      </Text>
-                    </View>
-                  )}
-                  {item.requirements.slots.duo?.needed > 0 && (
-                    <View style={[styles.tagBadge, { backgroundColor: "#8B5CF6" }]}>
-                      <Text style={styles.tagText}>
-                        {item.requirements.slots.duo.needed} Duo{item.requirements.slots.duo.needed > 1 ? "s" : ""}
-                      </Text>
-                    </View>
-                  )}
-                  {item.requirements.slots.band?.needed > 0 && (
-                    <View style={[styles.tagBadge, { backgroundColor: "#3B82F6" }]}>
-                      <Text style={styles.tagText}>
-                        {item.requirements.slots.band.needed} Group{item.requirements.slots.band.needed > 1 ? "s" : ""}
-                      </Text>
-                    </View>
-                  )}
-                  {/* Preferred Group Types */}
-                  {item.requirements.slots.band?.preferred_group_types?.length > 0 &&
-                    item.requirements.slots.band.preferred_group_types.map((typeId: string) => {
-                      const type = PH_MUSIC_GROUP_TYPES.find(t => t.id === typeId);
-                      return type ? (
-                        <View key={typeId} style={[styles.tagBadge, { backgroundColor: "#6366F1" }]}>
-                          <Text style={styles.tagText}>{type.label}</Text>
-                        </View>
-                      ) : null;
-                    })
-                  }
-                </>
-              )}
-              {showOpenApplicationsBadge && (
-                <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
-                  <Text style={styles.tagText}>Open Applications</Text>
-                </View>
-              )}
-              {/* Total Slots Badge for Gigs without detailed slots */}
-              {item.type === "Gig" && item.requirements?.total_slots_needed > 0 && !item.requirements?.slots && (
-                <View style={[styles.tagBadge, { backgroundColor: "#10B981" }]}>
-                  <Text style={styles.tagText}>
-                    {item.requirements.total_slots_needed} Slot{item.requirements.total_slots_needed > 1 ? "s" : ""}
-                  </Text>
+              </View>
+
+              {item.rating > 0 && (item.review_count || 0) > 0 && (
+                <View style={styles.glassBadge}>
+                  <Ionicons name="star" size={12} color="#FCD34D" />
+                  <Text style={styles.glassBadgeText}>{item.rating.toFixed(1)}</Text>
                 </View>
               )}
             </View>
@@ -707,7 +701,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
               <Text
                 style={[
                   styles.immersivePrice,
-                  { fontSize: 13, opacity: 0.85, marginTop: 2 },
+                  { marginTop: 2 },
                 ]}
               >
                 {secondaryPriceLabel}
@@ -828,43 +822,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
             />
           )}
 
-          {/* Group Required Warning Badge (Vertical) */}
-          {showGroupWarning && (
-            <View
-              style={[
-                styles.typeOverlayBadge,
-                { top: 45, backgroundColor: "#EF4444" },
-              ]}
-            >
-              <Text style={styles.typeOverlayText}>Group Required</Text>
-            </View>
-          )}
-
-          {/* Gig Application Deadline Badge (Vertical) */}
-          {gigDeadlineInfo && (
-            <View
-              style={[
-                styles.typeOverlayBadge,
-                {
-                  top: showGroupWarning ? 75 : 45,
-                  backgroundColor: gigDeadlineInfo.isPassed
-                    ? "#6B7280"
-                    : gigDeadlineInfo.isUrgent
-                      ? "#F59E0B"
-                      : "#10B981",
-                },
-              ]}
-            >
-              <Text style={styles.typeOverlayText}>
-                {gigDeadlineInfo.isPassed
-                  ? "Applications Closed"
-                  : gigDeadlineInfo.hoursLeft < 24
-                    ? `Apply within ${gigDeadlineInfo.hoursLeft}h`
-                    : `Apply within ${Math.ceil(gigDeadlineInfo.hoursLeft / 24)}d`}
-              </Text>
-            </View>
-          )}
-
           {/* Seasonal Rate Badges (Vertical) - Bottom Left Corner */}
           {(item.has_seasonal_pricing ||
             (item.weekend_multiplier &&
@@ -915,27 +872,36 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
           {/* Top Actions for Standard Card */}
           <View style={[styles.topActions]}>
-            <View style={{ flex: 1 }} />
-
-            {/* Rating moved to right or kept at top? Keeping original rating logic but ensuring zIndex */}
-            {item.rating > 0 && (item.review_count || 0) > 0 ? (
-              <View style={[styles.ratingBadge, { marginRight: "auto" }]}>
-                <Ionicons name="star" size={12} color="#FBBF24" />
-                <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.ratingBadge,
-                  {
-                    backgroundColor: "rgba(148, 163, 184, 0.9)",
-                    marginRight: "auto",
-                  },
-                ]}
-              >
-                <Text style={styles.ratingText}>No ratings yet</Text>
-              </View>
-            )}
+            {/* Left: Warning + Deadline badges */}
+            <View style={{ flexDirection: "column", gap: 6, flex: 1, alignItems: "flex-start" }}>
+              {showGroupWarning && (
+                <View style={[styles.overlayBadgeInline, { backgroundColor: "#EF4444" }]}>
+                  <Text style={styles.typeOverlayText}>Group Req.</Text>
+                </View>
+              )}
+              {gigDeadlineInfo && (
+                <View
+                  style={[
+                    styles.overlayBadgeInline,
+                    {
+                      backgroundColor: gigDeadlineInfo.isPassed
+                        ? "#6B7280"
+                        : gigDeadlineInfo.isUrgent
+                          ? "#F59E0B"
+                          : "#10B981",
+                    },
+                  ]}
+                >
+                  <Text style={styles.typeOverlayText}>
+                    {gigDeadlineInfo.isPassed
+                      ? "Closed"
+                      : gigDeadlineInfo.hoursLeft < 24
+                        ? `${gigDeadlineInfo.hoursLeft}h left`
+                        : `${Math.ceil(gigDeadlineInfo.hoursLeft / 24)}d left`}
+                  </Text>
+                </View>
+              )}
+            </View>
 
             <View style={{ flexDirection: "row", gap: 8 }}>
               {/* Invite Button Vertical */}
@@ -973,76 +939,187 @@ const ListingCard: React.FC<ListingCardProps> = ({
           <View
             style={{
               flexDirection: "row",
-              alignItems: "center",
-              gap: 6,
+              alignItems: "flex-start",
               marginBottom: 6,
-              flexWrap: "wrap",
             }}
           >
             <View
-              style={[
-                styles.tagBadge,
-                {
-                  backgroundColor: badgeColor,
-                  paddingVertical: 3,
-                  paddingHorizontal: 8,
-                  marginBottom: 0,
-                },
-              ]}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap",
+                flex: 1,
+                paddingRight: 8,
+              }}
             >
-              <Text style={[styles.tagText, { fontSize: 10 }]}>
-                {badgeLabel}
-              </Text>
-            </View>
-            {item.pax && (item.type === "Studio" || item.hourly_rate) && (
               <View
                 style={[
                   styles.tagBadge,
-                  {
-                    backgroundColor: "#10B981",
-                    paddingVertical: 3,
-                    paddingHorizontal: 8,
-                    marginBottom: 0,
-                  },
+                  styles.tagBadgeSmall,
+                  { backgroundColor: badgeColor },
                 ]}
               >
                 <Text style={[styles.tagText, { fontSize: 10 }]}>
-                  {item.pax} pax
+                  {badgeLabel}
                 </Text>
               </View>
-            )}
-            {/* Special Schedule Badge */}
-            {item.has_special_dates &&
-              (item.type === "Studio" || item.hourly_rate) && (
+              {item.pax && (item.type === "Studio" || item.hourly_rate) && (
                 <View
                   style={[
                     styles.tagBadge,
-                    {
-                      backgroundColor: "#F59E0B",
-                      paddingVertical: 3,
-                      paddingHorizontal: 8,
-                      marginBottom: 0,
-                    },
+                    styles.tagBadgeSmall,
+                    { backgroundColor: "#10B981" },
                   ]}
                 >
                   <Text style={[styles.tagText, { fontSize: 10 }]}>
-                    Special Hours
+                    {item.pax} pax
                   </Text>
                 </View>
               )}
-            {showOpenApplicationsBadge && (
-              <View
-                style={[
-                  styles.tagBadge,
-                  {
-                    backgroundColor: "#10B981",
-                    paddingVertical: 3,
-                    paddingHorizontal: 8,
-                    marginBottom: 0,
-                  },
-                ]}
-              >
-                <Text style={[styles.tagText, { fontSize: 10 }]}>Open Applications</Text>
+              {/* Special Schedule Badge */}
+              {item.has_special_dates &&
+                (item.type === "Studio" || item.hourly_rate) && (
+                  <View
+                    style={[
+                      styles.tagBadge,
+                      styles.tagBadgeSmall,
+                      { backgroundColor: "#F59E0B" },
+                    ]}
+                  >
+                    <Text style={[styles.tagText, { fontSize: 10 }]}>
+                      Special Hours
+                    </Text>
+                  </View>
+                )}
+              {showOpenApplicationsBadge && (
+                <View
+                  style={[
+                    styles.tagBadge,
+                    styles.tagBadgeSmall,
+                    { backgroundColor: "#10B981" },
+                  ]}
+                >
+                  <Text style={[styles.tagText, { fontSize: 10 }]}>Open Applications</Text>
+                </View>
+              )}
+
+              {/* Seasonal Pricing Badge for Studios - Vertical */}
+              {item.has_seasonal_pricing &&
+                (item.type === "Studio" || item.hourly_rate) && (
+                  <View
+                    style={[
+                      styles.tagBadge,
+                      styles.tagBadgeSmall,
+                      { backgroundColor: "#8B5CF6" },
+                    ]}
+                  >
+                    <Text style={[styles.tagText, { fontSize: 10 }]}>
+                      Seasonal Rates
+                    </Text>
+                  </View>
+                )}
+
+              {/* Weekend Rate Badge for Studios - Vertical */}
+              {item.weekend_multiplier &&
+                parseFloat(item.weekend_multiplier) > 1 &&
+                (item.type === "Studio" || item.hourly_rate) && (
+                  <View
+                    style={[
+                      styles.tagBadge,
+                      styles.tagBadgeSmall,
+                      { backgroundColor: "#EC4899" },
+                    ]}
+                  >
+                    <Text style={[styles.tagText, { fontSize: 10 }]}>
+                      Weekend +{Math.round((parseFloat(item.weekend_multiplier) - 1) * 100)}%
+                    </Text>
+                  </View>
+                )}
+
+              {/* Gig Slot Badges - present in horizontal, now added to vertical */}
+              {item.type === "Gig" && item.requirements?.slots && (
+                <>
+                  {item.requirements.slots.solo?.needed > 0 && (
+                    <View
+                      style={[
+                        styles.tagBadge,
+                        styles.tagBadgeSmall,
+                        { backgroundColor: "#EC4899" },
+                      ]}
+                    >
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>
+                        {item.requirements.slots.solo.needed} Solo
+                      </Text>
+                    </View>
+                  )}
+                  {item.requirements.slots.duo?.needed > 0 && (
+                    <View
+                      style={[
+                        styles.tagBadge,
+                        styles.tagBadgeSmall,
+                        { backgroundColor: "#8B5CF6" },
+                      ]}
+                    >
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>
+                        {item.requirements.slots.duo.needed} Duo{item.requirements.slots.duo.needed > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+                  {item.requirements.slots.band?.needed > 0 && (
+                    <View
+                      style={[
+                        styles.tagBadge,
+                        styles.tagBadgeSmall,
+                        { backgroundColor: "#3B82F6" },
+                      ]}
+                    >
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>
+                        {item.requirements.slots.band.needed} Group{item.requirements.slots.band.needed > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+                  {item.requirements.slots.band?.preferred_group_types?.length > 0 &&
+                    item.requirements.slots.band.preferred_group_types.map((typeId: string) => {
+                      const type = PH_MUSIC_GROUP_TYPES.find((t) => t.id === typeId);
+                      return type ? (
+                        <View
+                          key={typeId}
+                          style={[
+                            styles.tagBadge,
+                            styles.tagBadgeSmall,
+                            { backgroundColor: "#6366F1" },
+                          ]}
+                        >
+                          <Text style={[styles.tagText, { fontSize: 10 }]}>{type.label}</Text>
+                        </View>
+                      ) : null;
+                    })}
+                </>
+              )}
+
+              {/* Total Slots Badge for Gigs without detailed slots - Vertical */}
+              {item.type === "Gig" &&
+                item.requirements?.total_slots_needed > 0 &&
+                !item.requirements?.slots && (
+                  <View
+                    style={[
+                      styles.tagBadge,
+                      styles.tagBadgeSmall,
+                      { backgroundColor: "#10B981" },
+                    ]}
+                  >
+                    <Text style={[styles.tagText, { fontSize: 10 }]}>
+                      {item.requirements.total_slots_needed} Slot{item.requirements.total_slots_needed > 1 ? "s" : ""}
+                    </Text>
+                  </View>
+                )}
+            </View>
+
+            {item.rating > 0 && (item.review_count || 0) > 0 && (
+              <View style={styles.ratingBadge}>
+                <Ionicons name="star" size={12} color="#FBBF24" />
+                <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
               </View>
             )}
           </View>
@@ -1119,7 +1196,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   <Text
                     style={[
                       styles.price,
-                      { color: colors.primary, fontSize: 13, marginTop: 2 },
+                      { color: colors.primary, marginTop: 2 },
                     ]}
                   >
                     {secondaryPriceLabel}
@@ -1270,6 +1347,13 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginBottom: 8,
   },
+  // Smaller variant used in vertical list cards
+  tagBadgeSmall: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginBottom: 0,
+  },
   tagText: {
     color: "#FFF",
     fontSize: 10,
@@ -1393,7 +1477,7 @@ const styles = StyleSheet.create({
   inviteBtn: {
     backgroundColor: "#7C3AED",
   },
-  // Modern Type Badge (Overlay)
+  // Modern Type Badge (Overlay) - used for bottom-corner badges
   typeOverlayBadge: {
     position: "absolute",
     top: 12,
@@ -1410,6 +1494,15 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     textTransform: "uppercase",
     letterSpacing: 0.5,
+  },
+  // Inline badge used inside topActions row (non-absolute)
+  overlayBadgeInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.6)",
   },
   // Instruments styles for horizontal (immersive) cards
   instrumentsRow: {

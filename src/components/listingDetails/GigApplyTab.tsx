@@ -9,6 +9,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { getGigApplicationDeadlineInfo } from "../../utils/gigApplication";
 import DocumentUploader from "../DocumentUploader";
 import styles from "../ListingDetailsSheet.styles";
 import VideoUploader from "../VideoUploader";
@@ -19,9 +20,11 @@ interface GigApplyTabProps {
   colors: any;
   isDark: boolean;
   group: any;
+  applicationContext?: "gig" | "group";
   userId: string | null;
   pitchMessage: string;
   setPitchMessage: (value: string) => void;
+  cvFile: any;
   cvUrl: string;
   setCvFile: (file: any) => void;
   videoUrl: string;
@@ -45,9 +48,11 @@ const GigApplyTab = ({
   colors,
   isDark,
   group,
+  applicationContext = "gig",
   userId,
   pitchMessage,
   setPitchMessage,
+  cvFile,
   cvUrl,
   setCvFile,
   videoUrl,
@@ -76,6 +81,7 @@ const GigApplyTab = ({
   });
 
   const musicianTypeRequired = group?.requirements?.musician_type || "both";
+  const isGroupApplicationFlow = applicationContext === "group";
   const hasGroups = userGroups.length > 0;
   const slots = group?.requirements?.slots || {};
   const requiredSlotTypes = (["solo", "duo", "band"] as const).filter(
@@ -133,6 +139,29 @@ const GigApplyTab = ({
     group?.requirements?.slots,
   ]);
 
+  const requiresGroupSelection =
+    !isGroupApplicationFlow &&
+    group.requirements?.musician_type === "group" &&
+    !selectedGroupId;
+  const isApplicationsClosed = isGroupApplicationFlow
+    ? group?.open_group_applications !== true
+    : Boolean(getGigApplicationDeadlineInfo(group)?.isPassed);
+  const isPitchMissing = !pitchMessage.trim();
+  const isCvMissing = !cvFile && !cvUrl;
+  const isVideoMissing = !(videoUrl || "").trim();
+  const isFormIncomplete =
+    isPitchMissing ||
+    isCvMissing ||
+    isVideoMissing ||
+    requiresGroupSelection ||
+    isApplicationsClosed;
+  const isSubmitDisabled =
+    isSubmittingApplication ||
+    hasExistingApplication ||
+    isBlocked ||
+    groupAlreadyApplied ||
+    isFormIncomplete;
+
   return (
     <View style={styles.tabContent}>
       {isBlocked && (
@@ -164,7 +193,7 @@ const GigApplyTab = ({
         </View>
       )}
 
-      {(() => {
+      {!isGroupApplicationFlow && (() => {
         const canApplyAsSolo =
           musicianTypeRequired === "solo" || musicianTypeRequired === "both";
         const canApplyAsGroup =
@@ -317,7 +346,6 @@ const GigApplyTab = ({
                       <TouchableOpacity activeOpacity={1}
                         key={g.id}
                         onPress={() => setSelectedGroupId(g.id)}
-                        activeOpacity={1}
                         style={{
                           flexDirection: "row",
                           alignItems: "center",
@@ -390,7 +418,6 @@ const GigApplyTab = ({
                       <TouchableOpacity activeOpacity={1}
                         key={opt.id ?? "__solo__"}
                         onPress={() => setSelectedGroupId(opt.id)}
-                        activeOpacity={1}
                         style={{
                           flexDirection: "row",
                           alignItems: "center",
@@ -442,7 +469,9 @@ const GigApplyTab = ({
       })()}
 
       <View style={styles.inputContainer}>
-        <Text style={[styles.label, { color: colors.textSecondary }]}>Pitch Message</Text>
+        <Text style={[styles.label, { color: colors.textSecondary }]}>
+          {isGroupApplicationFlow ? "Application Message" : "Pitch Message"}
+        </Text>
         <View
           style={[
             styles.inputWrapper,
@@ -451,7 +480,11 @@ const GigApplyTab = ({
         >
           <TextInput
             style={[styles.input, { color: colors.text, height: "100%" }]}
-            placeholder="Why are you a good fit for this gig?"
+            placeholder={
+              isGroupApplicationFlow
+                ? "Tell the group why you are a good fit."
+                : "Why are you a good fit for this gig?"
+            }
             placeholderTextColor={colors.textSecondary}
             multiline
             textAlignVertical="top"
@@ -479,7 +512,7 @@ const GigApplyTab = ({
         maxSizeMB={50}
       />
 
-      {group?.contract_url ? (
+      {!isGroupApplicationFlow && group?.contract_url ? (
         <TouchableOpacity activeOpacity={1}
           onPress={() => Linking.openURL(group.contract_url)}
           style={{
@@ -487,7 +520,6 @@ const GigApplyTab = ({
             alignItems: "center",
             marginBottom: 24,
           }}
-          activeOpacity={1}
         >
           <Ionicons name="document-text-outline" size={18} color={colors.primary} />
           <Text
@@ -507,7 +539,7 @@ const GigApplyTab = ({
             style={{ marginLeft: 6 }}
           />
         </TouchableOpacity>
-      ) : (
+      ) : !isGroupApplicationFlow ? (
         <View
           style={{
             flexDirection: "row",
@@ -527,9 +559,9 @@ const GigApplyTab = ({
             No Terms & Conditions uploaded
           </Text>
         </View>
-      )}
+      ) : null}
 
-      {groupAlreadyApplied && selectedGroupId && (
+      {!isGroupApplicationFlow && groupAlreadyApplied && selectedGroupId && (
         <View
           style={[
             styles.infoBox,
@@ -553,25 +585,12 @@ const GigApplyTab = ({
         style={[
           styles.primaryBtn,
           { backgroundColor: colors.primary },
-          (isSubmittingApplication ||
-            !pitchMessage.trim() ||
-            !videoUrl ||
-            groupAlreadyApplied ||
-            (group.requirements?.musician_type === "group" && !selectedGroupId)) &&
-            { opacity: 0.5 },
         ]}
         onPress={() => {
           debugLog("🟡 SUBMIT APPLICATION BUTTON PRESSED - Validating...");
           handleSubmitApplication();
         }}
-        disabled={
-          isSubmittingApplication ||
-          hasExistingApplication ||
-          isBlocked ||
-          groupAlreadyApplied ||
-          (group.requirements?.musician_type === "group" && !selectedGroupId)
-        }
-        activeOpacity={1}
+        disabled={isSubmitDisabled}
       >
         {isSubmittingApplication ? (
           <ActivityIndicator color="#fff" />
@@ -586,8 +605,12 @@ const GigApplyTab = ({
                   : "Already Applied"
               : groupAlreadyApplied
                 ? "Group Already Applied"
-                : group.requirements?.musician_type === "group" && !selectedGroupId
+                : isApplicationsClosed
+                  ? "Applications Closed"
+                : requiresGroupSelection
                   ? "Select a Group to Apply"
+                  : isPitchMissing || isCvMissing || isVideoMissing
+                    ? "Complete Required Fields"
                   : "Submit Application"}
           </Text>
         )}
