@@ -51,6 +51,34 @@ export default function SubmitReviewScreen() {
     setAlertVisible(true);
   };
 
+  const extractFunctionErrorMessage = async (
+    error: any,
+    fallback: string
+  ) => {
+    if (!error) return fallback;
+
+    if (typeof error?.message === 'string' && error.message.trim().length > 0) {
+      const isGenericFunctionMessage = error.message.includes('non-2xx status code');
+      if (!isGenericFunctionMessage) return error.message;
+    }
+
+    try {
+      if (error.context && typeof error.context.json === 'function') {
+        const body = await error.context.json();
+        if (typeof body?.error === 'string' && body.error.trim().length > 0) {
+          return body.error;
+        }
+        if (typeof body?.message === 'string' && body.message.trim().length > 0) {
+          return body.message;
+        }
+      }
+    } catch (_parseError) {
+      // Fall through to fallback error text.
+    }
+
+    return fallback;
+  };
+
   // Determine what we're reviewing based on params
   const entityName = params.entityName || 'this booking';
   const isReviewingUser = !!params.targetUserId;
@@ -73,6 +101,16 @@ export default function SubmitReviewScreen() {
       return;
     }
 
+    const hasTargetEntity = !!(params.studioId || params.gigId || params.targetUserId);
+    if (!hasTargetEntity) {
+      showAlert(
+        'error',
+        'Error',
+        'Missing review target. Please open this screen from your booking history and try again.'
+      );
+      return;
+    }
+
     try {
       setSubmitting(true);
 
@@ -81,7 +119,7 @@ export default function SubmitReviewScreen() {
 
       const reviewPayload: any = {
         action: 'create_review',
-        userId,
+        userId: session.user.id,
         rating: selectedValue,
         content: feedback || null,
         bookingId: params.bookingId,
@@ -101,7 +139,14 @@ export default function SubmitReviewScreen() {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        const errorMessage = await extractFunctionErrorMessage(
+          error,
+          'Failed to submit review. Please try again.'
+        );
+        showAlert('error', 'Error', errorMessage);
+        return;
+      }
 
       if (data?.error) {
         showAlert('error', 'Error', data.error);
@@ -115,7 +160,11 @@ export default function SubmitReviewScreen() {
       ]);
     } catch (e: any) {
       console.log('Review submission error:', e);
-      showAlert('error', 'Error', 'Failed to submit review. Please try again.');
+      const errorMessage = await extractFunctionErrorMessage(
+        e,
+        'Failed to submit review. Please try again.'
+      );
+      showAlert('error', 'Error', errorMessage);
     } finally {
       setSubmitting(false);
     }

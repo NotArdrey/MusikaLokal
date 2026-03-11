@@ -4,14 +4,14 @@ import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -176,10 +176,22 @@ export default function AddGigScreen() {
   // Specific roles/instruments needed
   const [soloRolesNeeded, setSoloRolesNeeded] = useState<string[]>([]);
   const [newSoloRole, setNewSoloRole] = useState("");
+  const [soloPreferredGenres, setSoloPreferredGenres] = useState<string[]>([]);
+  const [newSoloPreferredGenre, setNewSoloPreferredGenre] = useState("");
+  const [soloPreferredInstruments, setSoloPreferredInstruments] = useState<string[]>([]);
+  const [newSoloPreferredInstrument, setNewSoloPreferredInstrument] = useState("");
   const [duoRolesNeeded, setDuoRolesNeeded] = useState<string[]>([]);
   const [newDuoRole, setNewDuoRole] = useState("");
+  const [duoPreferredGenres, setDuoPreferredGenres] = useState<string[]>([]);
+  const [newDuoPreferredGenre, setNewDuoPreferredGenre] = useState("");
+  const [duoPreferredInstruments, setDuoPreferredInstruments] = useState<string[]>([]);
+  const [newDuoPreferredInstrument, setNewDuoPreferredInstrument] = useState("");
   const [bandRolesNeeded, setBandRolesNeeded] = useState<string[]>([]);
   const [newBandRole, setNewBandRole] = useState("");
+  const [bandPreferredGenres, setBandPreferredGenres] = useState<string[]>([]);
+  const [newBandPreferredGenre, setNewBandPreferredGenre] = useState("");
+  const [bandPreferredInstruments, setBandPreferredInstruments] = useState<string[]>([]);
+  const [newBandPreferredInstrument, setNewBandPreferredInstrument] = useState("");
 
   // Preferred group types for band slots
   const [preferredGroupTypes, setPreferredGroupTypes] = useState<string[]>([]);
@@ -320,6 +332,12 @@ export default function AddGigScreen() {
     setMusicianType("both");
   }, [soloSlotsNeeded, duoSlotsNeeded, bandSlotsNeeded]);
 
+  useEffect(() => {
+    if (bandSlotsNeeded !== preferredGroupTypes.length) {
+      setBandSlotsNeeded(preferredGroupTypes.length);
+    }
+  }, [preferredGroupTypes, bandSlotsNeeded]);
+
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
       const schedules = getNormalizedEventSchedules();
@@ -439,15 +457,21 @@ export default function AddGigScreen() {
             solo: {
               needed: soloSlotsNeeded,
               roles: soloRolesNeeded,
+              preferred_genres: soloPreferredGenres,
+              preferred_instruments: soloPreferredInstruments,
             },
             duo: {
               needed: duoSlotsNeeded,
               roles: duoRolesNeeded,
+              preferred_genres: duoPreferredGenres,
+              preferred_instruments: duoPreferredInstruments,
             },
             band: {
               needed: bandSlotsNeeded,
               roles: bandRolesNeeded,
               preferred_group_types: preferredGroupTypes,
+              preferred_genres: bandPreferredGenres,
+              preferred_instruments: bandPreferredInstruments,
             },
           },
           total_slots_needed: soloSlotsNeeded + duoSlotsNeeded + bandSlotsNeeded,
@@ -2197,6 +2221,110 @@ export default function AddGigScreen() {
                           ))}
                         </View>
                       )}
+
+                      <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+                        Preferred genres (optional):
+                      </Text>
+                      <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                        <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+                          <TextInput
+                            value={newSoloPreferredGenre}
+                            onChangeText={setNewSoloPreferredGenre}
+                            placeholder="e.g., Pop, Acoustic..."
+                            placeholderTextColor={colors.textSecondary}
+                            style={[styles.textInput, { color: colors.text }]}
+                            onSubmitEditing={() => {
+                              const trimmed = newSoloPreferredGenre.trim();
+                              if (!trimmed) return;
+                              if (soloPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                                setNewSoloPreferredGenre("");
+                                return;
+                              }
+                              setSoloPreferredGenres([...soloPreferredGenres, trimmed]);
+                              setNewSoloPreferredGenre("");
+                            }}
+                          />
+                        </View>
+                        <TouchableOpacity activeOpacity={1}
+                          onPress={() => {
+                            const trimmed = newSoloPreferredGenre.trim();
+                            if (!trimmed) return;
+                            if (soloPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                              setNewSoloPreferredGenre("");
+                              return;
+                            }
+                            setSoloPreferredGenres([...soloPreferredGenres, trimmed]);
+                            setNewSoloPreferredGenre("");
+                          }}
+                          style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                        >
+                          <Ionicons name="add" size={20} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                      {soloPreferredGenres.length > 0 && (
+                        <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                          {soloPreferredGenres.map((genre, index) => (
+                            <View key={index} style={[styles.chip, { backgroundColor: "#EC489920" }]}>
+                              <Text style={[styles.chipText, { color: "#EC4899" }]}>{genre}</Text>
+                              <TouchableOpacity activeOpacity={1} onPress={() => setSoloPreferredGenres(soloPreferredGenres.filter((_, i) => i !== index))}>
+                                <Ionicons name="close-circle" size={16} color="#EC4899" />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+                        Preferred instruments (optional):
+                      </Text>
+                      <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                        <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+                          <TextInput
+                            value={newSoloPreferredInstrument}
+                            onChangeText={setNewSoloPreferredInstrument}
+                            placeholder="e.g., Acoustic Guitar, Cajon..."
+                            placeholderTextColor={colors.textSecondary}
+                            style={[styles.textInput, { color: colors.text }]}
+                            onSubmitEditing={() => {
+                              const trimmed = newSoloPreferredInstrument.trim();
+                              if (!trimmed) return;
+                              if (soloPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                                setNewSoloPreferredInstrument("");
+                                return;
+                              }
+                              setSoloPreferredInstruments([...soloPreferredInstruments, trimmed]);
+                              setNewSoloPreferredInstrument("");
+                            }}
+                          />
+                        </View>
+                        <TouchableOpacity activeOpacity={1}
+                          onPress={() => {
+                            const trimmed = newSoloPreferredInstrument.trim();
+                            if (!trimmed) return;
+                            if (soloPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                              setNewSoloPreferredInstrument("");
+                              return;
+                            }
+                            setSoloPreferredInstruments([...soloPreferredInstruments, trimmed]);
+                            setNewSoloPreferredInstrument("");
+                          }}
+                          style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                        >
+                          <Ionicons name="add" size={20} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                      {soloPreferredInstruments.length > 0 && (
+                        <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                          {soloPreferredInstruments.map((instrument, index) => (
+                            <View key={index} style={[styles.chip, { backgroundColor: "#EC489920" }]}>
+                              <Text style={[styles.chipText, { color: "#EC4899" }]}>{instrument}</Text>
+                              <TouchableOpacity activeOpacity={1} onPress={() => setSoloPreferredInstruments(soloPreferredInstruments.filter((_, i) => i !== index))}>
+                                <Ionicons name="close-circle" size={16} color="#EC4899" />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
                     </View>
                   )}
                 </View>
@@ -2275,6 +2403,110 @@ export default function AddGigScreen() {
                           ))}
                         </View>
                       )}
+
+                      <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+                        Preferred genres (optional):
+                      </Text>
+                      <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                        <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+                          <TextInput
+                            value={newDuoPreferredGenre}
+                            onChangeText={setNewDuoPreferredGenre}
+                            placeholder="e.g., OPM, Pop..."
+                            placeholderTextColor={colors.textSecondary}
+                            style={[styles.textInput, { color: colors.text }]}
+                            onSubmitEditing={() => {
+                              const trimmed = newDuoPreferredGenre.trim();
+                              if (!trimmed) return;
+                              if (duoPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                                setNewDuoPreferredGenre("");
+                                return;
+                              }
+                              setDuoPreferredGenres([...duoPreferredGenres, trimmed]);
+                              setNewDuoPreferredGenre("");
+                            }}
+                          />
+                        </View>
+                        <TouchableOpacity activeOpacity={1}
+                          onPress={() => {
+                            const trimmed = newDuoPreferredGenre.trim();
+                            if (!trimmed) return;
+                            if (duoPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                              setNewDuoPreferredGenre("");
+                              return;
+                            }
+                            setDuoPreferredGenres([...duoPreferredGenres, trimmed]);
+                            setNewDuoPreferredGenre("");
+                          }}
+                          style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                        >
+                          <Ionicons name="add" size={20} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                      {duoPreferredGenres.length > 0 && (
+                        <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                          {duoPreferredGenres.map((genre, index) => (
+                            <View key={index} style={[styles.chip, { backgroundColor: "#8B5CF620" }]}>
+                              <Text style={[styles.chipText, { color: "#8B5CF6" }]}>{genre}</Text>
+                              <TouchableOpacity activeOpacity={1} onPress={() => setDuoPreferredGenres(duoPreferredGenres.filter((_, i) => i !== index))}>
+                                <Ionicons name="close-circle" size={16} color="#8B5CF6" />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+                        Preferred instruments (optional):
+                      </Text>
+                      <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                        <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+                          <TextInput
+                            value={newDuoPreferredInstrument}
+                            onChangeText={setNewDuoPreferredInstrument}
+                            placeholder="e.g., Keyboard, Violin..."
+                            placeholderTextColor={colors.textSecondary}
+                            style={[styles.textInput, { color: colors.text }]}
+                            onSubmitEditing={() => {
+                              const trimmed = newDuoPreferredInstrument.trim();
+                              if (!trimmed) return;
+                              if (duoPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                                setNewDuoPreferredInstrument("");
+                                return;
+                              }
+                              setDuoPreferredInstruments([...duoPreferredInstruments, trimmed]);
+                              setNewDuoPreferredInstrument("");
+                            }}
+                          />
+                        </View>
+                        <TouchableOpacity activeOpacity={1}
+                          onPress={() => {
+                            const trimmed = newDuoPreferredInstrument.trim();
+                            if (!trimmed) return;
+                            if (duoPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                              setNewDuoPreferredInstrument("");
+                              return;
+                            }
+                            setDuoPreferredInstruments([...duoPreferredInstruments, trimmed]);
+                            setNewDuoPreferredInstrument("");
+                          }}
+                          style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                        >
+                          <Ionicons name="add" size={20} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                      {duoPreferredInstruments.length > 0 && (
+                        <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                          {duoPreferredInstruments.map((instrument, index) => (
+                            <View key={index} style={[styles.chip, { backgroundColor: "#8B5CF620" }]}>
+                              <Text style={[styles.chipText, { color: "#8B5CF6" }]}>{instrument}</Text>
+                              <TouchableOpacity activeOpacity={1} onPress={() => setDuoPreferredInstruments(duoPreferredInstruments.filter((_, i) => i !== index))}>
+                                <Ionicons name="close-circle" size={16} color="#8B5CF6" />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
                     </View>
                   )}
                 </View>
@@ -2286,115 +2518,256 @@ export default function AddGigScreen() {
                       <Ionicons name="musical-notes" size={20} color="#3B82F6" />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Preferred Group Type</Text>
                     </View>
-                    <View style={styles.counterContainer}>
-                      <TouchableOpacity activeOpacity={1}
-                        onPress={() => setBandSlotsNeeded(Math.max(0, bandSlotsNeeded - 1))}
-                        style={[styles.counterBtn, { backgroundColor: isDark ? "#374151" : "#E5E7EB" }]}
-                      >
-                        <Ionicons name="remove" size={18} color={colors.text} />
-                      </TouchableOpacity>
-                      <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
-                      <TouchableOpacity activeOpacity={1}
-                        onPress={() => setBandSlotsNeeded(bandSlotsNeeded + 1)}
-                        style={[styles.counterBtn, { backgroundColor: colors.primary }]}
-                      >
-                        <Ionicons name="add" size={18} color="#fff" />
-                      </TouchableOpacity>
-                    </View>
+                    <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
                   </View>
-                  {bandSlotsNeeded > 0 && (
-                    <View style={{ marginTop: 12 }}>
-                      <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 12 }}>
-                        Select the type(s) of group you prefer for this gig (Max: {bandSlotsNeeded}).
-                      </Text>
-                      <View style={[styles.chipContainer, { marginTop: 0 }]}>
-                        {PH_MUSIC_GROUP_TYPES.map((type) => {
-                          const isSelected = preferredGroupTypes.includes(type.id);
-                          return (
-                            <TouchableOpacity
-                              key={type.id}
-                              activeOpacity={1}
-                              onPress={() => {
-                                setPreferredGroupTypes(prev => {
-                                  if (isSelected) {
-                                    return prev.filter(id => id !== type.id);
-                                  } else {
-                                    if (prev.length >= bandSlotsNeeded) {
-                                      // Optional: could show a toast here
-                                      return prev;
-                                    }
-                                    return [...prev, type.id];
-                                  }
-                                });
-                              }}
-                              style={[
-                                styles.chip,
-                                {
-                                  backgroundColor: isSelected ? "rgba(59, 130, 246, 0.2)" : (isDark ? "#374151" : "#F3F4F6"),
-                                  borderWidth: isSelected ? 1 : 0,
-                                  borderColor: "#3B82F6",
-                                }
-                              ]}
-                            >
-                              <Text style={[styles.chipText, { color: isSelected ? "#3B82F6" : colors.textSecondary }]}>
-                                {type.label}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-
-                      <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 16 }]}>
-                        Any other specific requirements/genres (optional):
-                      </Text>
-                      <View style={[styles.addMemberRow, { marginTop: 8 }]}>
-                        <View
-                          style={[
-                            styles.inputWrapper,
-                            styles.flex1,
-                            { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
-                          ]}
+                  <View style={{ marginTop: 12 }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 12 }}>
+                      Tap a group type to add needed count.
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: "Poppins_400Regular", marginBottom: 12 }}>
+                      Tap + to add. Use the remove icon on selected types to reduce by 1.
+                    </Text>
+                    {preferredGroupTypes.length > 0 && (
+                      <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          onPress={() => setPreferredGroupTypes([])}
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            borderRadius: 14,
+                            backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                          }}
                         >
-                          <TextInput
-                            value={newBandRole}
-                            onChangeText={setNewBandRole}
-                            placeholder="e.g., specific instruments..."
-                            placeholderTextColor={colors.textSecondary}
-                            style={[styles.textInput, { color: colors.text }]}
-                            onSubmitEditing={() => {
-                              if (newBandRole.trim()) {
-                                setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
-                                setNewBandRole("");
-                              }
+                          <Text style={{ color: colors.text, fontSize: 12, fontFamily: "Poppins_500Medium" }}>Clear all</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                    <View style={[styles.chipContainer, { marginTop: 0 }]}>
+                      {PH_MUSIC_GROUP_TYPES.map((type) => {
+                        const typeCount = preferredGroupTypes.filter((id) => id === type.id).length;
+                        const isSelected = typeCount > 0;
+                        return (
+                          <TouchableOpacity
+                            key={type.id}
+                            activeOpacity={1}
+                            onPress={() => {
+                              setPreferredGroupTypes((prev) => [...prev, type.id]);
                             }}
-                          />
-                        </View>
-                        <TouchableOpacity activeOpacity={1}
-                          onPress={() => {
+                            style={[
+                              styles.chip,
+                              {
+                                backgroundColor: isSelected ? "rgba(59, 130, 246, 0.2)" : (isDark ? "#374151" : "#F3F4F6"),
+                                borderWidth: isSelected ? 1 : 0,
+                                borderColor: "#3B82F6",
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 6,
+                              }
+                            ]}
+                          >
+                            <Text style={[styles.chipText, { color: isSelected ? "#3B82F6" : colors.textSecondary }]}>
+                              {type.label}
+                            </Text>
+                            {typeCount > 0 && (
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                                <View
+                                  style={{
+                                    minWidth: 20,
+                                    height: 20,
+                                    borderRadius: 10,
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    backgroundColor: "#3B82F6",
+                                    paddingHorizontal: 6,
+                                  }}
+                                >
+                                  <Text style={{ color: "#fff", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>
+                                    {typeCount}
+                                  </Text>
+                                </View>
+                                <TouchableOpacity
+                                  activeOpacity={0.8}
+                                  onPress={(event) => {
+                                    event.stopPropagation();
+                                    setPreferredGroupTypes((prev) => {
+                                      const lastIndex = prev.lastIndexOf(type.id);
+                                      if (lastIndex === -1) return prev;
+                                      return prev.filter((_, index) => index !== lastIndex);
+                                    });
+                                  }}
+                                  style={{
+                                    width: 20,
+                                    height: 20,
+                                    borderRadius: 10,
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    backgroundColor: isDark ? "#1F2937" : "#E5E7EB",
+                                  }}
+                                >
+                                  <Ionicons name="trash-outline" size={12} color="#EF4444" />
+                                </TouchableOpacity>
+                              </View>
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+
+                    <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 16 }]}>
+                      Any other specific requirements/genres (optional):
+                    </Text>
+                    <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                      <View
+                        style={[
+                          styles.inputWrapper,
+                          styles.flex1,
+                          { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" },
+                        ]}
+                      >
+                        <TextInput
+                          value={newBandRole}
+                          onChangeText={setNewBandRole}
+                          placeholder="e.g., specific instruments..."
+                          placeholderTextColor={colors.textSecondary}
+                          style={[styles.textInput, { color: colors.text }]}
+                          onSubmitEditing={() => {
                             if (newBandRole.trim()) {
                               setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
                               setNewBandRole("");
                             }
                           }}
-                          style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                        >
-                          <Ionicons name="add" size={20} color="#fff" />
-                        </TouchableOpacity>
+                        />
                       </View>
-                      {bandRolesNeeded.length > 0 && (
-                        <View style={[styles.chipContainer, { marginTop: 8 }]}>
-                          {bandRolesNeeded.map((role, index) => (
-                            <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
-                              <Text style={[styles.chipText, { color: "#3B82F6" }]}>{role}</Text>
-                              <TouchableOpacity activeOpacity={1} onPress={() => setBandRolesNeeded(bandRolesNeeded.filter((_, i) => i !== index))}>
-                                <Ionicons name="close-circle" size={16} color="#3B82F6" />
-                              </TouchableOpacity>
-                            </View>
-                          ))}
-                        </View>
-                      )}
+                      <TouchableOpacity activeOpacity={1}
+                        onPress={() => {
+                          if (newBandRole.trim()) {
+                            setBandRolesNeeded([...bandRolesNeeded, newBandRole.trim()]);
+                            setNewBandRole("");
+                          }
+                        }}
+                        style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                      >
+                        <Ionicons name="add" size={20} color="#fff" />
+                      </TouchableOpacity>
                     </View>
-                  )}
+                    {bandRolesNeeded.length > 0 && (
+                      <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                        {bandRolesNeeded.map((role, index) => (
+                          <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
+                            <Text style={[styles.chipText, { color: "#3B82F6" }]}>{role}</Text>
+                            <TouchableOpacity activeOpacity={1} onPress={() => setBandRolesNeeded(bandRolesNeeded.filter((_, i) => i !== index))}>
+                              <Ionicons name="close-circle" size={16} color="#3B82F6" />
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+                      Preferred genres (optional):
+                    </Text>
+                    <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                      <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+                        <TextInput
+                          value={newBandPreferredGenre}
+                          onChangeText={setNewBandPreferredGenre}
+                          placeholder="e.g., Funk, R&B..."
+                          placeholderTextColor={colors.textSecondary}
+                          style={[styles.textInput, { color: colors.text }]}
+                          onSubmitEditing={() => {
+                            const trimmed = newBandPreferredGenre.trim();
+                            if (!trimmed) return;
+                            if (bandPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                              setNewBandPreferredGenre("");
+                              return;
+                            }
+                            setBandPreferredGenres([...bandPreferredGenres, trimmed]);
+                            setNewBandPreferredGenre("");
+                          }}
+                        />
+                      </View>
+                      <TouchableOpacity activeOpacity={1}
+                        onPress={() => {
+                          const trimmed = newBandPreferredGenre.trim();
+                          if (!trimmed) return;
+                          if (bandPreferredGenres.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                            setNewBandPreferredGenre("");
+                            return;
+                          }
+                          setBandPreferredGenres([...bandPreferredGenres, trimmed]);
+                          setNewBandPreferredGenre("");
+                        }}
+                        style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                      >
+                        <Ionicons name="add" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                    {bandPreferredGenres.length > 0 && (
+                      <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                        {bandPreferredGenres.map((genre, index) => (
+                          <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
+                            <Text style={[styles.chipText, { color: "#3B82F6" }]}>{genre}</Text>
+                            <TouchableOpacity activeOpacity={1} onPress={() => setBandPreferredGenres(bandPreferredGenres.filter((_, i) => i !== index))}>
+                              <Ionicons name="close-circle" size={16} color="#3B82F6" />
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    <Text style={[styles.slotSubLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+                      Preferred instruments (optional):
+                    </Text>
+                    <View style={[styles.addMemberRow, { marginTop: 8 }]}>
+                      <View style={[styles.inputWrapper, styles.flex1, { backgroundColor: colors.inputBackground, borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
+                        <TextInput
+                          value={newBandPreferredInstrument}
+                          onChangeText={setNewBandPreferredInstrument}
+                          placeholder="e.g., Brass section, Synths..."
+                          placeholderTextColor={colors.textSecondary}
+                          style={[styles.textInput, { color: colors.text }]}
+                          onSubmitEditing={() => {
+                            const trimmed = newBandPreferredInstrument.trim();
+                            if (!trimmed) return;
+                            if (bandPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                              setNewBandPreferredInstrument("");
+                              return;
+                            }
+                            setBandPreferredInstruments([...bandPreferredInstruments, trimmed]);
+                            setNewBandPreferredInstrument("");
+                          }}
+                        />
+                      </View>
+                      <TouchableOpacity activeOpacity={1}
+                        onPress={() => {
+                          const trimmed = newBandPreferredInstrument.trim();
+                          if (!trimmed) return;
+                          if (bandPreferredInstruments.some((item) => item.toLowerCase() === trimmed.toLowerCase())) {
+                            setNewBandPreferredInstrument("");
+                            return;
+                          }
+                          setBandPreferredInstruments([...bandPreferredInstruments, trimmed]);
+                          setNewBandPreferredInstrument("");
+                        }}
+                        style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                      >
+                        <Ionicons name="add" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                    {bandPreferredInstruments.length > 0 && (
+                      <View style={[styles.chipContainer, { marginTop: 8 }]}>
+                        {bandPreferredInstruments.map((instrument, index) => (
+                          <View key={index} style={[styles.chip, { backgroundColor: "#3B82F620" }]}>
+                            <Text style={[styles.chipText, { color: "#3B82F6" }]}>{instrument}</Text>
+                            <TouchableOpacity activeOpacity={1} onPress={() => setBandPreferredInstruments(bandPreferredInstruments.filter((_, i) => i !== index))}>
+                              <Ionicons name="close-circle" size={16} color="#3B82F6" />
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
                 </View>
 
                 {/* Total Summary */}
@@ -2608,6 +2981,13 @@ export default function AddGigScreen() {
                             </Text>
                           </View>
                         )}
+                        {soloSlotsNeeded > 0 && (soloPreferredGenres.length > 0 || soloPreferredInstruments.length > 0) && (
+                          <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
+                            {soloPreferredGenres.length > 0 ? `Genres: ${soloPreferredGenres.join(", ")}` : ""}
+                            {soloPreferredGenres.length > 0 && soloPreferredInstruments.length > 0 ? " • " : ""}
+                            {soloPreferredInstruments.length > 0 ? `Instruments: ${soloPreferredInstruments.join(", ")}` : ""}
+                          </Text>
+                        )}
                         {duoSlotsNeeded > 0 && (
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                             <Ionicons name="people" size={16} color="#8B5CF6" />
@@ -2617,6 +2997,13 @@ export default function AddGigScreen() {
                             </Text>
                           </View>
                         )}
+                        {duoSlotsNeeded > 0 && (duoPreferredGenres.length > 0 || duoPreferredInstruments.length > 0) && (
+                          <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
+                            {duoPreferredGenres.length > 0 ? `Genres: ${duoPreferredGenres.join(", ")}` : ""}
+                            {duoPreferredGenres.length > 0 && duoPreferredInstruments.length > 0 ? " • " : ""}
+                            {duoPreferredInstruments.length > 0 ? `Instruments: ${duoPreferredInstruments.join(", ")}` : ""}
+                          </Text>
+                        )}
                         {bandSlotsNeeded > 0 && (
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                             <Ionicons name="people-circle" size={16} color="#3B82F6" />
@@ -2625,6 +3012,13 @@ export default function AddGigScreen() {
                               {bandRolesNeeded.length > 0 && ` (${bandRolesNeeded.join(", ")})`}
                             </Text>
                           </View>
+                        )}
+                        {bandSlotsNeeded > 0 && (bandPreferredGenres.length > 0 || bandPreferredInstruments.length > 0) && (
+                          <Text style={{ color: colors.textSecondary, fontSize: 12, marginLeft: 24 }}>
+                            {bandPreferredGenres.length > 0 ? `Genres: ${bandPreferredGenres.join(", ")}` : ""}
+                            {bandPreferredGenres.length > 0 && bandPreferredInstruments.length > 0 ? " • " : ""}
+                            {bandPreferredInstruments.length > 0 ? `Instruments: ${bandPreferredInstruments.join(", ")}` : ""}
+                          </Text>
                         )}
                       </View>
                     </View>

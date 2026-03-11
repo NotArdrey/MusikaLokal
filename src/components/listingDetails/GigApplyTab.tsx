@@ -9,6 +9,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { PH_MUSIC_GROUP_TYPES } from "../../constants/groupTypes";
 import { getGigApplicationDeadlineInfo } from "../../utils/gigApplication";
 import DocumentUploader from "../DocumentUploader";
 import styles from "../ListingDetailsSheet.styles";
@@ -108,6 +109,36 @@ const GigApplyTab = ({
       return true;
     });
   };
+
+  const selectedSlotRequirements = React.useMemo(() => {
+    if (!selectedSlotType) return null;
+    const slot = slots?.[selectedSlotType] || {};
+    const preferredGenres = Array.isArray(slot.preferred_genres)
+      ? slot.preferred_genres.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+    const preferredInstruments = Array.isArray(slot.preferred_instruments)
+      ? slot.preferred_instruments.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+    const preferredGroupTypesRaw = selectedSlotType === "band" && Array.isArray(slot.preferred_group_types)
+      ? slot.preferred_group_types.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+
+    const preferredGroupTypeLabels = Array.from(
+      preferredGroupTypesRaw.reduce((map: Map<string, number>, typeId: string) => {
+        map.set(typeId, (map.get(typeId) || 0) + 1);
+        return map;
+      }, new Map<string, number>()).entries(),
+    ).map(([typeId, count]) => {
+      const label = PH_MUSIC_GROUP_TYPES.find((entry) => entry.id === typeId)?.label || "Group";
+      return count > 1 ? `${label} (${count})` : label;
+    });
+
+    return {
+      preferredGenres,
+      preferredInstruments,
+      preferredGroupTypeLabels,
+    };
+  }, [selectedSlotType, slots]);
 
   React.useEffect(() => {
     if (!selectedGroupId) return;
@@ -296,6 +327,41 @@ const GigApplyTab = ({
                       : "Choose a matching profile for the selected category."}
                 </Text>
               )}
+
+              {selectedSlotRequirements &&
+                (selectedSlotRequirements.preferredGenres.length > 0 ||
+                  selectedSlotRequirements.preferredInstruments.length > 0 ||
+                  selectedSlotRequirements.preferredGroupTypeLabels.length > 0) && (
+                  <View
+                    style={[
+                      styles.infoBox,
+                      {
+                        backgroundColor: isDark ? "#374151" : "#F9FAFB",
+                        borderColor: colors.border,
+                        marginTop: 8,
+                      },
+                    ]}
+                  >
+                    {selectedSlotRequirements.preferredGroupTypeLabels.length > 0 && (
+                      <Text style={[styles.infoText, { color: colors.text }]}>
+                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Preferred group types: </Text>
+                        {selectedSlotRequirements.preferredGroupTypeLabels.join(", ")}
+                      </Text>
+                    )}
+                    {selectedSlotRequirements.preferredGenres.length > 0 && (
+                      <Text style={[styles.infoText, { color: colors.text }]}>
+                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Preferred genres: </Text>
+                        {selectedSlotRequirements.preferredGenres.join(", ")}
+                      </Text>
+                    )}
+                    {selectedSlotRequirements.preferredInstruments.length > 0 && (
+                      <Text style={[styles.infoText, { color: colors.text }]}>
+                        <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Preferred instruments: </Text>
+                        {selectedSlotRequirements.preferredInstruments.join(", ")}
+                      </Text>
+                    )}
+                  </View>
+                )}
             </View>
           );
         };

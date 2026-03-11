@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
@@ -15,11 +15,12 @@ interface HeaderProps {
 
 function Header({ title, transparent, onBackPress }: HeaderProps) {
     const { colors, isDark } = useTheme();
-    const { isGuest } = useAuth();
+    const { isGuest, userId } = useAuth();
     const insets = useSafeAreaInsets();
 
     const pathname = usePathname();
     const [hasUnread, setHasUnread] = useState(false);
+    const [hasUnreadChats, setHasUnreadChats] = useState(false);
     const isMainNavPath = useMemo(
         () => pathname === "/explore" || pathname === "/home" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
         [pathname],
@@ -50,14 +51,13 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
         return '/add_group';
     }, [pathname]);
 
-    useFocusEffect(
-        useCallback(() => {
-            checkUnreadNotifications();
-        }, [])
-    );
-
-    const checkUnreadNotifications = async () => {
+    const checkUnreadNotifications = useCallback(async () => {
         try {
+            if (!userId || isGuest) {
+                setHasUnread(false);
+                return;
+            }
+
             // Check session first to avoid unnecessary API calls
             const { data: { session } } = await supabase.auth.getSession();
             if (!session?.access_token) return;
@@ -80,7 +80,86 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
         } catch (e) {
             // Silently ignore errors - user likely not logged in
         }
-    };
+    }, [isGuest, userId]);
+
+    const checkUnreadChats = useCallback(async () => {
+        try {
+            if (!userId || isGuest) {
+                setHasUnreadChats(false);
+                return;
+            }
+
+            const { data: participations, error: participationError } = await supabase
+                .from('conversation_participants')
+                .select('conversation_id')
+                .eq('user_id', userId);
+
+            if (participationError) return;
+
+            const conversationIds = (participations || []).map((item) => item.conversation_id);
+            if (conversationIds.length === 0) {
+                setHasUnreadChats(false);
+                return;
+            }
+
+            const { count, error: unreadCountError } = await supabase
+                .from('messages')
+                .select('id', { count: 'exact', head: true })
+                .in('conversation_id', conversationIds)
+                .neq('sender_id', userId)
+                .is('read_at', null);
+
+            if (unreadCountError) return;
+            setHasUnreadChats((count || 0) > 0);
+        } catch {
+            // Silently ignore errors
+        }
+    }, [isGuest, userId]);
+
+    useFocusEffect(
+        useCallback(() => {
+            checkUnreadNotifications();
+            checkUnreadChats();
+        }, [checkUnreadNotifications, checkUnreadChats])
+    );
+
+    useEffect(() => {
+        if (!userId || isGuest) {
+            setHasUnread(false);
+            setHasUnreadChats(false);
+            return;
+        }
+
+        checkUnreadNotifications();
+        checkUnreadChats();
+
+        const channel = supabase
+            .channel(`header-notifications:${userId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+                () => {
+                    checkUnreadNotifications();
+                }
+            )
+            .subscribe();
+
+        const messagesChannel = supabase
+            .channel(`header-messages:${userId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'messages' },
+                () => {
+                    checkUnreadChats();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+            supabase.removeChannel(messagesChannel);
+        };
+    }, [userId, isGuest, checkUnreadNotifications, checkUnreadChats]);
 
     return (
         <View style={[styles.container, {
@@ -120,6 +199,9 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
                         {/* Chat Button */}
                         <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>
                             <Ionicons name="chatbubbles" size={24} color={colors.text} />
+                            {hasUnreadChats && (
+                                <View style={styles.badge} />
+                            )}
                         </TouchableOpacity>
                         {/* Notifications Button */}
                         <TouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>

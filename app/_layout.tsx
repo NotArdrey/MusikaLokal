@@ -11,13 +11,17 @@ import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useRef } from "react";
-import { View } from "react-native";
+import { LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 
 SplashScreen.preventAutoHideAsync();
+
+LogBox.ignoreLogs([
+  "AuthApiError: Invalid Refresh Token: Refresh Token Not Found",
+]);
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({

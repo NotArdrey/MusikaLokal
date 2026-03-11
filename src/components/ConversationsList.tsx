@@ -120,7 +120,7 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                         <Image source={DEFAULT_AVATAR} style={styles.avatar} />
                     )}
                     {hasUnread && (
-                        <View style={[styles.onlineDot, { backgroundColor: colors.primary, borderColor: colors.background }]} />
+                        <View style={styles.unreadDot} />
                     )}
                 </View>
 
@@ -350,14 +350,16 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    onlineDot: {
+    unreadDot: {
         position: 'absolute',
         bottom: 1,
         right: 1,
         width: 14,
         height: 14,
         borderRadius: 7,
-        borderWidth: 2.5,
+        backgroundColor: '#EF4444',
+        borderWidth: 2,
+        borderColor: '#FFFFFF',
     },
     conversationContent: {
         flex: 1,

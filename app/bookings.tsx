@@ -794,6 +794,9 @@ export default function BookingsScreen() {
           };
         });
 
+      const normalizeStatus = (status?: string | null) =>
+        String(status || "").trim().toLowerCase();
+
       // Separate Items Logic
 
       // 1. Applicants (Pending Gig items)
@@ -856,7 +859,17 @@ export default function BookingsScreen() {
 
         return false;
       });
-      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted];
+      const terminalGigApplications = rawReview.filter((item: any) => {
+        if (item.type_id !== "gig_application") return false;
+        const status = normalizeStatus(item.status);
+        return ["completed", "fired", "declined", "rejected", "cancelled"].includes(status);
+      });
+
+      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted, ...terminalGigApplications]
+        .filter(
+          (item: any, index: number, arr: any[]) =>
+            arr.findIndex((candidate: any) => candidate.id === item.id && candidate.type_id === item.type_id) === index,
+        );
       // Sort history by date (most recent first)
       historyItems.sort(
         (a: any, b: any) =>
@@ -918,17 +931,22 @@ export default function BookingsScreen() {
 
         // Separate by status
         const appliedApps = allGigApps.filter(
-          (app: any) => app.status === "Applied" || app.status === "Pending" || app.status === "pending"
+          (app: any) => {
+            const status = normalizeStatus(app.status);
+            return status === "applied" || status === "pending";
+          },
         );
         const acceptedApps = allGigApps.filter(
-          (app: any) => app.status === "Accepted" || app.status === "Happening Now"
+          (app: any) => {
+            const status = normalizeStatus(app.status);
+            return status === "accepted" || status === "happening now" || status === "confirmed";
+          },
         );
         const completedApps = allGigApps.filter(
-          (app: any) =>
-            app.status === "Completed" ||
-            app.status === "Declined" ||
-            app.status === "Rejected" ||
-            app.status === "Fired"
+          (app: any) => {
+            const status = normalizeStatus(app.status);
+            return ["completed", "declined", "rejected", "fired", "cancelled"].includes(status);
+          },
         );
 
         // Sort by date (most recent first for applied, closest first for accepted)
@@ -1025,7 +1043,39 @@ export default function BookingsScreen() {
 
       debugLog("📥 handleStatusUpdate response:", { data, error });
 
-      if (error) throw error;
+      if (error) {
+        const errorContext = (error as any)?.context;
+        let contextBody: any = null;
+
+        try {
+          contextBody = errorContext?.json ? await errorContext.json() : null;
+        } catch {
+          contextBody = null;
+        }
+
+        console.log("[Bookings][handleStatusUpdate][Edge Function error]", {
+          bookingId,
+          newStatus,
+          typeId,
+          errorMessage: (error as any)?.message,
+          errorStatus: (error as any)?.status,
+          errorCode: (error as any)?.code,
+          errorDetails: (error as any)?.details,
+          contextStatus: errorContext?.status,
+          contextStatusText: errorContext?.statusText,
+          contextBody,
+        });
+
+        const contextMessage =
+          (contextBody && typeof contextBody === "object" && (contextBody.error || contextBody.message)) ||
+          null;
+
+        if (contextMessage && typeof contextMessage === "string") {
+          throw new Error(contextMessage);
+        }
+
+        throw error;
+      }
 
       if (
         typeId === "studio_booking" &&
@@ -2762,12 +2812,8 @@ export default function BookingsScreen() {
                                   padding: 10,
                                   borderRadius: 100,
                                   alignItems: "center",
-                                  flexDirection: "row",
-                                  justifyContent: "center",
-                                  gap: 6,
                                 }}
                               >
-                                <Ionicons name="flame" size={16} color="#EF4444" />
                                 <Text
                                   style={{
                                     color: "#EF4444",
@@ -2781,6 +2827,29 @@ export default function BookingsScreen() {
 
                               <TouchableOpacity activeOpacity={1}
                                 onPress={() => {
+                                  console.log("[Bookings][Active Musicians][COMPLETE pressed]", {
+                                    timestamp: new Date().toISOString(),
+                                    activeTab,
+                                    userRole,
+                                    modalModeBeforeOpen: modalMode,
+                                    booking: {
+                                      id: item?.id,
+                                      type_id: item?.type_id,
+                                      status: item?.status,
+                                      booking_status: item?.booking_status,
+                                      applicant_name: item?.applicant_name,
+                                      user_id: item?.user_id,
+                                      applicant_id: item?.applicant_id,
+                                      organizer_id: item?.organizer_id,
+                                      gig_id: item?.gig_id,
+                                      title: item?.title,
+                                      gig_title: item?.gig_title,
+                                      venue_name: item?.venue_name,
+                                      raw_date: item?.raw_date,
+                                      start_time: item?.start_time,
+                                      end_time: item?.end_time,
+                                    },
+                                  });
                                   setSelectedItem(item);
                                   setModalMode("complete");
                                   setModalVisible(true);
@@ -2791,16 +2860,8 @@ export default function BookingsScreen() {
                                   padding: 10,
                                   borderRadius: 100,
                                   alignItems: "center",
-                                  flexDirection: "row",
-                                  justifyContent: "center",
-                                  gap: 6,
                                 }}
                               >
-                                <Ionicons
-                                  name="checkmark-circle"
-                                  size={16}
-                                  color="white"
-                                />
                                 <Text
                                   style={{
                                     color: "white",
@@ -2815,35 +2876,37 @@ export default function BookingsScreen() {
                           ) : activeTab === "Review" ? (
                             // Review Tab: Leave Review + Renew Contract for venue owners
                             <View style={{ flexDirection: "row", gap: 8, flex: 1 }}>
-                              <TouchableOpacity activeOpacity={1}
-                                onPress={() => handleLeaveReview(item)}
-                                style={{
-                                  flex: 1,
-                                  borderColor: colors.primary,
-                                  borderWidth: 1,
-                                  padding: 10,
-                                  borderRadius: 100,
-                                  alignItems: "center",
-                                  flexDirection: "row",
-                                  justifyContent: "center",
-                                  gap: 6,
-                                }}
-                              >
-                                <Ionicons
-                                  name="star-outline"
-                                  size={16}
-                                  color={colors.primary}
-                                />
-                                <Text
+                              {!(userRole === "venue-owner" && item.type_id === "gig_application") && (
+                                <TouchableOpacity activeOpacity={1}
+                                  onPress={() => handleLeaveReview(item)}
                                   style={{
-                                    color: colors.primary,
-                                    fontFamily: "Poppins_500Medium",
-                                    fontSize: 12,
+                                    flex: 1,
+                                    borderColor: colors.primary,
+                                    borderWidth: 1,
+                                    padding: 10,
+                                    borderRadius: 100,
+                                    alignItems: "center",
+                                    flexDirection: "row",
+                                    justifyContent: "center",
+                                    gap: 6,
                                   }}
                                 >
-                                  Leave Review
-                                </Text>
-                              </TouchableOpacity>
+                                  <Ionicons
+                                    name="star-outline"
+                                    size={16}
+                                    color={colors.primary}
+                                  />
+                                  <Text
+                                    style={{
+                                      color: colors.primary,
+                                      fontFamily: "Poppins_500Medium",
+                                      fontSize: 12,
+                                    }}
+                                  >
+                                    Leave Review
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
 
                               {userRole === "venue-owner" && (
                                 <TouchableOpacity activeOpacity={1}
@@ -3615,22 +3678,41 @@ export default function BookingsScreen() {
                             </TouchableOpacity>
                           </View>
                         ) : activeTab === "Review" ? (
-                          <TouchableOpacity activeOpacity={1}
-                            onPress={() => handleLeaveReview(item)}
-                            style={[
-                              styles.outlineButton,
-                              { borderColor: colors.primary },
-                            ]}
-                          >
-                            <Text
+                          userRole === "venue-owner" && item.type_id === "gig_application" ? (
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => handleDetailsPress(item)}
                               style={[
-                                styles.outlineButtonText,
-                                { color: colors.primary },
+                                styles.outlineButton,
+                                { borderColor: colors.border },
                               ]}
                             >
-                              Leave Review
-                            </Text>
-                          </TouchableOpacity>
+                              <Text
+                                style={[
+                                  styles.outlineButtonText,
+                                  { color: colors.textSecondary },
+                                ]}
+                              >
+                                View Details
+                              </Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => handleLeaveReview(item)}
+                              style={[
+                                styles.outlineButton,
+                                { borderColor: colors.primary },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.outlineButtonText,
+                                  { color: colors.primary },
+                                ]}
+                              >
+                                Leave Review
+                              </Text>
+                            </TouchableOpacity>
+                          )
                         ) : (
                           // Default / Upcoming Buttons
                           <View
@@ -4064,6 +4146,34 @@ export default function BookingsScreen() {
               status = "late";
             }
 
+            if (modalMode === "complete") {
+              console.log("[Bookings][Complete Review Modal][CONFIRM pressed]", {
+                timestamp: new Date().toISOString(),
+                activeTab,
+                userRole,
+                modalMode,
+                computedStatus: status,
+                cancellationReason,
+                selectedItem: {
+                  id: selectedItem?.id,
+                  type_id: selectedItem?.type_id,
+                  status: selectedItem?.status,
+                  booking_status: selectedItem?.booking_status,
+                  applicant_name: selectedItem?.applicant_name,
+                  user_id: selectedItem?.user_id,
+                  applicant_id: selectedItem?.applicant_id,
+                  organizer_id: selectedItem?.organizer_id,
+                  gig_id: selectedItem?.gig_id,
+                  title: selectedItem?.title,
+                  gig_title: selectedItem?.gig_title,
+                  venue_name: selectedItem?.venue_name,
+                  raw_date: selectedItem?.raw_date,
+                  start_time: selectedItem?.start_time,
+                  end_time: selectedItem?.end_time,
+                },
+              });
+            }
+
             debugLog("🔍 Modal onConfirm - Final status:", status);
             debugLog(
               "🔍 Modal onConfirm - Calling handleStatusUpdate with:",
@@ -4095,11 +4205,9 @@ export default function BookingsScreen() {
               );
             }
 
-            // If FIRING or COMPLETED, redirect to review
-            if (modalMode === "fire" || modalMode === "complete") {
-              // Give a small delay or just switch
+            // Only redirect to review if the status update actually succeeded.
+            if (didUpdate && (modalMode === "fire" || modalMode === "complete")) {
               setActiveTab("Review");
-              // Open review flow for this item
               handleLeaveReview(selectedItem);
             }
           }

@@ -239,6 +239,49 @@ async function creditOwnerWallet(
   }
 }
 
+async function createSubscriptionActivatedNotificationIfNeeded(
+  supabaseAdmin: any,
+  userId: string,
+  planId: string,
+  planName: string,
+) {
+  try {
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+    const { data: existingNotification, error: checkError } = await supabaseAdmin
+      .from("notifications")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("title", "Subscription Activated! 🎉")
+      .contains("meta", { plan_id: planId })
+      .gte("created_at", thirtyMinutesAgo)
+      .limit(1)
+      .maybeSingle();
+
+    if (checkError) {
+      console.warn("⚠️ Failed to check existing subscription notification:", checkError);
+    }
+
+    if (existingNotification) {
+      console.log("⏭️ Skipping duplicate subscription activation notification", {
+        userId,
+        planId,
+      });
+      return;
+    }
+
+    await supabaseAdmin.from("notifications").insert({
+      user_id: userId,
+      type: "success",
+      title: "Subscription Activated! 🎉",
+      message: `Welcome to the ${planName} plan! Your subscription is now active.`,
+      meta: { plan_id: planId, plan_name: planName },
+    });
+  } catch (e) {
+    console.error("Error creating subscription activation notification:", e);
+  }
+}
+
 serve(async (req: Request) => {
   console.log("🔵 PayMongo function called:", req.method, req.url);
 
@@ -1279,14 +1322,12 @@ serve(async (req: Request) => {
               });
             }
 
-            // Send notification
-            await supabaseAdmin.from("notifications").insert({
-              user_id: userId,
-              type: "success",
-              title: "Subscription Activated! 🎉",
-              message: `Welcome to the ${plan.name} plan! Your subscription is now active.`,
-              meta: { plan_id: planId, plan_name: plan.name },
-            });
+            await createSubscriptionActivatedNotificationIfNeeded(
+              supabaseAdmin,
+              userId,
+              planId,
+              plan.name,
+            );
           }
         } catch (e) {
           console.error("Error creating subscription:", e);
@@ -1543,13 +1584,12 @@ serve(async (req: Request) => {
                 })
                 .eq("id", userId);
 
-              await supabaseAdmin.from("notifications").insert({
-                user_id: userId,
-                type: "success",
-                title: "Subscription Activated! 🎉",
-                message: `Your ${plan.name} plan subscription is now active.`,
-                meta: { plan_id: planId, plan_name: plan.name },
-              });
+              await createSubscriptionActivatedNotificationIfNeeded(
+                supabaseAdmin,
+                userId,
+                planId,
+                plan.name,
+              );
             }
           }
         } else {

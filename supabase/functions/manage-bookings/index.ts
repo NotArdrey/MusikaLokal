@@ -574,6 +574,7 @@ serve(async (req: Request) => {
         // Process Gig Applications
         // @ts-ignore
         gigApps?.forEach((g: any) => {
+          const normalizedStatus = (g.status || "").toLowerCase();
           const gig = g.gig;
           const dateStr =
             gig?.event_date || g.created_at?.split("T")[0] || "TBA";
@@ -603,24 +604,31 @@ serve(async (req: Request) => {
               gig?.organizer?.avatar_url ||
               "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
             status:
-              g.status === "pending"
+              normalizedStatus === "pending"
                 ? "Applied"
-                : g.status === "accepted"
+                : normalizedStatus === "accepted"
                   ? "Accepted"
-                  : g.status === "rejected"
-                    ? "Declined"
-                    : g.status,
+                  : normalizedStatus === "completed"
+                    ? "Completed"
+                    : normalizedStatus === "rejected" ||
+                        normalizedStatus === "cancelled" ||
+                        normalizedStatus === "fired"
+                      ? "Fired"
+                      : g.status,
             type: g.group_id ? "Group Application" : "Solo Application",
-            isCancelled: g.status === "cancelled" || g.status === "rejected",
-            action: g.status === "accepted" ? "View Details" : "Details",
+            isCancelled:
+              normalizedStatus === "cancelled" ||
+              normalizedStatus === "rejected" ||
+              normalizedStatus === "fired",
+            action: normalizedStatus === "accepted" ? "View Details" : "Details",
             location: gig?.location,
             reviewed_by_applicant: g.reviewed_by_applicant || false,
           };
 
-          if (g.status === "pending") {
+          if (normalizedStatus === "pending") {
             // @ts-ignore
             categorized.Pending.push(item);
-          } else if (g.status === "accepted") {
+          } else if (normalizedStatus === "accepted") {
             // Time-based categorization for accepted gigs
             if (eventDate) {
               const eventStart = new Date(gig.event_date);
@@ -646,8 +654,16 @@ serve(async (req: Request) => {
               // @ts-ignore
               categorized.Upcoming.push(item);
             }
-          } else if (g.status === "rejected" || g.status === "cancelled") {
-            // Declined applications - skip from main view
+          } else if (
+            normalizedStatus === "rejected" ||
+            normalizedStatus === "cancelled" ||
+            normalizedStatus === "fired"
+          ) {
+            // @ts-ignore
+            categorized.Review.push({ ...item, status: "Fired" });
+          } else if (normalizedStatus === "completed") {
+            // @ts-ignore
+            categorized.Review.push({ ...item, status: "Completed" });
           }
         });
 
@@ -1519,6 +1535,46 @@ serve(async (req: Request) => {
 
       const updateData: any = { status: new_status };
 
+      if (table === "gig_applications") {
+        const { data: targetApplication, error: targetError } = await supabaseAdmin
+          .from("gig_applications")
+          .select("id, applicant_id, gig_id")
+          .eq("id", booking_id)
+          .maybeSingle();
+
+        if (targetError) throw targetError;
+
+        if (!targetApplication) {
+          return new Response(JSON.stringify({ error: "Application not found" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 404,
+          });
+        }
+
+        const { data: targetGig, error: targetGigError } = await supabaseAdmin
+          .from("gigs")
+          .select("id, organizer_id")
+          .eq("id", targetApplication.gig_id)
+          .maybeSingle();
+
+        if (targetGigError) throw targetGigError;
+
+        const isOrganizer = targetGig?.organizer_id === authUser.id;
+        const isApplicant = targetApplication.applicant_id === authUser.id;
+        const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled"];
+        const applicantAllowedStatuses = ["cancelled"];
+
+        if (
+          !(isOrganizer && organizerAllowedStatuses.includes(new_status)) &&
+          !(isApplicant && applicantAllowedStatuses.includes(new_status))
+        ) {
+          return new Response(JSON.stringify({ error: "Forbidden" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          });
+        }
+      }
+
       // Add cancellation_reason if status is cancelled/rejected and reason is provided
       if (
         (new_status === "cancelled" || new_status === "rejected") &&
@@ -1529,21 +1585,33 @@ serve(async (req: Request) => {
 
       console.log("📝 Update data:", updateData);
 
-      const { data, error } = await supabaseClient
+      const updateClient = table === "gig_applications" ? supabaseAdmin : supabaseClient;
+
+      const { data, error } = await updateClient
         .from(table)
         .update(updateData)
         .eq("id", booking_id)
-        .select();
+        .select()
+        .maybeSingle();
 
       console.log("📝 Update result:", { data, error });
 
       if (error) throw error;
 
+      if (!data) {
+        return new Response(JSON.stringify({ error: "No matching record updated" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
       // NOTIFICATION LOGIC
       if (
-        ["cancelled", "rejected", "confirmed", "accepted"].includes(new_status)
+        ["cancelled", "rejected", "confirmed", "accepted", "completed"].includes(new_status)
       ) {
         try {
+          const notificationEventType = `${table}_${new_status}`;
+
           // Determine who to notify
           let targetUserId = null;
           let notificationTitle = "";
@@ -1555,12 +1623,15 @@ serve(async (req: Request) => {
             // For Studio Bookings
             const { data: bookingInfo } = await supabaseClient
               .from("studio_bookings")
-              .select("user_id, studio:studios(name)")
+              .select("user_id, studio:studios(name, images)")
               .eq("id", booking_id)
               .single();
 
             if (bookingInfo) {
-              notificationImage = null;
+              notificationImage = Array.isArray(bookingInfo.studio?.images)
+                ? bookingInfo.studio.images[0] || null
+                : null;
+
               if (new_status === "cancelled") {
                 targetUserId = bookingInfo.user_id;
                 notificationTitle = "Booking Declined";
@@ -1577,36 +1648,63 @@ serve(async (req: Request) => {
             }
           } else if (table === "gig_applications") {
             // For Gig Applications
-            const { data: gigInfo } = await supabaseClient
+            const { data: applicationInfo, error: applicationInfoError } = await supabaseAdmin
               .from("gig_applications")
-              .select("applicant_id, gig:gigs(name)")
+              .select("applicant_id, gig_id")
               .eq("id", booking_id)
-              .single();
+              .maybeSingle();
 
-            if (gigInfo) {
-              notificationImage = null;
+            if (applicationInfoError) throw applicationInfoError;
+
+            let gigMeta: { name?: string; images?: string[] | null } | null = null;
+            if (applicationInfo?.gig_id) {
+              const { data: gigRow, error: gigRowError } = await supabaseAdmin
+                .from("gigs")
+                .select("name, images")
+                .eq("id", applicationInfo.gig_id)
+                .maybeSingle();
+
+              if (gigRowError) throw gigRowError;
+              gigMeta = gigRow as any;
+            }
+
+            if (applicationInfo) {
+              notificationImage = Array.isArray(gigMeta?.images)
+                ? gigMeta.images[0] || null
+                : null;
+
               if (new_status === "rejected") {
-                targetUserId = gigInfo.applicant_id;
+                targetUserId = applicationInfo.applicant_id;
                 notificationTitle = "Application Declined";
-                notificationMessage = `Your application for ${gigInfo.gig.name} has been declined.`;
+                notificationMessage = `Your application for ${gigMeta?.name || "this gig"} has been declined.`;
                 notificationType = "error";
               } else if (new_status === "accepted") {
-                targetUserId = gigInfo.applicant_id;
+                targetUserId = applicationInfo.applicant_id;
                 notificationTitle = "Application Accepted!";
-                notificationMessage = `Your application for ${gigInfo.gig.name} has been accepted!`;
+                notificationMessage = `Your application for ${gigMeta?.name || "this gig"} has been accepted!`;
+                notificationType = "success";
+              } else if (new_status === "completed") {
+                targetUserId = applicationInfo.applicant_id;
+                notificationTitle = "Gig Completed";
+                notificationMessage = `Your contract for ${gigMeta?.name || "this gig"} has been marked as completed.`;
                 notificationType = "success";
               }
             }
           }
 
           if (targetUserId) {
-            await supabaseAdmin.from("notifications").insert({
+            await insertNotificationIfMissing(supabaseAdmin, {
               user_id: targetUserId,
               type: notificationType,
               title: notificationTitle,
               message: notificationMessage,
               image: notificationImage,
-              read: false,
+              meta: {
+                booking_id: booking_id,
+                source_table: table,
+                status: new_status,
+                event_type: notificationEventType,
+              },
             });
             console.log(
               `🔔 Notification sent to ${targetUserId}: ${notificationTitle}`,

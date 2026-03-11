@@ -78,6 +78,32 @@ const ListingCard: React.FC<ListingCardProps> = ({
     return getGigApplicationDeadlineInfo(item);
   }, [item.event_date, item.requirements?.event_start_time, item.type]);
 
+  const getPreferenceTagText = useCallback((label: string, values: unknown) => {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const cleaned = values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+    if (cleaned.length === 0) return null;
+    const first = cleaned[0];
+    const remaining = cleaned.length - 1;
+    return `${label}: ${first}${remaining > 0 ? ` +${remaining}` : ""}`;
+  }, []);
+
+  const preferredBandTypeBadges = useMemo(() => {
+    const types = item?.requirements?.slots?.band?.preferred_group_types;
+    if (!Array.isArray(types) || types.length === 0) return [] as string[];
+
+    const counts = new Map<string, number>();
+    types.forEach((typeId: unknown) => {
+      if (typeof typeId !== "string" || !typeId) return;
+      counts.set(typeId, (counts.get(typeId) || 0) + 1);
+    });
+
+    return Array.from(counts.entries()).map(([typeId, count]) => {
+      const type = PH_MUSIC_GROUP_TYPES.find((entry) => entry.id === typeId);
+      const label = type?.label || "Group";
+      return count > 1 ? `${label} (${count})` : label;
+    });
+  }, [item?.requirements?.slots?.band?.preferred_group_types]);
+
   // Determine "Subtitle" (Location or Genre)
   const subtitle = useMemo(() => {
     const baseSubtitle = item.location || item.address;
@@ -587,16 +613,41 @@ const ListingCard: React.FC<ListingCardProps> = ({
                       </View>
                     )}
                     {/* Preferred Group Types */}
-                    {item.requirements.slots.band?.preferred_group_types?.length > 0 &&
-                      item.requirements.slots.band.preferred_group_types.map((typeId: string) => {
-                        const type = PH_MUSIC_GROUP_TYPES.find(t => t.id === typeId);
-                        return type ? (
-                          <View key={typeId} style={[styles.tagBadge, { backgroundColor: "#6366F1" }]}>
-                            <Text style={styles.tagText}>{type.label}</Text>
-                          </View>
-                        ) : null;
-                      })
-                    }
+                    {preferredBandTypeBadges.map((label, index) => (
+                      <View key={`${label}-${index}`} style={[styles.tagBadge, { backgroundColor: "#6366F1" }]}>
+                        <Text style={styles.tagText}>{label}</Text>
+                      </View>
+                    ))}
+                    {getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres) && (
+                      <View style={[styles.tagBadge, { backgroundColor: "#BE185D" }]}>
+                        <Text style={styles.tagText}>{getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres)}</Text>
+                      </View>
+                    )}
+                    {getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments) && (
+                      <View style={[styles.tagBadge, { backgroundColor: "#9D174D" }]}>
+                        <Text style={styles.tagText}>{getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments)}</Text>
+                      </View>
+                    )}
+                    {getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres) && (
+                      <View style={[styles.tagBadge, { backgroundColor: "#6D28D9" }]}>
+                        <Text style={styles.tagText}>{getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres)}</Text>
+                      </View>
+                    )}
+                    {getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments) && (
+                      <View style={[styles.tagBadge, { backgroundColor: "#5B21B6" }]}>
+                        <Text style={styles.tagText}>{getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments)}</Text>
+                      </View>
+                    )}
+                    {getPreferenceTagText("Group Genre", item.requirements.slots.band?.preferred_genres) && (
+                      <View style={[styles.tagBadge, { backgroundColor: "#1D4ED8" }]}>
+                        <Text style={styles.tagText}>{getPreferenceTagText("Group Genre", item.requirements.slots.band?.preferred_genres)}</Text>
+                      </View>
+                    )}
+                    {getPreferenceTagText("Group Inst", item.requirements.slots.band?.preferred_instruments) && (
+                      <View style={[styles.tagBadge, { backgroundColor: "#1E40AF" }]}>
+                        <Text style={styles.tagText}>{getPreferenceTagText("Group Inst", item.requirements.slots.band?.preferred_instruments)}</Text>
+                      </View>
+                    )}
                   </>
                 )}
                 {showOpenApplicationsBadge && (
@@ -1079,22 +1130,48 @@ const ListingCard: React.FC<ListingCardProps> = ({
                       </Text>
                     </View>
                   )}
-                  {item.requirements.slots.band?.preferred_group_types?.length > 0 &&
-                    item.requirements.slots.band.preferred_group_types.map((typeId: string) => {
-                      const type = PH_MUSIC_GROUP_TYPES.find((t) => t.id === typeId);
-                      return type ? (
-                        <View
-                          key={typeId}
-                          style={[
-                            styles.tagBadge,
-                            styles.tagBadgeSmall,
-                            { backgroundColor: "#6366F1" },
-                          ]}
-                        >
-                          <Text style={[styles.tagText, { fontSize: 10 }]}>{type.label}</Text>
-                        </View>
-                      ) : null;
-                    })}
+                  {preferredBandTypeBadges.map((label, index) => (
+                    <View
+                      key={`${label}-${index}`}
+                      style={[
+                        styles.tagBadge,
+                        styles.tagBadgeSmall,
+                        { backgroundColor: "#6366F1" },
+                      ]}
+                    >
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>{label}</Text>
+                    </View>
+                  ))}
+                  {getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres) && (
+                    <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#BE185D" }]}>
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Solo Genre", item.requirements.slots.solo?.preferred_genres)}</Text>
+                    </View>
+                  )}
+                  {getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments) && (
+                    <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#9D174D" }]}>
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Solo Inst", item.requirements.slots.solo?.preferred_instruments)}</Text>
+                    </View>
+                  )}
+                  {getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres) && (
+                    <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#6D28D9" }]}>
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Duo Genre", item.requirements.slots.duo?.preferred_genres)}</Text>
+                    </View>
+                  )}
+                  {getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments) && (
+                    <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#5B21B6" }]}>
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Duo Inst", item.requirements.slots.duo?.preferred_instruments)}</Text>
+                    </View>
+                  )}
+                  {getPreferenceTagText("Group Genre", item.requirements.slots.band?.preferred_genres) && (
+                    <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#1D4ED8" }]}>
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Group Genre", item.requirements.slots.band?.preferred_genres)}</Text>
+                    </View>
+                  )}
+                  {getPreferenceTagText("Group Inst", item.requirements.slots.band?.preferred_instruments) && (
+                    <View style={[styles.tagBadge, styles.tagBadgeSmall, { backgroundColor: "#1E40AF" }]}>
+                      <Text style={[styles.tagText, { fontSize: 10 }]}>{getPreferenceTagText("Group Inst", item.requirements.slots.band?.preferred_instruments)}</Text>
+                    </View>
+                  )}
                 </>
               )}
 

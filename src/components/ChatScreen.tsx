@@ -6,6 +6,7 @@ import {
     ActivityIndicator,
     FlatList,
     Image,
+    Keyboard,
     KeyboardAvoidingView,
     Linking,
     Modal,
@@ -196,6 +197,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             }, 100);
         }
     }, [messages.length]);
+
+    // Scroll to bottom when keyboard opens so latest messages stay visible
+    useEffect(() => {
+        const keyboardShowEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const sub = Keyboard.addListener(keyboardShowEvent, () => {
+            setTimeout(() => {
+                flatListRef.current?.scrollToEnd({ animated: true });
+            }, Platform.OS === 'ios' ? 50 : 150);
+        });
+        return () => sub.remove();
+    }, []);
 
     const handleSend = async () => {
         if (!text.trim() || sending) return;
@@ -395,7 +407,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                 )}
                                 {/* File message */}
                                 {item.message_type === 'file' && item.attachment_url && (
-                                    <TouchableOpacity activeOpacity={1}
+                                    <TouchableOpacity
                                         style={[styles.fileBubble, { borderColor: isMe ? 'rgba(255,255,255,0.3)' : colors.border }]}
                                         onPress={() => Linking.openURL(item.attachment_url!)}
                                         activeOpacity={1}
@@ -528,7 +540,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
 
     return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <KeyboardAvoidingView
+            style={[styles.container, { backgroundColor: colors.background }]}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+        >
             {/* Header */}
             <View style={[
                 styles.header,
@@ -663,11 +679,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             />
 
             {/* Messages */}
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                style={styles.messagesContainer}
-                keyboardVerticalOffset={0}
-            >
+            <View style={styles.messagesContainer}>
                 {loading ? (
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator size="large" color={colors.primary} />
@@ -693,6 +705,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         contentContainerStyle={styles.messagesList}
                         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
                         showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                        keyboardDismissMode="interactive"
                     />
                 )}
 
@@ -744,7 +758,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         </TouchableOpacity>
                     )}
                 </View>
-            </KeyboardAvoidingView>
+            </View>
 
             {/* Reaction Picker Modal */}
             <Modal
@@ -818,7 +832,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 buttons={alertConfig.buttons}
                 onClose={() => setAlertVisible(false)}
             />
-        </View>
+        </KeyboardAvoidingView>
     );
 };
 

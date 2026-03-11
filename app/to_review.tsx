@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
@@ -9,6 +10,21 @@ import { useTheme } from '../src/context/ThemeContext';
 export default function ToReviewScreen() {
   const { colors, isDark } = useTheme();
   const { width } = useWindowDimensions();
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+  }>({
+    type: 'info',
+    title: '',
+    message: '',
+  });
+
+  const showAlert = (type: AlertType, title: string, message: string) => {
+    setAlertConfig({ type, title, message });
+    setAlertVisible(true);
+  };
 
   // Mock Data
   const reviewItems = [
@@ -18,9 +34,45 @@ export default function ToReviewScreen() {
       date: 'Sat, Nov 16 • 2:00 PM - 3:00 PM',
       image: 'https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=400&h=300&fit=crop',
       status: 'Completed',
-      type: 'Studio Booking'
+      type: 'Studio Booking',
+      type_id: 'studio_booking',
+      bookingId: 'mock-booking-id',
+      studioId: 'mock-studio-id',
+      reviewerRole: 'customer',
     }
   ];
+
+  const handleLeaveReview = (item: any) => {
+    const bookingType = item?.type_id;
+    const bookingId = item?.bookingId;
+    const reviewerRole = item?.reviewerRole;
+    const studioId = item?.studioId;
+    const gigId = item?.gigId;
+    const targetUserId = item?.targetUserId;
+    const hasTargetEntity = !!(studioId || gigId || targetUserId);
+
+    if (!bookingType || !bookingId || !reviewerRole || !hasTargetEntity) {
+      showAlert(
+        'info',
+        'Missing Review Details',
+        'This item does not have enough data to submit a review yet. Please open reviews from the Bookings screen.'
+      );
+      return;
+    }
+
+    router.push({
+      pathname: '/submit_review',
+      params: {
+        bookingId,
+        bookingType,
+        reviewerRole,
+        entityName: item?.name,
+        ...(studioId ? { studioId } : {}),
+        ...(gigId ? { gigId } : {}),
+        ...(targetUserId ? { targetUserId } : {}),
+      },
+    } as any);
+  };
 
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
@@ -62,7 +114,7 @@ export default function ToReviewScreen() {
 
                 <TouchableOpacity activeOpacity={1}
                   style={[styles.reviewBtn, { borderColor: colors.primary }]}
-                  onPress={() => router.push('/submit_review' as any)}
+                  onPress={() => handleLeaveReview(item)}
                 >
                   <Text style={[styles.reviewBtnText, { color: colors.primary }]}>Leave Review</Text>
                 </TouchableOpacity>
@@ -82,6 +134,14 @@ export default function ToReviewScreen() {
       <View style={styles.navbarContainer}>
         <Navbar />
       </View>
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        onClose={() => setAlertVisible(false)}
+      />
     </View>
   );
 }
