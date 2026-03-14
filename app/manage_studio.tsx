@@ -24,6 +24,31 @@ import {
     openNavigationDirections,
 } from "../src/utils/navigation";
 
+const canonicalizeStudioType = (
+  value: unknown,
+): "Rehearsal" | "Recording" | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized.includes("rehearsal")) return "Rehearsal";
+  if (normalized.includes("recording")) return "Recording";
+  return null;
+};
+
+const inferStudioTypeFromRows = (rows: unknown[]): "Rehearsal" | "Recording" | "Both" => {
+  const canonical = Array.from(
+    new Set(
+      rows
+        .map((row) => canonicalizeStudioType(row))
+        .filter((type): type is "Rehearsal" | "Recording" => Boolean(type)),
+    ),
+  );
+
+  if (canonical.length >= 2) return "Both";
+  return canonical[0] || "Both";
+};
+
 export default function StudioDetailsScreen() {
   const { colors, isDark } = useTheme();
   const { id } = useLocalSearchParams(); // Get Studio ID
@@ -242,6 +267,11 @@ export default function StudioDetailsScreen() {
         .eq('id', studioId)
         .single();
 
+      const { data: studioTypesData, error: studioTypesError } = await supabase
+        .from('studio_types')
+        .select('studio_type')
+        .eq('studio_id', studioId);
+
       if (studioError) {
         console.log('[manage_studio] Failed to fetch studio details:', studioError.message);
         // if (studioError.message?.includes("non-2xx")) {
@@ -251,6 +281,10 @@ export default function StudioDetailsScreen() {
       }
       if (legacyStudioError) {
         throw legacyStudioError;
+      }
+      if (studioTypesError) {
+        console.log('[manage_studio] Failed to fetch studio_types:', studioTypesError.message);
+        throw studioTypesError;
       }
 
       const { data: operatingRows } = await supabase
@@ -291,12 +325,19 @@ export default function StudioDetailsScreen() {
             : [],
       }));
 
+      const normalized3nfTypes = (studioTypesData || [])
+        .map((row: any) => row?.studio_type)
+        .filter(Boolean);
+      const legacyTypes = Array.isArray(legacyStudio?.types)
+        ? legacyStudio.types
+        : [];
+      const resolvedStudioType = normalized3nfTypes.length > 0
+        ? inferStudioTypeFromRows(normalized3nfTypes)
+        : inferStudioTypeFromRows(legacyTypes);
+
       setStudio({
         ...studioData,
-        type:
-          Array.isArray(legacyStudio?.types) && legacyStudio.types.length > 1
-            ? 'Both'
-            : legacyStudio?.types?.[0] || 'Both',
+        type: resolvedStudioType,
         amenities: legacyStudio?.amenities || [],
         images: legacyStudio?.images || [],
         instruments: legacyStudio?.instruments || [],

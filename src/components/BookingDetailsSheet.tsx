@@ -1,9 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BottomSheetModal, BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { router } from "expo-router";
 import React, { forwardRef, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Dimensions,
     Linking,
     StyleSheet,
@@ -39,12 +39,13 @@ interface BookingDetailsSheetProps {
   booking: any;
   onCancel?: (bookingId: string) => void;
   onConfirm?: (bookingId: string) => void;
+  onLeaveReview?: (booking: any) => void;
 }
 
 const BookingDetailsSheet = forwardRef<
   BottomSheetModal,
   BookingDetailsSheetProps
->(({ booking, onCancel, onConfirm }, ref) => {
+>(({ booking, onCancel, onConfirm, onLeaveReview }, ref) => {
   const { colors, isDark } = useTheme();
   const [loading, setLoading] = useState(false);
   const [studioDetails, setStudioDetails] = useState<any>(null);
@@ -205,6 +206,34 @@ const BookingDetailsSheet = forwardRef<
   const isStudio = booking.type_id === "studio_booking" || !!booking.studio_id;
   const isGig = booking.type_id === "gig_application" || !!booking.gig_id;
 
+  const inferApplicationKind = (item: any): "solo" | "duo" | "group" => {
+    const candidates = [
+      item?.performer,
+      item?.type,
+      item?.application_type,
+      item?.slot_type,
+      item?.category,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    if (candidates.includes("duo")) return "duo";
+    if (candidates.includes("group") || candidates.includes("band")) return "group";
+    if (candidates.includes("solo") || candidates.includes("individual")) return "solo";
+    if (item?.group_id) return "group";
+    return "solo";
+  };
+
+  const getApplicationDisplayLabel = (item: any): string => {
+    const kind = inferApplicationKind(item);
+    if (kind === "duo") return "Duo";
+    if (kind === "group") return "Group";
+    return "Solo Artist";
+  };
+
+  const applicationLabel = getApplicationDisplayLabel(booking);
+
   return (
     <BottomSheetModal
       ref={ref}
@@ -353,9 +382,9 @@ const BookingDetailsSheet = forwardRef<
                               },
                             ]}
                           >
-                            {booking.group_id
-                              ? `🎸 ${booking.type || "Group Application"}`
-                              : "🎤 Solo Application"}
+                            {applicationLabel === "Solo Artist"
+                              ? "🎤 Solo Application"
+                              : `🎸 ${applicationLabel} Application`}
                           </Text>
                         </View>
                       </View>
@@ -366,9 +395,9 @@ const BookingDetailsSheet = forwardRef<
                       <View style={styles.locationRow}>
                         <Ionicons
                           name={
-                            booking.performer
-                              ? "people-outline"
-                              : "person-outline"
+                            applicationLabel === "Solo Artist"
+                              ? "person-outline"
+                              : "people-outline"
                           }
                           size={16}
                           color={colors.primary}
@@ -383,7 +412,7 @@ const BookingDetailsSheet = forwardRef<
                               color: colors.primary,
                             }}
                           >
-                            {booking.performer || "Solo Artist"}
+                            {applicationLabel}
                           </Text>
                         </Text>
                       </View>
@@ -1102,7 +1131,14 @@ const BookingDetailsSheet = forwardRef<
                       { backgroundColor: colors.primary },
                     ]}
                     onPress={() => {
-                      router.push("/submit_review" as any);
+                      if (onLeaveReview) {
+                        onLeaveReview(booking);
+                      } else {
+                        Alert.alert(
+                          "Review Unavailable",
+                          "Please submit reviews from the Bookings screen so the correct review details are included.",
+                        );
+                      }
                       (ref as any)?.current?.dismiss();
                     }}
                   >

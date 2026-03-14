@@ -88,6 +88,27 @@ const formatTimeInput = (text: string): string => {
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 
+const canonicalizeStudioType = (
+  value: unknown,
+): "Rehearsal" | "Recording" | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized.includes("rehearsal")) return "Rehearsal";
+  if (normalized.includes("recording")) return "Recording";
+  return null;
+};
+
+const resolveStudioTypeRows = (value: unknown): ("Rehearsal" | "Recording")[] => {
+  if (typeof value === "string" && value.trim().toLowerCase() === "both") {
+    return ["Rehearsal", "Recording"];
+  }
+
+  const singleType = canonicalizeStudioType(value);
+  return singleType ? [singleType] : [];
+};
+
 export default function AddStudioScreen() {
   const { colors, isDark } = useTheme();
   const { isSystemLocked, showLockAlert } = useAuth();
@@ -637,12 +658,7 @@ export default function AddStudioScreen() {
 
       const studioId = data.id;
 
-      const normalizedTypes =
-        payload.type === 'Both'
-          ? ['Rehearsal', 'Recording']
-          : payload.type
-            ? [payload.type]
-            : [];
+      const normalizedTypes = resolveStudioTypeRows(payload.type);
 
       if (normalizedTypes.length > 0) {
         const { error: typesError } = await supabase

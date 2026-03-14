@@ -1952,15 +1952,85 @@ serve(async (req: Request) => {
         content,
         studioId,
         gigId,
+        groupId,
         targetUserId, // For reviewing a user (musician or owner)
         bookingId,
         bookingType, // 'studio_booking' or 'gig_application'
         reviewerRole, // 'customer' or 'owner' / 'applicant' or 'organizer'
       } = params;
 
-      // Check for duplicate review
+      // Enforce role ownership against the booking to avoid mis-targeted reviews.
+      if (bookingId && bookingType === "studio_booking") {
+        const { data: bookingAuth, error: bookingAuthError } = await supabaseClient
+          .from("studio_bookings")
+          .select("id, user_id, studio:studios(owner_id)")
+          .eq("id", bookingId)
+          .single();
+
+        if (bookingAuthError || !bookingAuth) {
+          return new Response(
+            JSON.stringify({ error: "Studio booking not found." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 },
+          );
+        }
+
+        const isStudioOwnerReviewer = reviewerRole === "owner" && bookingAuth.studio?.owner_id === userId;
+        const isCustomerReviewer = reviewerRole === "customer" && bookingAuth.user_id === userId;
+
+        if (!isStudioOwnerReviewer && !isCustomerReviewer) {
+          return new Response(
+            JSON.stringify({ error: "You are not allowed to submit this studio review." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
+          );
+        }
+      }
+
+      if (bookingId && bookingType === "gig_application") {
+        const { data: appAuth, error: appAuthError } = await supabaseClient
+          .from("gig_applications")
+          .select("id, applicant_id, group_id, gig:gig_id(organizer_id)")
+          .eq("id", bookingId)
+          .single();
+
+        if (appAuthError || !appAuth) {
+          return new Response(
+            JSON.stringify({ error: "Gig application not found." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 },
+          );
+        }
+
+        const isOrganizerReviewer = reviewerRole === "organizer" && appAuth.gig?.organizer_id === userId;
+        const isApplicantReviewer = reviewerRole === "applicant" && appAuth.applicant_id === userId;
+
+        if (!isOrganizerReviewer && !isApplicantReviewer) {
+          return new Response(
+            JSON.stringify({ error: "You are not allowed to submit this gig review." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
+          );
+        }
+      }
+
+      // Check for duplicate review.
+      // Prefer booking-level duplicate detection so users can review the same entity
+      // across different bookings/applications.
       let existingReview = null;
-      if (studioId) {
+      if (bookingId && bookingType === "studio_booking") {
+        const { data } = await supabaseClient
+          .from("reviews")
+          .select("id")
+          .eq("author_id", userId)
+          .eq("studio_booking_id", bookingId)
+          .maybeSingle();
+        existingReview = data;
+      } else if (bookingId && bookingType === "gig_application") {
+        const { data } = await supabaseClient
+          .from("reviews")
+          .select("id")
+          .eq("author_id", userId)
+          .eq("gig_application_id", bookingId)
+          .maybeSingle();
+        existingReview = data;
+      } else if (studioId) {
         const { data } = await supabaseClient
           .from("reviews")
           .select("id")
@@ -1974,6 +2044,14 @@ serve(async (req: Request) => {
           .select("id")
           .eq("author_id", userId)
           .eq("gig_id", gigId)
+          .maybeSingle();
+        existingReview = data;
+      } else if (groupId) {
+        const { data } = await supabaseClient
+          .from("reviews")
+          .select("id")
+          .eq("author_id", userId)
+          .eq("group_id", groupId)
           .maybeSingle();
         existingReview = data;
       } else if (targetUserId) {
@@ -2007,6 +2085,7 @@ serve(async (req: Request) => {
 
       if (studioId) reviewData.studio_id = studioId;
       if (gigId) reviewData.gig_id = gigId;
+      if (groupId) reviewData.group_id = groupId;
       if (targetUserId) reviewData.user_id = targetUserId;
       if (bookingId && bookingType === "studio_booking")
         reviewData.studio_booking_id = bookingId;

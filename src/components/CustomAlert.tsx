@@ -132,7 +132,7 @@ export default function CustomAlert({
             {buttons.map((button, index) => {
               const btnStyle = getButtonStyle(button.style);
               return (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity
                   key={index}
                   onPress={() => handleButtonPress(button)}
                   style={[

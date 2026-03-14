@@ -722,7 +722,7 @@ export default function SignupScreen() {
                 ))}
             </View>
 
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity
                 disabled={!selectedRole}
                 onPress={() => setStep('details')}
                 activeOpacity={1}

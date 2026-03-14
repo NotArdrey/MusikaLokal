@@ -1517,28 +1517,41 @@ export default function BookingsScreen() {
 
     // For studio owners reviewing musicians, target the user
     // For musicians reviewing studios, target the studio
+    const gigBaseName = typeof item.name === "string" ? item.name.split(" - ")[0] : "Gig";
+
     const params: any = {
       bookingId: item.id,
       bookingType: item.type_id,
-      entityName: item.name,
       reviewerRole,
+      // Keep venue owners on Manage Applications > Completed after review submit.
+      returnTab: userRole === "venue-owner" ? "Review" : activeTab,
     };
 
     if (item.type_id === "studio_booking") {
       if (isOwner) {
         // Owner reviews the musician (user)
         params.targetUserId = item.user_id;
+        params.entityName = item.customer_name || "Musician";
       } else {
         // Musician reviews the studio
         params.studioId = item.studio_id;
+        params.entityName = item.name || "Studio";
       }
     } else if (item.type_id === "gig_application") {
       if (isOrganizer) {
-        // Venue owner reviews the applicant
-        params.targetUserId = item.applicant_id;
+        // Venue owner reviews the actual performer target:
+        // group/duo applications -> review group, solo applications -> review user.
+        if (item.group_id) {
+          params.groupId = item.group_id;
+          params.entityName = item.performer || item.customer_name || "Group";
+        } else {
+          params.targetUserId = item.applicant_id;
+          params.entityName = item.customer_name || item.performer || "Musician";
+        }
       } else {
         // Musician reviews the gig
         params.gigId = item.gig_id;
+        params.entityName = gigBaseName;
       }
     }
 
@@ -2106,6 +2119,32 @@ export default function BookingsScreen() {
     );
   };
 
+  const inferApplicationKind = (item: any): "solo" | "duo" | "group" => {
+    const candidates = [
+      item?.performer,
+      item?.type,
+      item?.application_type,
+      item?.slot_type,
+      item?.category,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    if (candidates.includes("duo")) return "duo";
+    if (candidates.includes("group") || candidates.includes("band")) return "group";
+    if (candidates.includes("solo") || candidates.includes("individual")) return "solo";
+    if (item?.group_id) return "group";
+    return "solo";
+  };
+
+  const getApplicationDisplayLabel = (item: any): string => {
+    const kind = inferApplicationKind(item);
+    if (kind === "duo") return "Duo";
+    if (kind === "group") return "Group";
+    return "Solo Artist";
+  };
+
   const renderTab = (tab: Tab) => {
     // Hide Applicants tab if not venue owner AND empty
     if (
@@ -2255,6 +2294,9 @@ export default function BookingsScreen() {
                 const isMusicianView = userRole === "musician";
                 const isLeaderConfirmation = !!item.leader_approval_required;
                 const gigName = item.name ? item.name.split(" - ")[0] : "Gig";
+                const applicationLabel = getApplicationDisplayLabel(item);
+                const applicationIcon = applicationLabel === "Solo Artist" ? "person-outline" : "people-outline";
+                const applicationTypeBadge = `${applicationLabel} Application`;
 
                 return (
                   <View
@@ -2285,7 +2327,7 @@ export default function BookingsScreen() {
                       />
                       <View style={styles.typeBadge}>
                         <Text style={styles.typeBadgeText}>
-                          {item.type || "Application"}
+                          {applicationTypeBadge}
                         </Text>
                       </View>
                       <View
@@ -2335,7 +2377,7 @@ export default function BookingsScreen() {
                             {/* Role / Context */}
                             <View style={styles.cardDetailRow}>
                               <Ionicons
-                                name={isMusicianView ? "person-outline" : item.group_id ? "people-outline" : "mic-outline"}
+                                name={isMusicianView ? (applicationIcon as any) : (applicationIcon as any)}
                                 size={14}
                                 color={colors.primary}
                               />
@@ -2343,11 +2385,9 @@ export default function BookingsScreen() {
                                 {isMusicianView
                                   ? isLeaderConfirmation
                                     ? `Member submission by ${item.customer_name || "Group Member"}`
-                                    : item.performer
-                                      ? `Applied as ${item.performer}`
-                                      : "Applied as Solo Artist"
-                                  : item.group_id
-                                    ? `Applied for ${gigName}`
+                                    : `Applied as ${applicationLabel}`
+                                  : applicationLabel !== "Solo Artist"
+                                    ? `${applicationLabel} applied for ${gigName}`
                                     : `Applied for ${gigName}`}
                               </Text>
                             </View>
@@ -3969,7 +4009,7 @@ export default function BookingsScreen() {
               : modalMode === "fire"
                 ? "Are you sure you want to fire this musician? This will cancel their upcoming gigs with you."
                 : modalMode === "complete"
-                  ? "Confirm efficient completion of this gig? You will be redirected to review the musician."
+                    ? "Confirm efficient completion of this gig?"
                   : modalMode === "renew"
                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
                     : modalMode === "clear_balance"
@@ -4041,7 +4081,7 @@ export default function BookingsScreen() {
               : modalMode === "fire"
                 ? "Fire Musician"
                 : modalMode === "complete"
-                  ? "Complete & Review"
+                  ? "Complete"
                   : modalMode === "renew"
                     ? "Send Renewal Offer"
                     : modalMode === "clear_balance"
@@ -4205,10 +4245,10 @@ export default function BookingsScreen() {
               );
             }
 
-            // Only redirect to review if the status update actually succeeded.
+            // Keep completion/termination as status updates only.
+            // Users can submit reviews manually from the Review tab.
             if (didUpdate && (modalMode === "fire" || modalMode === "complete")) {
               setActiveTab("Review");
-              handleLeaveReview(selectedItem);
             }
           }
         }}
@@ -4228,6 +4268,7 @@ export default function BookingsScreen() {
         booking={selectedItem}
         onConfirm={handleConfirmBooking}
         onCancel={handleCancelBooking}
+        onLeaveReview={handleLeaveReview}
       />
 
       {/* Payment Option Modal */}

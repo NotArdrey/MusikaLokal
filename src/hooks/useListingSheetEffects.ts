@@ -89,20 +89,72 @@ export const useListingSheetEffects = ({
       try {
         if (!group) return;
 
-        let col = "group_id";
-        if (group.type === "Studio" || group.type === "Venue") col = "studio_id";
-        if (group.type === "Gig") col = "gig_id";
+        const listingTypeRaw = String(group.type || "").toLowerCase();
+        const isStudioLike = listingTypeRaw === "studio" || listingTypeRaw === "venue";
+        const isGig = listingTypeRaw === "gig";
+        const isArtist = listingTypeRaw === "artist" || listingTypeRaw === "musician";
+        const reviewSelect =
+          "*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url)";
 
-        const { data: rData } = await supabase
-          .from("reviews")
-          .select("*, author:author_id(full_name, avatar_url)")
-          .eq(col, listingId)
-          .order("created_at", { ascending: false })
-          .limit(5);
+        const normalizeReviews = (rows: any[] | null | undefined) =>
+          (rows || []).map((row: any) => ({
+            ...row,
+            // Keep compatibility with legacy rows that used comment instead of content.
+            content: row?.content ?? row?.comment ?? null,
+          }));
 
-        if (rData) setReviews(rData);
+        let rData: any[] | null = null;
+
+        if (isStudioLike) {
+          const { data } = await supabase
+            .from("reviews")
+            .select(reviewSelect)
+            .eq("studio_id", listingId)
+            .order("created_at", { ascending: false })
+            .limit(5);
+          rData = data;
+        } else if (isGig) {
+          const { data } = await supabase
+            .from("reviews")
+            .select(reviewSelect)
+            .eq("gig_id", listingId)
+            .order("created_at", { ascending: false })
+            .limit(5);
+          rData = data;
+        } else if (isArtist) {
+          const { data } = await supabase
+            .from("reviews")
+            .select(reviewSelect)
+            .eq("user_id", listingId)
+            .order("created_at", { ascending: false })
+            .limit(5);
+          rData = data;
+        } else {
+          // Group listings: prefer group-bound reviews; fallback to owner reviews if none.
+          const { data: groupReviewData } = await supabase
+            .from("reviews")
+            .select(reviewSelect)
+            .eq("group_id", listingId)
+            .order("created_at", { ascending: false })
+            .limit(5);
+
+          if (groupReviewData && groupReviewData.length > 0) {
+            rData = groupReviewData;
+          } else if (group?.owner_id) {
+            const { data: ownerReviewData } = await supabase
+              .from("reviews")
+              .select(reviewSelect)
+              .eq("user_id", group.owner_id)
+              .order("created_at", { ascending: false })
+              .limit(5);
+            rData = ownerReviewData;
+          }
+        }
+
+        setReviews(normalizeReviews(rData));
       } catch (e) {
         console.log("Error reviews:", e);
+        setReviews([]);
       }
 
       if (group.embedding) {

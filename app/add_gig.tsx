@@ -157,6 +157,7 @@ export default function AddGigScreen() {
   const [businessPermitFileName, setBusinessPermitFileName] = useState<string>("");
   const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
+  const documentPickerInProgressRef = useRef(false);
 
   // Requirements state
   const [requiredGenres, setRequiredGenres] = useState<string[]>([]);
@@ -519,13 +520,13 @@ export default function AddGigScreen() {
         return;
       }
 
-      const requirementRows = Object.entries(payload.requirements || {}).map(
-        ([requirement_key, requirement_value]) => ({
+      const requirementRows = Object.entries(payload.requirements || {})
+        .filter(([, requirement_value]) => requirement_value !== null && requirement_value !== undefined)
+        .map(([requirement_key, requirement_value]) => ({
           gig_id: data.id,
           requirement_key,
           requirement_value,
-        }),
-      );
+        }));
 
       if (requirementRows.length > 0) {
         const { error: requirementsError } = await supabase
@@ -850,6 +851,10 @@ export default function AddGigScreen() {
 
   const handleContractUpload = async () => {
     try {
+      if (uploadingContract || documentPickerInProgressRef.current) {
+        return;
+      }
+
       setUploadingContract(true);
 
       if (Platform.OS === "web") {
@@ -862,10 +867,12 @@ export default function AddGigScreen() {
 
       // Dynamic import for native platforms only
       const DocumentPicker = await import("expo-document-picker");
+      documentPickerInProgressRef.current = true;
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",
         copyToCacheDirectory: true,
       });
+      documentPickerInProgressRef.current = false;
 
       if (result.canceled) {
         setUploadingContract(false);
@@ -906,6 +913,7 @@ export default function AddGigScreen() {
       setContractFileName(fileName);
       showAlert("success", "Success", "Contract uploaded successfully!");
     } catch (error) {
+      documentPickerInProgressRef.current = false;
       console.error("Error uploading contract:", error);
       showAlert(
         "error",
@@ -925,6 +933,10 @@ export default function AddGigScreen() {
   // Business Permit Upload Handler
   const handleBusinessPermitUpload = async () => {
     try {
+      if (uploadingBusinessPermit || documentPickerInProgressRef.current) {
+        return;
+      }
+
       setUploadingBusinessPermit(true);
 
       if (Platform.OS === "web") {
@@ -937,10 +949,12 @@ export default function AddGigScreen() {
 
       // Dynamic import for native platforms only
       const DocumentPicker = await import("expo-document-picker");
+      documentPickerInProgressRef.current = true;
       const result = await DocumentPicker.getDocumentAsync({
         type: ["application/pdf", "image/*"],
         copyToCacheDirectory: true,
       });
+      documentPickerInProgressRef.current = false;
 
       if (result.canceled) {
         setUploadingBusinessPermit(false);
@@ -985,6 +999,7 @@ export default function AddGigScreen() {
       setBusinessPermitFileName(fileName);
       showAlert("success", "Success", "Business permit uploaded successfully!");
     } catch (error) {
+      documentPickerInProgressRef.current = false;
       console.error("Error uploading business permit:", error);
       showAlert(
         "error",
@@ -2521,10 +2536,10 @@ export default function AddGigScreen() {
                     <Text style={[styles.counterValue, { color: colors.text }]}>{bandSlotsNeeded}</Text>
                   </View>
                   <View style={{ marginTop: 12 }}>
-                    <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 12 }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, fontFamily: "Poppins_400Regular", marginBottom: 12, textAlign: "center" }}>
                       Tap a group type to add needed count.
                     </Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: "Poppins_400Regular", marginBottom: 12 }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: "Poppins_400Regular", marginBottom: 12, textAlign: "center" }}>
                       Tap + to add. Use the remove icon on selected types to reduce by 1.
                     </Text>
                     {preferredGroupTypes.length > 0 && (

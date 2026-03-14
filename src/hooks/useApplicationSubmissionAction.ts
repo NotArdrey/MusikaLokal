@@ -210,26 +210,28 @@ export const useApplicationSubmissionAction = ({
 
         console.log("[AppSubmit] Owner notification sent OK. Inserting self-notification (non-blocking)...");
 
-        // Non-blocking: self-notification should not stall the success flow
-        supabase
-          .from("notifications")
-          .insert({
-            user_id: userId,
-            type: "info",
-            title: "Group Application Submitted",
-            message: `You applied to join "${group.name}".`,
-            meta: applicationMeta,
-          })
-          .then(({ error: selfNotificationError }) => {
+        // Non-blocking: self-notification should not stall the success flow.
+        void (async () => {
+          try {
+            const { error: selfNotificationError } = await supabase
+              .from("notifications")
+              .insert({
+                user_id: userId,
+                type: "info",
+                title: "Group Application Submitted",
+                message: `You applied to join "${group.name}".`,
+                meta: applicationMeta,
+              });
+
             if (selfNotificationError) {
               console.error("Failed to persist group application receipt:", selfNotificationError);
             } else {
               console.log("[AppSubmit] Self-notification inserted OK.");
             }
-          })
-          .catch((err) => {
+          } catch (err: unknown) {
             console.error("[AppSubmit] Self-notification insert crashed:", err);
-          });
+          }
+        })();
 
         if (group && group.embedding) {
           try {

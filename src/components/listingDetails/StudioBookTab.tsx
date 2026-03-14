@@ -9,6 +9,7 @@ import {
     View,
 } from "react-native";
 import styles from "../ListingDetailsSheet.styles";
+import { isRecordingStudioMode } from "./availability";
 
 const debugLog = (...args: unknown[]) => {
   if (__DEV__) {
@@ -155,6 +156,11 @@ const StudioBookTab = ({
   selectedSessionType,
   showAlert,
 }: StudioBookTabProps) => {
+  const usesRecordingWholeDayMode = isRecordingStudioMode(
+    group?.studio_type,
+    selectedSessionType,
+  );
+
   const toValidDate = (value: any): Date | null => {
     if (!value) return null;
 
@@ -1108,7 +1114,7 @@ const StudioBookTab = ({
 
       {!(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") && (
         <>
-          <TouchableOpacity activeOpacity={1}
+          <TouchableOpacity
             style={[
               styles.primaryBtn,
               {
@@ -1169,11 +1175,7 @@ const StudioBookTab = ({
                           ];
 
                       const sessionType =
-                        group.studio_type === "Recording"
-                          ? "recording"
-                          : group.studio_type === "Both" && selectedSessionType === "Recording"
-                            ? "recording"
-                            : "rehearsal";
+                        usesRecordingWholeDayMode ? "recording" : "rehearsal";
 
                       debugLog("📤 Creating multi-slot booking:", {
                         studio_id: group.id,

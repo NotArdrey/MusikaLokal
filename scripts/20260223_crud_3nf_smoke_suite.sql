@@ -103,3 +103,74 @@ from (
   select ne.table_name, ne.column_name
   from public.normalization_exceptions ne
 ) x;
+
+-- 6) Audit tables must be profile-linked (3NF user lineage)
+with required(conrelid, conname) as (
+  values
+    ('public.studio_deletion_audit'::regclass, 'studio_deletion_audit_owner_id_fkey'),
+    ('public.studio_deletion_audit'::regclass, 'studio_deletion_audit_deleted_by_fkey'),
+    ('public.gig_deletion_audit'::regclass, 'gig_deletion_audit_organizer_id_fkey'),
+    ('public.gig_deletion_audit'::regclass, 'gig_deletion_audit_deleted_by_fkey'),
+    ('public.group_deletion_audit'::regclass, 'group_deletion_audit_owner_id_fkey'),
+    ('public.group_deletion_audit'::regclass, 'group_deletion_audit_deleted_by_fkey'),
+    ('public.normalization_exceptions'::regclass, 'normalization_exceptions_approved_by_user_id_fkey')
+)
+select 'audit_user_fk_presence' as check_name,
+       case when count(*) = 7 then 'PASS' else 'FAIL' end as status,
+       count(*) as present_fk_count
+from required r
+join pg_constraint c
+  on c.conrelid = r.conrelid
+ and c.conname = r.conname;
+
+-- 7) Audit tables must not contain dangling user ids
+select 'audit_user_fk_orphans' as check_name,
+       case when sum(orphans) = 0 then 'PASS' else 'FAIL' end as status,
+       sum(orphans) as orphan_count
+from (
+  select count(*) filter (
+    where owner_id is not null
+      and not exists (select 1 from public.profiles p where p.id = s.owner_id)
+  ) as orphans
+  from public.studio_deletion_audit s
+
+  union all
+
+  select count(*) filter (
+    where deleted_by is not null
+      and not exists (select 1 from public.profiles p where p.id = s.deleted_by)
+  ) as orphans
+  from public.studio_deletion_audit s
+
+  union all
+
+  select count(*) filter (
+    where organizer_id is not null
+      and not exists (select 1 from public.profiles p where p.id = g.organizer_id)
+  ) as orphans
+  from public.gig_deletion_audit g
+
+  union all
+
+  select count(*) filter (
+    where deleted_by is not null
+      and not exists (select 1 from public.profiles p where p.id = g.deleted_by)
+  ) as orphans
+  from public.gig_deletion_audit g
+
+  union all
+
+  select count(*) filter (
+    where owner_id is not null
+      and not exists (select 1 from public.profiles p where p.id = gr.owner_id)
+  ) as orphans
+  from public.group_deletion_audit gr
+
+  union all
+
+  select count(*) filter (
+    where deleted_by is not null
+      and not exists (select 1 from public.profiles p where p.id = gr.deleted_by)
+  ) as orphans
+  from public.group_deletion_audit gr
+) q;

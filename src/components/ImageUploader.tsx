@@ -186,7 +186,7 @@ export default function ImageUploader({
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scrollView}>
         <View style={styles.imagesRow}>
           {/* Add Image Button */}
-          <TouchableOpacity activeOpacity={1}
+          <TouchableOpacity
             style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6' }]}
             onPress={pickAndUploadImages}
             disabled={uploading || images.length >= maxImages}

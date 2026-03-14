@@ -932,7 +932,7 @@ export default function ProfileScreen() {
             ) : (
               <View style={styles.mediaGrid}>
                 {profile.portfolio_urls.map((url: string, i: number) => (
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity
                     key={i}
                     style={styles.gridItem}
                     onPress={() => openMediaViewer(url)}

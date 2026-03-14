@@ -3,6 +3,7 @@ import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { Calendar } from "react-native-calendars";
 import styles from "../ListingDetailsSheet.styles";
+import { normalizeStudioType } from "./availability";
 
 interface BookingControlsProps {
   colors: any;
@@ -79,6 +80,9 @@ const BookingControls = ({
   const now = new Date();
   const minLeadDateTime = new Date(now.getTime() + leadTimeHours * 60 * 60 * 1000);
   const minSelectableDate = toLocalDateKey(minLeadDateTime);
+  const normalizedStudioType = normalizeStudioType(group?.studio_type);
+  const supportsSessionTypeSelection = normalizedStudioType === "Both";
+  const hasSelectedSessionType = Boolean(selectedSessionType);
 
   return (
     <View
@@ -95,7 +99,7 @@ const BookingControls = ({
         },
       ]}
     >
-      {group?.studio_type === "Both" && (
+      {supportsSessionTypeSelection && (
         <View style={{ marginBottom: 16 }}>
           <Text
             style={[
@@ -240,7 +244,11 @@ const BookingControls = ({
             { color: colors.text, fontSize: 16, marginBottom: 0 },
           ]}
         >
-          {isRecordingMode ? "Select Recording Date" : "Select Date & Time"}
+          {!hasSelectedSessionType && supportsSessionTypeSelection
+            ? "Choose Session Type"
+            : isRecordingMode
+              ? "Select Recording Date"
+              : "Select Date & Time"}
         </Text>
         {isRecordingMode ? (
           <View
@@ -291,103 +299,161 @@ const BookingControls = ({
         ) : null}
       </View>
 
-      {group?.settings?.lead_time_hours && group.settings.lead_time_hours > 0 && (
-        <View
-          style={{
-            backgroundColor: isDark ? "rgba(245, 158, 11, 0.15)" : "#FEF3C7",
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-            borderRadius: 8,
-            marginBottom: 12,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <Ionicons name="time" size={16} color="#F59E0B" />
-          <Text
+      {supportsSessionTypeSelection && !hasSelectedSessionType ? (
+        <View style={{ marginTop: 4 }}>
+          <View
             style={{
-              color: "#D97706",
-              fontSize: 12,
-              fontFamily: "Poppins_500Medium",
-              flex: 1,
+              backgroundColor: isDark ? "rgba(59, 130, 246, 0.15)" : "#EFF6FF",
+              borderRadius: 10,
+              paddingHorizontal: 14,
+              paddingVertical: 14,
+              marginBottom: 12,
             }}
           >
-            Advance booking required: {group.settings.lead_time_hours} hours before
-            session
-          </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+              <Ionicons name="information-circle" size={18} color="#2563EB" />
+              <Text
+                style={{
+                  color: isDark ? "#BFDBFE" : "#1E40AF",
+                  fontSize: 13,
+                  fontFamily: "Poppins_600SemiBold",
+                  marginLeft: 6,
+                }}
+              >
+                Please choose a session type above
+              </Text>
+            </View>
+            <View style={{ gap: 6 }}>
+              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
+                <Ionicons name="musical-notes" size={14} color={isDark ? "#93C5FD" : "#3B82F6"} style={{ marginTop: 2 }} />
+                <Text
+                  style={{
+                    color: isDark ? "#D1D5DB" : "#4B5563",
+                    fontSize: 12,
+                    fontFamily: "Poppins_400Regular",
+                    flex: 1,
+                  }}
+                >
+                  <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Rehearsal</Text> — Book by the hour, pick your time slots
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
+                <Ionicons name="mic" size={14} color={isDark ? "#93C5FD" : "#3B82F6"} style={{ marginTop: 2 }} />
+                <Text
+                  style={{
+                    color: isDark ? "#D1D5DB" : "#4B5563",
+                    fontSize: 12,
+                    fontFamily: "Poppins_400Regular",
+                    flex: 1,
+                  }}
+                >
+                  <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Recording</Text> — Whole-day booking for uninterrupted sessions
+                </Text>
+              </View>
+            </View>
+          </View>
         </View>
+      ) : (
+        <>
+          {group?.settings?.lead_time_hours && group.settings.lead_time_hours > 0 && (
+            <View
+              style={{
+                backgroundColor: isDark ? "rgba(245, 158, 11, 0.15)" : "#FEF3C7",
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: 8,
+                marginBottom: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Ionicons name="time" size={16} color="#F59E0B" />
+              <Text
+                style={{
+                  color: "#D97706",
+                  fontSize: 12,
+                  fontFamily: "Poppins_500Medium",
+                  flex: 1,
+                }}
+              >
+                Advance booking required: {group.settings.lead_time_hours} hours before
+                session
+              </Text>
+            </View>
+          )}
+
+          <Calendar
+            current={toLocalDateKey(new Date())}
+            minDate={minSelectableDate}
+            markedDates={{
+              ...markedDates,
+              [selectedDate]: {
+                selected: true,
+                selectedColor: colors.primary,
+                selectedTextColor: "#FFFFFF",
+                customStyles: {
+                  container: {
+                    backgroundColor: colors.primary,
+                    elevation: 2,
+                  },
+                  text: {
+                    fontWeight: "bold",
+                  },
+                },
+              },
+            }}
+            onDayPress={async (day) => {
+              if (day.dateString < minSelectableDate) {
+                return;
+              }
+
+              if (markedDates[day.dateString]?.disabled) {
+                return;
+              }
+
+              const slots = await fetchAvailableSlots(day.dateString);
+              if (!slots || slots.length === 0) {
+                return;
+              }
+
+              setSelectedDate(day.dateString);
+              setSelectedSlot(null);
+              setValidEndTimes([]);
+              setEndTime(null);
+              const selectedDateObj = new Date(day.dateString);
+              setDate(selectedDateObj);
+            }}
+            theme={{
+              backgroundColor: "transparent",
+              calendarBackground: "transparent",
+              textSectionTitleColor: colors.textSecondary,
+              selectedDayBackgroundColor: colors.primary,
+              selectedDayTextColor: "#FFFFFF",
+              todayTextColor: colors.primary,
+              dayTextColor: colors.text,
+              textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
+              dotColor: colors.primary,
+              selectedDotColor: "#FFFFFF",
+              arrowColor: colors.primary,
+              monthTextColor: colors.text,
+              indicatorColor: colors.primary,
+              textDayFontFamily: "Poppins_500Medium",
+              textMonthFontFamily: "Poppins_600SemiBold",
+              textDayHeaderFontFamily: "Poppins_500Medium",
+              textDayFontSize: 14,
+              textMonthFontSize: 16,
+              textDayHeaderFontSize: 12,
+            }}
+            enableSwipeMonths={true}
+            style={{
+              marginBottom: selectedDate ? 16 : 0,
+            }}
+          />
+        </>
       )}
 
-      <Calendar
-        current={toLocalDateKey(new Date())}
-        minDate={minSelectableDate}
-        markedDates={{
-          ...markedDates,
-          [selectedDate]: {
-            selected: true,
-            selectedColor: colors.primary,
-            selectedTextColor: "#FFFFFF",
-            customStyles: {
-              container: {
-                backgroundColor: colors.primary,
-                elevation: 2,
-              },
-              text: {
-                fontWeight: "bold",
-              },
-            },
-          },
-        }}
-        onDayPress={async (day) => {
-          if (day.dateString < minSelectableDate) {
-            return;
-          }
-
-          if (markedDates[day.dateString]?.disabled) {
-            return;
-          }
-
-          const slots = await fetchAvailableSlots(day.dateString);
-          if (!slots || slots.length === 0) {
-            return;
-          }
-
-          setSelectedDate(day.dateString);
-          setSelectedSlot(null);
-          setValidEndTimes([]);
-          setEndTime(null);
-          const selectedDateObj = new Date(day.dateString);
-          setDate(selectedDateObj);
-        }}
-        theme={{
-          backgroundColor: "transparent",
-          calendarBackground: "transparent",
-          textSectionTitleColor: colors.textSecondary,
-          selectedDayBackgroundColor: colors.primary,
-          selectedDayTextColor: "#FFFFFF",
-          todayTextColor: colors.primary,
-          dayTextColor: colors.text,
-          textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
-          dotColor: colors.primary,
-          selectedDotColor: "#FFFFFF",
-          arrowColor: colors.primary,
-          monthTextColor: colors.text,
-          indicatorColor: colors.primary,
-          textDayFontFamily: "Poppins_500Medium",
-          textMonthFontFamily: "Poppins_600SemiBold",
-          textDayHeaderFontFamily: "Poppins_500Medium",
-          textDayFontSize: 14,
-          textMonthFontSize: 16,
-          textDayHeaderFontSize: 12,
-        }}
-        enableSwipeMonths={true}
-        style={{
-          marginBottom: selectedDate ? 16 : 0,
-        }}
-      />
-
-      {selectedDate && (
+      {selectedDate && (!supportsSessionTypeSelection || hasSelectedSessionType) && (
         <View
           style={[
             styles.slotGridContainer,

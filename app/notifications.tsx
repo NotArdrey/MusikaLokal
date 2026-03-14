@@ -434,7 +434,7 @@ export default function NotificationsScreen() {
         }, [resolvedImage]);
 
         return (
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity
                 style={[
                     styles.notificationItem,
                     {

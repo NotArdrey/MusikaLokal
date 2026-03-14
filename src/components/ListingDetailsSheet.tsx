@@ -55,6 +55,7 @@ import ReviewsTab from "./listingDetails/ReviewsTab";
 import StudioBookTab from "./listingDetails/StudioBookTab";
 import StudioGigVenueAboutTab from "./listingDetails/StudioGigVenueAboutTab";
 import StudioSetupTab from "./listingDetails/StudioSetupTab";
+import { isRecordingStudioMode, normalizeStudioType } from "./listingDetails/availability";
 import Modal from "./modal";
 
 const debugLog = (..._args: unknown[]) => { };
@@ -97,6 +98,50 @@ const toLocalDateKey = (value: Date) => {
   const month = String(value.getMonth() + 1).padStart(2, "0");
   const day = String(value.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+};
+
+const toPositiveNumber = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const inferStudioTypeFromRates = (
+  rehearsalRate: unknown,
+  recordingRate: unknown,
+) => {
+  const rehearsal = toPositiveNumber(rehearsalRate);
+  const recording = toPositiveNumber(recordingRate);
+
+  if (rehearsal > 0 && recording > 0) return "Both" as const;
+  if (recording > 0) return "Recording" as const;
+  if (rehearsal > 0) return "Rehearsal" as const;
+  return null;
+};
+
+const inferStudioTypeFromTypeRows = (rows: unknown[]) => {
+  const canonicalSet = new Set<"Rehearsal" | "Recording">();
+
+  rows.forEach((row) => {
+    const value = normalizeStudioType(
+      typeof row === "string" ? row : null,
+    );
+    if (value === "Both") {
+      canonicalSet.add("Rehearsal");
+      canonicalSet.add("Recording");
+      return;
+    }
+    if (value === "Rehearsal" || value === "Recording") {
+      canonicalSet.add(value);
+    }
+  });
+
+  const hasRehearsal = canonicalSet.has("Rehearsal");
+  const hasRecording = canonicalSet.has("Recording");
+
+  if (hasRehearsal && hasRecording) return "Both" as const;
+  if (hasRecording) return "Recording" as const;
+  if (hasRehearsal) return "Rehearsal" as const;
+  return null;
 };
 
 const ListingDetailsSheet = forwardRef<
@@ -197,8 +242,29 @@ const ListingDetailsSheet = forwardRef<
   const [selectedSessionType, setSelectedSessionType] = useState<"Rehearsal" | "Recording" | null>(null);
 
   // Helper: Check if we're in recording mode (either pure Recording studio OR Both with Recording selected)
-  const isRecordingMode = group?.studio_type === "Recording" ||
-    (group?.studio_type === "Both" && selectedSessionType === "Recording");
+  const normalizedGroupStudioType = normalizeStudioType(group?.studio_type);
+  const isRecordingMode = isRecordingStudioMode(group?.studio_type, selectedSessionType);
+
+  useEffect(() => {
+    if (!group?.id) return;
+
+    if (normalizedGroupStudioType === "Both") {
+      setSelectedSessionType(null);
+      return;
+    }
+
+    if (normalizedGroupStudioType === "Recording") {
+      setSelectedSessionType("Recording");
+      return;
+    }
+
+    if (normalizedGroupStudioType === "Rehearsal") {
+      setSelectedSessionType("Rehearsal");
+      return;
+    }
+
+    setSelectedSessionType(null);
+  }, [group?.id, normalizedGroupStudioType]);
 
   // Multiple time slots state for multi-slot bookings (same day)
   const [selectedTimeSlots, setSelectedTimeSlots] = useState<
@@ -1209,9 +1275,16 @@ const ListingDetailsSheet = forwardRef<
           data?.type === "Both"
             ? data.type
             : null;
+        const inferredStudioTypeFromRates = inferStudioTypeFromRates(
+          data?.rehearsal_rate,
+          data?.recording_rate,
+        );
         const normalizedStudioType =
           type === "Studio" || type === "Venue"
-            ? data?.studio_type || studioTypeFromData
+            ? normalizeStudioType(data?.studio_type || studioTypeFromData) ||
+            inferredStudioTypeFromRates ||
+            data?.studio_type ||
+            studioTypeFromData
             : null;
 
         const normalizedData = {
@@ -1248,6 +1321,7 @@ const ListingDetailsSheet = forwardRef<
             operatingHoursResult,
             dateOverridesResult,
             studioSettingsResult,
+            studioTypesResult,
           ] = await Promise.all([
             supabase
               .from("studio_operating_hours")
@@ -1263,6 +1337,10 @@ const ListingDetailsSheet = forwardRef<
               .select("*")
               .eq("studio_id", data.id)
               .single(),
+            supabase
+              .from("studio_types")
+              .select("studio_type")
+              .eq("studio_id", data.id),
           ]);
 
           const operatingHours = operatingHoursResult.data;
@@ -1271,6 +1349,19 @@ const ListingDetailsSheet = forwardRef<
           const overridesError = dateOverridesResult.error;
           const studioSettings = studioSettingsResult.data;
           const settingsError = studioSettingsResult.error;
+          const studioTypes = studioTypesResult.data;
+          const studioTypesError = studioTypesResult.error;
+
+          if (studioTypesError) {
+            debugLog("⚠️ Failed fetching studio_types, falling back to compatibility fields:", studioTypesError);
+          } else if (Array.isArray(studioTypes)) {
+            const inferredStudioTypeFromTypeRows = inferStudioTypeFromTypeRows(
+              studioTypes.map((row: any) => row?.studio_type),
+            );
+            if (inferredStudioTypeFromTypeRows) {
+              normalizedData.studio_type = inferredStudioTypeFromTypeRows;
+            }
+          }
 
           if (!hoursError && operatingHours) {
             debugLog("📅 Operating hours fetched:", operatingHours);
@@ -1500,9 +1591,11 @@ const ListingDetailsSheet = forwardRef<
 
         // RECORDING STUDIO WHOLE-DAY LOGIC:
         // For recording studios, if there are ANY bookings on this date, block the entire day
-        const isRecordingStudio = group?.studio_type === "Recording" ||
-          (group?.studio_type === "Both" && selectedSessionType === "Recording");
-        if (isRecordingStudio) {
+        const usesRecordingWholeDayMode = isRecordingStudioMode(
+          group?.studio_type,
+          selectedSessionType,
+        );
+        if (usesRecordingWholeDayMode) {
           // Also check cart bookings for recording studios
           const cartBookingsForDate = (cartBookings || []).filter((b) => {
             const cartDate = b?.date instanceof Date ? b.date : new Date(b?.date);
@@ -1717,9 +1810,11 @@ const ListingDetailsSheet = forwardRef<
 
     // RECORDING STUDIO WHOLE-DAY LOGIC:
     // For recording studios, the entire day is booked as one unit
-    const isRecordingStudio = group?.studio_type === "Recording" ||
-      (group?.studio_type === "Both" && selectedSessionType === "Recording");
-    if (isRecordingStudio) {
+    const usesRecordingWholeDayMode = isRecordingStudioMode(
+      group?.studio_type,
+      selectedSessionType,
+    );
+    if (usesRecordingWholeDayMode) {
       // Also check cart bookings for recording studios
       const cartBookingsForDate = bookings.filter((b) => {
         const cartDate = b?.date instanceof Date ? b.date : new Date(b?.date);
@@ -1913,6 +2008,48 @@ const ListingDetailsSheet = forwardRef<
     showTabs: hasDefaultTabs,
   } = useListingSheetDerived(group);
 
+  const effectiveDisplayRate = useMemo(() => {
+    const isStudioLike = group?.type === "Studio" || group?.type === "Venue";
+    if (!isStudioLike) return displayRate;
+
+    const rehearsal = Number(group?.rehearsal_rate || 0);
+    const recording = Number(group?.recording_rate || 0);
+    const normalizedType = normalizeStudioType(group?.studio_type);
+
+    if (normalizedType === "Recording") {
+      if (recording > 0) return recording.toLocaleString();
+      if (rehearsal > 0) return rehearsal.toLocaleString();
+      return displayRate;
+    }
+
+    if (normalizedType === "Rehearsal") {
+      if (rehearsal > 0) return rehearsal.toLocaleString();
+      if (recording > 0) return recording.toLocaleString();
+      return displayRate;
+    }
+
+    if (normalizedType === "Both") {
+      if (selectedSessionType === "Recording" && recording > 0) {
+        return recording.toLocaleString();
+      }
+      if (selectedSessionType === "Rehearsal" && rehearsal > 0) {
+        return rehearsal.toLocaleString();
+      }
+      if (rehearsal > 0) return rehearsal.toLocaleString();
+      if (recording > 0) return recording.toLocaleString();
+      return displayRate;
+    }
+
+    return displayRate;
+  }, [
+    displayRate,
+    group?.rehearsal_rate,
+    group?.recording_rate,
+    group?.studio_type,
+    group?.type,
+    selectedSessionType,
+  ]);
+
   const isGroupListing = group?.type === "Group";
   const effectiveUserRole = userRole || currentUserRole;
   const canApplyToGroup =
@@ -2018,7 +2155,7 @@ const ListingDetailsSheet = forwardRef<
       endTime={endTime}
       recordingDaySlot={recordingDaySlot}
       isRecordingWholeDayAvailable={isRecordingWholeDayAvailable}
-      displayRate={displayRate}
+      displayRate={effectiveDisplayRate}
     />
   );
 
@@ -2052,7 +2189,7 @@ const ListingDetailsSheet = forwardRef<
       group={group}
       bookings={bookings}
       setBookings={setBookings}
-      displayRate={displayRate}
+      displayRate={effectiveDisplayRate}
       isDark={isDark}
       colors={colors}
       hasExistingStudioBooking={hasExistingStudioBooking}
@@ -2296,7 +2433,7 @@ const ListingDetailsSheet = forwardRef<
       hasDualPricing={Boolean(hasDualPricing)}
       rehearsalRate={rehearsalRate || ""}
       recordingRate={recordingRate || ""}
-      displayRate={displayRate}
+      displayRate={effectiveDisplayRate}
       labels={labels}
       currentUserId={currentUserId}
       calculateCompletion={calculateCompletion}
@@ -2378,7 +2515,7 @@ const ListingDetailsSheet = forwardRef<
               <ListingBottomBar
                 styles={styles}
                 colors={colors}
-                displayRate={displayRate}
+                displayRate={effectiveDisplayRate}
                 labels={labels}
                 onReserve={() =>
                   handleConfirm(

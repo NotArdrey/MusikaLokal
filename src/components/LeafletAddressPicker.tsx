@@ -175,7 +175,7 @@ export default function LeafletAddressPicker({
 
     return (
         <>
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity
                 style={[
                     styles.pickerButton,
                     {

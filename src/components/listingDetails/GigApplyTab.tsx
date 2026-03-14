@@ -123,12 +123,10 @@ const GigApplyTab = ({
       ? slot.preferred_group_types.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
       : [];
 
-    const preferredGroupTypeLabels = Array.from(
-      preferredGroupTypesRaw.reduce((map: Map<string, number>, typeId: string) => {
+    const preferredGroupTypeLabels = [...preferredGroupTypesRaw.reduce((map: Map<string, number>, typeId: string) => {
         map.set(typeId, (map.get(typeId) || 0) + 1);
         return map;
-      }, new Map<string, number>()).entries(),
-    ).map(([typeId, count]) => {
+      }, new Map<string, number>()).entries()].map(([typeId, count]) => {
       const label = PH_MUSIC_GROUP_TYPES.find((entry) => entry.id === typeId)?.label || "Group";
       return count > 1 ? `${label} (${count})` : label;
     });

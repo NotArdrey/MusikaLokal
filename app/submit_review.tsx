@@ -16,17 +16,18 @@ export default function SubmitReviewScreen() {
   const params = useLocalSearchParams<{
     studioId?: string;
     gigId?: string;
+    groupId?: string;
     targetUserId?: string;
     bookingId?: string;
     bookingType?: string;
     entityName?: string;
     entityType?: string;
     reviewerRole?: string;
+    returnTab?: string;
   }>();
 
   const [selectedValue, setSelectedValue] = useState<number>(0);
   const ratingOptions = [1, 2, 3, 4, 5];
-  const [modalVisible, setModalVisible] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
@@ -81,11 +82,11 @@ export default function SubmitReviewScreen() {
 
   // Determine what we're reviewing based on params
   const entityName = params.entityName || 'this booking';
-  const isReviewingUser = !!params.targetUserId;
-  const reviewTitle = isReviewingUser
+  const isReviewingCounterparty = !!(params.targetUserId || params.groupId);
+  const reviewTitle = isReviewingCounterparty
     ? `Rate ${entityName}`
     : `Rate your experience`;
-  const reviewSubtitle = isReviewingUser
+  const reviewSubtitle = isReviewingCounterparty
     ? `How was your interaction with ${entityName}?`
     : `How was your booking with ${entityName}?`;
 
@@ -101,13 +102,27 @@ export default function SubmitReviewScreen() {
       return;
     }
 
-    const hasTargetEntity = !!(params.studioId || params.gigId || params.targetUserId);
+    const hasTargetEntity = !!(params.studioId || params.gigId || params.groupId || params.targetUserId);
     if (!hasTargetEntity) {
       showAlert(
         'error',
         'Error',
         'Missing review target. Please open this screen from your booking history and try again.'
       );
+      return;
+    }
+
+    if (!params.bookingId || !params.bookingType || !params.reviewerRole) {
+      showAlert(
+        'error',
+        'Error',
+        'Missing review metadata. Please open this screen from Bookings and try again.'
+      );
+      return;
+    }
+
+    if (params.bookingType !== 'studio_booking' && params.bookingType !== 'gig_application') {
+      showAlert('error', 'Error', 'Invalid booking type for review submission.');
       return;
     }
 
@@ -130,6 +145,7 @@ export default function SubmitReviewScreen() {
       // Set the target entity
       if (params.studioId) reviewPayload.studioId = params.studioId;
       if (params.gigId) reviewPayload.gigId = params.gigId;
+      if (params.groupId) reviewPayload.groupId = params.groupId;
       if (params.targetUserId) reviewPayload.targetUserId = params.targetUserId;
 
       const { data, error } = await supabase.functions.invoke('manage-bookings', {
@@ -153,10 +169,22 @@ export default function SubmitReviewScreen() {
         return;
       }
 
-      // Success - close modal and go back
-      setModalVisible(false);
+      // Success - go back
       showAlert('success', 'Success', 'Your review has been submitted!', [
-        { text: 'OK', onPress: () => router.back() }
+        {
+          text: 'OK',
+          onPress: () => {
+            const requestedTab = typeof params.returnTab === 'string' ? params.returnTab : undefined;
+            if (requestedTab) {
+              router.replace({
+                pathname: '/bookings',
+                params: { tab: requestedTab },
+              } as any);
+              return;
+            }
+            router.back();
+          },
+        }
       ]);
     } catch (e: any) {
       console.log('Review submission error:', e);
@@ -229,9 +257,7 @@ export default function SubmitReviewScreen() {
                 styles.submitButton,
                 { backgroundColor: colors.primary, opacity: selectedValue === 0 || submitting ? 0.5 : 1 }
               ]}
-              onPress={() => {
-                if (selectedValue > 0 && !submitting) setModalVisible(true)
-              }}
+              onPress={handleSubmitReview}
               disabled={selectedValue === 0 || submitting}
               activeOpacity={1}
             >
@@ -246,15 +272,6 @@ export default function SubmitReviewScreen() {
           <Navbar />
         </View>
       </View >
-
-      <Modal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        title="Confirm Review"
-        message={`Are you sure you want to submit this ${selectedValue}-star review?`}
-        buttonText={submitting ? "Submitting..." : "Submit"}
-        onConfirm={handleSubmitReview}
-      />
 
       <Modal
         visible={submitting}

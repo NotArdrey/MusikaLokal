@@ -21,7 +21,6 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert from "../src/components/CustomAlert";
 import Header from "../src/components/header";
-import ListingCard from "../src/components/ListingCard";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
 import Navbar from "../src/components/navbar";
 import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBanner";
@@ -385,10 +384,21 @@ export default function HomeScreen() {
 
   const [hasGroups, setHasGroups] = useState(false);
 
-  const topItems = useMemo(
-    () => [...featured, ...discover].slice(0, 12),
-    [featured, discover],
-  );
+  const topItems = useMemo(() => {
+    const combined = [...featured, ...discover];
+    const dedupedCombined = combined.filter(
+      (item, index, self) => index === self.findIndex((t) => t.id === item.id),
+    );
+
+    if (dedupedCombined.length > 0) {
+      return dedupedCombined.slice(0, 12);
+    }
+
+    const dedupedRandom = randomRecommendations.filter(
+      (item, index, self) => index === self.findIndex((t) => t.id === item.id),
+    );
+    return dedupedRandom.slice(0, 12);
+  }, [featured, discover, randomRecommendations]);
 
   const uniqueSmartFeedItems = useMemo(() => {
     const allItems = [...featured, ...discover];
@@ -1372,18 +1382,64 @@ export default function HomeScreen() {
     );
   };
 
-  // 2. Promotional Carousel & Top Picks (Redesigned as "Relevant")
+  // 2. Top Picks Section - Same card design as New Arrivals
   const renderHighlightsSection = () => {
     if (topItems.length === 0) return null;
 
+    // Helper to get price label - same logic as New Arrivals
+    const getTopPickPrice = (item: any) => {
+      if (item.type === "Group") return null;
+
+      if (item.type === "Studio") {
+        const rehearsalRate =
+          item.rehearsal_rate && item.rehearsal_rate !== "0"
+            ? parseInt(item.rehearsal_rate)
+            : 0;
+        const recordingRate =
+          item.recording_rate && item.recording_rate !== "0"
+            ? parseInt(item.recording_rate)
+            : 0;
+        const isRecordingOnlyStudio = item.studio_type === "Recording";
+        const isRehearsalOnlyStudio = item.studio_type === "Rehearsal";
+        const hasRehearsalRate = rehearsalRate > 0 && !isRecordingOnlyStudio;
+        const hasRecordingRate = recordingRate > 0 && !isRehearsalOnlyStudio;
+
+        if (hasRehearsalRate && hasRecordingRate) {
+          return `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+        }
+        if (hasRecordingRate) {
+          return `₱${recordingRate.toLocaleString()}/song`;
+        }
+        if (hasRehearsalRate) {
+          return `₱${rehearsalRate.toLocaleString()}/hr`;
+        }
+        if (item.hourly_rate && item.hourly_rate !== "0") {
+          return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+        }
+        return null;
+      }
+
+      if (item.hourly_rate && item.hourly_rate !== "0") {
+        return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+      }
+      if (item.budget && item.budget !== "0") {
+        return `₱${parseInt(item.budget).toLocaleString()}`;
+      }
+      if (item.rate && item.rate !== "0") {
+        return `₱${parseInt(item.rate).toLocaleString()}`;
+      }
+      return null;
+    };
+
     return (
-      <View style={{ marginTop: 24, paddingHorizontal: 24 }}>
+      <View style={styles.sectionContainer}>
         {/* Header */}
         <View
           style={{
             flexDirection: "row",
             justifyContent: "space-between",
             alignItems: "flex-end",
+            paddingHorizontal: 24,
             marginBottom: 16,
           }}
         >
@@ -1417,121 +1473,149 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Modern Masonry / Bento Grid Layout */}
-        {topItems.length >= 3 ? (
-          <View style={styles.bentoGrid}>
-            {/* Main Highlight (Large) */}
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => handleCardPress(topItems[0])}
-              style={styles.bentoTouchableLarge}
-            >
-              <View style={styles.bentoLarge}>
-                <AutoCardImage
-                  image={topItems[0].image}
-                  images={topItems[0].images}
-                  style={styles.bentoImage}
-                  width={720}
-                  height={560}
-                  cacheVersion={topItems[0].updated_at || topItems[0].created_at || topItems[0].id}
-                />
-                <LinearGradient
-                  colors={["transparent", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.8)"]}
-                  style={styles.bentoOverlay}
-                >
-                  <View style={styles.bentoContent}>
-                    <View
-                      style={[
-                        styles.glassBadge,
-                        { alignSelf: "flex-start", marginBottom: 8 },
-                      ]}
-                    >
-                      <Text style={styles.glassBadgeText}>
-                        {aiModeEnabled && topItems[0].similarity
-                          ? `🤖 ${(topItems[0].similarity * 100).toFixed(0)}% Match`
-                          : "🔥 Highly Rated"}
-                      </Text>
-                    </View>
-                    <Text style={styles.bentoTitleLarge} numberOfLines={2}>
-                      {topItems[0].name}
-                    </Text>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        marginTop: 4,
-                      }}
-                    >
-                      <Ionicons
-                        name="location"
-                        size={14}
-                        color="rgba(255,255,255,0.8)"
-                      />
-                      <Text style={styles.bentoSubtitle} numberOfLines={1}>
-                        {topItems[0].location}
-                      </Text>
-                    </View>
-                  </View>
-                </LinearGradient>
-              </View>
-            </TouchableOpacity>
-
-            {/* Side Column (2 Stacked) */}
-            <View style={styles.bentoColumn}>
-              {topItems.slice(1, 3).map((item, index) => (
-                <TouchableOpacity
-                  key={item.id}
-                  activeOpacity={1}
-                  onPress={() => handleCardPress(item)}
-                  style={styles.bentoTouchableSmall}
-                >
-                  <View style={styles.bentoSmall}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingLeft: 24,
+            paddingRight: 24,
+            paddingVertical: 8,
+          }}
+          decelerationRate="fast"
+          snapToInterval={280 + 16}
+        >
+          {topItems.map((item) => {
+            const priceLabel = getTopPickPrice(item);
+            return (
+              <TouchableOpacity
+                key={item.id}
+                activeOpacity={1}
+                onPress={() => handleCardPress(item)}
+                style={[
+                  styles.newArrivalCard,
+                  { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                ]}
+              >
+                {/* Image Section */}
+                <View style={styles.newArrivalImageContainer}>
+                  {((item.images && item.images.length > 0) || item.image) ? (
                     <AutoCardImage
                       image={item.image}
                       images={item.images}
-                      style={styles.bentoImage}
-                      width={480}
+                      style={styles.newArrivalImage}
+                      width={560}
                       height={280}
                       cacheVersion={item.updated_at || item.created_at || item.id}
                     />
-                    <LinearGradient
-                      colors={["transparent", "rgba(0,0,0,0.7)"]}
-                      style={styles.bentoOverlay}
+                  ) : (
+                    <View
+                      style={[
+                        styles.newArrivalImagePlaceholder,
+                        { backgroundColor: colors.primary + "20" },
+                      ]}
                     >
-                      <Text style={styles.bentoTitleSmall} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
-                        <Ionicons name="star" size={10} color="#FCD34D" />
-                        <Text style={styles.bentoRating}>
-                          {item.rating > 0 ? item.rating.toFixed(1) : "New"}
-                        </Text>
-                      </View>
-                    </LinearGradient>
+                      <Ionicons
+                        name={
+                          item.type === "Gig"
+                            ? "musical-notes"
+                            : item.type === "Studio"
+                              ? "business"
+                              : item.type === "Artist"
+                                ? "person"
+                                : "people"
+                        }
+                        size={32}
+                        color={colors.primary}
+                      />
+                    </View>
+                  )}
+                  {/* Type Badge */}
+                  <View
+                    style={[
+                      styles.newArrivalTypeBadge,
+                      { backgroundColor: getTypeBadgeColor(item.type) },
+                    ]}
+                  >
+                    <Text style={styles.newArrivalTypeBadgeText}>
+                      {item.type}
+                    </Text>
                   </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingRight: 16 }}
-          >
-            {topItems.map((item) => (
-              <View key={item.id} style={{ marginRight: 16 }}>
-                {renderUnifiedCard(item)}
-              </View>
-            ))}
-          </ScrollView>
-        )}
+                  {/* AI Match Badge (top right) */}
+                  {item.similarity && item.similarity > 0.1 && (
+                    <View
+                      style={[
+                        styles.newArrivalNewBadge,
+                        { backgroundColor: "rgba(16,185,129,0.95)" },
+                      ]}
+                    >
+                      <Ionicons name="sparkles" size={10} color="#FFF" />
+                      <Text
+                        style={[
+                          styles.newArrivalNewBadgeText,
+                          { color: "#FFF" },
+                        ]}
+                      >
+                        {Math.round(item.similarity * 100)}%
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Details Section */}
+                <View style={styles.newArrivalDetails}>
+                  <Text
+                    style={[styles.newArrivalName, { color: colors.text }]}
+                    numberOfLines={1}
+                  >
+                    {item.name}
+                  </Text>
+
+                  {/* Location/Genre */}
+                  <View style={styles.newArrivalRow}>
+                    <Ionicons
+                      name="location-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.newArrivalText,
+                        { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.location || item.genre || "Location TBA"}
+                    </Text>
+                  </View>
+
+                  {/* Rating */}
+                  <View style={styles.newArrivalRow}>
+                    <Ionicons name="star" size={14} color="#FCD34D" />
+                    <Text
+                      style={[
+                        styles.newArrivalText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {item.rating > 0
+                        ? `${item.rating.toFixed(1)} (${item.review_count || 0})`
+                        : "No ratings yet"}
+                    </Text>
+                  </View>
+
+                  {/* Price */}
+                  {priceLabel && (
+                    <Text
+                      style={[styles.newArrivalPrice, { color: colors.primary }]}
+                    >
+                      {priceLabel}
+                    </Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
     );
   };
@@ -1559,23 +1643,6 @@ export default function HomeScreen() {
     openListingDetails(item.id);
     // The ListingDetailsSheet will show the "Connect" tab for Groups
     // allowing venue/studio owners to send booking requests
-  };
-
-  // Unified Card Renderer
-  const renderUnifiedCard = (item: any) => {
-    return (
-      <ListingCard
-        key={item.id}
-        item={item}
-        onPress={handleCardPress}
-        onInvite={handleInvite}
-        onChat={handleChat}
-        variant="horizontal"
-        hasGroups={hasGroups}
-        showGigSummary={false}
-        style={{ width: 280 }}
-      />
-    );
   };
 
   // 3. New Arrivals Section - Custom Cards
@@ -2050,9 +2117,11 @@ export default function HomeScreen() {
     if (uniqueItems.length === 0) {
       return (
         <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            For You
-          </Text>
+          <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              For You
+            </Text>
+          </View>
           <View
             style={{
               paddingHorizontal: 24,
@@ -2084,7 +2153,7 @@ export default function HomeScreen() {
           style={{
             flexDirection: "row",
             justifyContent: "space-between",
-            alignItems: "flex-end",
+            alignItems: "center",
             paddingHorizontal: 24,
             marginBottom: 16,
           }}

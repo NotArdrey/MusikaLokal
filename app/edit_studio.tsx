@@ -93,6 +93,46 @@ const formatTimeInput = (text: string): string => {
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 
+const canonicalizeStudioType = (
+  value: unknown,
+): "Rehearsal" | "Recording" | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized.includes("rehearsal")) return "Rehearsal";
+  if (normalized.includes("recording")) return "Recording";
+  return null;
+};
+
+const resolveStudioTypeRows = (value: unknown): ("Rehearsal" | "Recording")[] => {
+  if (typeof value === "string" && value.trim().toLowerCase() === "both") {
+    return ["Rehearsal", "Recording"];
+  }
+
+  const singleType = canonicalizeStudioType(value);
+  return singleType ? [singleType] : [];
+};
+
+const inferStudioTypeFromRows = (
+  rows: unknown[],
+): "Rehearsal" | "Recording" | "Both" => {
+  const canonicalSet = new Set<"Rehearsal" | "Recording">();
+
+  rows.forEach((row) => {
+    const canonical = canonicalizeStudioType(row);
+    if (canonical) canonicalSet.add(canonical);
+  });
+
+  const hasRehearsal = canonicalSet.has("Rehearsal");
+  const hasRecording = canonicalSet.has("Recording");
+
+  if (hasRehearsal && hasRecording) return "Both";
+  if (hasRecording) return "Recording";
+  if (hasRehearsal) return "Rehearsal";
+  return "Both";
+};
+
 export default function EditStudioScreen() {
   const { colors, isDark } = useTheme();
   const { id } = useLocalSearchParams();
@@ -534,9 +574,13 @@ export default function EditStudioScreen() {
         });
       });
 
-      const normalizedTypes = (studioTypesData || [])
-        .map((row: any) => row.studio_type)
-        .filter(Boolean);
+      const normalizedTypes = Array.from(
+        new Set(
+          (studioTypesData || [])
+            .map((row: any) => canonicalizeStudioType(row.studio_type))
+            .filter((type): type is "Rehearsal" | "Recording" => Boolean(type)),
+        ),
+      );
 
       const normalizedInstruments = (studioInstrumentsData || []).map(
         (row: any) => ({
@@ -581,10 +625,7 @@ export default function EditStudioScreen() {
         availability: normalizedAvailability,
         calendar_availability: [],
         types: normalizedTypes,
-        type:
-          normalizedTypes.length > 1
-            ? "Both"
-            : normalizedTypes[0] || "Both",
+        type: inferStudioTypeFromRows(normalizedTypes),
         lead_time_hours: studioSettingsData?.lead_time_hours ?? 24,
         weekend_multiplier: studioSettingsData?.weekend_multiplier ?? 1.0,
         peak_season_multiplier:
@@ -2107,12 +2148,7 @@ export default function EditStudioScreen() {
       }
 
       await supabase.from('studio_types').delete().eq('studio_id', studioId);
-      const normalizedTypes =
-        payload.type === 'Both'
-          ? ['Rehearsal', 'Recording']
-          : payload.type
-            ? [payload.type]
-            : [];
+      const normalizedTypes = resolveStudioTypeRows(payload.type);
       if (normalizedTypes.length > 0) {
         const { error: typeError } = await supabase
           .from('studio_types')

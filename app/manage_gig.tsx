@@ -93,6 +93,17 @@ export default function GigDetailsScreen() {
 
   const Alert = { alert: showAlertNative };
 
+  const fetchApplicationsFallback = async (gigId: string) => {
+    const { data, error } = await supabase
+      .from("gig_applications")
+      .select("id, status, created_at, group_id, applicant_id")
+      .eq("gig_id", gigId)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  };
+
   const handleNavigateToGig = async () => {
     try {
       await openNavigationDirections({
@@ -162,19 +173,36 @@ export default function GigDetailsScreen() {
 
       console.log(`[manage_gig] Fetching data for gigId: ${gigId}, userId: ${userId}`);
 
-      // Base query + legacy projection merge
-      const { data: gigData, error: gigError } = await supabase
-        .from('gigs')
-        .select('*')
-        .eq('id', gigId)
-        .eq('organizer_id', userId)
-        .single();
-
-      const { data: legacyGig, error: legacyGigError } = await supabase
-        .from('gigs_legacy_projection')
-        .select('requirements, images, documents')
-        .eq('id', gigId)
-        .single();
+      // Load 3NF sources first so newly created gigs are visible immediately.
+      const [
+        { data: gigData, error: gigError },
+        { data: requirementRows, error: requirementsError },
+        { data: mediaRows, error: mediaError },
+        { data: legacyGig, error: legacyGigError },
+      ] = await Promise.all([
+        supabase
+          .from('gigs')
+          .select('*')
+          .eq('id', gigId)
+          .eq('organizer_id', userId)
+          .single(),
+        supabase
+          .from('gig_requirements')
+          .select('requirement_key, requirement_value')
+          .eq('gig_id', gigId),
+        supabase
+          .from('gig_media')
+          .select('media_url, media_type, sort_order, created_at')
+          .eq('gig_id', gigId)
+          .eq('media_type', 'image')
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('gigs_legacy_projection')
+          .select('requirements, images, documents')
+          .eq('id', gigId)
+          .single(),
+      ]);
 
       if (gigError) {
         console.log('[manage_gig] Failed to fetch gig details:', gigError.message);
@@ -183,13 +211,31 @@ export default function GigDetailsScreen() {
         // }
         throw gigError;
       }
+      if (requirementsError) throw requirementsError;
+      if (mediaError) throw mediaError;
+
+      // Legacy projection is fallback-only; do not fail page load if this read errors.
       if (legacyGigError) {
-        throw legacyGigError;
+        console.log('[manage_gig] Legacy projection unavailable, using direct 3NF rows only.');
       }
+
+      const requirementsFromRows = (requirementRows || []).reduce((acc: Record<string, any>, row: any) => {
+        if (!row?.requirement_key) return acc;
+        acc[row.requirement_key] = row.requirement_value;
+        return acc;
+      }, {});
+
+      const imagesFromRows = (mediaRows || [])
+        .map((row: any) => row?.media_url)
+        .filter((url: any) => typeof url === 'string' && url.length > 0);
+
       setGig({
         ...gigData,
-        requirements: legacyGig?.requirements || {},
-        images: legacyGig?.images || [],
+        requirements:
+          Object.keys(requirementsFromRows).length > 0
+            ? requirementsFromRows
+            : (legacyGig?.requirements || {}),
+        images: imagesFromRows.length > 0 ? imagesFromRows : (legacyGig?.images || []),
         documents: legacyGig?.documents || [],
       });
 
@@ -206,13 +252,15 @@ export default function GigDetailsScreen() {
             },
           });
         if (appError) {
-          console.log('[manage_gig] Failed to fetch applications:', appError);
-          // Don't throw here, allowing the page to load at least the gig details
+          console.log('[manage_gig] Edge function failed for applications, trying direct query fallback.');
+          const fallbackApps = await fetchApplicationsFallback(gigId);
+          setApplications(fallbackApps);
         } else {
           setApplications(appData || []);
         }
       } catch (appErr) {
-        console.log('[manage_gig] Exception fetching applications:', appErr);
+        console.log('[manage_gig] Exception fetching applications; using empty list fallback:', appErr);
+        setApplications([]);
       }
 
       // Direct query to reviews table
@@ -284,9 +332,21 @@ export default function GigDetailsScreen() {
 
   const tabs = ["About", "Applicants", "Review"];
 
-  const formatMusicianType = (type?: string) => {
+  const formatMusicianType = (requirements?: any) => {
+    const slots = requirements?.slots || {};
+    const soloNeeded = Number(slots?.solo?.needed || 0);
+    const duoNeeded = Number(slots?.duo?.needed || 0);
+    const bandNeeded = Number(slots?.band?.needed || 0);
+
+    if (duoNeeded > 0 && soloNeeded === 0 && bandNeeded === 0) return "Duo";
+    if (soloNeeded > 0 && duoNeeded === 0 && bandNeeded === 0) return "Solo";
+    if (bandNeeded > 0 && soloNeeded === 0 && duoNeeded === 0) return "Group";
+    if (soloNeeded > 0 && (duoNeeded > 0 || bandNeeded > 0)) return "Both";
+    if (duoNeeded > 0 || bandNeeded > 0) return "Group";
+
+    const type = requirements?.musician_type;
     if (!type) return "Not specified";
-    return type.charAt(0).toUpperCase() + type.slice(1);
+    return String(type).charAt(0).toUpperCase() + String(type).slice(1);
   };
 
   // Show loading while checking authorization
@@ -574,7 +634,7 @@ export default function GigDetailsScreen() {
                           color: colors.text,
                         }}
                       >
-                        {formatMusicianType(gig?.requirements?.musician_type)}
+                        {formatMusicianType(gig?.requirements)}
                       </Text>
                     </View>
                   </View>

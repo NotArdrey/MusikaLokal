@@ -39,19 +39,49 @@ export default function MyGroupScreen() {
         setAlertVisible(true);
     };
 
+    const isMissingRelationError = (error: any, relationName: string) => {
+        const message = String(error?.message || '').toLowerCase();
+        return error?.code === '42P01' && message.includes(relationName.toLowerCase());
+    };
+
+    const isMissingFunctionError = (error: any, functionName: string) => {
+        const message = String(error?.message || '').toLowerCase();
+        return error?.code === '42883' && message.includes(functionName.toLowerCase());
+    };
+
     const fetchGroups = async () => {
         if (!userId) return;
         try {
-            // Direct query to groups_with_stats view
+            let groupRows: any[] = [];
+
+            // Preferred source with aggregates.
             const { data, error } = await supabase
                 .from('groups_with_stats')
                 .select('*')
                 .eq('owner_id', userId)
                 .order('created_at', { ascending: false });
 
-            if (error) throw error;
+            if (!error) {
+                groupRows = data || [];
+            } else if (isMissingRelationError(error, 'groups_with_stats')) {
+                const { data: fallbackData, error: fallbackError } = await supabase
+                    .from('groups')
+                    .select('id, owner_id, name, genre, description, location, latitude, longitude, rate, created_at, group_type')
+                    .eq('owner_id', userId)
+                    .order('created_at', { ascending: false });
 
-            const groupRows = data || [];
+                if (fallbackError) throw fallbackError;
+
+                groupRows = (fallbackData || []).map((row: any) => ({
+                    ...row,
+                    rating: 0,
+                    review_count: 0,
+                    images: [],
+                }));
+            } else {
+                throw error;
+            }
+
             const groupIds = groupRows.map((item: any) => item.id).filter(Boolean);
 
             let mediaByGroupId = new Map<string, string[]>();
@@ -124,7 +154,15 @@ export default function MyGroupScreen() {
         setModalVisible(true);
     };
 
-    const isDeleteConfirmed = deleteConfirmationText.trim() === selectedName.trim();
+    const normalizeForDeleteConfirmation = (value: string) =>
+        String(value || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .toLowerCase();
+
+    const isDeleteConfirmed =
+        normalizeForDeleteConfirmation(deleteConfirmationText) ===
+        normalizeForDeleteConfirmation(selectedName);
 
     const handleDelete = async () => {
         if (!selectedId || !userId || deleting) return;
@@ -139,9 +177,23 @@ export default function MyGroupScreen() {
                 p_reason: 'Deleted from My Group screen by owner',
             });
 
-            if (error) throw error;
+            let result: any = data;
 
-            const result: any = data;
+            if (error) {
+                if (isMissingFunctionError(error, 'delete_group_safely')) {
+                    const { error: fallbackDeleteError } = await supabase
+                        .from('groups')
+                        .delete()
+                        .eq('id', selectedId)
+                        .eq('owner_id', userId);
+
+                    if (fallbackDeleteError) throw fallbackDeleteError;
+                    result = { success: true };
+                } else {
+                    throw error;
+                }
+            }
+
             if (!result?.success) {
                 if (result?.code === 'ACTIVE_ACCEPTED_APPLICATIONS_EXIST') {
                     showAlert(
@@ -287,7 +339,7 @@ export default function MyGroupScreen() {
                 inputPlaceholder="Type group name"
                 inputValue={deleteConfirmationText}
                 onInputChange={setDeleteConfirmationText}
-                confirmDisabled={!isDeleteConfirmed || deleting}
+                confirmDisabled={deleting}
             />
             <CustomAlert
                 visible={alertVisible}
