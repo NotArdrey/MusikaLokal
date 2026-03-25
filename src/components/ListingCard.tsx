@@ -588,6 +588,15 @@ const ListingCard: React.FC<ListingCardProps> = ({
                       </Text>
                     </View>
                   )}
+                {/* Promo Badge for Studios */}
+                {item.has_active_promotion &&
+                  (item.type === "Studio" || item.hourly_rate) && (
+                    <View
+                      style={[styles.tagBadge, { backgroundColor: "#10B981" }]}
+                    >
+                      <Text style={styles.tagText}>Promo</Text>
+                    </View>
+                  )}
                 {/* Slots Needed Badge for Gigs */}
                 {item.type === "Gig" && item.requirements?.slots && (
                   <>
@@ -1084,6 +1093,22 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   >
                     <Text style={[styles.tagText, { fontSize: 10 }]}>
                       Weekend +{Math.round((parseFloat(item.weekend_multiplier) - 1) * 100)}%
+                    </Text>
+                  </View>
+                )}
+
+              {/* Promo Badge for Studios - Vertical */}
+              {item.has_active_promotion &&
+                (item.type === "Studio" || item.hourly_rate) && (
+                  <View
+                    style={[
+                      styles.tagBadge,
+                      styles.tagBadgeSmall,
+                      { backgroundColor: "#10B981" },
+                    ]}
+                  >
+                    <Text style={[styles.tagText, { fontSize: 10 }]}>
+                      Promo
                     </Text>
                   </View>
                 )}

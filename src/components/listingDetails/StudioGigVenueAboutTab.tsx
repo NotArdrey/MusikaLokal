@@ -21,6 +21,7 @@ interface StudioGigVenueAboutTabProps {
   currentUserId: string | null;
   calculateCompletion: () => number;
   handleProfileNavigation: () => void;
+  promotions?: any[];
 }
 
 const StudioGigVenueAboutTab = ({
@@ -36,6 +37,7 @@ const StudioGigVenueAboutTab = ({
   currentUserId,
   calculateCompletion,
   handleProfileNavigation,
+  promotions = [],
 }: StudioGigVenueAboutTabProps) => {
   const parsedCompletionRate = Number(group.completion_rate);
   const baseCompletionRate = Number.isFinite(parsedCompletionRate)
@@ -53,6 +55,16 @@ const StudioGigVenueAboutTab = ({
   const isStudioOrVenue = group.type === "Studio" || group.type === "Venue";
   const isMediaCarouselType =
     group.type === "Studio" || group.type === "Venue" || group.type === "Gig";
+
+  const activePromotions = useMemo(() => {
+    if (!promotions || promotions.length === 0) return [];
+    const today = new Date().toISOString().split("T")[0];
+    return promotions.filter((p: any) => {
+      if (!p.is_active) return false;
+      if (p.is_permanent) return true;
+      return p.start_date <= today && p.end_date >= today;
+    });
+  }, [promotions]);
   const mediaItems = useMemo(() => {
     if (!isMediaCarouselType) return [];
 
@@ -368,6 +380,76 @@ const StudioGigVenueAboutTab = ({
             )}
           </View>
         )}
+      </View>
+    )}
+
+    {isStudioOrVenue && activePromotions.length > 0 && (
+      <View style={{ marginBottom: 24 }}>
+        <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 10 }]}>
+          Active Promotions
+        </Text>
+        {activePromotions.map((promo: any) => (
+          <View
+            key={promo.id}
+            style={{
+              backgroundColor: isDark ? "#1e1b4b" : "#EEF2FF",
+              borderWidth: 1,
+              borderColor: isDark ? "#4338ca" : colors.primary + "40",
+              borderRadius: 12,
+              padding: 14,
+              marginBottom: 8,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
+              <Text
+                style={{
+                  fontFamily: "Poppins_600SemiBold",
+                  color: isDark ? "#c7d2fe" : "#3730a3",
+                  fontSize: 14,
+                }}
+              >
+                {promo.name}
+              </Text>
+            </View>
+            <Text
+              style={{
+                fontFamily: "Poppins_500Medium",
+                color: isDark ? "#a5b4fc" : "#4338ca",
+                fontSize: 13,
+              }}
+            >
+              {promo.discount_type === "percentage"
+                ? `${promo.discount_value}% off`
+                : `₱${promo.discount_value}/hr off`}
+              {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
+            </Text>
+            {promo.description ? (
+              <Text
+                style={{
+                  fontFamily: "Poppins_400Regular",
+                  color: isDark ? "#a5b4fc" : "#4338ca",
+                  fontSize: 12,
+                  marginTop: 2,
+                }}
+              >
+                {promo.description}
+              </Text>
+            ) : null}
+            <Text
+              style={{
+                fontFamily: "Poppins_400Regular",
+                color: isDark ? "#818cf8" : "#6366f1",
+                fontSize: 11,
+                marginTop: 4,
+              }}
+            >
+              {promo.is_permanent
+                ? "Always available"
+                : `Valid: ${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+            </Text>
+          </View>
+        ))}
       </View>
     )}
 

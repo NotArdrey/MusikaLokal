@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 
@@ -7,6 +8,7 @@ interface ListingBottomBarProps {
   displayRate: string;
   labels: { unit: string };
   onReserve: () => void;
+  hasActivePromotion?: boolean;
 }
 
 const ListingBottomBar = ({
@@ -15,6 +17,7 @@ const ListingBottomBar = ({
   displayRate,
   labels,
   onReserve,
+  hasActivePromotion = false,
 }: ListingBottomBarProps) => (
   <View
     style={[
@@ -38,6 +41,14 @@ const ListingBottomBar = ({
           {labels.unit}
         </Text>
       </Text>
+      {hasActivePromotion && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
+          <Ionicons name="pricetag" size={10} color={colors.primary} />
+          <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: colors.primary }}>
+            Promo available
+          </Text>
+        </View>
+      )}
     </View>
     <TouchableOpacity activeOpacity={1}
       style={[styles.bookBtn, { backgroundColor: colors.primary }]}

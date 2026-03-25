@@ -740,7 +740,9 @@ const StudioBookTab = ({
                           borderRadius: 4,
                         }}
                       >
-                        <Text style={{ color: colors.primary, fontSize: 10 }}>Promo Applied</Text>
+                        <Text style={{ color: colors.primary, fontSize: 10 }}>
+                          {booking.pricing?.modifiers?.promotion?.name || "Promo Applied"}
+                        </Text>
                       </View>
                     )}
                   </View>
@@ -822,6 +824,7 @@ const StudioBookTab = ({
                       p_booking_date: bookingDate,
                       p_start_time: startTime,
                       p_end_time: endTimeStr,
+                      p_session_type: selectedSessionType?.toLowerCase() || "rehearsal",
                     });
 
                     if (pricingError || !pricing || pricing.length === 0) {
@@ -829,6 +832,27 @@ const StudioBookTab = ({
                       showAlert("error", "Pricing Error", "Failed to calculate price. Please try again.");
                       setIsCheckingAvailability(false);
                       return;
+                    }
+
+                    // Apply promotion discount if available
+                    let finalPricing = pricing[0];
+                    try {
+                      const { data: promoResult } = await supabase.rpc("apply_studio_promotion", {
+                        p_studio_id: group.id,
+                        p_booking_date: bookingDate,
+                        p_session_type: selectedSessionType?.toLowerCase() || "rehearsal",
+                        p_base_price: finalPricing.final_price || 0,
+                        p_hours: finalPricing.hours || 0,
+                      });
+                      if (promoResult) {
+                        finalPricing = {
+                          ...finalPricing,
+                          final_price: promoResult.final_price_after_promo,
+                          modifiers: { ...(finalPricing.modifiers || {}), promotion: promoResult },
+                        };
+                      }
+                    } catch (promoErr) {
+                      debugLog("Promotion RPC not available, skipping:", promoErr);
                     }
 
                     const startDate = new Date(`${bookingDate}T${startTime}`);
@@ -841,7 +865,7 @@ const StudioBookTab = ({
                         startTime: startDate,
                         endTime: endDate,
                         timeSlots: [{ start: startTime, end: endTimeStr }],
-                        pricing: pricing[0],
+                        pricing: finalPricing,
                       },
                     ]);
 
@@ -928,6 +952,7 @@ const StudioBookTab = ({
                         p_booking_date: bookingDate,
                         p_start_time: startTime,
                         p_end_time: endTime2,
+                        p_session_type: selectedSessionType?.toLowerCase() || "rehearsal",
                       });
 
                       if (pricingError || !pricing || pricing.length === 0) {
@@ -935,6 +960,27 @@ const StudioBookTab = ({
                         showAlert("error", "Pricing Error", "Failed to calculate price. Please try again.");
                         setIsCheckingAvailability(false);
                         return;
+                      }
+
+                      // Apply promotion discount if available
+                      let finalPricing = pricing[0];
+                      try {
+                        const { data: promoResult } = await supabase.rpc("apply_studio_promotion", {
+                          p_studio_id: group.id,
+                          p_booking_date: bookingDate,
+                          p_session_type: selectedSessionType?.toLowerCase() || "rehearsal",
+                          p_base_price: finalPricing.final_price || 0,
+                          p_hours: finalPricing.hours || 0,
+                        });
+                        if (promoResult) {
+                          finalPricing = {
+                            ...finalPricing,
+                            final_price: promoResult.final_price_after_promo,
+                            modifiers: { ...(finalPricing.modifiers || {}), promotion: promoResult },
+                          };
+                        }
+                      } catch (promoErr) {
+                        debugLog("Promotion RPC not available, skipping:", promoErr);
                       }
 
                       if (existingBookingIndex >= 0) {
@@ -969,15 +1015,15 @@ const StudioBookTab = ({
                         mergedSlots.sort((a, b) => a.start.localeCompare(b.start));
 
                         const existingPrice = existingBooking.pricing?.final_price || 0;
-                        const newPrice = pricing[0]?.final_price || 0;
-                        const totalHours = (existingBooking.pricing?.hours || 0) + (pricing[0]?.hours || 0);
+                        const newPrice = finalPricing?.final_price || 0;
+                        const totalHours = (existingBooking.pricing?.hours || 0) + (finalPricing?.hours || 0);
 
                         const updatedBookings = [...bookings];
                         updatedBookings[existingBookingIndex] = {
                           ...existingBooking,
                           timeSlots: mergedSlots,
                           pricing: {
-                            ...pricing[0],
+                            ...finalPricing,
                             final_price: existingPrice + newPrice,
                             hours: totalHours,
                           },
@@ -996,7 +1042,7 @@ const StudioBookTab = ({
                             startTime: new Date(date),
                             endTime: new Date(endTime),
                             timeSlots: [currentSlot],
-                            pricing: pricing[0],
+                            pricing: finalPricing,
                           },
                         ]);
                       }

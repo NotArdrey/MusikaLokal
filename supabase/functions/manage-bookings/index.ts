@@ -1239,6 +1239,7 @@ serve(async (req: Request) => {
           p_studio_id: studio_id,
           p_booking_date: date,
           p_time_slots: slots,
+          p_session_type: session_type || "rehearsal",
         },
       );
 
@@ -1262,6 +1263,7 @@ serve(async (req: Request) => {
                 p_booking_date: date,
                 p_start_time: slot.start,
                 p_end_time: slot.end,
+                p_session_type: session_type || "rehearsal",
               },
             );
 

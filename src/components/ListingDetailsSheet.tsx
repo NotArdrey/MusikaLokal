@@ -586,6 +586,49 @@ const ListingDetailsSheet = forwardRef<
     }
   };
 
+  // Refresh studio bookings and calendar availability (e.g. after booking creation or payment modal dismissal)
+  const refreshStudioCalendar = useCallback(async () => {
+    if (!listingId || !group || (group.type !== "Studio" && group.type !== "Venue")) return;
+    try {
+      const freshBookings = await fetchStudioBookings(listingId);
+      setExistingBookings(freshBookings);
+      if (group.availability) {
+        processAvailability(
+          group.availability,
+          freshBookings,
+          group.dateOverrides,
+          bookings,
+        );
+      }
+      // Re-check unpaid booking status
+      if (userId) {
+        const { data: latestUserBooking } = await supabase
+          .from("studio_bookings")
+          .select("id, status, payment_status")
+          .eq("user_id", userId)
+          .eq("studio_id", listingId)
+          .eq("status", "confirmed")
+          .in("payment_status", ["unpaid", "pending", "failed"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (latestUserBooking) {
+          setHasExistingStudioBooking(true);
+          setExistingStudioBookingStatus("unpaid");
+          setBookings([]);
+          setSelectedTimeSlots([]);
+          setShowAddBooking(false);
+        } else {
+          setHasExistingStudioBooking(false);
+          setExistingStudioBookingStatus(null);
+        }
+      }
+    } catch (e) {
+      console.error("Error refreshing studio calendar:", e);
+    }
+  }, [listingId, group, bookings, userId, fetchStudioBookings]);
+
   // Process payment with selected payment type (full or downpayment)
   const processPaymentWithType = async (
     paymentType: "full" | "downpayment",
@@ -1322,6 +1365,7 @@ const ListingDetailsSheet = forwardRef<
             dateOverridesResult,
             studioSettingsResult,
             studioTypesResult,
+            studioPromotionsResult,
           ] = await Promise.all([
             supabase
               .from("studio_operating_hours")
@@ -1341,6 +1385,11 @@ const ListingDetailsSheet = forwardRef<
               .from("studio_types")
               .select("studio_type")
               .eq("studio_id", data.id),
+            supabase
+              .from("studio_promotions")
+              .select("*")
+              .eq("studio_id", data.id)
+              .eq("is_active", true),
           ]);
 
           const operatingHours = operatingHoursResult.data;
@@ -1351,6 +1400,9 @@ const ListingDetailsSheet = forwardRef<
           const settingsError = studioSettingsResult.error;
           const studioTypes = studioTypesResult.data;
           const studioTypesError = studioTypesResult.error;
+
+          // Attach promotions to normalizedData
+          normalizedData.promotions = studioPromotionsResult.data || [];
 
           if (studioTypesError) {
             debugLog("⚠️ Failed fetching studio_types, falling back to compatibility fields:", studioTypesError);
@@ -2438,6 +2490,7 @@ const ListingDetailsSheet = forwardRef<
       currentUserId={currentUserId}
       calculateCompletion={calculateCompletion}
       handleProfileNavigation={handleProfileNavigation}
+      promotions={group?.promotions || []}
     />
   );
 
@@ -2593,9 +2646,12 @@ const ListingDetailsSheet = forwardRef<
         statusBarTranslucent
         navigationBarTranslucent
         animationType="fade"
-        onRequestClose={() =>
-          !isProcessingPayment && setShowPaymentOptionModal(false)
-        }
+        onRequestClose={() => {
+          if (!isProcessingPayment) {
+            setShowPaymentOptionModal(false);
+            refreshStudioCalendar();
+          }
+        }}
       >
         <BlurView intensity={60} tint="dark" style={styles.paymentModalOverlay}>
           {isProcessingPayment ? (

@@ -375,6 +375,34 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             );
           }
 
+          // Fetch active promotions for studios
+          const studioIds = Array.from(
+            new Set(
+              results
+                .filter((item) => item.type === "Studio" && item.id)
+                .map((item) => item.id),
+            ),
+          );
+
+          if (studioIds.length > 0) {
+            const todayStr = new Date().toISOString().split("T")[0];
+            const { data: studioPromos } = await supabase
+              .from("studio_promotions")
+              .select("studio_id")
+              .in("studio_id", studioIds)
+              .eq("is_active", true)
+              .or(`is_permanent.eq.true,and(start_date.lte.${todayStr},end_date.gte.${todayStr})`);
+
+            if (studioPromos) {
+              const promoStudioIds = new Set(studioPromos.map((p: any) => p.studio_id));
+              results = results.map((item) =>
+                item.type === "Studio"
+                  ? { ...item, has_active_promotion: promoStudioIds.has(item.id) }
+                  : item,
+              );
+            }
+          }
+
           if (sortBy === "rating") {
             results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
           } else if (sortBy === "price_low") {

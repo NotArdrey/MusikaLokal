@@ -637,6 +637,24 @@ export default function HomeScreen() {
             }));
             debugLog("🏠 Studios augmented with date overrides");
           }
+
+          // Fetch active promotions for studios
+          const todayStr = new Date().toISOString().split("T")[0];
+          const { data: studioPromos } = await supabase
+            .from("studio_promotions")
+            .select("studio_id")
+            .in("studio_id", studioIds)
+            .eq("is_active", true)
+            .or(`is_permanent.eq.true,and(start_date.lte.${todayStr},end_date.gte.${todayStr})`);
+
+          if (studioPromos) {
+            const promoStudioIds = new Set(studioPromos.map((p: any) => p.studio_id));
+            studios = studios.map((studio: any) => ({
+              ...studio,
+              has_active_promotion: promoStudioIds.has(studio.id),
+            }));
+            debugLog("🏠 Studios augmented with promotion flags");
+          }
         }
         const { data: gigData, error: gigError } = await supabase
           .from("gigs_with_stats")
@@ -725,6 +743,7 @@ export default function HomeScreen() {
           // Seasonal pricing fields for studios
           has_seasonal_pricing: item.has_seasonal_pricing || false,
           has_special_dates: item.has_special_dates || false,
+          has_active_promotion: item.has_active_promotion || false,
           lead_time_hours: item.lead_time_hours || 24,
           weekend_multiplier: item.weekend_multiplier || 1.0,
           peak_season_multiplier: item.peak_season_multiplier || 1.0,
@@ -1611,6 +1630,15 @@ export default function HomeScreen() {
                       {priceLabel}
                     </Text>
                   )}
+                  {/* Promo Badge */}
+                  {item.type === "Studio" && item.has_active_promotion && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                      <Ionicons name="pricetag" size={10} color="#10B981" />
+                      <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                        Promo available
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </TouchableOpacity>
             );
@@ -1864,6 +1892,15 @@ export default function HomeScreen() {
                   >
                     {priceLabel}
                   </Text>
+                )}
+                {/* Promo Badge */}
+                {item.type === "Studio" && item.has_active_promotion && (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                    <Ionicons name="pricetag" size={10} color="#10B981" />
+                    <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                      Promo available
+                    </Text>
+                  </View>
                 )}
               </View>
               </TouchableOpacity>
@@ -2263,6 +2300,11 @@ export default function HomeScreen() {
                         </Text>
                       </View>
                     )}
+                    {uniqueItems[0].type === "Studio" && uniqueItems[0].has_active_promotion && (
+                      <View style={[styles.tagBadge, { backgroundColor: "rgba(16,185,129,0.8)", borderColor: "rgba(16,185,129,0.9)" }]}>
+                        <Text style={styles.tagText}>Promo</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               </LinearGradient>
@@ -2445,6 +2487,15 @@ export default function HomeScreen() {
                     }
                     return null;
                   })()}
+                {/* Promo Badge */}
+                {item.type === "Studio" && item.has_active_promotion && (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                    <Ionicons name="pricetag" size={10} color="#10B981" />
+                    <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                      Promo available
+                    </Text>
+                  </View>
+                )}
               </View>
             </TouchableOpacity>
           ))}
