@@ -1,0 +1,41 @@
+[functions.paymongo]
+verify_jwt = false
+
+[functions.verification-redirect]
+verify_jwt = false
+
+[functions.didit-webhook]
+verify_jwt = false
+
+[functions.create-didit-session]
+verify_jwt = false
+
+[functions.create-address-verification]
+verify_jwt = false
+
+[functions.smile-webhook]
+verify_jwt = false
+
+[functions.login-redirect]
+[functions.listings-crud]
+verify_jwt = false
+[functions.manage-profile]
+verify_jwt = false
+[functions.manage-bookings]
+verify_jwt = false
+[functions.manage-notifications]
+verify_jwt = false
+[functions.manage-listings]
+verify_jwt = false
+[functions.manage-details]
+verify_jwt = false
+[functions.verify-identity]
+verify_jwt = false
+[functions.home-feed]
+verify_jwt = false
+[functions.search-content]
+verify_jwt = false
+[functions.instrument-suggestions]
+verify_jwt = false
+[functions.gig-applications]
+verify_jwt = false

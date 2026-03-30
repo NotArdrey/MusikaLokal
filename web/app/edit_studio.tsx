@@ -1,0 +1,5006 @@
+import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
+import * as ImagePicker from "expo-image-picker";
+import { router } from "expo-router";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+    ActivityIndicator,
+    BackHandler,
+    Image,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { Calendar } from "react-native-calendars";
+import ConflictResolutionModal, {
+    ConflictingBooking,
+    ConflictResolution,
+} from "../src/components/ConflictResolutionModal";
+import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+import Header from "../src/components/header";
+import ImageUploader from "../src/components/ImageUploader";
+import LocationPicker from "../src/components/LocationPicker";
+import Modal from "../src/components/modal";
+import Navbar from "../src/components/navbar";
+import { useTheme } from "../src/context/ThemeContext";
+
+// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
+  const b64 = base64.replace(/=/g, "");
+  const bufLen = Math.floor(b64.length * 0.75);
+  const bytes = new Uint8Array(bufLen);
+  let p = 0;
+  for (let i = 0; i < b64.length; i += 4) {
+    const e1 = lookup[b64.charCodeAt(i)];
+    const e2 = lookup[b64.charCodeAt(i + 1)];
+    const e3 = lookup[b64.charCodeAt(i + 2)];
+    const e4 = lookup[b64.charCodeAt(i + 3)];
+    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
+    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+  }
+  return bytes;
+};
+
+import { useLocalSearchParams } from "expo-router";
+import { supabase } from "../lib/supabase";
+
+// Helper function to format time input
+const formatTimeInput = (text: string): string => {
+  // Remove all non-digit characters except colon
+  let cleaned = text.replace(/[^0-9:]/g, "");
+
+  // Limit to 5 characters (HH:MM)
+  if (cleaned.length > 5) cleaned = cleaned.substring(0, 5);
+
+  // Auto-add colon after 2 digits
+  if (cleaned.length === 2 && !cleaned.includes(":")) {
+    cleaned = cleaned + ":";
+  }
+
+  // If user types more than 2 digits before colon, insert colon
+  if (cleaned.length > 2 && !cleaned.includes(":")) {
+    cleaned = cleaned.substring(0, 2) + ":" + cleaned.substring(2);
+  }
+
+  // Validate hour (01-12)
+  const parts = cleaned.split(":");
+  if (parts[0] && parts[0].length === 2) {
+    const hour = parseInt(parts[0]);
+    if (hour < 1 || hour > 12) {
+      return cleaned.substring(0, 1);
+    }
+  }
+
+  // Validate minute (00-59)
+  if (parts[1] && parts[1].length === 2) {
+    const minute = parseInt(parts[1]);
+    if (minute > 59) {
+      return parts[0] + ":" + parts[1].substring(0, 1);
+    }
+  }
+
+  return cleaned;
+};
+
+const TITLE_MAX_LENGTH = 120;
+const DESCRIPTION_MAX_LENGTH = 1000;
+
+export default function EditStudioScreen() {
+  const { colors, isDark } = useTheme();
+  const { id } = useLocalSearchParams();
+  const [studioName, setStudioName] = useState("");
+  const [description, setDescription] = useState("");
+  const [address, setAddress] = useState("");
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  // Dynamic pricing per studio type
+  const [rehearsalRate, setRehearsalRate] = useState("");
+  const [recordingRate, setRecordingRate] = useState("");
+  const [studioType, setStudioType] = useState<
+    "Rehearsal" | "Recording" | "Both"
+  >("Both");
+  const [pax, setPax] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Custom Alert State
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState<{
+    type: AlertType;
+    title: string;
+    message: string;
+    buttons?: {
+      text: string;
+      onPress?: () => void;
+      style?: "default" | "cancel" | "destructive";
+    }[];
+  }>({
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  const showAlert = (
+    type: AlertType,
+    title: string,
+    message: string,
+    buttons?: {
+      text: string;
+      onPress?: () => void;
+      style?: "default" | "cancel" | "destructive";
+    }[],
+  ) => {
+    setAlertConfig({ type, title, message, buttons });
+    setAlertVisible(true);
+  };
+
+  const handleAttemptLeave = useCallback(() => {
+    if (saving) return;
+
+    showAlert(
+      "warning",
+      "Leave edit studio?",
+      "Your current edits won't be saved unless you tap Save Changes.",
+      [
+        { text: "Stay", style: "cancel" },
+        { text: "Leave", style: "destructive", onPress: () => router.back() },
+      ],
+    );
+  }, [saving]);
+
+  const toggleCalendarDate = (dateStr: string) => {
+    setSelectedDates((prev) => {
+      const next = { ...prev };
+      if (next[dateStr]?.selected) {
+        delete next[dateStr];
+      } else {
+        next[dateStr] = {
+          selected: true,
+          slots: [{ start: "09:00 AM", end: "05:00 PM" }],
+        };
+      }
+      return next;
+    });
+  };
+
+  const [amenities, setAmenities] = useState<string[]>([]);
+  const [newAmenity, setNewAmenity] = useState("");
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [thumbnailIndex, setThumbnailIndex] = useState(0);
+
+  // Contract state
+  const [contractUrl, setContractUrl] = useState<string>("");
+  const [contractFileName, setContractFileName] = useState<string>("");
+  const [uploadingContract, setUploadingContract] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Business Permit state
+  const [businessPermitUrl, setBusinessPermitUrl] = useState<string>("");
+  const [businessPermitFileName, setBusinessPermitFileName] = useState<string>("");
+  const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
+  const businessPermitInputRef = useRef<HTMLInputElement>(null);
+
+  // Availability state
+  const daysOfWeek = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+  ];
+  const [availability, setAvailability] = useState<
+    { day: string; slots: { start: string; end: string }[] }[]
+  >(daysOfWeek.map((day) => ({ day, slots: [] })));
+
+  // Instruments state
+  const [selectedInstruments, setSelectedInstruments] = useState<
+    { name: string; image: string }[]
+  >([]);
+
+  // Studio Equipment state (full details with name, quantity, description, image)
+  interface EquipmentItem {
+    id: string;
+    name: string;
+    quantity: number;
+    description: string;
+    image: string;
+  }
+  const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
+  const [showEquipmentModal, setShowEquipmentModal] = useState(false);
+  const [editingEquipment, setEditingEquipment] =
+    useState<EquipmentItem | null>(null);
+  const [equipmentForm, setEquipmentForm] = useState({
+    name: "",
+    quantity: "1",
+    description: "",
+    image: "",
+  });
+
+  // Calendar-based availability state
+  const [selectedDates, setSelectedDates] = useState<{
+    [date: string]: {
+      selected: boolean;
+      slots: { start: string; end: string }[];
+    };
+  }>({});
+
+  // Conflict Resolution State
+  const [conflictModalVisible, setConflictModalVisible] = useState(false);
+  const [conflictingBookings, setConflictingBookings] = useState<
+    ConflictingBooking[]
+  >([]);
+  const [pendingSavePayload, setPendingSavePayload] = useState<any>(null);
+  const originalAvailabilityRef = useRef<
+    { day: string; slots: { start: string; end: string }[] }[]
+  >(daysOfWeek.map((day) => ({ day, slots: [] })));
+  const originalSelectedDatesRef = useRef<{
+    [date: string]: {
+      selected: boolean;
+      slots: { start: string; end: string }[];
+    };
+  }>({});
+
+  // Predefined instruments with images
+  const INSTRUMENT_OPTIONS = [
+    {
+      name: "Drum Kit",
+      image:
+        "https://images.unsplash.com/photo-1519892300165-cb5542fb47c7?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Piano",
+      image:
+        "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Guitar Amp",
+      image:
+        "https://images.unsplash.com/photo-1535587566541-97121a128dc5?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Bass Amp",
+      image:
+        "https://images.unsplash.com/photo-1516924962500-2b4b3b99ea02?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Microphones",
+      image:
+        "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Keyboard",
+      image:
+        "https://images.unsplash.com/photo-1552422535-c45813c61732?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Electric Guitar",
+      image:
+        "https://images.unsplash.com/photo-1550985616-10810253b84d?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Bass Guitar",
+      image:
+        "https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=200&h=200&fit=crop",
+    },
+    {
+      name: "DJ Equipment",
+      image:
+        "https://images.unsplash.com/photo-1571327073757-71d13c24de30?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Synthesizer",
+      image:
+        "https://images.unsplash.com/photo-1598653222000-6b7b7a552625?w=200&h=200&fit=crop",
+    },
+    {
+      name: "PA System",
+      image:
+        "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=200&h=200&fit=crop",
+    },
+    {
+      name: "Mixing Console",
+      image:
+        "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=200&h=200&fit=crop",
+    },
+  ];
+
+  // Toggle instrument selection
+  const toggleInstrument = (instrument: { name: string; image: string }) => {
+    const isSelected = selectedInstruments.some(
+      (i) => i.name === instrument.name,
+    );
+    if (isSelected) {
+      setSelectedInstruments(
+        selectedInstruments.filter((i) => i.name !== instrument.name),
+      );
+    } else {
+      setSelectedInstruments([...selectedInstruments, instrument]);
+    }
+  };
+
+  // Role-based access control
+  useEffect(() => {
+    checkAuthorization();
+  }, []);
+
+  const checkAuthorization = async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace("/");
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) throw profileError;
+
+      if (profile?.role !== "studio-owner") {
+        showAlert(
+          "error",
+          "Unauthorized",
+          "Only studio owners can edit studios.",
+        );
+        router.replace("/home");
+        return;
+      }
+
+      setAuthorized(true);
+      // Now fetch the studio details
+      // fetchStudioDetails(); // This will be called by the other useEffect now
+    } catch (e) {
+      console.error("Authorization check failed:", e);
+      router.replace("/home");
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
+
+  useEffect(() => {
+    // Only refetch if id changes and we're already authorized
+    if (authorized && id) {
+      fetchStudioDetails();
+    }
+  }, [id, authorized]);
+
+  useEffect(() => {
+    const backSubscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        handleAttemptLeave();
+        return true;
+      },
+    );
+
+    return () => backSubscription.remove();
+  }, [handleAttemptLeave]);
+
+  const fetchStudioDetails = async () => {
+    console.log("🔄 ===== FETCH STUDIO DETAILS STARTED =====");
+    console.log("🔄 Timestamp:", new Date().toISOString());
+    console.log("🔄 Studio ID (raw):", id);
+    console.log("🔄 Studio ID type:", typeof id);
+    console.log("🔄 Is Array?:", Array.isArray(id));
+
+    try {
+      setLoading(true);
+      console.log("🔄 Loading state set to true");
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      console.log("👤 User fetched:", user?.id);
+
+      if (!user) {
+        console.error("❌ No user found, redirecting to login");
+        router.replace("/");
+        return;
+      }
+
+      // Ensure id is a string, not an array
+      const studioId = Array.isArray(id) ? id[0] : id;
+      console.log("🎯 Studio ID (processed):", studioId);
+      console.log("🎯 Studio ID type after processing:", typeof studioId);
+
+      if (!studioId) {
+        console.error("❌ Invalid studio ID after processing");
+        showAlert("error", "Error", "Invalid studio ID");
+        router.replace("/home");
+        return;
+      }
+
+      console.log("📡 Calling edge function with params:", {
+        action: "fetch_one",
+        type: "studio",
+        id: studioId,
+        userId: user.id,
+      });
+
+      // Base query + normalized child tables merge
+      const { data: baseData, error: baseError } = await supabase
+        .from('studios')
+        .select('*')
+        .eq('id', studioId)
+        .eq('owner_id', user.id)
+        .single();
+
+      const [
+        { data: studioTypesData, error: studioTypesError },
+        { data: studioAmenitiesData, error: studioAmenitiesError },
+        { data: studioInstrumentsData, error: studioInstrumentsError },
+        { data: studioMediaData, error: studioMediaError },
+        { data: studioSettingsData, error: studioSettingsError },
+        { data: operatingHoursData, error: operatingHoursError },
+      ] = await Promise.all([
+        supabase
+          .from('studio_types')
+          .select('studio_type')
+          .eq('studio_id', studioId),
+        supabase
+          .from('studio_amenities')
+          .select('amenity')
+          .eq('studio_id', studioId),
+        supabase
+          .from('studio_instruments')
+          .select('*')
+          .eq('studio_id', studioId),
+        supabase
+          .from('studio_media')
+          .select('media_url, sort_order, created_at')
+          .eq('studio_id', studioId)
+          .eq('media_type', 'image')
+          .order('sort_order', { ascending: true })
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('studio_settings')
+          .select(
+            'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates',
+          )
+          .eq('studio_id', studioId)
+          .maybeSingle(),
+        supabase
+          .from('studio_operating_hours')
+          .select('day_of_week, is_open, open_time, close_time, slot_order')
+          .eq('studio_id', studioId)
+          .eq('is_open', true)
+          .order('day_of_week', { ascending: true })
+          .order('slot_order', { ascending: true }),
+      ]);
+
+      console.log("� ===== EDGE FUNCTION RESPONSE =====");
+      console.log("📥 Response timestamp:", new Date().toISOString());
+      console.log("📥 Error object:", baseError);
+      console.log("📥 Data object:", baseData);
+      console.log("📥 Data type:", typeof baseData);
+      console.log("📥 Data is null?:", baseData === null);
+      console.log("📥 Data is undefined?:", baseData === undefined);
+      console.log("📥 Data is array?:", Array.isArray(baseData));
+      console.log("📥 Data keys:", baseData ? Object.keys(baseData) : "NO DATA");
+      console.log("📥 Data stringified:", JSON.stringify(baseData, null, 2));
+
+      if (baseError) {
+        console.error("❌ Base studio query returned error:", baseError);
+        throw baseError;
+      }
+
+      if (studioTypesError) throw studioTypesError;
+      if (studioAmenitiesError) throw studioAmenitiesError;
+      if (studioInstrumentsError) throw studioInstrumentsError;
+      if (studioMediaError) throw studioMediaError;
+      if (studioSettingsError) throw studioSettingsError;
+      if (operatingHoursError) throw operatingHoursError;
+
+      const dayIndexToName = [
+        'Sunday',
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+      ];
+
+      const availabilityByDay: Record<string, { start: string; end: string }[]> =
+        dayIndexToName.reduce((acc, day) => {
+          acc[day] = [];
+          return acc;
+        }, {} as Record<string, { start: string; end: string }[]>);
+
+      (operatingHoursData || []).forEach((row: any) => {
+        const dayName = dayIndexToName[row.day_of_week];
+        if (!dayName || !row.open_time || !row.close_time) return;
+        availabilityByDay[dayName].push({
+          start: row.open_time,
+          end: row.close_time,
+        });
+      });
+
+      const normalizedTypes = (studioTypesData || [])
+        .map((row: any) => row.studio_type)
+        .filter(Boolean);
+
+      const normalizedInstruments = (studioInstrumentsData || []).map(
+        (row: any) => ({
+          id: row.id,
+          name: row.instrument_name,
+          image: row.image_url || '',
+          quantity: row.quantity,
+          description: row.description,
+        }),
+      );
+
+      const normalizedAmenities = (studioAmenitiesData || [])
+        .map((row: any) => row.amenity)
+        .filter(Boolean);
+
+      const normalizedImages = (studioMediaData || [])
+        .map((row: any) => row.media_url)
+        .filter(Boolean);
+
+      const normalizedAvailability = dayIndexToName.map((day) => ({
+        day,
+        slots: availabilityByDay[day] || [],
+      }));
+
+      // If no data returned, user doesn't own this studio
+      if (!baseData) {
+        console.error("❌ No data returned from edge function");
+        showAlert(
+          "error",
+          "Not Found",
+          "Studio not found or you do not have permission to edit it.",
+        );
+        router.replace("/home");
+        return;
+      }
+
+      const data = {
+        ...baseData,
+        amenities: normalizedAmenities,
+        images: normalizedImages,
+        instruments: normalizedInstruments,
+        availability: normalizedAvailability,
+        calendar_availability: [],
+        types: normalizedTypes,
+        type:
+          normalizedTypes.length > 1
+            ? "Both"
+            : normalizedTypes[0] || "Both",
+        lead_time_hours: studioSettingsData?.lead_time_hours ?? 24,
+        weekend_multiplier: studioSettingsData?.weekend_multiplier ?? 1.0,
+        peak_season_multiplier:
+          studioSettingsData?.peak_season_multiplier ?? 1.0,
+        peak_season_dates: studioSettingsData?.peak_season_dates ?? [],
+        off_peak_multiplier: studioSettingsData?.off_peak_multiplier ?? 1.0,
+        off_peak_dates: studioSettingsData?.off_peak_dates ?? [],
+      } as any;
+
+      console.log("✅ ===== DATA VALIDATION PASSED =====");
+      console.log(
+        "📦 Full studio data received:",
+        JSON.stringify(data, null, 2),
+      );
+      console.log("📦 Data field count:", Object.keys(data).length);
+
+      // Log each critical field
+      console.log("📦 Field Analysis:");
+      console.log("  - name:", data.name, "(type:", typeof data.name, ")");
+      console.log(
+        "  - description:",
+        data.description?.substring(0, 50) + "...",
+        "(length:",
+        data.description?.length,
+        ")",
+      );
+      console.log("  - address:", data.address);
+      console.log(
+        "  - latitude:",
+        data.latitude,
+        "(type:",
+        typeof data.latitude,
+        ")",
+      );
+      console.log(
+        "  - longitude:",
+        data.longitude,
+        "(type:",
+        typeof data.longitude,
+        ")",
+      );
+      console.log(
+        "  - rehearsal_rate:",
+        data.rehearsal_rate,
+        "(type:",
+        typeof data.rehearsal_rate,
+        ")",
+      );
+      console.log(
+        "  - recording_rate:",
+        data.recording_rate,
+        "(type:",
+        typeof data.recording_rate,
+        ")",
+      );
+      console.log(
+        "  - hourly_rate (fallback):",
+        data.hourly_rate,
+        "(type:",
+        typeof data.hourly_rate,
+        ")",
+      );
+      console.log("  - type:", data.type, "(type:", typeof data.type, ")");
+      console.log("  - pax:", data.pax, "(type:", typeof data.pax, ")");
+      console.log(
+        "  - amenities:",
+        data.amenities,
+        "(is array:",
+        Array.isArray(data.amenities),
+        ", length:",
+        data.amenities?.length,
+        ")",
+      );
+      console.log(
+        "  - instruments:",
+        data.instruments,
+        "(is array:",
+        Array.isArray(data.instruments),
+        ", length:",
+        data.instruments?.length,
+        ")",
+      );
+      console.log(
+        "  - images:",
+        data.images,
+        "(is array:",
+        Array.isArray(data.images),
+        ", length:",
+        data.images?.length,
+        ")",
+      );
+      console.log("  - contract_url:", data.contract_url);
+      console.log(
+        "  - availability:",
+        data.availability,
+        "(is array:",
+        Array.isArray(data.availability),
+        ", length:",
+        data.availability?.length,
+        ")",
+      );
+      console.log(
+        "  - calendar_availability:",
+        data.calendar_availability,
+        "(is array:",
+        Array.isArray(data.calendar_availability),
+        ")",
+      );
+      console.log(
+        "  - lead_time_hours:",
+        data.lead_time_hours,
+        "(type:",
+        typeof data.lead_time_hours,
+        ")",
+      );
+      console.log(
+        "  - weekend_multiplier:",
+        data.weekend_multiplier,
+        "(type:",
+        typeof data.weekend_multiplier,
+        ")",
+      );
+      console.log("  - peak_season_multiplier:", data.peak_season_multiplier);
+      console.log("  - peak_season_dates:", data.peak_season_dates);
+      console.log("  - off_peak_multiplier:", data.off_peak_multiplier);
+      console.log("  - off_peak_dates:", data.off_peak_dates);
+
+      console.log("🔧 ===== SETTING STATE VALUES =====");
+
+      console.log("🔧 Setting studioName to:", data.name);
+      setStudioName(data.name);
+
+      console.log(
+        "🔧 Setting description to:",
+        data.description?.substring(0, 50),
+      );
+      setDescription(data.description);
+
+      console.log("🔧 Setting address to:", data.address);
+      setAddress(data.address);
+
+      console.log("🔧 Setting latitude to:", data.latitude || null);
+      setLatitude(data.latitude || null);
+
+      console.log("🔧 Setting longitude to:", data.longitude || null);
+      setLongitude(data.longitude || null);
+
+      // Load dynamic pricing
+      const rehearsalValue =
+        data.rehearsal_rate?.toString() || data.hourly_rate?.toString() || "";
+      console.log(
+        "🔧 Setting rehearsalRate to:",
+        rehearsalValue,
+        "(from rehearsal_rate:",
+        data.rehearsal_rate,
+        "or hourly_rate:",
+        data.hourly_rate,
+        ")",
+      );
+      setRehearsalRate(rehearsalValue);
+
+      const recordingValue = data.recording_rate?.toString() || "";
+      console.log("🔧 Setting recordingRate to:", recordingValue);
+      setRecordingRate(recordingValue);
+
+      const typeValue = data.type || "Both";
+      console.log("🔧 Setting studioType to:", typeValue);
+      setStudioType(typeValue);
+
+      const paxValue = data.pax?.toString() || "";
+      console.log(
+        "🔧 Setting pax to:",
+        paxValue,
+        "(original value:",
+        data.pax,
+        ", type:",
+        typeof data.pax,
+        ")",
+      );
+      setPax(paxValue);
+      console.log("✅ setPax STATE UPDATE completed");
+
+      console.log("🔧 Setting amenities to:", data.amenities || []);
+      setAmenities(data.amenities || []);
+
+      console.log("🔧 Setting contractUrl to:", data.contract_url || "");
+      setContractUrl(data.contract_url || "");
+      if (data.contract_url) {
+        const fileName = data.contract_url.split("/").pop() || "Contract.pdf";
+        console.log("🔧 Setting contractFileName to:", fileName);
+        setContractFileName(decodeURIComponent(fileName));
+      }
+
+      console.log("🔧 Setting businessPermitUrl to:", data.business_permit_url || "");
+      setBusinessPermitUrl(data.business_permit_url || "");
+      if (data.business_permit_url) {
+        const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
+        console.log("🔧 Setting businessPermitFileName to:", fileName);
+        setBusinessPermitFileName(decodeURIComponent(fileName));
+      }
+
+      // Load equipment/instruments from instruments JSONB
+      console.log("🎸 ===== PARSING INSTRUMENTS =====");
+      console.log("🎸 Raw data.instruments:", data.instruments);
+      console.log("🎸 Type of data.instruments:", typeof data.instruments);
+      console.log("🎸 Is Array?:", Array.isArray(data.instruments));
+
+      const instrumentsData = Array.isArray(data.instruments)
+        ? data.instruments
+        : [];
+      console.log(
+        "🎸 Processed instrumentsData:",
+        JSON.stringify(instrumentsData, null, 2),
+      );
+      console.log("🎸 instrumentsData array length:", instrumentsData.length);
+      console.log("🎸 instrumentsData items:");
+      instrumentsData.forEach((item: any, index: number) => {
+        console.log(`  [${index}]:`, {
+          name: item?.name,
+          image: item?.image,
+          quantity: item?.quantity,
+          description: item?.description,
+          hasQuantity: "quantity" in (item || {}),
+          hasDescription: "description" in (item || {}),
+          keys: item ? Object.keys(item) : "null",
+        });
+      });
+
+      const presetLookup = new Map(
+        INSTRUMENT_OPTIONS.map((item) => [item.name, item.image]),
+      );
+
+      console.log("🎸 ===== FILTERING EQUIPMENT ITEMS =====");
+      const equipmentItems = instrumentsData
+        .filter((item: any) => {
+          if (!item || typeof item !== "object") {
+            console.log("🎸 Skipping invalid item:", item);
+            return false;
+          }
+
+          const name = typeof item.name === "string" ? item.name.trim() : "";
+          if (!name) return false;
+
+          const hasQuantity =
+            typeof item.quantity === "number" ||
+            (typeof item.quantity === "string" && item.quantity.trim() !== "");
+          const hasDescription =
+            typeof item.description === "string" &&
+            item.description.trim().length > 0;
+
+          if (hasQuantity || hasDescription) {
+            console.log(
+              `🎸 Treating "${name}" as equipment (has quantity/description)`
+            );
+            return true;
+          }
+
+          const presetImage = presetLookup.get(name);
+          if (!presetImage) {
+            console.log(`🎸 Treating "${name}" as equipment (not a preset)`);
+            return true;
+          }
+
+          const image = typeof item.image === "string" ? item.image.trim() : "";
+          const isCustomImage = image.length > 0 && image !== presetImage;
+          if (isCustomImage) {
+            console.log(
+              `🎸 Treating "${name}" as equipment (custom image)`
+            );
+          }
+          return isCustomImage;
+        })
+        .map((eq: any, index: number) => {
+          const mapped = {
+            id: eq.id || `eq-${index}`,
+            name: eq.name || "",
+            quantity:
+              typeof eq.quantity === "number"
+                ? eq.quantity
+                : parseInt(eq.quantity, 10) || 1,
+            description: eq.description || "",
+            image: eq.image || "",
+          };
+          console.log(`🎸 Mapped equipment [${index}]:`, mapped);
+          return mapped;
+        });
+      console.log(
+        "🎸 Final filtered equipment items count:",
+        equipmentItems.length,
+      );
+      console.log(
+        "🎸 Final filtered equipment items:",
+        JSON.stringify(equipmentItems, null, 2),
+      );
+
+      console.log("🎸 ===== FILTERING PRESET ITEMS =====");
+      const presetItems = instrumentsData
+        .filter((item: any) => {
+          if (!item || typeof item !== "object") {
+            console.log("🎸 Preset: Skipping invalid item:", item);
+            return false;
+          }
+          const name = typeof item.name === "string" ? item.name.trim() : "";
+          if (!name) {
+            console.log("🎸 Preset: Skipping item without name:", item);
+            return false;
+          }
+
+          const image = typeof item.image === "string" ? item.image.trim() : "";
+          const presetImage = presetLookup.get(name);
+          const willInclude = !!presetImage && image === presetImage;
+          console.log(
+            `🎸 Preset: Evaluating "${name}": willInclude=${willInclude}`,
+          );
+          return willInclude;
+        })
+        .map((item: any) => {
+          const mapped = {
+            name: item.name,
+            image: item.image,
+          };
+          console.log("🎸 Preset: Mapped item:", mapped);
+          return mapped;
+        });
+      console.log("🎸 Final filtered preset items count:", presetItems.length);
+      console.log(
+        "🎸 Final filtered preset items:",
+        JSON.stringify(presetItems, null, 2),
+      );
+
+      // Always set equipment even if length is 0 to clear old data
+      console.log(
+        "🔧 Setting equipment state with",
+        equipmentItems.length,
+        "items",
+      );
+      setEquipment(equipmentItems);
+      console.log(
+        "✅ setEquipment STATE UPDATE completed with",
+        equipmentItems.length,
+        "items",
+      );
+
+      // Load calendar availability from date overrides table
+      const { data: dateOverrides, error: overridesError } = await supabase
+        .from("studio_date_overrides")
+        .select("*")
+        .eq("studio_id", studioId)
+        .gte("override_date", new Date().toISOString().split("T")[0]); // Only future dates
+
+      if (!overridesError && dateOverrides && dateOverrides.length > 0) {
+        // Helper function to convert 24-hour to 12-hour format
+        const convertTo12Hour = (time24: string) => {
+          if (!time24 || !time24.includes(":")) return "09:00 AM";
+          const [hours, minutes] = time24.split(":");
+          const hour = parseInt(hours, 10);
+          const period = hour >= 12 ? "PM" : "AM";
+          const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+          return `${String(hour12).padStart(2, "0")}:${minutes} ${period}`;
+        };
+
+        const calendarDates: {
+          [date: string]: {
+            selected: boolean;
+            slots: { start: string; end: string }[];
+          };
+        } = {};
+        dateOverrides.forEach((override: any) => {
+          if (override.override_date) {
+            calendarDates[override.override_date] = {
+              selected: true,
+              slots:
+                override.is_open && override.open_time && override.close_time
+                  ? [
+                    {
+                      start: convertTo12Hour(override.open_time),
+                      end: convertTo12Hour(override.close_time),
+                    },
+                  ]
+                  : [],
+            };
+          }
+        });
+        setSelectedDates(calendarDates);
+        originalSelectedDatesRef.current = JSON.parse(
+          JSON.stringify(calendarDates),
+        );
+        console.log("📅 Loaded date overrides:", calendarDates);
+      } else if (
+        data.calendar_availability &&
+        Array.isArray(data.calendar_availability)
+      ) {
+        // Fallback: Load from legacy calendar_availability field
+        const calendarDates: {
+          [date: string]: {
+            selected: boolean;
+            slots: { start: string; end: string }[];
+          };
+        } = {};
+        data.calendar_availability.forEach((item: any) => {
+          if (item.date) {
+            calendarDates[item.date] = {
+              selected: true,
+              slots:
+                item.is_open === false
+                  ? []
+                  : item.slots || [{ start: "09:00 AM", end: "05:00 PM" }],
+            };
+          }
+        });
+        setSelectedDates(calendarDates);
+        originalSelectedDatesRef.current = JSON.parse(
+          JSON.stringify(calendarDates),
+        );
+      } else {
+        setSelectedDates({});
+        originalSelectedDatesRef.current = {};
+      }
+
+      // Load availability
+      console.log("📅 Loading availability from data:", data.availability);
+      if (data.availability && Array.isArray(data.availability)) {
+        // Helper function to convert 24-hour to 12-hour format
+        const convertTo12Hour = (time24: string) => {
+          if (!time24 || !time24.includes(":")) return "09:00 AM";
+          const [hours, minutes] = time24.split(":");
+          const hour = parseInt(hours, 10);
+          const period = hour >= 12 ? "PM" : "AM";
+          const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+          return `${String(hour12).padStart(2, "0")}:${minutes} ${period}`;
+        };
+
+        const loadedAvailability = daysOfWeek.map((day) => {
+          const dayData = data.availability.find((a: any) => a.day === day);
+          return {
+            day,
+            slots: dayData?.slots
+              ? dayData.slots.map((slot: any) => ({
+                start: convertTo12Hour(slot.start),
+                end: convertTo12Hour(slot.end),
+              }))
+              : [],
+          };
+        });
+        console.log("📅 Loaded availability:", loadedAvailability);
+        setAvailability(loadedAvailability);
+        originalAvailabilityRef.current = JSON.parse(
+          JSON.stringify(loadedAvailability),
+        );
+      } else {
+        console.log("📅 No availability data, using default empty schedule");
+        // Initialize with empty schedule if no availability data
+        const defaultAvailability = daysOfWeek.map((day) => ({
+          day,
+          slots: [],
+        }));
+        setAvailability(defaultAvailability);
+        originalAvailabilityRef.current = JSON.parse(
+          JSON.stringify(defaultAvailability),
+        );
+      }
+
+      // Load preset instruments
+      console.log("🔧 Checking preset items for selectedInstruments update");
+      if (presetItems.length > 0) {
+        console.log(
+          "🔧 Setting selectedInstruments with",
+          presetItems.length,
+          "items:",
+          presetItems,
+        );
+        setSelectedInstruments(presetItems);
+        console.log(
+          "✅ setSelectedInstruments STATE UPDATE completed with",
+          presetItems.length,
+          "items",
+        );
+      } else {
+        console.log(
+          "⚠️ No preset items to set, selectedInstruments will remain empty",
+        );
+      }
+
+      console.log("🔧 Setting images - raw data.images:", data.images);
+      console.log("🔧 Images array length:", data.images?.length || 0);
+      setSelectedImages(data.images || []);
+      console.log(
+        "✅ setSelectedImages STATE UPDATE completed with",
+        (data.images || []).length,
+        "images",
+      );
+
+      if (data.images && data.images.length > 0) {
+        console.log("🔧 Setting thumbnailIndex to 0");
+        setThumbnailIndex(0);
+        console.log("✅ setThumbnailIndex STATE UPDATE completed");
+      } else {
+        console.log("⚠️ No images available, thumbnailIndex not updated");
+      }
+      console.log("✅ ===== FETCH STUDIO DETAILS COMPLETED SUCCESSFULLY =====");
+      console.log("✅ Timestamp:", new Date().toISOString());
+    } catch (e) {
+      console.error("❌ ===== FETCH STUDIO DETAILS FAILED =====");
+      console.error("❌ Error timestamp:", new Date().toISOString());
+      console.error("❌ Error object:", e);
+      console.error("❌ Error message:", (e as any)?.message);
+      console.error("❌ Error stack:", (e as any)?.stack);
+      showAlert("error", "Error", "Failed to load studio details.");
+      router.replace("/home");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const parseTimeToMinutes = (timeValue: string): number | null => {
+    const normalized = timeValue.trim().toUpperCase();
+    const match = normalized.match(/^(\d{1,2}):(\d{2})\s?(AM|PM)$/);
+    if (!match) return null;
+
+    let hour = parseInt(match[1], 10);
+    const minute = parseInt(match[2], 10);
+    const period = match[3];
+
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+
+    if (hour === 12) hour = 0;
+    if (period === "PM") hour += 12;
+
+    return hour * 60 + minute;
+  };
+
+  const validateSlots = (
+    label: string,
+    slots: { start: string; end: string }[],
+  ): string | null => {
+    const normalizedSlots: { slotNumber: number; start: number; end: number }[] =
+      [];
+
+    for (let index = 0; index < slots.length; index++) {
+      const slot = slots[index];
+      const slotNumber = index + 1;
+      const start = parseTimeToMinutes(slot.start);
+      const end = parseTimeToMinutes(slot.end);
+
+      if (start === null || end === null) {
+        return `${label} has an invalid time format on slot ${slotNumber}. Use HH:MM AM/PM.`;
+      }
+
+      if (end <= start) {
+        return `${label} has an invalid time range on slot ${slotNumber}. End time must be after start time.`;
+      }
+
+      normalizedSlots.push({ slotNumber, start, end });
+    }
+
+    const sortedSlots = [...normalizedSlots].sort((a, b) => a.start - b.start);
+    for (let index = 1; index < sortedSlots.length; index++) {
+      const previousSlot = sortedSlots[index - 1];
+      const currentSlot = sortedSlots[index];
+      if (currentSlot.start < previousSlot.end) {
+        return `${label} has overlapping time slots (${previousSlot.slotNumber} and ${currentSlot.slotNumber}).`;
+      }
+    }
+
+    return null;
+  };
+
+  const validateScheduleConflicts = (): boolean => {
+    for (const daySchedule of availability) {
+      if (!daySchedule.slots.length) continue;
+      const dayError = validateSlots(daySchedule.day, daySchedule.slots);
+      if (dayError) {
+        showAlert("error", "Schedule Conflict", dayError);
+        return false;
+      }
+    }
+
+    for (const [dateStr, dateData] of Object.entries(selectedDates)) {
+      if (!dateData.selected) continue;
+
+      // Empty slots means this specific date is explicitly closed.
+      if (!dateData.slots.length) {
+        continue;
+      }
+
+      const displayDate = new Date(`${dateStr}T00:00:00`).toLocaleDateString(
+        "en-US",
+        {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        },
+      );
+      const dateError = validateSlots(displayDate, dateData.slots);
+      if (dateError) {
+        showAlert("error", "Schedule Conflict", dateError);
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const validateForm = (): boolean => {
+    if (!studioName.trim()) {
+      showAlert("error", "Required Field", "Please enter a studio name");
+      return false;
+    }
+    if (!description.trim()) {
+      showAlert("error", "Required Field", "Please enter a description");
+      return false;
+    }
+    if (!address || !latitude || !longitude) {
+      showAlert(
+        "error",
+        "Required Field",
+        "Please select a location on the map",
+      );
+      return false;
+    }
+    // Validate pricing based on studio type
+    if (studioType === "Both") {
+      if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
+        showAlert(
+          "error",
+          "Required Field",
+          "Please enter a valid rehearsal rate",
+        );
+        return false;
+      }
+      if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
+        showAlert(
+          "error",
+          "Required Field",
+          "Please enter a valid recording rate",
+        );
+        return false;
+      }
+    } else if (studioType === "Rehearsal") {
+      if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
+        showAlert(
+          "error",
+          "Required Field",
+          "Please enter a valid rehearsal rate",
+        );
+        return false;
+      }
+    } else {
+      if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
+        showAlert(
+          "error",
+          "Required Field",
+          "Please enter a valid recording rate",
+        );
+        return false;
+      }
+    }
+    if (!validateScheduleConflicts()) {
+      return false;
+    }
+    if (selectedImages.length === 0) {
+      showAlert(
+        "error",
+        "Required Field",
+        "Please upload at least one studio photo",
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const convertTo24HourForSchedule = (time12: string): string => {
+    const [time, modifier] = time12.split(" ");
+    if (!modifier) return time;
+    let [hours, minutes] = time.split(":");
+    if (hours === "12") {
+      hours = "00";
+    }
+    if (modifier === "PM") {
+      hours = String(parseInt(hours, 10) + 12);
+    }
+    return `${hours.padStart(2, "0")}:${minutes}`;
+  };
+
+  const getDayOfWeekName = (dateStr: string): string => {
+    const date = new Date(dateStr);
+    const days = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+    return days[date.getDay()];
+  };
+
+  const getEditedAvailableSlotsForDate = (
+    dateStr: string,
+  ): { start: string; end: string }[] => {
+    if (selectedDates[dateStr]?.selected) {
+      if (!selectedDates[dateStr].slots.length) {
+        return [];
+      }
+      return selectedDates[dateStr].slots.map((slot) => ({
+        start: convertTo24HourForSchedule(slot.start),
+        end: convertTo24HourForSchedule(slot.end),
+      }));
+    }
+
+    const dayName = getDayOfWeekName(dateStr);
+    const daySchedule = availability.find((a) => a.day === dayName);
+    if (!daySchedule || !daySchedule.slots.length) {
+      return [];
+    }
+
+    return daySchedule.slots.map((slot) => ({
+      start: convertTo24HourForSchedule(slot.start),
+      end: convertTo24HourForSchedule(slot.end),
+    }));
+  };
+
+  const bookingFitsInSlots = (
+    bookingStart: string,
+    bookingEnd: string,
+    slots: { start: string; end: string }[],
+  ): boolean => {
+    const toMinutes = (time: string) => {
+      const [h, m] = time.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    const bStart = toMinutes(bookingStart);
+    const bEnd = toMinutes(bookingEnd);
+
+    return slots.some((slot) => {
+      const sStart = toMinutes(slot.start);
+      const sEnd = toMinutes(slot.end);
+      return bStart >= sStart && bEnd <= sEnd;
+    });
+  };
+
+  const findScheduleConflictsForEditedState = async (studioId: string) => {
+    const today = new Date().toISOString().split("T")[0];
+
+    const { data: existingBookings, error: bookingsError } = await supabase
+      .from("studio_bookings")
+      .select(
+        `
+          id,
+          booking_date,
+          start_time,
+          end_time,
+          status,
+          user_id,
+          profiles:user_id (
+            full_name,
+            email
+          )
+        `,
+      )
+      .eq("studio_id", studioId)
+      .in("status", ["pending", "confirmed", "pending_relocation"])
+      .gte("booking_date", today);
+
+    if (bookingsError) {
+      throw new Error(
+        `Failed to check booking conflicts: ${bookingsError.message}`,
+      );
+    }
+
+    const conflicts: ConflictingBooking[] = [];
+
+    if (existingBookings && existingBookings.length > 0) {
+      for (const booking of existingBookings) {
+        const bookingDate = booking.booking_date;
+        const bookingStart = booking.start_time.substring(0, 5);
+        const bookingEnd = booking.end_time.substring(0, 5);
+        const availableSlots = getEditedAvailableSlotsForDate(bookingDate);
+
+        const bookingFits = bookingFitsInSlots(
+          bookingStart,
+          bookingEnd,
+          availableSlots,
+        );
+
+        if (!bookingFits) {
+          const profile = booking.profiles as any;
+          const conflict: ConflictingBooking = {
+            id: booking.id,
+            booking_date: bookingDate,
+            start_time: booking.start_time,
+            end_time: booking.end_time,
+            status: booking.status,
+            user_id: booking.user_id,
+            user_name: profile?.full_name || "Unknown",
+            user_email: profile?.email || "",
+            conflictType:
+              availableSlots.length === 0 ? "date_removed" : "time_overlap",
+            newAvailableSlot: null,
+          };
+
+          const nextSlot = await findNextAvailableSlot(
+            studioId,
+            bookingDate,
+            bookingStart,
+            bookingEnd,
+          );
+          conflict.newAvailableSlot = nextSlot;
+          conflicts.push(conflict);
+        }
+      }
+    }
+
+    const { data: activeHolds, error: holdsError } = await supabase
+      .from("booking_holds")
+      .select("id, user_id, booking_date, start_time, end_time, expires_at")
+      .eq("studio_id", studioId)
+      .gte("booking_date", today)
+      .gt("expires_at", new Date().toISOString());
+
+    if (holdsError) {
+      throw new Error(
+        `Failed to check active booking holds: ${holdsError.message}`,
+      );
+    }
+
+    const conflictingHoldCount = (activeHolds || []).filter((hold: any) => {
+      const holdStart = hold.start_time.substring(0, 5);
+      const holdEnd = hold.end_time.substring(0, 5);
+      const availableSlots = getEditedAvailableSlotsForDate(hold.booking_date);
+      return !bookingFitsInSlots(holdStart, holdEnd, availableSlots);
+    }).length;
+
+    return { conflicts, conflictingHoldCount };
+  };
+
+  const getScheduleSlotsForDate = (
+    dateStr: string,
+    weeklySchedule: { day: string; slots: { start: string; end: string }[] }[],
+    dateOverrides: {
+      [date: string]: {
+        selected: boolean;
+        slots: { start: string; end: string }[];
+      };
+    },
+  ): { start: string; end: string }[] => {
+    if (dateOverrides[dateStr]?.selected) {
+      return (dateOverrides[dateStr].slots || []).map((slot) => ({
+        start: convertTo24HourForSchedule(slot.start),
+        end: convertTo24HourForSchedule(slot.end),
+      }));
+    }
+
+    const dayName = getDayOfWeekName(dateStr);
+    const daySchedule = weeklySchedule.find((a) => a.day === dayName);
+    if (!daySchedule || !daySchedule.slots.length) {
+      return [];
+    }
+
+    return daySchedule.slots.map((slot) => ({
+      start: convertTo24HourForSchedule(slot.start),
+      end: convertTo24HourForSchedule(slot.end),
+    }));
+  };
+
+  const oldSlotsCoveredByNewSlots = (
+    oldSlots: { start: string; end: string }[],
+    newSlots: { start: string; end: string }[],
+  ): boolean => {
+    const toMinutes = (time: string) => {
+      const [h, m] = time.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    return oldSlots.every((oldSlot) => {
+      const oldStart = toMinutes(oldSlot.start);
+      const oldEnd = toMinutes(oldSlot.end);
+      return newSlots.some((newSlot) => {
+        const newStart = toMinutes(newSlot.start);
+        const newEnd = toMinutes(newSlot.end);
+        return newStart <= oldStart && newEnd >= oldEnd;
+      });
+    });
+  };
+
+  const detectNearTermScheduleReduction = (
+    lockHours: number,
+  ): { blocked: boolean; affectedDate?: string } => {
+    const now = new Date();
+    const horizon = new Date(now.getTime() + lockHours * 60 * 60 * 1000);
+    const iterDate = new Date(now);
+    const datesToCheck = new Set<string>();
+
+    while (iterDate <= horizon) {
+      datesToCheck.add(iterDate.toISOString().split("T")[0]);
+      iterDate.setDate(iterDate.getDate() + 1);
+    }
+
+    for (const dateStr of datesToCheck) {
+      const oldSlots = getScheduleSlotsForDate(
+        dateStr,
+        originalAvailabilityRef.current,
+        originalSelectedDatesRef.current,
+      );
+      const newSlots = getScheduleSlotsForDate(dateStr, availability, selectedDates);
+
+      if (!oldSlots.length) {
+        continue;
+      }
+
+      const stillCovered = oldSlotsCoveredByNewSlots(oldSlots, newSlots);
+      if (!stillCovered) {
+        return { blocked: true, affectedDate: dateStr };
+      }
+    }
+
+    return { blocked: false };
+  };
+
+  const performSave = async () => {
+    if (saving) return;
+    setSaving(true);
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setSaving(false);
+        return;
+      }
+
+      // Ensure id is a string, not an array
+      const studioId = Array.isArray(id) ? id[0] : id;
+      if (!studioId) {
+        showAlert("error", "Error", "Invalid studio ID");
+        setSaving(false);
+        return;
+      }
+
+      const reductionCheck = detectNearTermScheduleReduction(48);
+      if (reductionCheck.blocked) {
+        showAlert(
+          "warning",
+          "Schedule Change Locked",
+          `You can't reduce or close availability within the next 48 hours. First affected date: ${reductionCheck.affectedDate}.`,
+        );
+        setSaving(false);
+        return;
+      }
+
+      // Check for booking conflicts before saving
+      console.log("🔍 Checking for booking conflicts...");
+
+      const { conflicts, conflictingHoldCount } =
+        await findScheduleConflictsForEditedState(studioId);
+
+      if (conflicts.length > 0) {
+        console.log("⚠️ Found conflicts:", conflicts.length);
+        setConflictingBookings(conflicts);
+        setConflictModalVisible(true);
+        setSaving(false);
+        return;
+      }
+
+      if (conflictingHoldCount > 0) {
+        showAlert(
+          "warning",
+          "Active Checkout Holds",
+          `${conflictingHoldCount} active checkout hold(s) conflict with your edited schedule. Please try again in a moment after those holds expire.`,
+        );
+        setSaving(false);
+        return;
+      }
+
+      await executeSave();
+    } catch (e: any) {
+      console.error("❌ Error checking bookings:", e);
+      showAlert(
+        "error",
+        "Error",
+        `Failed to save: ${e?.message || "Unknown error"}`,
+      );
+      setSaving(false);
+    }
+  };
+
+  // Find next available slot for a booking
+  const findNextAvailableSlot = async (
+    studioId: string,
+    currentDate: string,
+    bookingStart: string,
+    bookingEnd: string,
+  ): Promise<{ date: string; start_time: string; end_time: string } | null> => {
+    const bookingDuration = (() => {
+      const [sH, sM] = bookingStart.split(":").map(Number);
+      const [eH, eM] = bookingEnd.split(":").map(Number);
+      return eH * 60 + eM - (sH * 60 + sM);
+    })();
+
+    // Helper function to convert 12-hour to 24-hour format
+    const convertTo24Hour = (time12: string): string => {
+      const [time, modifier] = time12.split(" ");
+      if (!modifier) return time;
+      let [hours, minutes] = time.split(":");
+      if (hours === "12") hours = "00";
+      if (modifier === "PM") hours = String(parseInt(hours, 10) + 12);
+      return `${hours.padStart(2, "0")}:${minutes}`;
+    };
+
+    const getDayOfWeek = (dateStr: string): string => {
+      const date = new Date(dateStr);
+      const days = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ];
+      return days[date.getDay()];
+    };
+
+    // Search for next 30 days
+    const startDate = new Date(currentDate);
+    startDate.setDate(startDate.getDate() + 1); // Start from next day
+
+    for (let i = 0; i < 30; i++) {
+      const checkDate = new Date(startDate);
+      checkDate.setDate(checkDate.getDate() + i);
+      const dateStr = checkDate.toISOString().split("T")[0];
+
+      // Get available slots for this date
+      let availableSlots: { start: string; end: string }[] = [];
+
+      // Check date overrides first
+      if (
+        selectedDates[dateStr]?.selected &&
+        selectedDates[dateStr]?.slots.length > 0
+      ) {
+        availableSlots = selectedDates[dateStr].slots.map((slot) => ({
+          start: convertTo24Hour(slot.start),
+          end: convertTo24Hour(slot.end),
+        }));
+      } else {
+        // Check weekly schedule
+        const dayName = getDayOfWeek(dateStr);
+        const daySchedule = availability.find((a) => a.day === dayName);
+        if (daySchedule && daySchedule.slots.length > 0) {
+          availableSlots = daySchedule.slots.map((slot) => ({
+            start: convertTo24Hour(slot.start),
+            end: convertTo24Hour(slot.end),
+          }));
+        }
+      }
+
+      if (availableSlots.length === 0) continue;
+
+      // Check existing bookings on this date
+      const { data: existingOnDate } = await supabase
+        .from("studio_bookings")
+        .select("start_time, end_time")
+        .eq("studio_id", studioId)
+        .eq("booking_date", dateStr)
+        .in("status", ["pending", "confirmed", "pending_relocation"]);
+
+      // Find a slot that can fit the booking
+      for (const slot of availableSlots) {
+        const slotStart = slot.start;
+        const slotEnd = slot.end;
+
+        // Calculate slot duration in minutes
+        const [ssH, ssM] = slotStart.split(":").map(Number);
+        const [seH, seM] = slotEnd.split(":").map(Number);
+        const slotDuration = seH * 60 + seM - (ssH * 60 + ssM);
+
+        if (slotDuration < bookingDuration) continue;
+
+        // Check if there's room considering existing bookings
+        const bookedTimes = (existingOnDate || []).map((b: any) => ({
+          start: b.start_time.substring(0, 5),
+          end: b.end_time.substring(0, 5),
+        }));
+
+        // Try to find a free window within the slot
+        let currentTime = ssH * 60 + ssM;
+        const slotEndMinutes = seH * 60 + seM;
+
+        while (currentTime + bookingDuration <= slotEndMinutes) {
+          const proposedStart = `${String(Math.floor(currentTime / 60)).padStart(2, "0")}:${String(currentTime % 60).padStart(2, "0")}`;
+          const proposedEnd = `${String(Math.floor((currentTime + bookingDuration) / 60)).padStart(2, "0")}:${String((currentTime + bookingDuration) % 60).padStart(2, "0")}`;
+
+          // Check if this time conflicts with existing bookings
+          const hasConflict = bookedTimes.some((bt: any) => {
+            const btStart = bt.start.split(":").map(Number);
+            const btEnd = bt.end.split(":").map(Number);
+            const btStartMin = btStart[0] * 60 + btStart[1];
+            const btEndMin = btEnd[0] * 60 + btEnd[1];
+            // Check overlap
+            return !(
+              currentTime + bookingDuration <= btStartMin ||
+              currentTime >= btEndMin
+            );
+          });
+
+          if (!hasConflict) {
+            return {
+              date: dateStr,
+              start_time: proposedStart,
+              end_time: proposedEnd,
+            };
+          }
+
+          // Move to next slot increment (30 minutes)
+          currentTime += 30;
+        }
+      }
+    }
+
+    return null; // No available slot found
+  };
+
+  // Handle conflict resolution
+  const handleConflictResolution = async (
+    resolutions: ConflictResolution[],
+  ) => {
+    setSaving(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setSaving(false);
+        return;
+      }
+
+      const studioId = Array.isArray(id) ? id[0] : id;
+
+      for (const resolution of resolutions) {
+        if (resolution.action === "cancel") {
+          // Cancel the booking
+          const { error } = await supabase
+            .from("studio_bookings")
+            .update({
+              status: "cancelled",
+              cancellation_reason:
+                "Studio schedule was updated by owner. Booking no longer fits available times.",
+            })
+            .eq("id", resolution.bookingId);
+
+          if (error) {
+            console.error("Error cancelling booking:", error);
+            throw error;
+          }
+
+          // Create notification for the user
+          const conflict = conflictingBookings.find(
+            (c) => c.id === resolution.bookingId,
+          );
+          if (conflict) {
+            await supabase.from("notifications").insert({
+              user_id: conflict.user_id,
+              type: "warning",
+              title: "Booking Cancelled",
+              message: `Your booking at ${studioName} on ${new Date(conflict.booking_date).toLocaleDateString()} has been cancelled due to schedule changes. You will receive a refund.`,
+              meta: { bookingId: resolution.bookingId, studioId },
+            });
+          }
+        } else if (resolution.action === "move" && resolution.newSlot) {
+          const targetSlots = getEditedAvailableSlotsForDate(
+            resolution.newSlot.date,
+          );
+          const moveFitsEditedSchedule = bookingFitsInSlots(
+            resolution.newSlot.start_time,
+            resolution.newSlot.end_time,
+            targetSlots,
+          );
+
+          if (!moveFitsEditedSchedule) {
+            throw new Error(
+              "Selected move slot no longer fits the edited schedule. Please pick a different slot.",
+            );
+          }
+
+          const { data: overlappingBookings, error: overlapBookingsError } =
+            await supabase
+              .from("studio_bookings")
+              .select("id, start_time, end_time")
+              .eq("studio_id", studioId)
+              .eq("booking_date", resolution.newSlot.date)
+              .in("status", ["pending", "confirmed", "pending_relocation"])
+              .neq("id", resolution.bookingId);
+
+          if (overlapBookingsError) {
+            throw new Error(
+              `Failed to validate move target: ${overlapBookingsError.message}`,
+            );
+          }
+
+          const toMinutes = (time: string) => {
+            const [h, m] = time.substring(0, 5).split(":").map(Number);
+            return h * 60 + m;
+          };
+
+          const moveStartMinutes = toMinutes(resolution.newSlot.start_time);
+          const moveEndMinutes = toMinutes(resolution.newSlot.end_time);
+
+          const hasBookingOverlap = (overlappingBookings || []).some(
+            (booking: any) => {
+              const existingStart = toMinutes(booking.start_time);
+              const existingEnd = toMinutes(booking.end_time);
+              return !(
+                moveEndMinutes <= existingStart ||
+                moveStartMinutes >= existingEnd
+              );
+            },
+          );
+
+          if (hasBookingOverlap) {
+            throw new Error(
+              "Selected move slot is no longer available because of another booking.",
+            );
+          }
+
+          const { data: overlappingHolds, error: overlapHoldsError } =
+            await supabase
+              .from("booking_holds")
+              .select("id, user_id, start_time, end_time")
+              .eq("studio_id", studioId)
+              .eq("booking_date", resolution.newSlot.date)
+              .gt("expires_at", new Date().toISOString());
+
+          if (overlapHoldsError) {
+            throw new Error(
+              `Failed to validate temporary holds for move: ${overlapHoldsError.message}`,
+            );
+          }
+
+          const movedBooking = conflictingBookings.find(
+            (c) => c.id === resolution.bookingId,
+          );
+          const movedBookingUserId = movedBooking?.user_id;
+
+          const hasHoldOverlap = (overlappingHolds || []).some((hold: any) => {
+            if (movedBookingUserId && hold.user_id === movedBookingUserId) {
+              return false;
+            }
+            const holdStart = toMinutes(hold.start_time);
+            const holdEnd = toMinutes(hold.end_time);
+            return !(moveEndMinutes <= holdStart || moveStartMinutes >= holdEnd);
+          });
+
+          if (hasHoldOverlap) {
+            throw new Error(
+              "Selected move slot is currently reserved in another user's checkout hold.",
+            );
+          }
+
+          const relocationExpiresAt = new Date(
+            Date.now() + 24 * 60 * 60 * 1000,
+          ).toISOString();
+
+          // Convert move into musician approval flow (pending relocation).
+          const { error } = await supabase
+            .from("studio_bookings")
+            .update({
+              status: "pending_relocation",
+              relocation_requested_at: new Date().toISOString(),
+              relocation_proposed_date: resolution.newSlot.date,
+              relocation_proposed_start_time: resolution.newSlot.start_time,
+              relocation_proposed_end_time: resolution.newSlot.end_time,
+              relocation_expires_at: relocationExpiresAt,
+              notes: `Pending relocation requested by studio owner. Proposed slot: ${resolution.newSlot.date} ${resolution.newSlot.start_time}-${resolution.newSlot.end_time}. Expires: ${relocationExpiresAt}`,
+            })
+            .eq("id", resolution.bookingId);
+
+          if (error) {
+            console.error("Error moving booking:", error);
+            throw error;
+          }
+
+          // Create notification for the user
+          const conflict = conflictingBookings.find(
+            (c) => c.id === resolution.bookingId,
+          );
+          if (conflict) {
+            await supabase.from("notifications").insert({
+              user_id: conflict.user_id,
+              type: "warning",
+              title: "Booking Relocation Request",
+              message: `Your booking at ${studioName} needs relocation to ${new Date(resolution.newSlot.date).toLocaleDateString()} at ${resolution.newSlot.start_time}. Please accept within 24 hours or your booking will be cancelled and refunded.`,
+              meta: {
+                bookingId: resolution.bookingId,
+                studioId,
+                relocation: {
+                  status: "pending_relocation",
+                  proposed_date: resolution.newSlot.date,
+                  proposed_start_time: resolution.newSlot.start_time,
+                  proposed_end_time: resolution.newSlot.end_time,
+                  expires_at: relocationExpiresAt,
+                },
+              },
+            });
+          }
+        }
+      }
+
+      // Close the modal and proceed with save
+      setConflictModalVisible(false);
+      setConflictingBookings([]);
+
+      // Now save the studio changes
+      await executeSave();
+    } catch (e: any) {
+      console.error("Error resolving conflicts:", e);
+      showAlert(
+        "error",
+        "Error",
+        `Failed to resolve conflicts: ${e?.message || "Unknown error"}`,
+      );
+      setSaving(false);
+    }
+  };
+
+  const executeSave = async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setSaving(false);
+        return;
+      }
+
+      // Ensure id is a string, not an array
+      const studioId = Array.isArray(id) ? id[0] : id;
+      if (!studioId) {
+        showAlert("error", "Error", "Invalid studio ID");
+        setSaving(false);
+        return;
+      }
+
+      // Final preflight: re-check right before writing to reduce stale-state races.
+      const { conflicts: latestConflicts, conflictingHoldCount } =
+        await findScheduleConflictsForEditedState(studioId);
+
+      if (latestConflicts.length > 0) {
+        setConflictingBookings(latestConflicts);
+        setConflictModalVisible(true);
+        showAlert(
+          "warning",
+          "New Booking Detected",
+          "A booking changed while you were editing. Please resolve the new conflicts before saving.",
+        );
+        return;
+      }
+
+      if (conflictingHoldCount > 0) {
+        showAlert(
+          "warning",
+          "Active Checkout Holds",
+          `${conflictingHoldCount} active checkout hold(s) conflict with your edited schedule. Please try again shortly.`,
+        );
+        return;
+      }
+
+      // Helper function to convert 12-hour to 24-hour format
+      const convertTo24Hour = (time12: string): string => {
+        const [time, modifier] = time12.split(" ");
+        if (!modifier) return time; // Already 24h or invalid
+        let [hours, minutes] = time.split(":");
+        if (hours === "12") {
+          hours = "00";
+        }
+        if (modifier === "PM") {
+          hours = String(parseInt(hours, 10) + 12);
+        }
+        return `${hours}:${minutes}`;
+      };
+
+      // Convert calendar-based availability to the payload format
+      const calendarAvailability = Object.entries(selectedDates)
+        .filter(([_, data]) => data.selected)
+        .map(([date, data]) => ({
+          date,
+          is_open: data.slots.length > 0,
+          slots: data.slots.map((slot) => ({
+            start: convertTo24Hour(slot.start),
+            end: convertTo24Hour(slot.end),
+          })),
+        }));
+
+      const equipmentPayload = equipment.map((e) => ({
+        name: e.name,
+        quantity: e.quantity,
+        description: e.description,
+        image: e.image,
+      }));
+      const presetPayload = selectedInstruments
+        .filter((preset) => !equipment.some((e) => e.name === preset.name))
+        .map((preset) => ({ name: preset.name, image: preset.image }));
+      const instrumentsPayload = [...equipmentPayload, ...presetPayload];
+
+      const orderedImages =
+        selectedImages.length > 0 && selectedImages[thumbnailIndex]
+          ? [
+            selectedImages[thumbnailIndex],
+            ...selectedImages.filter((_, i) => i !== thumbnailIndex),
+          ]
+          : selectedImages;
+
+      const parsedRehearsalRate = parseFloat(rehearsalRate) || 0;
+      const parsedRecordingRate = parseFloat(recordingRate) || 0;
+      const effectiveRehearsalRate =
+        studioType === "Recording" ? 0 : parsedRehearsalRate;
+      const effectiveRecordingRate =
+        studioType === "Rehearsal" ? 0 : parsedRecordingRate;
+
+      const payload = {
+        name: studioName,
+        type: studioType,
+        description,
+        address,
+        // Dynamic pricing based on studio type
+        hourly_rate:
+          studioType === "Recording"
+            ? effectiveRecordingRate
+            : effectiveRehearsalRate,
+        rehearsal_rate: effectiveRehearsalRate,
+        recording_rate: effectiveRecordingRate,
+        pax: pax ? parseInt(pax) : null,
+        amenities,
+        instruments: instrumentsPayload,
+        latitude,
+        longitude,
+        images: orderedImages,
+        contract_url: contractUrl || null,
+        business_permit_url: businessPermitUrl || null,
+        availability: availability
+          .filter((day) => day.slots.length > 0)
+          .map((day) => ({
+            ...day,
+            slots: day.slots.map((slot) => ({
+              start: convertTo24Hour(slot.start),
+              end: convertTo24Hour(slot.end),
+            })),
+          })),
+        calendar_availability: calendarAvailability,
+        // Booking settings - default 24hr advance booking
+        booking_settings: {
+          lead_time_hours: 24,
+          weekend_multiplier: 1.0,
+          peak_season_multiplier: 1.0,
+          peak_season_dates: [],
+          off_peak_multiplier: 1.0,
+          off_peak_dates: [],
+        },
+      };
+
+      console.log(
+        " RAW availability state:",
+        JSON.stringify(availability, null, 2),
+      );
+      console.log(
+        "📅 FILTERED availability (days with slots):",
+        payload.availability,
+      );
+      console.log(
+        "📅 Number of days with availability:",
+        payload.availability.length,
+      );
+      console.log(
+        "🔵 Updating studio with payload:",
+        JSON.stringify(
+          {
+            action: "update",
+            type: "studio",
+            id: studioId,
+            userId: user.id,
+            payload,
+          },
+          null,
+          2,
+        ),
+      );
+
+      // Direct update to studios table
+      const { data: studioData, error: updateError } = await supabase
+        .from('studios')
+        .update({
+          name: payload.name,
+          description: payload.description,
+          address: payload.address,
+          hourly_rate: payload.hourly_rate,
+          rehearsal_rate: payload.rehearsal_rate,
+          recording_rate: payload.recording_rate,
+          pax: payload.pax,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          contract_url: payload.contract_url,
+          business_permit_url: payload.business_permit_url,
+        })
+        .eq('id', studioId)
+        .eq('owner_id', user.id)
+        .select()
+        .single();
+
+      console.log("🔵 Response data:", studioData);
+      console.log("🔵 Response error:", updateError);
+
+      if (updateError) {
+        console.error("❌ Error details:", JSON.stringify(updateError, null, 2));
+        let alertMessage = `Failed to update studio: ${updateError.message}`;
+        if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
+        if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
+        throw new Error(alertMessage);
+      }
+
+      await supabase.from('studio_types').delete().eq('studio_id', studioId);
+      const normalizedTypes =
+        payload.type === 'Both'
+          ? ['Rehearsal', 'Recording']
+          : payload.type
+            ? [payload.type]
+            : [];
+      if (normalizedTypes.length > 0) {
+        const { error: typeError } = await supabase
+          .from('studio_types')
+          .insert(
+            normalizedTypes.map((studio_type: string) => ({
+              studio_id: studioId,
+              studio_type,
+            })),
+          );
+        if (typeError) {
+          throw new Error(`Failed to sync studio types: ${typeError.message}`);
+        }
+      }
+
+      await supabase.from('studio_amenities').delete().eq('studio_id', studioId);
+      if ((payload.amenities || []).length > 0) {
+        const { error: amenitiesError } = await supabase
+          .from('studio_amenities')
+          .insert(
+            payload.amenities.map((amenity: string) => ({
+              studio_id: studioId,
+              amenity,
+            })),
+          );
+        if (amenitiesError) {
+          throw new Error(`Failed to sync studio amenities: ${amenitiesError.message}`);
+        }
+      }
+
+      await supabase.from('studio_instruments').delete().eq('studio_id', studioId);
+      if ((payload.instruments || []).length > 0) {
+        const { error: instrumentsError } = await supabase
+          .from('studio_instruments')
+          .insert(
+            payload.instruments.map((item: any) => ({
+              studio_id: studioId,
+              instrument_name: item.name,
+              image_url: item.image || null,
+            })),
+          );
+        if (instrumentsError) {
+          throw new Error(`Failed to sync studio instruments: ${instrumentsError.message}`);
+        }
+      }
+
+      await supabase.from('studio_media').delete().eq('studio_id', studioId).eq('media_type', 'image');
+      if ((payload.images || []).length > 0) {
+        const { error: mediaError } = await supabase
+          .from('studio_media')
+          .insert(
+            payload.images.map((media_url: string, index: number) => ({
+              studio_id: studioId,
+              media_type: 'image',
+              media_url,
+              sort_order: index,
+            })),
+          );
+        if (mediaError) {
+          throw new Error(`Failed to sync studio images: ${mediaError.message}`);
+        }
+      }
+
+      // Update studio settings
+      await supabase
+        .from('studio_settings')
+        .upsert({
+          studio_id: studioId,
+          lead_time_hours: payload.booking_settings.lead_time_hours || 24,
+          weekend_multiplier: payload.booking_settings.weekend_multiplier || 1.0,
+          peak_season_multiplier: payload.booking_settings.peak_season_multiplier || 1.0,
+          peak_season_dates: payload.booking_settings.peak_season_dates || [],
+          off_peak_multiplier: payload.booking_settings.off_peak_multiplier || 1.0,
+          off_peak_dates: payload.booking_settings.off_peak_dates || [],
+        }, { onConflict: 'studio_id' });
+
+      // Update operating hours
+      await supabase.from('studio_operating_hours').delete().eq('studio_id', studioId);
+
+      const dayMap: { [key: string]: number } = {
+        'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+      };
+      let operatingHours: any[] = [];
+
+      if (payload.availability && Array.isArray(payload.availability) && payload.availability.length > 0) {
+        for (const daySchedule of payload.availability) {
+          const dayIndex = dayMap[daySchedule.day];
+          if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+            daySchedule.slots.forEach((slot: any, slotIndex: number) => {
+              operatingHours.push({
+                studio_id: studioId,
+                day_of_week: dayIndex,
+                is_open: true,
+                open_time: slot.start,
+                close_time: slot.end,
+                slot_order: slotIndex
+              });
+            });
+          }
+        }
+      }
+
+      if (operatingHours.length > 0) {
+        await supabase.from('studio_operating_hours').insert(operatingHours);
+      }
+
+      // Update calendar date overrides
+      await supabase.from('studio_date_overrides').delete().eq('studio_id', studioId);
+
+      if (payload.calendar_availability && Array.isArray(payload.calendar_availability) && payload.calendar_availability.length > 0) {
+        const dateOverrides = payload.calendar_availability
+          .filter((entry: any) => entry.date)
+          .map((entry: any) => {
+            const hasSlots = Array.isArray(entry.slots) && entry.slots.length > 0;
+            return {
+              studio_id: studioId,
+              override_date: entry.date,
+              is_open: hasSlots,
+              open_time: hasSlots ? entry.slots[0].start : null,
+              close_time: hasSlots ? entry.slots[0].end : null,
+              reason: hasSlots ? 'Custom schedule' : 'Closed override'
+            };
+          });
+
+        if (dateOverrides.length > 0) {
+          await supabase.from('studio_date_overrides').insert(dateOverrides);
+        }
+      }
+
+      const response = { data: studioData, error: null };
+
+      // Check if data indicates an error
+      if (!response.data) {
+        throw new Error("No data returned from server");
+      }
+
+      console.log("✅ Studio Updated successfully");
+      showAlert("success", "Success", "Studio updated successfully!", [
+        {
+          text: "OK",
+          onPress: () => {
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.push("/manage_studio");
+            }
+          },
+        },
+      ]);
+    } catch (e: any) {
+      console.error("❌ Error updating studio:", e);
+      console.error("❌ Error message:", e?.message);
+      console.error("❌ Error stack:", e?.stack);
+      console.error(
+        "❌ Full error object:",
+        JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
+      );
+      showAlert(
+        "error",
+        "Error",
+        `Failed to update studio: ${e?.message || "Unknown error"}`,
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!validateForm()) {
+      return;
+    }
+
+    showAlert(
+      "warning",
+      "Save Changes",
+      "Are you sure you want to update this studio profile?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Save & Update",
+          style: "default",
+          onPress: () => performSave(),
+        },
+      ],
+    );
+  };
+
+  const addAmenity = () => {
+    if (newAmenity.trim()) {
+      setAmenities([...amenities, newAmenity.trim()]);
+      setNewAmenity("");
+    }
+  };
+
+  const removeAmenity = (index: number) => {
+    setAmenities(amenities.filter((_, i) => i !== index));
+  };
+
+  const handleContractUpload = async () => {
+    try {
+      setUploadingContract(true);
+
+      if (Platform.OS === "web") {
+        if (fileInputRef.current) {
+          fileInputRef.current.click();
+        }
+        setUploadingContract(false);
+        return;
+      }
+
+      // Dynamic import for native platforms only
+      const DocumentPicker = await import("expo-document-picker");
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "application/pdf",
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        setUploadingContract(false);
+        return;
+      }
+
+      const file = result.assets[0];
+      const fileName = file.name;
+      const fileUri = file.uri;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        showAlert("error", "Error", "Session expired. Please log in again.");
+        setUploadingContract(false);
+        return;
+      }
+
+      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = base64ToUint8Array(base64);
+
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .upload(filePath, bytes, {
+          contentType: "application/pdf",
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+      setContractUrl(publicUrl);
+      setContractFileName(fileName);
+      showAlert("success", "Success", "Contract uploaded successfully!");
+    } catch (error) {
+      console.error("Error uploading contract:", error);
+      showAlert(
+        "error",
+        "Error",
+        "Failed to upload contract. Please try again.",
+      );
+    } finally {
+      setUploadingContract(false);
+    }
+  };
+
+  const removeContract = () => {
+    setContractUrl("");
+    setContractFileName("");
+  };
+
+  // Business Permit Upload Handler
+  const handleBusinessPermitUpload = async () => {
+    try {
+      setUploadingBusinessPermit(true);
+
+      if (Platform.OS === "web") {
+        if (businessPermitInputRef.current) {
+          businessPermitInputRef.current.click();
+        }
+        setUploadingBusinessPermit(false);
+        return;
+      }
+
+      // Dynamic import for native platforms only
+      const DocumentPicker = await import("expo-document-picker");
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["application/pdf", "image/*"],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        setUploadingBusinessPermit(false);
+        return;
+      }
+
+      const file = result.assets[0];
+      const fileName = file.name;
+      const fileUri = file.uri;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        showAlert("error", "Error", "Session expired. Please log in again.");
+        setUploadingBusinessPermit(false);
+        return;
+      }
+
+      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const bytes = base64ToUint8Array(base64);
+
+      const contentType = fileName.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
+        : `image/${fileName.split('.').pop()?.toLowerCase() || 'jpeg'}`;
+
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .upload(filePath, bytes, {
+          contentType,
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+      setBusinessPermitUrl(publicUrl);
+      setBusinessPermitFileName(fileName);
+      showAlert("success", "Success", "Business permit uploaded successfully!");
+    } catch (error) {
+      console.error("Error uploading business permit:", error);
+      showAlert(
+        "error",
+        "Error",
+        "Failed to upload business permit. Please try again.",
+      );
+    } finally {
+      setUploadingBusinessPermit(false);
+    }
+  };
+
+  const removeBusinessPermit = () => {
+    setBusinessPermitUrl("");
+    setBusinessPermitFileName("");
+  };
+
+  const handleWebBusinessPermitSelect = async (event: any) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingBusinessPermit(true);
+      const fileName = file.name;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        showAlert("error", "Error", "Session expired. Please log in again.");
+        setUploadingBusinessPermit(false);
+        return;
+      }
+
+      const contentType = fileName.toLowerCase().endsWith('.pdf')
+        ? 'application/pdf'
+        : file.type || 'image/jpeg';
+
+      const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .upload(filePath, file, {
+          contentType,
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+      setBusinessPermitUrl(publicUrl);
+      setBusinessPermitFileName(fileName);
+      showAlert("success", "Success", "Business permit uploaded successfully!");
+    } catch (error) {
+      console.error("Error uploading business permit:", error);
+      showAlert("error", "Error", "Failed to upload business permit. Please try again.");
+    } finally {
+      setUploadingBusinessPermit(false);
+      if (event.target) {
+        event.target.value = "";
+      }
+    }
+  };
+
+  // Equipment image upload state
+  const [uploadingEquipmentImage, setUploadingEquipmentImage] = useState(false);
+
+  // Pick and upload equipment image
+  const pickEquipmentImage = async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        showAlert("error", "Error", "Session expired. Please log in again.");
+        return;
+      }
+
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        showAlert(
+          "error",
+          "Permission Needed",
+          "Please allow access to your photos.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: "images",
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0)
+        return;
+
+      setUploadingEquipmentImage(true);
+      const asset = result.assets[0];
+      const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const bytes = base64ToUint8Array(base64);
+      const { data, error } = await supabase.storage
+        .from("listings")
+        .upload(fileName, bytes, {
+          contentType: `image/${fileExt}`,
+          upsert: false,
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from("listings")
+        .getPublicUrl(data.path);
+
+      setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
+    } catch (error) {
+      console.error("Error uploading equipment image:", error);
+      showAlert("error", "Error", "Failed to upload image. Please try again.");
+    } finally {
+      setUploadingEquipmentImage(false);
+    }
+  };
+
+  const handleWebFileSelect = async (event: any) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingContract(true);
+      const fileName = file.name;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        showAlert("error", "Error", "Session expired. Please log in again.");
+        setUploadingContract(false);
+        return;
+      }
+
+      const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
+      const { data, error } = await supabase.storage
+        .from("documents")
+        .upload(filePath, file, {
+          contentType: "application/pdf",
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("documents").getPublicUrl(filePath);
+
+      setContractUrl(publicUrl);
+      setContractFileName(fileName);
+      showAlert("success", "Success", "Contract uploaded successfully!");
+    } catch (error) {
+      console.error("Error uploading contract:", error);
+      showAlert(
+        "error",
+        "Error",
+        "Failed to upload contract. Please try again.",
+      );
+    } finally {
+      setUploadingContract(false);
+      if (event.target) {
+        event.target.value = "";
+      }
+    }
+  };
+
+  const renderSectionHeader = (title: string, icon: string) => (
+    <View style={styles.sectionHeader}>
+      <Ionicons name={icon as any} size={18} color={colors.primary} />
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+    </View>
+  );
+
+  const renderInput = (
+    label: string,
+    value: string,
+    setValue: (text: string) => void,
+    multiline = false,
+    numeric = false,
+  ) => {
+    const normalizedLabel = label.trim().toLowerCase();
+    const inputMaxLength = normalizedLabel.includes("description")
+      ? DESCRIPTION_MAX_LENGTH
+      : normalizedLabel.includes("name") || normalizedLabel.includes("title")
+        ? TITLE_MAX_LENGTH
+        : undefined;
+
+    return (
+      <View style={styles.inputContainer}>
+      <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+        {label}
+      </Text>
+      <View
+        style={[
+          styles.inputWrapper,
+          {
+            borderColor: isDark ? "#374151" : "#E5E7EB",
+            backgroundColor: colors.inputBackground,
+          },
+        ]}
+      >
+        <TextInput
+          value={value}
+          onChangeText={setValue}
+          maxLength={inputMaxLength}
+          multiline={multiline}
+          numberOfLines={multiline ? 4 : 1}
+          keyboardType={numeric ? "numeric" : "default"}
+          style={[
+            styles.input,
+            {
+              fontFamily: "Poppins_400Regular",
+              color: colors.text,
+              height: multiline ? 120 : "auto",
+              textAlign: "left",
+              textAlignVertical: multiline ? "top" : "center",
+            },
+          ]}
+        />
+      </View>
+      </View>
+    );
+  };
+
+  // Show loading while checking authorization
+  if (checkingAuth) {
+    return (
+      <View
+        style={[
+          styles.flex1,
+          styles.centerContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text
+          style={{
+            marginTop: 16,
+            color: colors.textSecondary,
+            fontFamily: "Poppins_400Regular",
+          }}
+        >
+          Checking permissions...
+        </Text>
+      </View>
+    );
+  }
+
+  // Don't render if not authorized
+  if (!authorized) {
+    return null;
+  }
+
+  // Show loading while fetching data
+  if (loading) {
+    return (
+      <View
+        style={[
+          styles.flex1,
+          styles.centerContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text
+          style={{
+            marginTop: 16,
+            color: colors.textSecondary,
+            fontFamily: "Poppins_400Regular",
+          }}
+        >
+          Loading studio details...
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      {Platform.OS === "web" && (
+        <input
+          ref={fileInputRef as any}
+          type="file"
+          accept="application/pdf"
+          onChange={handleWebFileSelect}
+          style={{ display: "none" }}
+        />
+      )}
+      {Platform.OS === "web" && (
+        <input
+          ref={businessPermitInputRef as any}
+          type="file"
+          accept="application/pdf,image/*"
+          onChange={handleWebBusinessPermitSelect}
+          style={{ display: "none" }}
+        />
+      )}
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+        <Header title="Edit Studio" onBackPress={handleAttemptLeave} />
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          style={styles.flex1}
+        >
+          {renderSectionHeader("Studio Details", "business")}
+          {renderInput("Studio Name", studioName, setStudioName)}
+
+          {/* Studio Type Selection */}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Studio Type
+            </Text>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              {(["Rehearsal", "Recording", "Both"] as const).map((type) => (
+                <TouchableOpacity activeOpacity={1}
+                  key={type}
+                  onPress={() => setStudioType(type)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    backgroundColor:
+                      studioType === type
+                        ? colors.primary
+                        : isDark
+                          ? "#374151"
+                          : "#F3F4F6",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderWidth: 1,
+                    borderColor:
+                      studioType === type ? colors.primary : "transparent",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color:
+                        studioType === type ? "#FFF" : colors.textSecondary,
+                      fontFamily: "Poppins_600SemiBold",
+                      fontSize: type === "Both" ? 14 : 12,
+                    }}
+                  >
+                    {type === "Both" ? "Both" : type}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {renderInput("Description", description, setDescription, true)}
+
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Location
+            </Text>
+            <TouchableOpacity activeOpacity={1}
+              onPress={() => setLocationPickerVisible(true)}
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  padding: 16,
+                },
+              ]}
+            >
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Ionicons
+                  name="location-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <Text
+                  style={{
+                    flex: 1,
+                    color: address ? colors.text : colors.textSecondary,
+                    fontFamily: "Poppins_400Regular",
+                  }}
+                >
+                  {address || "Tap to select location on map"}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {/* Dynamic Pricing Section */}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Pricing
+            </Text>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
+            >
+              Set rates for each studio type
+            </Text>
+
+            {/* Rehearsal Rate */}
+            {(studioType === "Rehearsal" || studioType === "Both") && (
+              <View style={{ marginBottom: 12 }}>
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: isDark ? "#374151" : "#E5E7EB",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingHorizontal: 16,
+                    },
+                  ]}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      flex: 1,
+                    }}
+                  >
+                    <Ionicons
+                      name="musical-notes"
+                      size={20}
+                      color={colors.primary}
+                    />
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontFamily: "Poppins_500Medium",
+                        minWidth: 80,
+                      }}
+                    >
+                      Rehearsal
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontFamily: "Poppins_600SemiBold",
+                      marginRight: 4,
+                    }}
+                  >
+                    ₱
+                  </Text>
+                  <TextInput
+                    value={rehearsalRate}
+                    onChangeText={setRehearsalRate}
+                    placeholder="500"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="numeric"
+                    style={{
+                      color: colors.text,
+                      fontFamily: "Poppins_600SemiBold",
+                      fontSize: 16,
+                      minWidth: 80,
+                      textAlign: "center",
+                      paddingVertical: 16,
+                    }}
+                  />
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      marginLeft: 4,
+                    }}
+                  >
+                    /hr
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Recording Rate */}
+            {(studioType === "Recording" || studioType === "Both") && (
+              <View>
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    {
+                      backgroundColor: colors.inputBackground,
+                      borderColor: isDark ? "#374151" : "#E5E7EB",
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingHorizontal: 16,
+                    },
+                  ]}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      flex: 1,
+                    }}
+                  >
+                    <Ionicons name="mic" size={20} color="#EF4444" />
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontFamily: "Poppins_500Medium",
+                        minWidth: 80,
+                      }}
+                    >
+                      Recording
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      color: colors.text,
+                      fontFamily: "Poppins_600SemiBold",
+                      marginRight: 4,
+                    }}
+                  >
+                    ₱
+                  </Text>
+                  <TextInput
+                    value={recordingRate}
+                    onChangeText={setRecordingRate}
+                    placeholder="1000"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="numeric"
+                    style={{
+                      color: colors.text,
+                      fontFamily: "Poppins_600SemiBold",
+                      fontSize: 16,
+                      minWidth: 80,
+                      textAlign: "center",
+                      paddingVertical: 16,
+                    }}
+                  />
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      marginLeft: 4,
+                    }}
+                  >
+                    /song
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
+
+          {/* Pax / Capacity */}
+          <View style={styles.inputContainer}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+              Studio Capacity (Pax)
+            </Text>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
+            >
+              Maximum number of people the studio can accommodate
+            </Text>
+            <View
+              style={[
+                styles.inputWrapper,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingHorizontal: 16,
+                },
+              ]}
+            >
+              <Ionicons
+                name="people"
+                size={20}
+                color={colors.primary}
+                style={{ marginRight: 12 }}
+              />
+              <TextInput
+                value={pax}
+                onChangeText={setPax}
+                placeholder="e.g. 10"
+                placeholderTextColor={colors.textSecondary}
+                keyboardType="numeric"
+                style={{
+                  flex: 1,
+                  color: colors.text,
+                  fontFamily: "Poppins_500Medium",
+                  fontSize: 16,
+                  textAlign: "left",
+                  paddingVertical: 16,
+                }}
+              />
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontFamily: "Poppins_400Regular",
+                }}
+              >
+                persons
+              </Text>
+            </View>
+          </View>
+
+          {/* Contract Upload */}
+          {renderSectionHeader("Contract", "document-text")}
+          <View style={styles.inputContainer}>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
+            >
+              Upload a PDF contract that musicians will see before booking
+            </Text>
+            {contractUrl ? (
+              <View
+                style={[
+                  styles.contractPreview,
+                  {
+                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                    flex: 1,
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.pdfIcon,
+                      { backgroundColor: colors.primary },
+                    ]}
+                  >
+                    <Ionicons name="document-text" size={24} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[styles.contractFileName, { color: colors.text }]}
+                      numberOfLines={1}
+                    >
+                      {contractFileName}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.contractFileSize,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      PDF Document
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity activeOpacity={1}
+                  onPress={removeContract}
+                  style={styles.removeContractBtn}
+                >
+                  <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={handleContractUpload}
+                disabled={uploadingContract}
+                activeOpacity={1}
+                style={[
+                  styles.uploadContractBtn,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
+                {uploadingContract ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="cloud-upload-outline"
+                      size={32}
+                      color={colors.textSecondary}
+                    />
+                    <Text style={[styles.uploadText, { color: colors.text }]}>
+                      Upload Contract (PDF)
+                    </Text>
+                    <Text
+                      style={[
+                        styles.uploadSubText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Tap to browse files
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Business Permit Upload */}
+          {renderSectionHeader("Business Permit", "shield-checkmark")}
+          <View style={styles.inputContainer}>
+            <Text
+              style={[styles.inputSubLabel, { color: colors.textSecondary }]}
+            >
+              Upload your business permit (PDF or Image)
+            </Text>
+            {businessPermitUrl ? (
+              <View
+                style={[
+                  styles.contractPreview,
+                  {
+                    backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                    flex: 1,
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.pdfIcon,
+                      { backgroundColor: "#10B981" },
+                    ]}
+                  >
+                    <Ionicons name="shield-checkmark" size={24} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[styles.contractFileName, { color: colors.text }]}
+                      numberOfLines={1}
+                    >
+                      {businessPermitFileName}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.contractFileSize,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Business Permit
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity activeOpacity={1}
+                  onPress={removeBusinessPermit}
+                  style={styles.removeContractBtn}
+                >
+                  <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={handleBusinessPermitUpload}
+                disabled={uploadingBusinessPermit}
+                activeOpacity={1}
+                style={[
+                  styles.uploadContractBtn,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  },
+                ]}
+              >
+                {uploadingBusinessPermit ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="shield-checkmark-outline"
+                      size={32}
+                      color={colors.textSecondary}
+                    />
+                    <Text style={[styles.uploadText, { color: colors.text }]}>
+                      Upload Business Permit
+                    </Text>
+                    <Text
+                      style={[
+                        styles.uploadSubText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      PDF or Image format
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {renderSectionHeader("Facilities & Equipment", "mic")}
+          <View style={styles.addAmenityContainer}>
+            <View
+              style={[
+                styles.addAmenityInput,
+                {
+                  borderColor: isDark ? "#374151" : "#E5E7EB",
+                  backgroundColor: colors.inputBackground,
+                },
+              ]}
+            >
+              <TextInput
+                value={newAmenity}
+                onChangeText={setNewAmenity}
+                placeholder="e.g. Drum Kit"
+                placeholderTextColor={colors.textSecondary}
+                style={[
+                  styles.input,
+                  { fontFamily: "Poppins_400Regular", color: colors.text },
+                ]}
+              />
+            </View>
+            <TouchableOpacity activeOpacity={1}
+              onPress={addAmenity}
+              style={[
+                styles.addAmenityButton,
+                { backgroundColor: colors.primary },
+              ]}
+            >
+              <Ionicons name="add" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.amenitiesList}>
+            {amenities.map((item, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.amenityItem,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
+                <Text style={[styles.amenityText, { color: colors.text }]}>
+                  {item}
+                </Text>
+                <TouchableOpacity activeOpacity={1} onPress={() => removeAmenity(index)}>
+                  <Ionicons
+                    name="close-circle"
+                    size={16}
+                    color={colors.textSecondary}
+                  />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+
+          {/* Studio Equipment Section */}
+          {renderSectionHeader("Studio Equipment", "cube-outline")}
+          <Text
+            style={[
+              styles.subtitle,
+              { color: colors.textSecondary, marginBottom: 12 },
+            ]}
+          >
+            Add equipment available at your studio with details
+          </Text>
+
+          {/* Add Equipment Button */}
+          <TouchableOpacity activeOpacity={1}
+            onPress={() => {
+              setEditingEquipment(null);
+              setEquipmentForm({
+                name: "",
+                quantity: "1",
+                description: "",
+                image: "",
+              });
+              setShowEquipmentModal(true);
+            }}
+            style={[
+              styles.addEquipmentBtn,
+              {
+                backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+                borderColor: colors.primary,
+              },
+            ]}
+          >
+            <Ionicons name="add-circle" size={24} color={colors.primary} />
+            <Text
+              style={{
+                color: colors.primary,
+                fontFamily: "Poppins_600SemiBold",
+                marginLeft: 8,
+              }}
+            >
+              Add Equipment
+            </Text>
+          </TouchableOpacity>
+
+          {/* Equipment List */}
+          {equipment.length > 0 && (
+            <View style={{ marginTop: 16 }}>
+              {equipment.map((item) => (
+                <View
+                  key={item.id}
+                  style={[
+                    styles.equipmentCard,
+                    {
+                      backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={{ flexDirection: "row", gap: 12 }}>
+                    {item.image ? (
+                      <Image
+                        source={{ uri: item.image }}
+                        style={styles.equipmentImage}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.equipmentImage,
+                          {
+                            backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="cube-outline"
+                          size={24}
+                          color={colors.textSecondary}
+                        />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[styles.equipmentName, { color: colors.text }]}
+                      >
+                        {item.name}
+                      </Text>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 12,
+                          fontFamily: "Poppins_400Regular",
+                        }}
+                      >
+                        Qty: {item.quantity}
+                      </Text>
+                      {item.description && (
+                        <Text
+                          style={{
+                            color: colors.textSecondary,
+                            fontSize: 11,
+                            fontFamily: "Poppins_400Regular",
+                            marginTop: 4,
+                          }}
+                          numberOfLines={2}
+                        >
+                          {item.description}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      <TouchableOpacity activeOpacity={1}
+                        onPress={() => {
+                          setEditingEquipment(item);
+                          setEquipmentForm({
+                            name: item.name,
+                            quantity: item.quantity.toString(),
+                            description: item.description,
+                            image: item.image,
+                          });
+                          setShowEquipmentModal(true);
+                        }}
+                      >
+                        <Ionicons
+                          name="pencil"
+                          size={18}
+                          color={colors.primary}
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity activeOpacity={1}
+                        onPress={() =>
+                          setEquipment(
+                            equipment.filter((e) => e.id !== item.id),
+                          )
+                        }
+                      >
+                        <Ionicons
+                          name="trash-outline"
+                          size={18}
+                          color="#EF4444"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {equipment.length > 0 && (
+            <Text
+              style={[styles.selectedCount, { color: colors.textSecondary }]}
+            >
+              {equipment.length} equipment item
+              {equipment.length !== 1 ? "s" : ""} added
+            </Text>
+          )}
+
+          {/* Quick Add from Presets */}
+          <Text
+            style={[
+              styles.subtitle,
+              { color: colors.textSecondary, marginTop: 24, marginBottom: 12 },
+            ]}
+          >
+            Or quickly select from common equipment
+          </Text>
+
+          <View style={styles.instrumentsGrid}>
+            {INSTRUMENT_OPTIONS.map((instrument) => {
+              const isSelected = selectedInstruments.some(
+                (i) => i.name === instrument.name,
+              );
+              return (
+                <TouchableOpacity activeOpacity={1}
+                  key={instrument.name}
+                  onPress={() => toggleInstrument(instrument)}
+                  style={[
+                    styles.instrumentCard,
+                    {
+                      backgroundColor: isSelected
+                        ? colors.primary + "20"
+                        : isDark
+                          ? "#1F2937"
+                          : "#F9FAFB",
+                      borderColor: isSelected
+                        ? colors.primary
+                        : isDark
+                          ? "#374151"
+                          : "#E5E7EB",
+                    },
+                  ]}
+                >
+                  <Image
+                    source={{ uri: instrument.image }}
+                    style={styles.instrumentImage}
+                  />
+                  <Text
+                    style={[styles.instrumentName, { color: colors.text }]}
+                    numberOfLines={1}
+                  >
+                    {instrument.name}
+                  </Text>
+                  {isSelected && (
+                    <View
+                      style={[
+                        styles.instrumentCheckmark,
+                        { backgroundColor: colors.primary },
+                      ]}
+                    >
+                      <Ionicons name="checkmark" size={12} color="#fff" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {selectedInstruments.length > 0 && (
+            <Text
+              style={[styles.selectedCount, { color: colors.textSecondary }]}
+            >
+              {selectedInstruments.length} preset
+              {selectedInstruments.length !== 1 ? "s" : ""} selected
+            </Text>
+          )}
+
+          {renderSectionHeader("Availability", "time")}
+          <Text
+            style={[
+              styles.subtitle,
+              { color: colors.textSecondary, marginBottom: 16 },
+            ]}
+          >
+            Set your regular weekly schedule and/or select specific dates
+          </Text>
+
+          {/* Calendar Date Selection */}
+          <View style={{ marginBottom: 24 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 12,
+              }}
+            >
+              <Ionicons name="calendar" size={16} color={colors.primary} />
+              <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
+                Specific Dates
+              </Text>
+            </View>
+            <Text
+              style={{
+                color: colors.textSecondary,
+                fontSize: 12,
+                fontFamily: "Poppins_400Regular",
+                marginBottom: 12,
+              }}
+            >
+              Tap on dates to set special hours or override weekly schedule
+            </Text>
+
+            <View
+              style={[
+                styles.calendarContainer,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Calendar
+                current={new Date().toISOString().split("T")[0]}
+                minDate={new Date().toISOString().split("T")[0]}
+                maxDate={(() => {
+                  const maxDate = new Date();
+                  maxDate.setDate(maxDate.getDate() + 90);
+                  return maxDate.toISOString().split("T")[0];
+                })()}
+                markedDates={Object.entries(selectedDates).reduce(
+                  (acc, [dateStr, data]) => {
+                    if (data.selected) {
+                      acc[dateStr] = {
+                        selected: true,
+                        selectedColor: colors.primary,
+                        selectedTextColor: "#FFFFFF",
+                      };
+                    }
+                    return acc;
+                  },
+                  {} as Record<string, any>,
+                )}
+                onDayPress={(day) => toggleCalendarDate(day.dateString)}
+                dayComponent={({ date, state, marking }) => {
+                  if (!date) return null;
+                  const isSelected = !!marking?.selected;
+                  const isDisabled = state === "disabled";
+
+                  return (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      onPress={() => toggleCalendarDate(date.dateString)}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: isSelected
+                          ? colors.primary
+                          : "transparent",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: isSelected
+                            ? "#FFFFFF"
+                            : isDisabled
+                              ? isDark
+                                ? "#4B5563"
+                                : "#D1D5DB"
+                              : colors.text,
+                          fontFamily: "Poppins_500Medium",
+                          fontSize: 14,
+                        }}
+                      >
+                        {date.day}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                }}
+                theme={{
+                  backgroundColor: "transparent",
+                  calendarBackground: "transparent",
+                  textSectionTitleColor: colors.textSecondary,
+                  selectedDayBackgroundColor: colors.primary,
+                  selectedDayTextColor: "#FFFFFF",
+                  todayTextColor: colors.primary,
+                  dayTextColor: colors.text,
+                  textDisabledColor: isDark ? "#4B5563" : "#D1D5DB",
+                  dotColor: colors.primary,
+                  selectedDotColor: "#FFFFFF",
+                  arrowColor: colors.primary,
+                  monthTextColor: colors.text,
+                  indicatorColor: colors.primary,
+                  textDayFontFamily: "Poppins_500Medium",
+                  textMonthFontFamily: "Poppins_600SemiBold",
+                  textDayHeaderFontFamily: "Poppins_500Medium",
+                  textDayFontSize: 14,
+                  textMonthFontSize: 16,
+                  textDayHeaderFontSize: 12,
+                }}
+              />
+              {Object.keys(selectedDates).filter(
+                (d) => selectedDates[d]?.selected,
+              ).length > 0 && (
+                  <View
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingBottom: 12,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color={colors.primary}
+                    />
+                    <Text
+                      style={{
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 13,
+                      }}
+                    >
+                      {
+                        Object.keys(selectedDates).filter(
+                          (d) => selectedDates[d]?.selected,
+                        ).length
+                      }{" "}
+                      date(s) selected
+                    </Text>
+                  </View>
+                )}
+            </View>
+
+            {/* Selected Dates with Time Slots */}
+            {Object.entries(selectedDates).filter(([_, data]) => data.selected)
+              .length > 0 && (
+                <View style={{ marginTop: 16 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontSize: 12,
+                      fontFamily: "Poppins_600SemiBold",
+                      marginBottom: 8,
+                    }}
+                  >
+                    SELECTED DATES (OVERRIDES WEEKLY SCHEDULE)
+                  </Text>
+                  {Object.entries(selectedDates)
+                    .filter(([_, data]) => data.selected)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([dateStr, data]) => {
+                      const date = new Date(dateStr + "T00:00:00");
+                      const dayName = date.toLocaleDateString("en-US", {
+                        weekday: "long",
+                      });
+                      const weeklySchedule = availability.find(
+                        (a) => a.day === dayName,
+                      );
+                      const hasConflict =
+                        weeklySchedule && weeklySchedule.slots.length > 0;
+
+                      const toggleAmPm = (timeStr: string) => {
+                        const [time, period] = timeStr.split(" ");
+                        return `${time} ${period === "AM" ? "PM" : "AM"}`;
+                      };
+
+                      return (
+                        <View
+                          key={dateStr}
+                          style={[
+                            styles.selectedDateCard,
+                            {
+                              backgroundColor: isDark ? "#374151" : "#FFF",
+                              borderColor: hasConflict
+                                ? "#F59E0B"
+                                : colors.border,
+                            },
+                          ]}
+                        >
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                            }}
+                          >
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 8,
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: colors.text,
+                                  fontFamily: "Poppins_600SemiBold",
+                                }}
+                              >
+                                {date.toLocaleDateString("en-US", {
+                                  weekday: "short",
+                                  month: "short",
+                                  day: "numeric",
+                                })}
+                              </Text>
+                              {hasConflict && (
+                                <View
+                                  style={{
+                                    backgroundColor: "#F59E0B20",
+                                    paddingHorizontal: 6,
+                                    paddingVertical: 2,
+                                    borderRadius: 4,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      color: "#F59E0B",
+                                      fontSize: 10,
+                                      fontFamily: "Poppins_500Medium",
+                                    }}
+                                  >
+                                    Override
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => {
+                                const newDates = { ...selectedDates };
+                                delete newDates[dateStr];
+                                setSelectedDates(newDates);
+                              }}
+                            >
+                              <Ionicons
+                                name="close-circle"
+                                size={20}
+                                color="#EF4444"
+                              />
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Editable Time Slots for Specific Date */}
+                          {data.slots.map((slot, slotIndex) => (
+                            <View
+                              key={slotIndex}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 8,
+                                marginTop: 12,
+                              }}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={{
+                                    color: colors.textSecondary,
+                                    fontSize: 11,
+                                    marginBottom: 4,
+                                    fontFamily: "Poppins_600SemiBold",
+                                  }}
+                                >
+                                  START
+                                </Text>
+                                <View
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: 4,
+                                  }}
+                                >
+                                  <TextInput
+                                    value={slot.start.split(" ")[0]}
+                                    onChangeText={(text) => {
+                                      const formatted = formatTimeInput(text);
+                                      const newDates = { ...selectedDates };
+                                      const period =
+                                        slot.start.split(" ")[1] || "AM";
+                                      newDates[dateStr].slots[slotIndex].start =
+                                        `${formatted} ${period}`;
+                                      setSelectedDates(newDates);
+                                    }}
+                                    placeholder="09:00"
+                                    keyboardType="numeric"
+                                    maxLength={5}
+                                    style={[
+                                      styles.timeInput,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "white",
+                                        borderColor: colors.border,
+                                        color: colors.text,
+                                        flex: 1,
+                                      },
+                                    ]}
+                                  />
+                                  <TouchableOpacity activeOpacity={1}
+                                    onPress={() => {
+                                      const newDates = { ...selectedDates };
+                                      newDates[dateStr].slots[slotIndex].start =
+                                        toggleAmPm(slot.start);
+                                      setSelectedDates(newDates);
+                                    }}
+                                    style={[
+                                      styles.ampmBtn,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "#E5E7EB",
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={{
+                                        fontSize: 12,
+                                        fontFamily: "Poppins_600SemiBold",
+                                        color: colors.text,
+                                      }}
+                                    >
+                                      {slot.start.split(" ")[1] || "AM"}
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                              <Ionicons
+                                name="arrow-forward"
+                                size={20}
+                                color={colors.textSecondary}
+                                style={{ marginTop: 20 }}
+                              />
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={{
+                                    color: colors.textSecondary,
+                                    fontSize: 11,
+                                    marginBottom: 4,
+                                    fontFamily: "Poppins_600SemiBold",
+                                  }}
+                                >
+                                  END
+                                </Text>
+                                <View
+                                  style={{
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: 4,
+                                  }}
+                                >
+                                  <TextInput
+                                    value={slot.end.split(" ")[0]}
+                                    onChangeText={(text) => {
+                                      const formatted = formatTimeInput(text);
+                                      const newDates = { ...selectedDates };
+                                      const period =
+                                        slot.end.split(" ")[1] || "PM";
+                                      newDates[dateStr].slots[slotIndex].end =
+                                        `${formatted} ${period}`;
+                                      setSelectedDates(newDates);
+                                    }}
+                                    placeholder="05:00"
+                                    keyboardType="numeric"
+                                    maxLength={5}
+                                    style={[
+                                      styles.timeInput,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "white",
+                                        borderColor: colors.border,
+                                        color: colors.text,
+                                        flex: 1,
+                                      },
+                                    ]}
+                                  />
+                                  <TouchableOpacity activeOpacity={1}
+                                    onPress={() => {
+                                      const newDates = { ...selectedDates };
+                                      newDates[dateStr].slots[slotIndex].end =
+                                        toggleAmPm(slot.end);
+                                      setSelectedDates(newDates);
+                                    }}
+                                    style={[
+                                      styles.ampmBtn,
+                                      {
+                                        backgroundColor: isDark
+                                          ? "#1F2937"
+                                          : "#E5E7EB",
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={{
+                                        fontSize: 12,
+                                        fontFamily: "Poppins_600SemiBold",
+                                        color: colors.text,
+                                      }}
+                                    >
+                                      {slot.end.split(" ")[1] || "PM"}
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                              {data.slots.length > 1 && (
+                                <TouchableOpacity activeOpacity={1}
+                                  onPress={() => {
+                                    const newDates = { ...selectedDates };
+                                    newDates[dateStr].slots.splice(slotIndex, 1);
+                                    setSelectedDates(newDates);
+                                  }}
+                                  style={{ marginTop: 20 }}
+                                >
+                                  <Ionicons
+                                    name="trash-outline"
+                                    size={20}
+                                    color="#EF4444"
+                                  />
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          ))}
+
+                          {/* Add Slot Button for Specific Date */}
+                          {data.slots.length < 3 && (
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => {
+                                const newDates = { ...selectedDates };
+                                newDates[dateStr].slots.push({
+                                  start: "06:00 PM",
+                                  end: "09:00 PM",
+                                });
+                                setSelectedDates(newDates);
+                              }}
+                              style={{
+                                marginTop: 12,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 4,
+                              }}
+                            >
+                              <Ionicons
+                                name="add-circle-outline"
+                                size={16}
+                                color={colors.primary}
+                              />
+                              <Text
+                                style={{
+                                  color: colors.primary,
+                                  fontSize: 12,
+                                  fontFamily: "Poppins_500Medium",
+                                }}
+                              >
+                                Add Time Slot
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {hasConflict && (
+                            <Text
+                              style={{
+                                color: "#F59E0B",
+                                fontSize: 11,
+                                fontFamily: "Poppins_400Regular",
+                                marginTop: 8,
+                              }}
+                            >
+                              ⚠️ This overrides weekly {dayName} schedule (
+                              {weeklySchedule.slots[0]?.start} -{" "}
+                              {weeklySchedule.slots[0]?.end})
+                            </Text>
+                          )}
+                        </View>
+                      );
+                    })}
+                </View>
+              )}
+          </View>
+
+          {/* Weekly Schedule Section */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 12,
+            }}
+          >
+            <Ionicons name="repeat" size={16} color={colors.primary} />
+            <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
+              Weekly Schedule
+            </Text>
+          </View>
+          <Text
+            style={{
+              color: colors.textSecondary,
+              fontSize: 12,
+              fontFamily: "Poppins_400Regular",
+              marginBottom: 16,
+            }}
+          >
+            Set recurring availability for each day of the week
+          </Text>
+
+          {availability.map((daySchedule, dayIndex) => (
+            <View
+              key={daySchedule.day}
+              style={[
+                styles.dayCard,
+                {
+                  backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                  borderColor: colors.border,
+                  marginBottom: 12,
+                },
+              ]}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
+                <Text style={[styles.dayLabel, { color: colors.text }]}>
+                  {daySchedule.day}
+                </Text>
+                <TouchableOpacity activeOpacity={1}
+                  onPress={() => {
+                    const newAvailability = [...availability];
+                    if (newAvailability[dayIndex].slots.length === 0) {
+                      newAvailability[dayIndex].slots.push({
+                        start: "09:00 AM",
+                        end: "05:00 PM",
+                      });
+                    } else {
+                      newAvailability[dayIndex].slots = [];
+                    }
+                    setAvailability(newAvailability);
+                  }}
+                  style={[
+                    styles.toggleBtn,
+                    {
+                      backgroundColor:
+                        daySchedule.slots.length > 0
+                          ? colors.primary
+                          : isDark
+                            ? "#374151"
+                            : "#E5E7EB",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color:
+                        daySchedule.slots.length > 0
+                          ? "#FFFFFF"
+                          : colors.textSecondary,
+                      fontSize: 12,
+                      fontFamily: "Poppins_600SemiBold",
+                    }}
+                  >
+                    {daySchedule.slots.length > 0 ? "Available" : "Closed"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {daySchedule.slots.map((slot, slotIndex) => {
+                const toggleAmPm = (timeStr: string) => {
+                  const [time, period] = timeStr.split(" ");
+                  return `${time} ${period === "AM" ? "PM" : "AM"}`;
+                };
+
+                return (
+                  <View
+                    key={slotIndex}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          marginBottom: 4,
+                          fontFamily: "Poppins_600SemiBold",
+                        }}
+                      >
+                        START
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <TextInput
+                          value={slot.start.split(" ")[0]}
+                          onChangeText={(text) => {
+                            const formatted = formatTimeInput(text);
+                            const newAvailability = [...availability];
+                            const period = slot.start.split(" ")[1];
+                            newAvailability[dayIndex].slots[slotIndex].start =
+                              `${formatted} ${period}`;
+                            setAvailability(newAvailability);
+                          }}
+                          placeholder="09:00"
+                          keyboardType="numeric"
+                          maxLength={5}
+                          style={[
+                            styles.timeInput,
+                            {
+                              backgroundColor: isDark ? "#374151" : "white",
+                              borderColor: colors.border,
+                              color: colors.text,
+                              flex: 1,
+                            },
+                          ]}
+                        />
+                        <TouchableOpacity activeOpacity={1}
+                          onPress={() => {
+                            const newAvailability = [...availability];
+                            newAvailability[dayIndex].slots[slotIndex].start =
+                              toggleAmPm(slot.start);
+                            setAvailability(newAvailability);
+                          }}
+                          style={[
+                            styles.ampmBtn,
+                            { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                          ]}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontFamily: "Poppins_600SemiBold",
+                              color: colors.text,
+                            }}
+                          >
+                            {slot.start.split(" ")[1]}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <Ionicons
+                      name="arrow-forward"
+                      size={20}
+                      color={colors.textSecondary}
+                      style={{ marginTop: 20 }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          marginBottom: 4,
+                          fontFamily: "Poppins_600SemiBold",
+                        }}
+                      >
+                        END
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <TextInput
+                          value={slot.end.split(" ")[0]}
+                          onChangeText={(text) => {
+                            const formatted = formatTimeInput(text);
+                            const newAvailability = [...availability];
+                            const period = slot.end.split(" ")[1];
+                            newAvailability[dayIndex].slots[slotIndex].end =
+                              `${formatted} ${period}`;
+                            setAvailability(newAvailability);
+                          }}
+                          placeholder="05:00"
+                          keyboardType="numeric"
+                          maxLength={5}
+                          style={[
+                            styles.timeInput,
+                            {
+                              backgroundColor: isDark ? "#374151" : "white",
+                              borderColor: colors.border,
+                              color: colors.text,
+                              flex: 1,
+                            },
+                          ]}
+                        />
+                        <TouchableOpacity activeOpacity={1}
+                          onPress={() => {
+                            const newAvailability = [...availability];
+                            newAvailability[dayIndex].slots[slotIndex].end =
+                              toggleAmPm(slot.end);
+                            setAvailability(newAvailability);
+                          }}
+                          style={[
+                            styles.ampmBtn,
+                            { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                          ]}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              fontFamily: "Poppins_600SemiBold",
+                              color: colors.text,
+                            }}
+                          >
+                            {slot.end.split(" ")[1]}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {daySchedule.slots.length > 1 && (
+                      <TouchableOpacity activeOpacity={1}
+                        onPress={() => {
+                          const newAvailability = [...availability];
+                          newAvailability[dayIndex].slots.splice(slotIndex, 1);
+                          setAvailability(newAvailability);
+                        }}
+                        style={{ marginTop: 20 }}
+                      >
+                        <Ionicons
+                          name="trash-outline"
+                          size={20}
+                          color="#EF4444"
+                        />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+
+              {daySchedule.slots.length > 0 && daySchedule.slots.length < 3 && (
+                <TouchableOpacity activeOpacity={1}
+                  onPress={() => {
+                    const newAvailability = [...availability];
+                    newAvailability[dayIndex].slots.push({
+                      start: "06:00 PM",
+                      end: "09:00 PM",
+                    });
+                    setAvailability(newAvailability);
+                  }}
+                  style={{
+                    marginTop: 8,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <Ionicons
+                    name="add-circle-outline"
+                    size={16}
+                    color={colors.primary}
+                  />
+                  <Text
+                    style={{
+                      color: colors.primary,
+                      fontSize: 12,
+                      fontFamily: "Poppins_500Medium",
+                    }}
+                  >
+                    Add Time Slot
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+
+          {renderSectionHeader("Visuals", "image")}
+          <ImageUploader
+            images={selectedImages}
+            onImagesChange={setSelectedImages}
+            thumbnailIndex={thumbnailIndex}
+            onThumbnailChange={setThumbnailIndex}
+            maxImages={10}
+            bucketName="listings"
+            userId={id as string}
+            folder="studios"
+          />
+
+          <View style={styles.footerActions}>
+            <TouchableOpacity
+              style={[
+                styles.saveButton,
+                {
+                  backgroundColor: saving
+                    ? colors.textSecondary
+                    : colors.primary,
+                  shadowColor: colors.primary,
+                },
+              ]}
+              onPress={handleSave}
+              disabled={saving}
+              activeOpacity={1}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity activeOpacity={1}
+              style={[styles.cancelButton, { borderColor: colors.border }]}
+              onPress={handleAttemptLeave}
+            >
+              <Text
+                style={{
+                  fontFamily: "Poppins_600SemiBold",
+                  color: colors.text,
+                }}
+              >
+                Cancel
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+
+        <Navbar />
+      </View>
+
+      <Modal
+        visible={saving}
+        loading
+        loadingMessage="Saving changes..."
+        onClose={() => { }}
+      />
+
+      <CustomAlert
+        visible={alertVisible}
+        type={alertConfig.type}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        buttons={alertConfig.buttons}
+        onClose={() => setAlertVisible(false)}
+      />
+
+      <ConflictResolutionModal
+        visible={conflictModalVisible}
+        conflicts={conflictingBookings}
+        studioName={studioName}
+        onClose={() => {
+          setConflictModalVisible(false);
+          setConflictingBookings([]);
+          setSaving(false);
+        }}
+        onResolve={handleConflictResolution}
+      />
+
+      <LocationPicker
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        onSelect={(location) => {
+          setAddress(location.address);
+          setLatitude(location.lat);
+          setLongitude(location.lng);
+          setLocationPickerVisible(false);
+        }}
+        initialLocation={
+          latitude && longitude ? { lat: latitude, lng: longitude } : undefined
+        }
+      />
+
+      {/* Equipment Modal */}
+      {showEquipmentModal && (
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 24,
+            zIndex: 1000,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: colors.background,
+              borderRadius: 16,
+              padding: 24,
+              width: "100%",
+              maxWidth: 400,
+              maxHeight: "80%",
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <Text
+                style={{
+                  fontSize: 18,
+                  fontFamily: "Poppins_600SemiBold",
+                  color: colors.text,
+                }}
+              >
+                {editingEquipment ? "Edit Equipment" : "Add Equipment"}
+              </Text>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowEquipmentModal(false)}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Name */}
+              <View style={{ marginBottom: 16 }}>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_600SemiBold",
+                    marginBottom: 8,
+                  }}
+                >
+                  NAME *
+                </Text>
+                <TextInput
+                  value={equipmentForm.name}
+                  onChangeText={(text) =>
+                    setEquipmentForm({ ...equipmentForm, name: text })
+                  }
+                  placeholder="e.g. Yamaha DTX Drums"
+                  placeholderTextColor={colors.textSecondary}
+                  style={{
+                    backgroundColor: colors.inputBackground,
+                    borderRadius: 12,
+                    padding: 16,
+                    color: colors.text,
+                    fontFamily: "Poppins_400Regular",
+                    borderWidth: 1,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  }}
+                />
+              </View>
+
+              {/* Quantity */}
+              <View style={{ marginBottom: 16 }}>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_600SemiBold",
+                    marginBottom: 8,
+                  }}
+                >
+                  QUANTITY *
+                </Text>
+                <TextInput
+                  value={equipmentForm.quantity}
+                  onChangeText={(text) =>
+                    setEquipmentForm({
+                      ...equipmentForm,
+                      quantity: text.replace(/[^0-9]/g, ""),
+                    })
+                  }
+                  placeholder="1"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="numeric"
+                  style={{
+                    backgroundColor: colors.inputBackground,
+                    borderRadius: 12,
+                    padding: 16,
+                    color: colors.text,
+                    fontFamily: "Poppins_400Regular",
+                    borderWidth: 1,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                  }}
+                />
+              </View>
+
+              {/* Description */}
+              <View style={{ marginBottom: 16 }}>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_600SemiBold",
+                    marginBottom: 8,
+                  }}
+                >
+                  DESCRIPTION
+                </Text>
+                <TextInput
+                  value={equipmentForm.description}
+                  onChangeText={(text) =>
+                    setEquipmentForm({ ...equipmentForm, description: text })
+                  }
+                  placeholder="Brief description of the equipment"
+                  placeholderTextColor={colors.textSecondary}
+                  multiline
+                  numberOfLines={3}
+                  style={{
+                    backgroundColor: colors.inputBackground,
+                    borderRadius: 12,
+                    padding: 16,
+                    color: colors.text,
+                    fontFamily: "Poppins_400Regular",
+                    borderWidth: 1,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                    height: 80,
+                    textAlignVertical: "top",
+                  }}
+                />
+              </View>
+
+              {/* Image Upload */}
+              <View style={{ marginBottom: 24 }}>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: "Poppins_600SemiBold",
+                    marginBottom: 8,
+                  }}
+                >
+                  IMAGE
+                </Text>
+                {equipmentForm.image ? (
+                  <View style={{ position: "relative" }}>
+                    <Image
+                      source={{ uri: equipmentForm.image }}
+                      style={{ width: "100%", height: 150, borderRadius: 12 }}
+                    />
+                    <TouchableOpacity activeOpacity={1}
+                      onPress={() =>
+                        setEquipmentForm({ ...equipmentForm, image: "" })
+                      }
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        backgroundColor: "rgba(0,0,0,0.5)",
+                        borderRadius: 12,
+                        padding: 4,
+                      }}
+                    >
+                      <Ionicons name="close" size={16} color="#FFF" />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={pickEquipmentImage}
+                    disabled={uploadingEquipmentImage}
+                    activeOpacity={1}
+                    style={{
+                      backgroundColor: colors.inputBackground,
+                      borderRadius: 12,
+                      padding: 24,
+                      alignItems: "center",
+                      borderWidth: 2,
+                      borderStyle: "dashed",
+                      borderColor: isDark ? "#374151" : "#E5E7EB",
+                    }}
+                  >
+                    {uploadingEquipmentImage ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="camera-outline"
+                          size={32}
+                          color={colors.textSecondary}
+                        />
+                        <Text
+                          style={{
+                            color: colors.textSecondary,
+                            fontFamily: "Poppins_400Regular",
+                            marginTop: 8,
+                          }}
+                        >
+                          Tap to add image
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Submit Button */}
+              <TouchableOpacity activeOpacity={1}
+                onPress={() => {
+                  if (!equipmentForm.name.trim()) {
+                    showAlert(
+                      "error",
+                      "Required",
+                      "Please enter equipment name",
+                    );
+                    return;
+                  }
+                  if (editingEquipment) {
+                    setEquipment(
+                      equipment.map((e) =>
+                        e.id === editingEquipment.id
+                          ? {
+                            ...e,
+                            ...equipmentForm,
+                            quantity: parseInt(equipmentForm.quantity) || 1,
+                          }
+                          : e,
+                      ),
+                    );
+                  } else {
+                    setEquipment([
+                      ...equipment,
+                      {
+                        id: Date.now().toString(),
+                        name: equipmentForm.name,
+                        quantity: parseInt(equipmentForm.quantity) || 1,
+                        description: equipmentForm.description,
+                        image: equipmentForm.image,
+                      },
+                    ]);
+                  }
+                  setShowEquipmentModal(false);
+                  setEquipmentForm({
+                    name: "",
+                    quantity: "1",
+                    description: "",
+                    image: "",
+                  });
+                  setEditingEquipment(null);
+                }}
+                style={{
+                  backgroundColor: colors.primary,
+                  borderRadius: 12,
+                  padding: 16,
+                  alignItems: "center",
+                }}
+              >
+                <Text
+                  style={{ color: "#FFF", fontFamily: "Poppins_600SemiBold" }}
+                >
+                  {editingEquipment ? "Update Equipment" : "Add Equipment"}
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      )}
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
+  centerContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scrollContent: {
+    paddingBottom: 160,
+    paddingHorizontal: 24,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 16,
+  },
+  inputContainer: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    marginBottom: 8,
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  inputWrapper: {
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  input: {
+    padding: 16,
+    textAlign: "left",
+    textAlignVertical: "center",
+  },
+  addAmenityContainer: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 16,
+  },
+  addAmenityInput: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  addAmenityButton: {
+    width: 56,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+  },
+  amenitiesList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  amenityItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  amenityText: {
+    marginRight: 8,
+    fontFamily: "Poppins_500Medium",
+  },
+  footerActions: {
+    marginTop: 32,
+    marginBottom: 20,
+  },
+  saveButton: {
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    marginBottom: 16,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    color: "white",
+    fontFamily: "Poppins_600SemiBold",
+  },
+  cancelButton: {
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    borderWidth: 1,
+  },
+  inputSubLabel: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+    marginBottom: 8,
+  },
+  uploadContractBtn: {
+    padding: 32,
+    borderWidth: 2,
+    borderStyle: "dashed",
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  uploadText: {
+    fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
+    marginTop: 8,
+  },
+  uploadSubText: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+  },
+  contractPreview: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 12,
+  },
+  pdfIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contractFileName: {
+    fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  contractFileSize: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+    marginTop: 2,
+  },
+  removeContractBtn: {
+    padding: 8,
+  },
+  dayCard: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  dayLabel: {
+    fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  toggleBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  timeInput: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontFamily: "Poppins_500Medium",
+    fontSize: 14,
+  },
+  ampmBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 50,
+    alignItems: "center",
+  },
+  subtitle: {
+    fontSize: 13,
+    fontFamily: "Poppins_400Regular",
+  },
+  // Instruments styles
+  instrumentsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  instrumentCard: {
+    width: "30%",
+    aspectRatio: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    padding: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  instrumentImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  instrumentName: {
+    fontSize: 10,
+    fontFamily: "Poppins_500Medium",
+    textAlign: "center",
+  },
+  instrumentCheckmark: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectedCount: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+    marginTop: 12,
+    textAlign: "center",
+  },
+  // Equipment styles
+  addEquipmentBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderStyle: "dashed",
+  },
+  equipmentCard: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  equipmentImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+  },
+  equipmentName: {
+    fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  // Calendar styles
+  calendarContainer: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  dateCard: {
+    width: 60,
+    height: 80,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  selectedDateCard: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    fontFamily: "Poppins_600SemiBold",
+  },
+});
