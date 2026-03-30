@@ -21,7 +21,12 @@ import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
-import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
+import {
+    isDuoGroupType,
+    mapDbGroupTypeToUiGroupType,
+    mapUiGroupTypeToDbGroupType,
+    PH_MUSIC_GROUP_TYPES,
+} from "../src/constants/groupTypes";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { isGroupLeaderMember } from "../src/utils/groupMembers";
@@ -79,7 +84,7 @@ export default function AddGroupScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   // Group type based on the 11 PH Music Group Types
   const [groupType, setGroupType] = useState<string>(
-    isDuoMode ? "acoustic_duo" : "standard_opm_band",
+    mapDbGroupTypeToUiGroupType(isDuoMode ? "duo" : "band"),
   );
   const [groupTypeModalVisible, setGroupTypeModalVisible] = useState(false);
   // Enhanced member structure: { name, instrument, role?, user_id?, avatar_url? }
@@ -442,7 +447,7 @@ export default function AddGroupScreen() {
         images: orderedImages,
         latitude,
         longitude,
-        group_type: groupType, // 'duo' or 'band'
+        group_type: mapUiGroupTypeToDbGroupType(groupType),
       };
 
       // Insert base group row (3NF-safe)
@@ -487,7 +492,10 @@ export default function AddGroupScreen() {
         instrument: member.instrument || null,
         avatar_url: member.avatar_url || null,
         sort_order: index,
-        raw_member: member,
+        raw_member: {
+          ...member,
+          group_type_ui: groupType,
+        },
       }));
 
       if (rosterRows.length > 0) {
@@ -515,19 +523,33 @@ export default function AddGroupScreen() {
         }
       }
 
-      // Add owner to group_members
-      // Add additional members if they have user_ids
-      // Exclude the creator (owner) since they are automatically added by trigger or should use 'upsert' to prevent duplicates if manual
-      const additionalMembers = (payload.members || [])
-        .filter((m: any) => m.user_id && m.user_id !== session.user.id)
-        .map((m: any) => ({
-          group_id: data.id,
-          user_id: m.user_id,
-          role: 'member'
-        }));
+      const desiredMemberUserIds = Array.from(
+        new Set(
+          [
+            session.user.id,
+            ...(payload.members || [])
+              .map((member: any) => member?.user_id)
+              .filter((memberId: any): memberId is string =>
+                typeof memberId === 'string' && memberId.trim().length > 0,
+              ),
+          ],
+        ),
+      );
 
-      if (additionalMembers.length > 0) {
-        await supabase.from('group_members').insert(additionalMembers);
+      const membershipRows = desiredMemberUserIds.map((memberId) => ({
+        group_id: data.id,
+        user_id: memberId,
+        role: memberId === session.user.id ? 'owner' : 'member',
+      }));
+
+      if (membershipRows.length > 0) {
+        const { error: membershipError } = await supabase
+          .from('group_members')
+          .upsert(membershipRows, { onConflict: 'group_id,user_id' });
+
+        if (membershipError) {
+          console.log('Failed to sync group_members during create:', membershipError);
+        }
       }
 
       setNewGroupId(data.id);
@@ -663,7 +685,7 @@ export default function AddGroupScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title={PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType)?.label || "Create Group"} />
+        <Header title="Create Group" />
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -953,7 +975,7 @@ export default function AddGroupScreen() {
             {step === 2 && (
               <View>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  Who's in the {groupType === "duo" ? "duo" : "band"}?
+                  Who's in the {isDuoGroupType(groupType) ? "duo" : "band"}?
                 </Text>
                 <Text
                   style={{
@@ -963,7 +985,7 @@ export default function AddGroupScreen() {
                     fontFamily: "Poppins_400Regular",
                   }}
                 >
-                  {groupType === "duo"
+                  {isDuoGroupType(groupType)
                     ? "Add yourself and one other member (exactly 2 members required)."
                     : "Add yourself and at least 2 other members (minimum 3 members required)."}
                 </Text>
@@ -1477,7 +1499,7 @@ export default function AddGroupScreen() {
                 </View>
 
                 <Text style={styles.termsText}>
-                  By tapping {PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType)?.label || "Create"}, you agree to our Terms and Conditions.
+                  By tapping Create Group, you agree to our Terms and Conditions.
                 </Text>
               </View>
             )}
@@ -1529,7 +1551,7 @@ export default function AddGroupScreen() {
                     <ActivityIndicator color="#fff" size="small" />
                   ) : (
                     <Text style={styles.nextBtnText}>
-                      {step === 3 ? (PH_MUSIC_GROUP_TYPES.find((t) => t.id === groupType)?.label || "Create Group") : "Next"}
+                      {step === 3 ? "Create Group" : "Next"}
                     </Text>
                   )}
                 </TouchableOpacity>

@@ -1,0 +1,1297 @@
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:48:const [reviews, setReviews] = useState<any[]>([]);
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:98:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:99:.select("id, status, created_at, group_id, applicant_id")
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:248:await supabase.functions.invoke("gig-applications", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:249:body: { action: "fetch_gig_applications", gigId: gigId, userId },
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:266:// Direct query to reviews table
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:268:const { data: reviewData, error: reviewError } = await supabase
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:269:.from('reviews')
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:270:.select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url)')
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:273:if (reviewError) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:274:console.log('[manage_gig] Failed to fetch reviews:', reviewError);
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:276:setReviews(reviewData || []);
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:278:} catch (reviewErr) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:279:console.log('[manage_gig] Exception fetching reviews:', reviewErr);
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:294:const confirmAction = (applicationId: string, status: string) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:296:status === "accepted" ? "Accept Application" : "Decline Application",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:299:`Are you sure you want to ${status === "accepted" ? "accept" : "decline"} this application?`,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:301:setModalButtonText(status === "accepted" ? "Accept" : "Decline");
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:309:const { error } = await supabase.functions.invoke("gig-applications", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:311:action: "update_application_status",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:313:status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:321:a.id === applicationId ? { ...a, status } : a,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:327:Alert.alert("Error", "Failed to update application status");
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:333:const tabs = ["About", "Applicants", "Review"];
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:925:styles.statusBadge,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:928:app.status === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:930:: app.status === "accepted"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:932:: app.status === "approved"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:937:app.status === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:939:: app.status === "accepted" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:940:app.status === "approved"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:951:app.status === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:953:: app.status === "accepted" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:954:app.status === "approved"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:959:{app.status === "accepted" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:960:app.status === "approved"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:961:? "Accepted"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:962:: app.status === "rejected"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:963:? "Declined"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:964:: "Pending"}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1501:{app.status === "pending" && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1504:onPress={() => confirmAction(app.id, "rejected")}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1520:onPress={() => confirmAction(app.id, "accepted")}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1543:{activeTab === "Review" && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1545:<View style={styles.reviewHeader}>
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1569:Based on {gig?.review_count || 0} reviews
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1573:{reviews.length > 0 ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1574:reviews.map((review) => (
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1576:key={review.id}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1578:styles.reviewCard,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1582:<View style={styles.reviewUserHeader}>
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1585:source={{ uri: review.author?.avatar_url || null }}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1597:{review.author?.full_name || "User"}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1607:{new Date(review.created_at).toLocaleDateString()}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1614:name={i < review.rating ? "star" : "star-outline"}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1622:styles.reviewText,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1626:{review.comment}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1634:No reviews yet.
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1883:reviewHeader: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1897:reviewCard: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1902:reviewUserHeader: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1918:reviewText: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_gig.tsx:1958:statusBadge: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:75:const [reviews, setReviews] = useState<any[]>([]);
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:158:const updateBookingStatus = async (
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:159:bookingId: string,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:160:status: "confirmed" | "cancelled",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:164:const { data, error } = await supabase.functions.invoke("manage-bookings", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:166:action: "update_status",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:167:booking_id: bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:168:new_status: status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:180:bookingId: string,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:182:acceptedSlots: Array<{ start: string; end: string }>,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:183:declinedSlots: Array<{ start: string; end: string }>,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:186:const { data, error } = await supabase.functions.invoke("manage-bookings", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:188:action: "partial_slot_approval",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:189:booking_id: bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:191:accepted_slots: acceptedSlots,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:192:declined_slots: declinedSlots,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:351:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:397:// Direct query to reviews table
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:399:const { data: reviewData, error: reviewError } = await supabase
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:400:.from('reviews')
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:401:.select('*, author:profiles!reviews_author_id_fkey(id, full_name, avatar_url)')
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:404:if (reviewError) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:405:console.log('[manage_studio] Failed to fetch reviews:', reviewError);
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:407:setReviews(reviewData || []);
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:409:} catch (reviewErr) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:410:console.log('[manage_studio] Exception fetching reviews:', reviewErr);
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:425:const confirmAction = (bookingId: string, status: string) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:426:const isDecline = status === "cancelled";
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:428:status === "confirmed" ? "Accept Booking" : "Decline Booking",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:431:status === "confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:435:setModalButtonText(status === "confirmed" ? "Accept" : "Decline");
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:445:await updateBookingStatus(
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:446:bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:447:status as "confirmed" | "cancelled",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:454:bookings.map((b) => (b.id === bookingId ? { ...b, status } : b)),
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:461:Alert.alert("Error", "Failed to update booking status");
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:506:// Separate accepted and declined slots
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:507:const acceptedSlots = slots.filter(
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:510:const declinedSlots = slots.filter(
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:521:"Please decide on all time slots before submitting.",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:532:// If all slots are accepted, just confirm the booking
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:533:if (acceptedSlots.length === slots.length) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:534:await updateBookingStatus(booking.id, "confirmed", user.id);
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:537:b.id === booking.id ? { ...b, status: "confirmed" } : b,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:541:// If all slots are declined, just cancel the booking
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:542:else if (declinedSlots.length === slots.length) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:543:await updateBookingStatus(
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:545:"cancelled",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:547:"All requested time slots were declined by the studio owner.",
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:551:b.id === booking.id ? { ...b, status: "cancelled" } : b,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:560:acceptedSlots,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:561:declinedSlots,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:562:declinedSlots.length > 0
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:563:? "Some time slots were declined by the studio owner."
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:577:Alert.alert("Error", "Failed to update booking status");
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:581:const tabs = ["About", "Setup", "Bookings", "Review"];
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1444:booking.status === "confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1448:booking.status === "confirmed" ? 2 : 1, // Gold/Neon border for confirmed
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1515:{booking.status}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1519:{booking.status === "confirmed" && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1609:{booking.status}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1718:{/* Action buttons if pending */}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1719:{booking.status === "pending" && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1755:confirmAction(booking.id, "cancelled")
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1773:confirmAction(booking.id, "confirmed")
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1798:{activeTab === "Review" && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1800:<View style={styles.reviewHeader}>
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1824:Based on {studio?.review_count || 0} reviews
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1828:{reviews.map((review) => (
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1830:key={review.id}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1832:styles.reviewCard,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1836:<View style={styles.reviewUserHeader}>
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1841:review.author?.avatar_url ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1852:{review.author?.full_name || "User"}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1862:{new Date(review.created_at).toLocaleDateString()}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1869:name={i < review.rating ? "star" : "star-outline"}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1877:styles.reviewText,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1881:{review.comment}
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:1936:Review Time Slots
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:2089:styles.submitPartialBtn,
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:2100:Submit Decisions
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:2385:reviewHeader: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:2399:reviewCard: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:2404:reviewUserHeader: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:2420:reviewText: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\manage_studio.tsx:2550:submitPartialBtn: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:55:| "Pending"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:58:| "Review"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:62:type VenueOwnerTab = "Applicants" | "Active Musicians" | "Completed";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:65:type ApplicationTab = "Applied" | "Accepted" | "Completed";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:78:const [activeTab, setActiveTab] = useState<Tab>("Pending");
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:111:Pending: any[];
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:114:Review: any[];
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:119:Pending: [],
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:122:Review: [],
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:126:// Application data separated by status for musicians
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:129:Accepted: any[];
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:130:Completed: any[];
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:133:Accepted: [],
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:134:Completed: [],
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:204:const pendingPaymentBookingId = useRef<string | null>(null);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:215:"Pending",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:218:"Review",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:228:const bookingId = params.retry_payment;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:232:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:234:.eq("id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:256:// If we were in payment flow, check status and refresh
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:258:debugLog("?? Checking payment status after return...");
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:259:const bookingId = pendingPaymentBookingId.current;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:261:pendingPaymentBookingId.current = null;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:263:// Poll for payment status with retries (webhook might be processing)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:264:let paymentConfirmed = false;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:266:debugLog(`?? Payment status check attempt ${attempt}/3...`);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:272:if (bookingId) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:274:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:275:.select("id, status, payment_status")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:276:.eq("id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:279:if (booking?.payment_status === "paid") {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:280:paymentConfirmed = true;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:281:debugLog("? Payment confirmed for booking:", bookingId);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:287:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:288:.select("id, status, payment_status")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:290:.eq("payment_status", "paid")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:295:paymentConfirmed = true;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:305:if (paymentConfirmed) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:377:table: "studio_bookings",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:389:table: "gig_applications",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:409:table: "studio_bookings",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:431:table: "gig_applications",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:441:channel = liveChannel.subscribe((status: string) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:442:debugLog("?? Realtime status:", status);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:498:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:515:Pending: [] as any[],
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:518:Review: [] as any[],
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:529:const lateReportByBookingId = new Map<string, {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:535:const bookingIds = (studioRows || []).map((row: any) => row.id).filter(Boolean);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:537:if (bookingIds.length > 0) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:541:.in("booking_id", bookingIds)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:550:const existing = lateReportByBookingId.get(event.booking_id) || {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:559:lateReportByBookingId.set(event.booking_id, {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:575:Pending: [] as any[],
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:578:Review: [] as any[],
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:585:b.status === "pending" &&
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:586:(!b.payment_status ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:587:b.payment_status === "unpaid" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:588:b.payment_status === "pending" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:589:b.payment_status === "failed");
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:591:const lateReportMeta = lateReportByBookingId.get(b.id);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:608:status:
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:609:b.status === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:613:: b.status === "pending_relocation"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:615:: b.status === "confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:616:? "Confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:617:: b.status === "checked_in"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:619:: b.status === "cancelled"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:620:? "Declined"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:621:: b.status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:623:isCancelled: b.status === "cancelled",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:625:b.status === "pending_relocation"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:627:: b.status === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:630:raw_status: b.status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:636:reviewed_by_customer: b.reviewed_by_customer || false,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:637:reviewed_by_owner: b.reviewed_by_owner || false,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:639:payment_status: b.payment_status || "unpaid",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:655:if (b.status === "pending" || b.status === "pending_relocation") {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:656:fallback.Pending.push(item);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:657:} else if (b.status === "confirmed") {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:659:fallback.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:661:fallback.Ongoing.push({ ...item, status: "In Progress" });
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:665:} else if (b.status === "checked_in") {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:667:fallback.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:669:fallback.Ongoing.push({ ...item, status: "In Progress" });
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:671:} else if (b.status === "completed") {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:673:if (!b.reviewed_by_owner) fallback.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:675:if (!b.reviewed_by_customer) fallback.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:677:} else if (b.status === "cancelled") {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:709:"manage-bookings",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:725:...(effectiveBookings?.Pending || []),
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:728:...(effectiveBookings?.Review || []),
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:731:const studioBookingIds = [...new Set(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:738:const lateReportByBookingId = new Map<string, {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:745:studioBookingIds.length > 0
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:750:.in("booking_id", studioBookingIds)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:759:const existing = lateReportByBookingId.get(event.booking_id) || {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:768:lateReportByBookingId.set(event.booking_id, {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:785:const lateReportMeta = lateReportByBookingId.get(item.id);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:797:const normalizeStatus = (status?: string | null) =>
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:798:String(status || "").trim().toLowerCase();
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:802:// 1. Applicants (Pending Gig items)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:803:const rawPending = attachLateReportMeta(effectiveBookings?.Pending || []);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:804:const pendingGigApplications = rawPending.filter(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:808:const applicants = role === "venue-owner" ? pendingGigApplications : [];
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:810:const studioPending = rawPending.filter(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:814:const pendingItems =
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:816:? [...pendingGigApplications, ...studioPending]
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:817:: studioPending;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:819:pendingItems.sort(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:825:// 2. Active Musicians (Confirmed Gig items from Upcoming & Ongoing)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:836:// 3. Upcoming/Ongoing - Include ALL items (both studio bookings and approved gig applications)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:837:// Musicians should see their approved gig applications in Upcoming
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:838:// Filter out cancelled/declined bookings from Upcoming - they go to History
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:840:(item: any) => !item.isCancelled && item.status !== "Declined"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:844:// 4. History - Cancelled/Declined bookings + already-reviewed completed items (by current viewer)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:845:const rawReview = attachLateReportMeta(effectiveBookings?.Review || []);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:846:const cancelledFromUpcoming = rawUpcoming.filter(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:847:(item: any) => item.isCancelled || item.status === "Declined"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:849:const alreadyReviewedCompleted = rawReview.filter((item: any) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:853:return item.reviewed_by_owner === true;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:857:return item.reviewed_by_customer === true;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:862:const terminalGigApplications = rawReview.filter((item: any) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:864:const status = normalizeStatus(item.status);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:865:return ["completed", "fired", "declined", "rejected", "cancelled"].includes(status);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:868:const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted, ...terminalGigApplications]
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:880:// 5. Review - role-aware unreviewed items
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:881:const unreviewedItems = rawReview.filter((item: any) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:883:// For venue owners, Review tab = Completed tab: fired musicians + completed contracts.
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:884:// Shows gig applications with status "Fired" or "Completed" (never "Accepted").
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:886:(item.status === "Fired" || item.status === "Completed");
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:892:return item.reviewed_by_owner !== true;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:896:return item.reviewed_by_customer !== true;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:913:Pending: pendingItems,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:916:Review: unreviewedItems,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:922:// For musicians: Separate gig applications by status for the Applications view
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:926:...rawPending.filter((item: any) => item.type_id === "gig_application"),
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:929:...(effectiveBookings?.Review || []).filter((item: any) => item.type_id === "gig_application"),
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:930:].filter((item: any) => !item.leader_approval_required);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:932:// Separate by status
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:935:const status = normalizeStatus(app.status);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:936:return status === "applied" || status === "pending";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:939:const acceptedApps = allGigApps.filter(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:941:const status = normalizeStatus(app.status);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:942:return status === "accepted" || status === "happening now" || status === "confirmed";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:945:const completedApps = allGigApps.filter(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:947:const status = normalizeStatus(app.status);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:948:return ["completed", "declined", "rejected", "fired", "cancelled"].includes(status);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:952:// Sort by date (most recent first for applied, closest first for accepted)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:958:acceptedApps.sort(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:963:completedApps.sort(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:971:Accepted: acceptedApps,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:972:Completed: completedApps,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:982:async function handleStatusUpdate(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:983:bookingId: string,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:984:newStatus: string,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:989:debugLog("?? handleStatusUpdate called with:", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:990:bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:991:newStatus,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:996:const attendanceStatuses = ["late", "no_show"];
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1001:if (typeId === "studio_booking" && attendanceStatuses.includes(newStatus)) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1003:p_booking_id: bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1004:p_event_type: newStatus,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1012:debugLog("?? record_booking_attendance failed, falling back to manage-bookings:", error);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1014:const invokeFallback = await supabase.functions.invoke("manage-bookings", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1016:action: "update_status",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1017:booking_id: bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1018:new_status: newStatus,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1029:const invokeResult = await supabase.functions.invoke("manage-bookings", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1031:action: "update_status",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1032:booking_id: bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1033:new_status: newStatus,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1044:debugLog("?? handleStatusUpdate response:", { data, error });
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1056:console.log("[Bookings][handleStatusUpdate][Edge Function error]", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1057:bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1058:newStatus,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1061:errorStatus: (error as any)?.status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1064:contextStatus: errorContext?.status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1065:contextStatusText: errorContext?.statusText,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1082:attendanceStatuses.includes(newStatus) &&
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1087:const duplicateMessage =
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1088:newStatus === "late"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1091:showAlert("info", "Already Reported", duplicateMessage);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1101:debugLog("Error updating status:", e);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1104:(typeof e === "string" ? e : "Failed to update booking status.");
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1115:const handleConfirmBooking = async (bookingId: string) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1121:const handleCancelBooking = async (bookingId: string) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1137:const isReviewOrCompletedContext =
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1138:activeTab === "Review" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1141:activeAppTab === "Completed");
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1177:if (item?.isCancelled) return false;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1184:if (isReviewOrCompletedContext) return false;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1194:return !!(item.applicant_id || item.user_id || item.submitted_by_user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1198:if (item.leader_approval_required) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1199:return !!(item.submitted_by_user_id || item.applicant_id);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1223:chatContext.studioBookingId = item.id;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1241:item.applicant_id || item.user_id || item.submitted_by_user_id || null;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1245:if (item.leader_approval_required) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1246:recipientId = item.submitted_by_user_id || item.applicant_id || null;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1322:decision: "approved" | "rejected",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1325:const { data, error } = await supabase.functions.invoke("gig-applications", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1327:action: "update_leader_approval",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1364:const handleRelocationDecision = async (item: any, accepted: boolean) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1371:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1373:"id, user_id, studio_id, status, payment_status, relocation_expires_at, relocation_proposed_date, relocation_proposed_start_time, relocation_proposed_end_time",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1383:if (latestBooking.status !== "pending_relocation") {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1387:"This relocation request is no longer pending.",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1406:if (accepted) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1408:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1410:status: "confirmed",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1421:"\nRelocation accepted by musician and applied.",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1432:title: "Relocation Accepted",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1433:message: `The musician accepted your relocation request for ${item.name}.`,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1435:bookingId: item.id,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1437:event_type: "relocation_accepted",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1444:"Relocation Confirmed",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1445:"You accepted the moved schedule.",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1449:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1451:status: "cancelled",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1452:payment_status: latestBooking.payment_status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1454:"Musician declined the owner relocation request.",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1470:title: "Relocation Declined",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1471:message: `The musician declined your relocation request for ${item.name}. Booking was cancelled.`,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1473:bookingId: item.id,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1475:event_type: "relocation_declined",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1482:"Relocation Declined",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1483:"You declined the move request. Booking has been cancelled.",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1501:// Leave Review handler with proper params
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1502:const handleLeaveReview = (item: any) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1503:// Determine reviewer role based on user role and item type
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1509:const reviewerRole =
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1518:// For studio owners reviewing musicians, target the user
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1519:// For musicians reviewing studios, target the studio
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1523:bookingId: item.id,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1524:bookingType: item.type_id,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1525:reviewerRole,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1526:// Keep venue owners on Manage Applications > Completed after review submit.
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1527:returnTab: userRole === "venue-owner" ? "Review" : activeTab,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1532:// Owner reviews the musician (user)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1536:// Musician reviews the studio
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1542:// Venue owner reviews the actual performer target:
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1543:// group/duo applications -> review group, solo applications -> review user.
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1552:// Musician reviews the gig
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1559:pathname: "/submit_review",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1578:"manage-bookings",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1654:queryParams: { status: "success", booking_id: item.id },
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1657:queryParams: { status: "cancelled", booking_id: item.id },
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1662:bookingId: item.id,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1688:pendingPaymentBookingId.current = item.id;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1725:queryParams: { status: "success", booking_id: item.id },
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1728:queryParams: { status: "cancelled", booking_id: item.id },
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1733:bookingId: item.id,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1756:pendingPaymentBookingId.current = item.id;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1791:const bookingId = selectedItem.id;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1796:bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1803:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1805:.eq("id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1824:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1827:payment_status: "paid",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1830:.eq("id", bookingId);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1857:reference_id: bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1859:status: "completed",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1872:booking_id: bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1877:debugLog(`?? Balance cleared: ?${balanceAmount} for booking ${bookingId}`);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1896:// Check payment status (for returning from payment)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1897:const checkPaymentStatus = async (bookingId: string) => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1902:booking_id: bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1906:if (data?.payment_status === "paid") {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1909:"Payment confirmed! Your booking is now in Upcoming.",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1920:// Permission status not yet loaded
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:1979:Alert.alert("Success", "Check-in confirmed! Booking is now LIVE.");
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2062:case "Completed":
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2063:return data.Review.filter((item: any) => item.type_id === "gig_application");
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2071:const isActive = activeTab === (tab === "Completed" ? "Review" : tab);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2076:onPress={() => setActiveTab(tab === "Completed" ? "Review" : tab as Tab)}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2235:(["Applicants", "Active Musicians", "Completed"] as VenueOwnerTab[]).map(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2240:["Pending", "Upcoming", "Ongoing", "Review", "History"].map(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2271:? "No pending applications"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2274:: activeTab === "Review"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2275:? "No completed gigs"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2295:const isLeaderConfirmation = !!item.leader_approval_required;
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2321:{ opacity: item.isCancelled ? 0.6 : 1 },
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2340:item.status === "Accepted" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2341:item.status === "Happening Now" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2342:item.status === "Confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2344:: item.status === "Declined"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2350:<Text style={styles.typeBadgeText}>{item.status}</Text>
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2352:{item.status === "Happening Now" && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2559:<View style={styles.statusContainer}>
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2560:{item.status === "Happening Now" || item.status === "Accepted" || item.status === "Confirmed" || item.status === "Completed" ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2562:) : item.status === "Declined" || item.status === "Fired" ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2569:styles.statusText,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2572:item.status === "Happening Now" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2573:item.status === "Accepted" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2574:item.status === "Confirmed" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2575:item.status === "Completed"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2577:: item.status === "Declined" || item.status === "Fired"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2583:{item.status}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2757:) : activeTab === "Pending" && isMusicianView && isLeaderConfirmation ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2878:status: item?.status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2879:booking_status: item?.booking_status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2916:) : activeTab === "Review" ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2917:// Review Tab: Leave Review + Renew Contract for venue owners
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2921:onPress={() => handleLeaveReview(item)}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:2946:Leave Review
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3032:{ opacity: item.isCancelled ? 0.6 : 1 },
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3059:{/* Status Overlays */}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3067:{item.isCancelled && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3068:<View style={styles.cancelledOverlay}>
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3069:<View style={styles.cancelledBadge}>
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3070:<Text style={styles.cancelledText}>Cancelled</Text>
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3335:{/* Status Text with Icon - Now at the Top */}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3346:style={[styles.statusContainer, { marginBottom: 0 }]}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3348:{item.isCancelled ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3360:) : activeTab === "Review" ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3366:) : activeTab === "Pending" ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3382:styles.statusText,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3384:color: item.isCancelled
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3386:: activeTab === "Pending"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3390:: activeTab === "Review"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3396:{item.status}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3402:item.payment_status !== "paid" && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3454:{/* PENDING TAB: Studio Bookings - Payment Button for Musicians */}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3455:{activeTab === "Pending" &&
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3458:(item.raw_status === "pending_relocation" ||
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3459:item.status === "Relocation Request") ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3547:"Decline this move request? Booking will be cancelled.",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3622:) : activeTab === "Pending" &&
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3657:{item.payment_status !== "paid" && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3687:) : activeTab === "Pending" &&
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3690:// Studio Owner view for pending bookings - just show details (no confirmation needed)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3720:) : activeTab === "Review" ? (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3740:onPress={() => handleLeaveReview(item)}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3752:Leave Review
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3798:item.payment_status !== "paid" && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3915:!item.isCancelled && (
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3970:? selectedItem?.leader_approval_required
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3971:? "Approve for Venue Review"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3976:? selectedItem?.leader_approval_required
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:3999:? selectedItem?.leader_approval_required
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4000:? "Approve this member submission so it can be sent to the venue owner for review?"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4005:? selectedItem?.leader_approval_required
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4026:return "Are you sure you want to revoke this accepted application? The musician will be notified.";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4039:return "Warning: You are withdrawing from an accepted gig with more than 7 days notice. This may affect your reputation with this venue.";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4049:const isFullyPaid = selectedItem?.payment_status === "paid";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4050:const isPartialPaid = selectedItem?.payment_status === "partial";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4071:? selectedItem?.leader_approval_required
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4077:? selectedItem?.leader_approval_required
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4092:? "Submit"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4101:!(modalMode === "decline" && selectedItem?.leader_approval_required)
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4116:!(modalMode === "decline" && selectedItem?.leader_approval_required) &&
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4145:selectedItem?.leader_approval_required &&
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4150:modalMode === "confirm" ? "approved" : "rejected",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4166:let status = "cancelled"; // Default for studio bookings
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4168:status =
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4170:? "accepted"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4171:: "confirmed";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4173:status =
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4175:? "rejected"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4176:: "cancelled";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4179:status =
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4181:? "rejected"
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4182:: "cancelled";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4184:status = "completed";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4186:status = "late";
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4190:console.log("[Bookings][Complete Review Modal][CONFIRM pressed]", {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4195:computedStatus: status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4200:status: selectedItem?.status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4201:booking_status: selectedItem?.booking_status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4217:debugLog("?? Modal onConfirm - Final status:", status);
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4219:"?? Modal onConfirm - Calling handleStatusUpdate with:",
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4222:status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4229:const didUpdate = await handleStatusUpdate(
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4231:status,
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4248:// Keep completion/termination as status updates only.
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4249:// Users can submit reviews manually from the Review tab.
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4251:setActiveTab("Review");
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4271:onLeaveReview={handleLeaveReview}
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4278:statusBarTranslucent
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4578:cancelledOverlay: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4588:cancelledBadge: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4594:cancelledText: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4630:statusContainer: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\bookings.tsx:4634:statusText: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:13:export default function SubmitReviewScreen() {
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:21:bookingId?: string;
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:22:bookingType?: string;
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:25:reviewerRole?: string;
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:32:const [submitting, setSubmitting] = useState(false);
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:62:const isGenericFunctionMessage = error.message.includes('non-2xx status code');
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:83:// Determine what we're reviewing based on params
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:85:const isReviewingCounterparty = !!(params.targetUserId || params.groupId);
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:86:const reviewTitle = isReviewingCounterparty
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:89:const reviewSubtitle = isReviewingCounterparty
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:93:const handleSubmitReview = async () => {
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:94:if (submitting) return;
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:96:showAlert('error', 'Error', 'You must be logged in to submit a review.');
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:110:'Missing review target. Please open this screen from your booking history and try again.'
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:115:if (!params.bookingId || !params.bookingType || !params.reviewerRole) {
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:119:'Missing review metadata. Please open this screen from Bookings and try again.'
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:124:if (params.bookingType !== 'studio_booking' && params.bookingType !== 'gig_application') {
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:125:showAlert('error', 'Error', 'Invalid booking type for review submission.');
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:130:setSubmitting(true);
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:135:const reviewPayload: any = {
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:136:action: 'create_review',
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:140:bookingId: params.bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:141:bookingType: params.bookingType,
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:142:reviewerRole: params.reviewerRole,
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:146:if (params.studioId) reviewPayload.studioId = params.studioId;
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:147:if (params.gigId) reviewPayload.gigId = params.gigId;
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:148:if (params.groupId) reviewPayload.groupId = params.groupId;
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:149:if (params.targetUserId) reviewPayload.targetUserId = params.targetUserId;
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:151:const { data, error } = await supabase.functions.invoke('manage-bookings', {
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:152:body: reviewPayload,
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:161:'Failed to submit review. Please try again.'
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:173:showAlert('success', 'Success', 'Your review has been submitted!', [
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:190:console.log('Review submission error:', e);
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:193:'Failed to submit review. Please try again.'
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:197:setSubmitting(false);
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:204:<Header title="Submit Review" />
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:213:{reviewTitle}
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:216:{reviewSubtitle}
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:257:styles.submitButton,
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:258:{ backgroundColor: colors.primary, opacity: selectedValue === 0 || submitting ? 0.5 : 1 }
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:260:onPress={handleSubmitReview}
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:261:disabled={selectedValue === 0 || submitting}
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:264:<Text style={styles.submitButtonText}>
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:265:{submitting ? 'Submitting...' : 'Submit Review'}
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:277:visible={submitting}
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:279:loadingMessage="Submitting review..."
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:340:submitButton: {
+E:\React-Native-Projects\MusikaLokal\mobile\app\submit_review.tsx:351:submitButtonText: {
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:33:isSubmittingApplication: boolean;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:34:hasExistingApplication: boolean;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:35:existingApplicationStatus: string | null;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:39:selectedGroupId: string | null;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:40:setSelectedGroupId: (value: string | null) => void;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:41:selectedSlotType: "solo" | "duo" | "band" | null;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:42:setSelectedSlotType: (value: "solo" | "duo" | "band" | null) => void;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:43:groupAlreadyApplied: boolean;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:45:handleSubmitApplication: () => void;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:61:isSubmittingApplication,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:62:hasExistingApplication,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:63:existingApplicationStatus,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:67:selectedGroupId,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:68:setSelectedGroupId,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:69:selectedSlotType,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:70:setSelectedSlotType,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:71:groupAlreadyApplied,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:73:handleSubmitApplication,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:79:isSubmittingApplication,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:96:if (selectedSlotType === "duo") return isDuoType(g);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:97:if (selectedSlotType === "band") return isBandType(g);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:114:if (!selectedSlotType) return null;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:115:const slot = slots?.[selectedSlotType] || {};
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:122:const preferredGroupTypesRaw = selectedSlotType === "band" && Array.isArray(slot.preferred_group_types)
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:139:}, [selectedSlotType, slots]);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:142:if (!selectedGroupId) return;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:143:const stillVisible = filteredGroups.some((g) => g.id === selectedGroupId);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:145:setSelectedGroupId(null);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:147:}, [filteredGroups, selectedGroupId, setSelectedGroupId]);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:153:if (selectedSlotType !== null) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:154:setSelectedSlotType(null);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:159:if (!selectedSlotType || !enabledSlotTypes.includes(selectedSlotType)) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:160:setSelectedSlotType(enabledSlotTypes[0]);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:164:selectedGroupId,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:165:selectedSlotType,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:166:setSelectedSlotType,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:174:!selectedGroupId;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:175:const isApplicationsClosed = isGroupApplicationFlow
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:181:const isFormIncomplete =
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:186:isApplicationsClosed;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:187:const isSubmitDisabled =
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:188:isSubmittingApplication ||
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:189:hasExistingApplication ||
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:191:groupAlreadyApplied ||
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:192:isFormIncomplete;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:268:const isSelected = selectedSlotType === slotType;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:296:setSelectedSlotType(slotType);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:321:{selectedSlotType === "duo" && !filteredGroups.length
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:323:: selectedSlotType === "band" && !filteredGroups.length
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:408:const isSelected = selectedGroupId === g.id;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:412:onPress={() => setSelectedGroupId(g.id)}
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:480:const isSelected = selectedGroupId === opt.id;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:484:onPress={() => setSelectedGroupId(opt.id)}
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:597:Review Terms & Conditions
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:628:{!isGroupApplicationFlow && groupAlreadyApplied && selectedGroupId && (
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:654:debugLog("?? SUBMIT APPLICATION BUTTON PRESSED - Validating...");
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:655:handleSubmitApplication();
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:657:disabled={isSubmitDisabled}
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:659:{isSubmittingApplication ? (
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:663:{hasExistingApplication
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:664:? existingApplicationStatus === "rejected"
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:665:? "Application Declined"
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:666:: existingApplicationStatus === "accepted" ||
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:667:existingApplicationStatus === "approved"
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:668:? "Application Accepted"
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:670:: groupAlreadyApplied
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:672:: isApplicationsClosed
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\GigApplyTab.tsx:678:: "Submit Application"}
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:15:groupAlreadyApplied: boolean;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:17:selectedGroupId: string | null;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:18:selectedSlotType: "solo" | "duo" | "band" | null;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:32:setIsSubmittingApplication: (value: boolean) => void;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:33:setHasExistingApplication: (value: boolean) => void;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:34:setExistingApplicationStatus: (value: string | null) => void;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:46:groupAlreadyApplied,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:48:selectedGroupId,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:49:selectedSlotType,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:58:setIsSubmittingApplication,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:59:setHasExistingApplication,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:60:setExistingApplicationStatus,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:122:setIsSubmittingApplication(true);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:128:const selectedGroup = selectedGroupId
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:129:? userGroups.find((g) => g.id === selectedGroupId)
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:132:!!selectedGroupId && !!selectedGroup && selectedGroup.owner_id !== userId;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:146:setIsSubmittingApplication(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:153:console.log("[AppSubmit] isGroupListing:", isGroupListing, "group.type:", group?.type);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:166:console.log("[AppSubmit] Sending notification to group owner:", group.owner_id);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:174:selected_group_id: selectedGroupId || null,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:178:submitted_at: new Date().toISOString(),
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:179:status: "pending",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:193:console.log("[AppSubmit] invokeListingsCrudAction returned.", {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:211:console.log("[AppSubmit] Owner notification sent OK. Inserting self-notification (non-blocking)...");
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:221:title: "Group Application Submitted",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:229:console.log("[AppSubmit] Self-notification inserted OK.");
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:232:console.error("[AppSubmit] Self-notification insert crashed:", err);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:249:console.log("[AppSubmit] Showing success alert for group application.");
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:251:setHasExistingApplication(true);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:252:setExistingApplicationStatus("pending");
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:256:title: "Application Submitted!",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:258:"Your application has been sent to the group leader. They can review your pitch, CV, and video.",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:277:group_id: selectedGroupId || null,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:278:is_solo_application: !selectedGroupId,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:279:slot_type: selectedSlotType || null,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:280:submitted_by_user_id: userId,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:281:leader_approval_status: (() => {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:282:if (!selectedGroupId) return null;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:283:const selectedGroup = userGroups.find((g) => g.id === selectedGroupId);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:284:return selectedGroup?.owner_id === userId ? "approved" : "pending";
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:289:status: "pending",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:296:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:303:String(error?.message || "").includes("leader_approval_status")
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:305:const { leader_approval_status: _unusedStatus, ...legacyPayload } = applicationPayload;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:308:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:315:console.error("Error submitting application:", error);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:320:title: "Duplicate Application",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:329:"Failed to submit application. Please try again.",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:336:console.log("? Application submitted successfully!", data);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:351:group_id: selectedGroupId || null,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:360:if (selectedGroupId && data) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:365:.eq("group_id", selectedGroupId)
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:369:const selectedGroup = userGroups.find((g) => g.id === selectedGroupId);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:403:setHasExistingApplication(true);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:404:setExistingApplicationStatus("pending");
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:408:title: "Application Submitted!",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:409:message: selectedGroupId
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:411:? "Your group application was sent to your group leader for approval. Once approved, it will be visible to the venue owner."
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:412:: "Your group application has been submitted successfully. Group members have been notified. The venue owner will review it and get back to you soon."
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:413:: "Your application has been submitted successfully. The venue owner will review it and get back to you soon.",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:434:setIsSubmittingApplication(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:443:selectedGroupId,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:448:setExistingApplicationStatus,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:449:setHasExistingApplication,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:450:setIsSubmittingApplication,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:460:const handleSubmitApplication = useCallback(async () => {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:461:console.log("=== handleSubmitApplication CALLED ===");
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:520:"Please upload a performance video before submitting your application.",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:530:"Submit Application?",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:531:"Are you sure you want to submit this group application? This action cannot be undone.",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:537:if (groupAlreadyApplied) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:560:const isGroupApplication = !!selectedGroupId;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:590:if (!selectedSlotType || !requiredSlotTypes.includes(selectedSlotType)) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:601:if (selectedSlotType !== "solo" && !isGroupApplication) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:606:"Duo/Group applications require selecting a group before submitting.",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:612:if (selectedSlotType === "duo" || selectedSlotType === "band") {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:613:const selectedGroup = userGroups.find((g) => g.id === selectedGroupId);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:614:const requiredGroupType = selectedSlotType === "duo" ? "duo" : "band";
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:622:selectedSlotType === "duo"
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:631:if (musicianTypeRequired === "group" && selectedSlotType === "solo") {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:642:if (musicianTypeRequired === "solo" && selectedSlotType !== "solo") {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:687:const { data: acceptedApps, error: countError } = await supabase
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:688:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:691:.eq("status", "accepted");
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:693:if (!countError && acceptedApps) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:694:const acceptedCount = acceptedApps.length;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:697:if (acceptedCount >= totalSlots) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:701:message: `All ${totalSlots} performer slot${totalSlots > 1 ? "s have" : " has"} been filled for this gig. No more applications can be accepted.`,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:708:console.error("Error checking slot availability:", e);
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:716:"Submit Application?",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:717:"Are you sure you want to submit this application? This action cannot be undone.",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:724:groupAlreadyApplied,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:729:selectedGroupId,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:730:selectedSlotType,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useApplicationSubmissionAction.ts:739:handleSubmitApplication,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:69:hasExistingStudioBooking: boolean;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:70:existingStudioBookingStatus: string | null;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:76:isCheckingAvailability: boolean;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:77:setIsCheckingAvailability: (value: boolean) => void;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:120:hasExistingStudioBooking,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:121:existingStudioBookingStatus,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:127:isCheckingAvailability,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:128:setIsCheckingAvailability,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:226:const slotsOverlap = (
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:397:status: (refreshError as any)?.status,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:410:status: (refreshedUserError as any)?.status,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:469:return await supabase.functions.invoke("manage-bookings", {
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:474:const endpoint = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/manage-bookings`;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:505:const httpError: any = new Error("Edge Function returned a non-2xx status code");
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:508:httpError.status = response.status;
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:523:{hasExistingStudioBooking && existingStudioBookingStatus === "unpaid" && (
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:567:Payment Pending
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:599:router.push({ pathname: "/bookings", params: { tab: "Pending" } } as any);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:765:{!(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") &&
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:778:opacity: !isRecordingWholeDayAvailable || isCheckingAvailability ? 0.5 : 1,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:781:disabled={!isRecordingWholeDayAvailable || isCheckingAvailability}
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:785:setIsCheckingAvailability(true);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:797:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:811:showAlert("error", "Availability Check Failed", "Failed to check availability. Please try again.");
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:812:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:818:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:833:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:880:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:885:{isCheckingAvailability ? (
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:905:opacity: !selectedSlot || !endTime || isCheckingAvailability ? 0.5 : 1,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:908:disabled={!selectedSlot || !endTime || isCheckingAvailability}
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:912:setIsCheckingAvailability(true);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:917:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:939:showAlert("error", "Availability Check Failed", "Failed to check availability. Please try again.");
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:940:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:946:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:961:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:999:const hasDuplicateOrOverlap = existingSlots.some((slot: { start: string; end: string }) =>
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1000:slotsOverlap(slot, currentSlot),
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1003:if (hasDuplicateOrOverlap) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1006:"Duplicate Time Slot",
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1009:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1059:setIsCheckingAvailability(false);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1064:{isCheckingAvailability ? (
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1078:) : !(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") ? (
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1123:{bookings.length > 0 && !(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") && (
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1161:{!(hasExistingStudioBooking && existingStudioBookingStatus === "unpaid") && (
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1254:debugLog("?? Invoking manage-bookings:create", {
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1286:status: error?.status,
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1297:debugLog("?? Error response status:", response.status);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1342:error?.status === 401 ||
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1358:if (errorMsg.includes("no_overlapping_bookings") || errorMsg.includes("exclusion constraint")) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1409:router.push({ pathname: "/bookings", params: { tab: "Pending" } } as any);
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1421:? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ?${totalBookingsCost.toLocaleString()}\n\nRecording sessions occupy the full day. The studio owner will review and approve your booking request.`
+E:\React-Native-Projects\MusikaLokal\mobile\src\components\listingDetails\StudioBookTab.tsx:1422:: `Book ${bookings.length} session(s) at ${group.name}\nTotal: ?${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:14:requestMessage: string;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:21:setRequestMessage: (value: string) => void;
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:29:requestMessage,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:36:setRequestMessage,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:62:if (!requestMessage.trim()) {
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:84:message: requestMessage,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:85:status: "pending",
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:97:setRequestMessage("");
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:123:requestMessage,
+E:\React-Native-Projects\MusikaLokal\mobile\src\hooks\useBookingRequestAction.ts:128:setRequestMessage,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:40:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:52:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:69:status: 500,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:79:status: 403,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:86:if (action === 'fetch_gig_applications') {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:89:.from('gig_applications')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:99:return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:105:let query = supabaseClient.from('gig_applications').select(`
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:107:gig:gigs!gig_id(name, location, budget, event_date, status, images)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:119:return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:122:// UPDATE APPLICATION STATUS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:123:if (action === 'update_application_status') {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:124:const { applicationId, status } = params;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:127:.from('gig_applications')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:140:.from('gig_applications')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:141:.update({ status })
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:154:if (status === 'rejected') {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:156:notificationTitle = 'Application Declined';
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:157:notificationMessage = `Your application for "${gigName}" has been declined.`;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:158:} else if (status === 'accepted') {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:160:notificationTitle = 'Application Accepted! ??';
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:161:notificationMessage = `Congratulations! Your application for "${gigName}" has been accepted.`;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:175:status: status
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:180:return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:188:return new Response(JSON.stringify({ blocked: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:195:.from('gig_applications')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:197:.eq('status', 'cancelled')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:208:}), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:216:.from('gig_applications')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:230:status: 403,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:235:.from('gig_applications')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:236:.update({ status: 'cancelled' })
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:244:.from('gig_applications')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:261:.from('gig_applications')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:263:.eq('status', 'cancelled')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:272:return new Response(JSON.stringify({ success: true, cancellation_count: cancellationCount }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\gig-applications\index.ts:286:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:79:const bookingId = payload.meta?.booking_id;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:81:if (eventType && bookingId) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:86:.contains("meta", { event_type: eventType, booking_id: bookingId })
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:117:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:119:"id, user_id, studio_id, booking_date, start_time, end_time, status, studio:studios(name, owner_id)",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:121:.eq("status", "confirmed")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:144:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:146:status: "checked_in",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:150:.eq("status", "confirmed")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:196:status: 401,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:228:status: 401,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:241:status: 403,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:261:Pending: [],
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:264:Review: [],
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:272:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:287:// console.log(`[DEBUG] Booking ${b.id}: Status=${b.status}, End=${endDate.toISOString()}, Now=${now.toISOString()}`)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:289:// Determine status text - for pending bookings, check if payment is needed
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:290:const isUnpaid = b.status === "pending" && (!b.payment_status || b.payment_status === "unpaid" || b.payment_status === "pending" || b.payment_status === "failed");
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:307:status:
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:308:b.status === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:312:: b.status === "pending_relocation"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:314:: b.status === "confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:315:? "Confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:316:: b.status === "checked_in"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:318:: b.status === "cancelled"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:319:? "Declined"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:320:: b.status,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:322:isCancelled: b.status === "cancelled",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:324:b.status === "pending_relocation"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:326:: b.status === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:329:raw_status: b.status,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:335:reviewed_by_customer: b.reviewed_by_customer || false,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:336:reviewed_by_owner: b.reviewed_by_owner || false,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:338:// Payment-related fields for musician to see payment status
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:339:payment_status: b.payment_status || "unpaid",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:351:if (b.status === "pending" || b.status === "pending_relocation") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:353:categorized.Pending.push(item);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:354:} else if (b.status === "confirmed") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:356:// AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:358:categorized.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:362:categorized.Ongoing.push({ ...item, status: "In Progress" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:367:} else if (b.status === "checked_in") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:369:// AUTO-COMPLETE: If checked_in and time passed, it's done. Move to Review.
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:371:categorized.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:375:categorized.Ongoing.push({ ...item, status: "In Progress" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:377:} else if (b.status === "completed") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:378:// Completed bookings that need review
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:379:if (!b.reviewed_by_customer) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:381:categorized.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:383:} else if (b.status === "cancelled") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:402:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:412:const bookingIds = (bookings || []).map((booking: any) => booking.id).filter(Boolean);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:414:if (bookingIds.length > 0) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:418:.in("booking_id", bookingIds)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:457:// For studio owner: show payment status for pending bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:458:const isUnpaid = b.status === "pending" && (!b.payment_status || b.payment_status === "unpaid" || b.payment_status === "pending" || b.payment_status === "failed");
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:475:status:
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:476:b.status === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:480:: b.status === "pending_relocation"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:482:: b.status === "confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:483:? "Confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:484:: b.status === "checked_in"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:486:: b.status === "cancelled"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:487:? "Declined"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:488:: b.status,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:490:isCancelled: b.status === "cancelled",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:491:action: b.status === "pending_relocation" ? "Awaiting musician response" : "Details", // No confirmation needed - payment auto-confirms
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:492:raw_status: b.status,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:503:reviewed_by_customer: b.reviewed_by_customer || false,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:504:reviewed_by_owner: b.reviewed_by_owner || false,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:507:payment_status: b.payment_status || "unpaid",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:521:if (b.status === "pending" || b.status === "pending_relocation") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:523:categorized.Pending.push(item);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:524:} else if (b.status === "confirmed") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:526:// AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:528:categorized.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:532:categorized.Ongoing.push({ ...item, status: "In Progress" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:537:} else if (b.status === "checked_in") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:539:// AUTO-COMPLETE: If checked_in and time passed, it's done. Move to Review.
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:541:categorized.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:545:categorized.Ongoing.push({ ...item, status: "In Progress" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:547:} else if (b.status === "completed") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:548:if (!b.reviewed_by_owner) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:550:categorized.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:552:} else if (b.status === "cancelled") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:563:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:577:const normalizedStatus = (g.status || "").toLowerCase();
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:606:status:
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:607:normalizedStatus === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:609:: normalizedStatus === "accepted"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:610:? "Accepted"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:611:: normalizedStatus === "completed"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:612:? "Completed"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:613:: normalizedStatus === "rejected" ||
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:614:normalizedStatus === "cancelled" ||
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:615:normalizedStatus === "fired"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:617:: g.status,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:619:isCancelled:
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:620:normalizedStatus === "cancelled" ||
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:621:normalizedStatus === "rejected" ||
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:622:normalizedStatus === "fired",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:623:action: normalizedStatus === "accepted" ? "View Details" : "Details",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:625:reviewed_by_applicant: g.reviewed_by_applicant || false,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:628:if (normalizedStatus === "pending") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:630:categorized.Pending.push(item);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:631:} else if (normalizedStatus === "accepted") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:632:// Time-based categorization for accepted gigs
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:640:categorized.Ongoing.push({ ...item, status: "Happening Now" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:642:// Gig has ended - show in Review if not yet reviewed
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:643:if (!g.reviewed_by_applicant) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:645:categorized.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:658:normalizedStatus === "rejected" ||
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:659:normalizedStatus === "cancelled" ||
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:660:normalizedStatus === "fired"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:663:categorized.Review.push({ ...item, status: "Fired" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:664:} else if (normalizedStatus === "completed") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:666:categorized.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:670:// Leader confirmation queue: applications submitted by members to leader-owned groups
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:671:const { data: leaderPendingApps, error: leaderPendingError } = await supabaseClient
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:672:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:674:"*, gig:gig_id(name, event_date, location), group:group_id(id, name, group_type, owner_id), submitter:submitted_by_user_id(full_name, avatar_url)",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:676:.eq("status", "pending")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:677:.eq("leader_approval_status", "pending")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:678:.neq("submitted_by_user_id", userId)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:681:if (leaderPendingError) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:682:console.log("Error fetching leader pending apps:", leaderPendingError);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:686:leaderPendingApps?.forEach((app: any) => {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:692:const submitterName = app.submitter?.full_name || "Group Member";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:697:leader_approval_required: true,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:701:submitted_by_user_id: app.submitted_by_user_id,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:703:customer_name: submitterName,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:709:app.submitter?.avatar_url ||
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:711:status: "Awaiting Your Approval",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:713:isCancelled: false,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:714:action: "Review",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:723:categorized.Pending.push(item);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:727:// D. For Venue Owners: Fetch accepted applications for their gigs
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:738:const { data: acceptedApps, error: appError } = await supabaseClient
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:739:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:748:.in("status", ["accepted", "pending", "rejected", "cancelled", "completed"])
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:749:.or("leader_approval_status.is.null,leader_approval_status.eq.approved")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:753:console.log("Error fetching accepted applications:", appError);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:756:// Process accepted applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:757:acceptedApps?.forEach((app: any) => {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:783:status:
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:784:app.status === "pending"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:786:: app.status === "accepted"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:787:? "Confirmed"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:788:: app.status === "rejected" || app.status === "cancelled"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:790:: "Completed",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:792:isCancelled: app.status === "rejected" || app.status === "cancelled",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:793:action: app.status === "pending" ? "Confirm Now" : "View Details",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:803:reviewed_by_organizer: app.reviewed_by_organizer || false,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:806:if (app.status === "pending") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:808:categorized.Pending.push(item);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:809:} else if (app.status === "accepted") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:810:// Accepted musicians always go to Active Musicians (Upcoming/Ongoing), never to Completed
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:820:status: "Happening Now",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:823:// Future or past-date accepted musicians stay in Upcoming (Active Musicians)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:832:} else if (app.status === "rejected" || app.status === "cancelled") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:833:// Fired musicians go to Review (Completed tab)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:835:categorized.Review.push({ ...item, status: "Fired" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:836:} else if (app.status === "completed") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:837:// Completed contracts go to Review (Completed tab) - can be renewed
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:839:categorized.Review.push({ ...item, status: "Completed" });
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:847:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:867:status: 403,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:901:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:914:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:933:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:948:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:963:status: 500,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:999:status: 409,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1011:status: 409,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1031:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1043:status: 409,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1055:status: 409,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1070:status: 409,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1076:// Check if user already has a pending booking for this studio ON THIS DATE (prevent spam)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1077:const { data: existingPendingBooking, error: existingError } =
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1079:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1080:.select("id, status, booking_date")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1084:.eq("status", "pending")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1091:if (existingPendingBooking) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1095:"You already have a pending booking for this studio on this date. Please wait for the studio owner to respond, or cancel your existing booking to create a new one.",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1096:existing_booking_id: existingPendingBooking.id,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1100:status: 409, // Conflict
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1106:console.log("?? Checking multi-slot availability...");
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1146:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1161:status: 409,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1173:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1181:"One or more time slots are not available. They may be outside operating hours, overlap with another booking, or the studio may be closed on this date.",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1185:status: 409, // Conflict
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1207:status: 404,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1227:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1291:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1350:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1364:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1389:status: "pending",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1399:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1424:await supabaseAdmin.from("studio_bookings").delete().eq("id", data.id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1460:status: 201,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1464:// 3. UPDATE STATUS (Cancel/Confirm)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1465:if (action === "update_status") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1466:const { booking_id, new_status, type_id, cancellation_reason } = params; // type_id: 'studio_booking' or 'gig_application'
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1468:console.log("?? update_status called with:", {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1470:new_status,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1475:let table = "studio_bookings";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1476:if (type_id === "gig_application") table = "gig_applications";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1480:const attendanceIssueStatuses = ["late", "not_attending", "no_show"];
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1482:table === "studio_bookings" &&
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1483:attendanceIssueStatuses.includes(new_status);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1487:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1496:new_status === "late"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1507:title: new_status === "late" ? "Late Arrival Alert" : "Attendance Alert",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1509:new_status === "late"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1517:issue_status: new_status,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1518:event_type: `booking_${new_status}`,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1533:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1538:const updateData: any = { status: new_status };
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1540:if (table === "gig_applications") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1542:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1552:status: 404,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1566:const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled"];
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1567:const applicantAllowedStatuses = ["cancelled"];
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1570:!(isOrganizer && organizerAllowedStatuses.includes(new_status)) &&
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1571:!(isApplicant && applicantAllowedStatuses.includes(new_status))
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1575:status: 403,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1580:// Add cancellation_reason if status is cancelled/rejected and reason is provided
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1582:(new_status === "cancelled" || new_status === "rejected") &&
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1590:const updateClient = table === "gig_applications" ? supabaseAdmin : supabaseClient;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1606:status: 404,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1612:["cancelled", "rejected", "confirmed", "accepted", "completed"].includes(new_status)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1615:const notificationEventType = `${table}_${new_status}`;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1624:if (table === "studio_bookings") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1627:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1637:if (new_status === "cancelled") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1639:notificationTitle = "Booking Declined";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1641:? `Your booking at ${bookingInfo.studio.name} has been declined/cancelled. Reason: ${cancellation_reason}`
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1642:: `Your booking at ${bookingInfo.studio.name} has been declined/cancelled.`;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1644:} else if (new_status === "confirmed") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1646:notificationTitle = "Booking Confirmed!";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1647:notificationMessage = `Your booking at ${bookingInfo.studio.name} has been confirmed.`;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1651:} else if (table === "gig_applications") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1654:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1678:if (new_status === "rejected") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1680:notificationTitle = "Application Declined";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1681:notificationMessage = `Your application for ${gigMeta?.name || "this gig"} has been declined.`;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1683:} else if (new_status === "accepted") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1685:notificationTitle = "Application Accepted!";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1686:notificationMessage = `Your application for ${gigMeta?.name || "this gig"} has been accepted!`;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1688:} else if (new_status === "completed") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1690:notificationTitle = "Gig Completed";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1691:notificationMessage = `Your contract for ${gigMeta?.name || "this gig"} has been marked as completed.`;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1707:status: new_status,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1722:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1727:if (action === "partial_slot_approval") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1731:accepted_slots,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1732:declined_slots,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1736:if (!booking_id || !user_id || !Array.isArray(accepted_slots)) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1739:error: "booking_id, user_id, and accepted_slots are required.",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1743:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1748:const safeDeclinedSlots = Array.isArray(declined_slots)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1749:? declined_slots
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1753:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1755:"id, user_id, studio_id, booking_date, status, base_rate, hours, final_price, studio:studios(name, owner_id, hourly_rate)",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1765:status: 404,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1775:status: 403,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1780:if (bookingDetails.status !== "pending") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1782:JSON.stringify({ error: "Only pending bookings can be partially approved." }),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1785:status: 409,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1790:if (accepted_slots.length === 0) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1792:cancellation_reason || "All requested time slots were declined by the studio owner.";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1795:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1797:status: "cancelled",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1809:title: "Booking Declined",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1810:message: `Your booking request for ${bookingDetails.studio?.name || "this studio"} has been declined.`,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1815:event_type: "booking_all_slots_declined",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1820:JSON.stringify({ success: true, status: "cancelled" }),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1823:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1828:const normalizedAcceptedSlots = accepted_slots.map((slot: any) => ({
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1833:const totalHours = normalizedAcceptedSlots.reduce(
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1840:JSON.stringify({ error: "Accepted slots must have a positive duration." }),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1843:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1848:const sortedStarts = normalizedAcceptedSlots
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1851:const sortedEnds = normalizedAcceptedSlots
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1866:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1868:status: "confirmed",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1875:safeDeclinedSlots.length > 0
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1876:? cancellation_reason || "Some requested time slots were declined."
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1890:const slotRows = normalizedAcceptedSlots.map((slot: any, index: number) => ({
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1903:const slotLabel = normalizedAcceptedSlots
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1911:type: safeDeclinedSlots.length > 0 ? "info" : "success",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1913:safeDeclinedSlots.length > 0
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1914:? "Booking Partially Approved"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1915:: "Booking Confirmed!",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1917:safeDeclinedSlots.length > 0
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1918:? `Your booking was partially approved. Accepted slots: ${slotLabel}.`
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1919:: `Your booking at ${bookingDetails.studio?.name || "the studio"} has been confirmed.`,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1924:accepted_slots: normalizedAcceptedSlots,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1925:declined_slots: safeDeclinedSlots,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1927:safeDeclinedSlots.length > 0
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1928:? "booking_partial_slot_approval"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1929:: "booking_confirmed",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1936:status: "confirmed",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1937:accepted_slots: normalizedAcceptedSlots,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1938:declined_slots: safeDeclinedSlots,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1944:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1949:// 4. CREATE REVIEW
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1950:if (action === "create_review") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1958:targetUserId, // For reviewing a user (musician or owner)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1959:bookingId,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1960:bookingType, // 'studio_booking' or 'gig_application'
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1961:reviewerRole, // 'customer' or 'owner' / 'applicant' or 'organizer'
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1964:// Enforce role ownership against the booking to avoid mis-targeted reviews.
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1965:if (bookingId && bookingType === "studio_booking") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1967:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1969:.eq("id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1975:{ headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 },
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1979:const isStudioOwnerReviewer = reviewerRole === "owner" && bookingAuth.studio?.owner_id === userId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1980:const isCustomerReviewer = reviewerRole === "customer" && bookingAuth.user_id === userId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1982:if (!isStudioOwnerReviewer && !isCustomerReviewer) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1984:JSON.stringify({ error: "You are not allowed to submit this studio review." }),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1985:{ headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1990:if (bookingId && bookingType === "gig_application") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1992:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:1994:.eq("id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2000:{ headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 },
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2004:const isOrganizerReviewer = reviewerRole === "organizer" && appAuth.gig?.organizer_id === userId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2005:const isApplicantReviewer = reviewerRole === "applicant" && appAuth.applicant_id === userId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2007:if (!isOrganizerReviewer && !isApplicantReviewer) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2009:JSON.stringify({ error: "You are not allowed to submit this gig review." }),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2010:{ headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2015:// Check for duplicate review.
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2016:// Prefer booking-level duplicate detection so users can review the same entity
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2018:let existingReview = null;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2019:if (bookingId && bookingType === "studio_booking") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2021:.from("reviews")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2024:.eq("studio_booking_id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2026:existingReview = data;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2027:} else if (bookingId && bookingType === "gig_application") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2029:.from("reviews")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2032:.eq("gig_application_id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2034:existingReview = data;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2037:.from("reviews")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2042:existingReview = data;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2045:.from("reviews")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2050:existingReview = data;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2053:.from("reviews")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2058:existingReview = data;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2061:.from("reviews")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2066:existingReview = data;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2069:if (existingReview) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2072:error: "You have already submitted a review for this entity.",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2076:status: 409,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2081:// Insert the review
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2082:const reviewData: any = {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2088:if (studioId) reviewData.studio_id = studioId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2089:if (gigId) reviewData.gig_id = gigId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2090:if (groupId) reviewData.group_id = groupId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2091:if (targetUserId) reviewData.user_id = targetUserId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2092:if (bookingId && bookingType === "studio_booking")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2093:reviewData.studio_booking_id = bookingId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2094:if (bookingId && bookingType === "gig_application")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2095:reviewData.gig_application_id = bookingId;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2097:const { data: review, error: reviewError } = await supabaseClient
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2098:.from("reviews")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2099:.insert(reviewData)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2103:if (reviewError) throw reviewError;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2105:// Update booking reviewed status
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2106:if (bookingId && bookingType === "studio_booking") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2108:reviewerRole === "customer"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2109:? "reviewed_by_customer"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2110:: "reviewed_by_owner";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2112:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2114:.eq("id", bookingId);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2116:// Check if BOTH have reviewed -> mark as completed
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2118:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2119:.select("reviewed_by_customer, reviewed_by_owner")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2120:.eq("id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2123:if (booking?.reviewed_by_customer && booking?.reviewed_by_owner) {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2125:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2126:.update({ status: "completed" })
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2127:.eq("id", bookingId);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2129:} else if (bookingId && bookingType === "gig_application") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2131:reviewerRole === "applicant"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2132:? "reviewed_by_applicant"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2133:: "reviewed_by_organizer";
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2135:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2137:.eq("id", bookingId);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2140:return new Response(JSON.stringify(review), {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2142:status: 201,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2148:// 6. CHECK REVIEW STATUS (to know if user already reviewed)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2149:if (action === "check_review_status") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2150:const { bookingId, bookingType } = params;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2152:if (bookingType === "studio_booking") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2154:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2155:.select("reviewed_by_customer, reviewed_by_owner, status")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2156:.eq("id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2162:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2166:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2167:.select("reviewed_by_applicant, reviewed_by_organizer, status")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2168:.eq("id", bookingId)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2174:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2185:// 1. Verify the booking exists and is confirmed
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2187:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2203:status: 404,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2211:status: 404,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2228:status: 403,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2233:// 3. Verify status
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2234:console.log("?? Current booking status:", booking.status);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2235:if (booking.status === "checked_in") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2240:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2245:if (booking.status !== "confirmed") {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2248:error: `Cannot check in. Booking status is ${booking.status}.`,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2252:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2257:// 4. Update status to checked_in
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2260:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2262:status: "checked_in",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2273:error: "Failed to update check-in status.",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2279:status: 500,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2287:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2304:.from("gig_applications")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2314:status: 404,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2327:status: 403,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2378:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2392:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2396:// 1. Fetch current booking to check status
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2398:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2399:.select("id, status, payment_status, payment_type, remaining_balance, final_price, user_id, studio:studios(name)")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2406:status: 404,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2411:// If it sends 'confirmed' status, it moves to Upcoming
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2413:payment_status: 'paid',
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2415:status: 'confirmed', // Auto-confirm when paid
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2431:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2439:return new Response(JSON.stringify({ error: "Failed to update booking status", details: updateError }), {
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2441:status: 500,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2451:message: `Your booking at ${booking.studio?.name} has been confirmed.`,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2465:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2478:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2485:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2495:status: 404,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2506:status: 403,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2517:status: 400,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2526:.from("studio_bookings")
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2529:payment_status: "paid",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2540:status: 500,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2576:status: "completed",
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2622:status: 200,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\functions\manage-bookings\index.ts:2631:status: 400,

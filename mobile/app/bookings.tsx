@@ -1322,13 +1322,23 @@ export default function BookingsScreen() {
     decision: "approved" | "rejected",
   ) => {
     try {
-      const { data, error } = await supabase.functions.invoke("gig-applications", {
+      const invokeOptions: Record<string, any> = {
         body: {
           action: "update_leader_approval",
           applicationId: item.id,
           decision,
           userId,
         },
+      };
+
+      if (session?.access_token) {
+        invokeOptions.headers = {
+          Authorization: `Bearer ${session.access_token}`,
+        };
+      }
+
+      const { data, error } = await supabase.functions.invoke("gig-applications", {
+        ...invokeOptions,
       });
 
       if (error) throw error;

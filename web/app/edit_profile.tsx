@@ -3,17 +3,17 @@ import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  BackHandler,
-  Image,
+    ActivityIndicator,
+    BackHandler,
+    Image,
 
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -976,7 +976,7 @@ const styles = StyleSheet.create({
     padding: 10,
     fontSize: 14,
     fontFamily: "Poppins_400Regular",
-    textAlign: "center",
+    textAlign: "left",
   },
   moreText: {
     fontSize: 12,

@@ -1,0 +1,50 @@
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:65:verification_status TEXT CHECK (verification_status IN ('PENDING', 'APPROVED', 'DECLINED', 'ABANDONED', 'PENDING_REVIEW')),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:126:status TEXT DEFAULT 'open' CHECK (status IN ('open', 'closed', 'cancelled')),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:208:status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'resolved', 'dismissed')),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:217:CREATE TABLE studio_bookings (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:236:status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled', 'completed')),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:339:CREATE TABLE gig_applications (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:346:status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:385:status TEXT DEFAULT 'completed' CHECK (status IN ('pending', 'completed', 'failed')),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:430:ELSE ROUND((COUNT(CASE WHEN status = 'completed' THEN 1 END)::NUMERIC / COUNT(id)::NUMERIC) * 100, 0)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:433:WHERE status IN ('completed', 'cancelled')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:550:AND status NOT IN ('cancelled')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1112:ELSE ROUND((COUNT(CASE WHEN status = 'completed' THEN 1 END)::NUMERIC / COUNT(id)::NUMERIC) * 100, 0)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1115:WHERE status IN ('completed', 'cancelled')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1185:WHERE status = 'pending';
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1188:CREATE INDEX IF NOT EXISTS idx_studio_bookings_user_studio_status ON studio_bookings(user_id, studio_id, status);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1249:CREATE INDEX IF NOT EXISTS idx_gig_applications_status ON gig_applications(status);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1299:ALTER TABLE studio_bookings ADD COLUMN IF NOT EXISTS reviewed_by_customer BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1300:ALTER TABLE studio_bookings ADD COLUMN IF NOT EXISTS reviewed_by_owner BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1302:ALTER TABLE gig_applications ADD COLUMN IF NOT EXISTS reviewed_by_applicant BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1303:ALTER TABLE gig_applications ADD COLUMN IF NOT EXISTS reviewed_by_organizer BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1432:WHERE status = 'pending';
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1535:AND sb.status IN ('pending', 'confirmed')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1658:CREATE INDEX IF NOT EXISTS idx_studio_bookings_date_status
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1659:ON studio_bookings(studio_id, booking_date, status);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1693:DROP CONSTRAINT studio_bookings_status_check;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1696:ADD CONSTRAINT studio_bookings_status_check
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1697:CHECK (status IN ('pending', 'confirmed', 'checked_in', 'cancelled', 'completed', 'rejected', 'accepted'));
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1704:DROP CONSTRAINT IF EXISTS studio_bookings_status_check;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1706:-- 2. Add new constraint with 'checked_in' status
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1708:ADD CONSTRAINT studio_bookings_status_check
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1709:CHECK (status IN ('pending', 'confirmed', 'cancelled', 'completed', 'checked_in'));
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1721:ADD COLUMN IF NOT EXISTS reviewed_by_customer BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1724:ADD COLUMN IF NOT EXISTS reviewed_by_owner BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1748:SET status = 'cancelled'
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1755:AND b1.status NOT IN ('cancelled', 'rejected')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1756:AND b2.status NOT IN ('cancelled', 'rejected')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1778:WHERE (status != 'cancelled' AND status != 'rejected');
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1825:ELSE ROUND((COUNT(CASE WHEN status = 'completed' THEN 1 END)::NUMERIC / COUNT(id)::NUMERIC) * 100, 0)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1828:WHERE status IN ('completed', 'cancelled')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1872:status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled')),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1881:WHERE status = 'pending';
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1910:(to_user_id = auth.uid() AND status = 'pending') OR
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1911:(from_user_id = auth.uid() AND status = 'pending')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1929:IF req.status != 'pending' THEN
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1937:-- Update request status
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1939:SET status = 'accepted', responded_at = NOW()
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1977:IF req.status != 'pending' THEN
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1986:SET status = 'declined', responded_at = NOW()
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:2005:IF req.status != 'pending' THEN
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:2014:SET status = 'cancelled', responded_at = NOW()

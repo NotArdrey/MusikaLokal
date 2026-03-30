@@ -20,7 +20,12 @@ import ImageUploader from "../src/components/ImageUploader";
 import LocationPicker from "../src/components/LocationPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
-import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
+import {
+    isDuoGroupType,
+    mapDbGroupTypeToUiGroupType,
+    mapUiGroupTypeToDbGroupType,
+    PH_MUSIC_GROUP_TYPES,
+} from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
 import {
     getGroupMembersLabel,
@@ -116,6 +121,11 @@ export default function EditGroupScreen() {
     setAlertVisible(true);
   };
 
+  const isMissingRelationError = (error: any, relationName: string) => {
+    const message = String(error?.message || "").toLowerCase();
+    return error?.code === "42P01" && message.includes(relationName.toLowerCase());
+  };
+
   const handleAttemptLeave = useCallback(() => {
     if (saving) return;
 
@@ -146,7 +156,7 @@ export default function EditGroupScreen() {
   const [pendingMember, setPendingMember] = useState<any>(null);
 
   // Group type based on the constants
-  const [groupType, setGroupType] = useState<string>("band");
+  const [groupType, setGroupType] = useState<string>(mapDbGroupTypeToUiGroupType("band"));
   const [groupTypeModalVisible, setGroupTypeModalVisible] = useState(false);
 
   // Leadership Transfer State
@@ -158,7 +168,7 @@ export default function EditGroupScreen() {
   const [isTransferring, setIsTransferring] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [groupOwnerId, setGroupOwnerId] = useState<string | null>(null);
-  const [initialGroupType, setInitialGroupType] = useState<string>("band");
+  const [initialGroupType, setInitialGroupType] = useState<string>(mapDbGroupTypeToUiGroupType("band"));
   const [initialMemberUserIds, setInitialMemberUserIds] = useState<string[]>([]);
   const [impactSummary, setImpactSummary] = useState({
     activeApplications: 0,
@@ -302,6 +312,9 @@ export default function EditGroupScreen() {
         .eq('owner_id', user.id)
         .single();
 
+      let legacyMembers: any[] = [];
+      let legacyImages: string[] = [];
+
       const { data: legacyData, error: legacyError } = await supabase
         .from('groups_legacy_projection')
         .select('members, images')
@@ -309,7 +322,50 @@ export default function EditGroupScreen() {
         .single();
 
       if (error) throw error;
-      if (legacyError) throw legacyError;
+
+      if (!legacyError && legacyData) {
+        legacyMembers = Array.isArray(legacyData.members) ? legacyData.members : [];
+        legacyImages = Array.isArray(legacyData.images) ? legacyData.images : [];
+      } else if (legacyError && isMissingRelationError(legacyError, "groups_legacy_projection")) {
+        const [{ data: rosterRows, error: rosterError }, { data: mediaRows, error: mediaError }] = await Promise.all([
+          supabase
+            .from("group_roster_members")
+            .select("user_id, member_name, member_role, instrument, avatar_url, sort_order, raw_member")
+            .eq("group_id", groupId)
+            .order("sort_order", { ascending: true })
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("group_media")
+            .select("media_url, sort_order, created_at")
+            .eq("group_id", groupId)
+            .eq("media_type", "image")
+            .order("sort_order", { ascending: true })
+            .order("created_at", { ascending: true }),
+        ]);
+
+        if (!rosterError) {
+          legacyMembers = (rosterRows || []).map((row: any) => {
+            if (row?.raw_member && typeof row.raw_member === "object") {
+              return row.raw_member;
+            }
+            return {
+              name: row?.member_name || "Unknown",
+              role: row?.member_role || undefined,
+              user_id: row?.user_id || undefined,
+              avatar_url: row?.avatar_url || undefined,
+              instrument: row?.instrument || "",
+            };
+          });
+        }
+
+        if (!mediaError) {
+          legacyImages = (mediaRows || [])
+            .map((row: any) => row.media_url)
+            .filter((url: any) => typeof url === "string" && url.trim().length > 0);
+        }
+      } else if (legacyError) {
+        throw legacyError;
+      }
 
       if (!baseData) {
         showAlert(
@@ -323,8 +379,8 @@ export default function EditGroupScreen() {
 
       const data = {
         ...baseData,
-        members: legacyData?.members || [],
-        images: legacyData?.images || [],
+        members: legacyMembers,
+        images: legacyImages,
       } as any;
 
       // If no data returned, user doesn't own this group
@@ -352,8 +408,22 @@ export default function EditGroupScreen() {
       setAddress(data.location || "");
       setLatitude(data.latitude || null);
       setLongitude(data.longitude || null);
-      // Load group type (default to 'band' for backward compatibility)
-      const loadedType = data.group_type || "band";
+      // Restore exact UI group type if available from persisted roster payload.
+      const persistedUiGroupType = Array.isArray(data.members)
+        ? data.members
+            .map((member: any) =>
+              typeof member === "object" && member
+                ? String(member.group_type_ui || "").trim().toLowerCase()
+                : "",
+            )
+            .find((typeId: string) =>
+              PH_MUSIC_GROUP_TYPES.some((entry) => entry.id === typeId),
+            )
+        : "";
+      // Fallback to canonical db value for old records.
+      const loadedType =
+        persistedUiGroupType ||
+        mapDbGroupTypeToUiGroupType(data.group_type || "band");
       setGroupType(loadedType);
       setInitialGroupType(loadedType);
       // Handle both old string[] format and new MemberDetail[] format
@@ -538,7 +608,7 @@ export default function EditGroupScreen() {
         longitude,
         members,
         images: orderedImages,
-        group_type: groupType, // 'duo' or 'band'
+        group_type: mapUiGroupTypeToDbGroupType(groupType),
       };
 
       // Direct update to groups table
@@ -558,19 +628,8 @@ export default function EditGroupScreen() {
 
       if (error) {
         console.error('❌ Update failed with error:', error);
-        // Note: invoke returns { data, error } but here only error was destructured. 
-        // We can't access data unless we change destructuring, but error usually contains info.
-
-        let errorMsg = error.message || "Unknown error";
-        let alertMessage = `Failed to update group: ${errorMsg}`;
-
-        // If it's a FunctionsHttpError, context might have details, 
-        // but simply dumping stringified error is a safe bet for "similar all error"
-        if (errorMsg.includes("non-2xx")) {
-          alertMessage += `\n\nRaw: ${JSON.stringify(error)}`;
-        }
-
-        showAlert("error", "Error", alertMessage);
+        const errorMsg = error.message || "Unknown error";
+        showAlert("error", "Error", `Failed to update group: ${errorMsg}`);
         return;
       }
 
@@ -583,7 +642,10 @@ export default function EditGroupScreen() {
         instrument: member.instrument || null,
         avatar_url: member.avatar_url || null,
         sort_order: index,
-        raw_member: member,
+        raw_member: {
+          ...member,
+          group_type_ui: groupType,
+        },
       }));
       if (rosterRows.length > 0) {
         const { error: rosterError } = await supabase
@@ -645,7 +707,7 @@ export default function EditGroupScreen() {
       }
 
       if (desiredMemberUserIds.length > 0) {
-        const inClause = `(${desiredMemberUserIds.map((id) => `"${id}"`).join(",")})`;
+        const inClause = `(${desiredMemberUserIds.join(",")})`;
         const { error: deleteStaleMembersError } = await supabase
           .from("group_members")
           .delete()
@@ -825,7 +887,7 @@ export default function EditGroupScreen() {
     showAlert(
       "warning",
       "Remove Member",
-      `Remove ${memberName} from this ${groupType === "duo" ? "duo" : "band"}?${impactLine}`,
+      `Remove ${memberName} from this ${isDuoGroupType(groupType) ? "duo" : "band"}?${impactLine}`,
       [
         { text: "Cancel", style: "cancel" },
         {
