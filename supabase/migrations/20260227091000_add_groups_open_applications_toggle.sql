@@ -1,2 +1,0 @@
-ALTER TABLE public.groups
-ADD COLUMN IF NOT EXISTS open_group_applications BOOLEAN NOT NULL DEFAULT TRUE;

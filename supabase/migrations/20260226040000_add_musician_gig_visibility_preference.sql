@@ -1,2 +1,0 @@
-ALTER TABLE public.profiles
-ADD COLUMN IF NOT EXISTS show_gig_statuses BOOLEAN NOT NULL DEFAULT TRUE;
