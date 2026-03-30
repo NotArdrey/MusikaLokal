@@ -772,6 +772,7 @@ export default function AddStudioScreen() {
           business_permit_url: payload.business_permit_url,
           latitude: payload.latitude,
           longitude: payload.longitude,
+          permit_status: 'pending_review',
         })
         .select()
         .single();
@@ -960,11 +961,7 @@ export default function AddStudioScreen() {
 
   const handleSuccessRedirect = () => {
     setModalVisible(false);
-    if (newStudioId) {
-      router.push({ pathname: "/manage_studio", params: { id: newStudioId } });
-    } else {
-      router.back();
-    }
+    router.push({ pathname: "/bookings", params: { tab: "Pending" } });
   };
 
   // Start address verification (before studio creation)

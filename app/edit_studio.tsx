@@ -256,9 +256,11 @@ export default function EditStudioScreen() {
 
   // Business Permit state
   const [businessPermitUrl, setBusinessPermitUrl] = useState<string>("");
+  const [initialBusinessPermitUrl, setInitialBusinessPermitUrl] = useState<string>("");
   const [businessPermitFileName, setBusinessPermitFileName] = useState<string>("");
   const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
+  const [permitStatus, setPermitStatus] = useState<string>("pending_review");
 
   // Availability state
   const daysOfWeek = [
@@ -935,6 +937,8 @@ export default function EditStudioScreen() {
 
       console.log("🔧 Setting businessPermitUrl to:", data.business_permit_url || "");
       setBusinessPermitUrl(data.business_permit_url || "");
+      setInitialBusinessPermitUrl(data.business_permit_url || "");
+      setPermitStatus(data.permit_status || "pending_review");
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
         console.log("🔧 Setting businessPermitFileName to:", fileName);
@@ -2301,6 +2305,28 @@ export default function EditStudioScreen() {
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
         if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
         throw new Error(alertMessage);
+      }
+
+      const shouldMarkResubmitted =
+        permitStatus === "rejected" &&
+        !!businessPermitUrl &&
+        businessPermitUrl !== initialBusinessPermitUrl;
+
+      if (shouldMarkResubmitted) {
+        const { error: permitStatusError } = await supabase
+          .from("studios")
+          .update({
+            permit_status: "resubmitted",
+            permit_rejection_reason: null,
+          })
+          .eq("id", studioId)
+          .eq("owner_id", user.id);
+
+        if (permitStatusError) {
+          throw new Error(`Failed to update permit status: ${permitStatusError.message}`);
+        }
+
+        setPermitStatus("resubmitted");
       }
 
       await supabase.from('studio_types').delete().eq('studio_id', studioId);

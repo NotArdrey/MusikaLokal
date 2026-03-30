@@ -210,9 +210,11 @@ export default function EditGigScreen() {
 
   // Business Permit state
   const [businessPermitUrl, setBusinessPermitUrl] = useState<string>("");
+  const [initialBusinessPermitUrl, setInitialBusinessPermitUrl] = useState<string>("");
   const [businessPermitFileName, setBusinessPermitFileName] = useState<string>("");
   const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
+  const [permitStatus, setPermitStatus] = useState<string>("pending_review");
 
   const getNormalizedEventSchedules = (): EventSchedule[] => {
     const cleanedSchedules = eventSchedules
@@ -566,6 +568,8 @@ export default function EditGigScreen() {
         console.log('🔧 setContractFileName:', fileName);
       }
       setBusinessPermitUrl(data.business_permit_url || "");
+      setInitialBusinessPermitUrl(data.business_permit_url || "");
+      setPermitStatus(data.permit_status || "pending_review");
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
         setBusinessPermitFileName(decodeURIComponent(fileName));
@@ -781,6 +785,28 @@ export default function EditGigScreen() {
         }
 
         throw new Error(rpcResult?.message || 'Failed to update gig');
+      }
+
+      const shouldMarkResubmitted =
+        permitStatus === "rejected" &&
+        !!businessPermitUrl &&
+        businessPermitUrl !== initialBusinessPermitUrl;
+
+      if (shouldMarkResubmitted) {
+        const { error: permitStatusError } = await supabase
+          .from("gigs")
+          .update({
+            permit_status: "resubmitted",
+            permit_rejection_reason: null,
+          })
+          .eq("id", gigId)
+          .eq("organizer_id", user.id);
+
+        if (permitStatusError) {
+          throw new Error(`Failed to update permit status: ${permitStatusError.message}`);
+        }
+
+        setPermitStatus("resubmitted");
       }
 
       const reconfirmRequired = Number(rpcResult?.reconfirmation?.required_count || 0);

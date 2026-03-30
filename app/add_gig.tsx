@@ -504,6 +504,7 @@ export default function AddGigScreen() {
           longitude: payload.longitude,
           event_date: payload.event_date,
           reapplication_cooldown_days: payload.reapplication_cooldown_days,
+          permit_status: 'pending_review',
         })
         .select()
         .single();
@@ -576,12 +577,7 @@ export default function AddGigScreen() {
 
   const handleSuccessRedirect = () => {
     setModalVisible(false);
-    // Initiate address verification after successful gig creation
-    if (newGigId) {
-      router.push({ pathname: "/manage_gig", params: { id: newGigId } });
-    } else {
-      router.back();
-    }
+    router.push({ pathname: "/bookings", params: { tab: "Pending" } });
   };
 
   // Start address verification (before gig creation)
