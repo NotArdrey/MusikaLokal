@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verification Successful</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #F8FAFC;
+        }
+
+        .container {
+            text-align: center;
+            padding: 40px;
+            max-width: 400px;
+            width: 90%;
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            backdrop-filter: blur(10px);
+        }
+
+        .logo {
+            font-size: 64px;
+            margin-bottom: 24px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            color: #F8FAFC;
+        }
+
+        p {
+            font-size: 16px;
+            color: #94A3B8;
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+
+        .btn {
+            display: inline-block;
+            background: #4F46E5;
+            color: white;
+            text-decoration: none;
+            padding: 16px 32px;
+            border-radius: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+            width: 100%;
+            margin-bottom: 12px;
+        }
+
+        .btn:hover {
+            background: #4338CA;
+            transform: translateY(-2px);
+        }
+
+        .secondary-action {
+            margin-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 20px;
+        }
+
+        .expo-input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            margin-bottom: 8px;
+            font-family: inherit;
+        }
+
+        .small-text {
+            font-size: 12px;
+            color: #64748B;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="logo">🎉</div>
+        <h1>Successfully Verified!</h1>
+        <p>Your email has been confirmed. You will be redirected to the app automatically.</p>
+
+        <a id="appLink" href="#" class="btn">Open App</a>
+
+        <div class="secondary-action">
+            <p class="small-text" style="margin-bottom: 8px;">Development Testing (Expo Go)</p>
+            <input type="text" id="expoUrl" class="expo-input" placeholder="exp://192.168.x.x:8081">
+            <button onclick="openExpo()" class="btn" style="background: #334155; font-size: 14px; padding: 12px;">Open
+                in Expo Go</button>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const APP_SCHEME = "musikalokal://";
+        const PATH = "?verified=true";
+
+        // set the main button link
+        const appLink = document.getElementById('appLink');
+        appLink.href = APP_SCHEME + PATH;
+
+        // Attempt auto-redirect
+        setTimeout(() => {
+            window.location.href = APP_SCHEME + PATH;
+        }, 1000);
+
+        function openExpo() {
+            const input = document.getElementById('expoUrl');
+            let url = input.value.trim();
+            if (!url) return alert('Please enter your Expo Go URL (e.g., exp://...)');
+
+            // Ensure functionality
+            if (!url.startsWith('exp://')) {
+                // If they just pasted the IP
+                url = 'exp://' + url;
+            }
+
+            // Append the path if not present (simple check)
+            // Note: Expo Go urls are tricky with paths, usually need /--/path
+            // But for query params at root, we can try appending directly or via /--/
+
+            // Try standard Expo deep link format
+            // exp://.../--/?verified=true
+            if (!url.includes('/--/')) {
+                if (url.endsWith('/')) {
+                    url += '--/';
+                } else {
+                    url += '/--/';
+                }
+            }
+
+            window.location.href = url + PATH;
+        }
+    </script>
+</body>
+</html>

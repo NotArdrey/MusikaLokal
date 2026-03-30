@@ -1,0 +1,7 @@
+app/edit_group.tsx(1597,39): error TS2339: Property 'memberInfo' does not exist on type '{ flex1: { flex: number; }; centerContainer: { alignItems: "center"; justifyContent: "center"; }; scrollContent: { paddingBottom: number; paddingHorizontal: number; }; sectionHeader: { flexDirection: "row"; alignItems: "center"; gap: number; marginBottom: number; }; ... 49 more ...; typeButton: { ...; }; }'.
+app/edit_group.tsx(1616,36): error TS2339: Property 'avatarText' does not exist on type '{ flex1: { flex: number; }; centerContainer: { alignItems: "center"; justifyContent: "center"; }; scrollContent: { paddingBottom: number; paddingHorizontal: number; }; sectionHeader: { flexDirection: "row"; alignItems: "center"; gap: number; marginBottom: number; }; ... 49 more ...; typeButton: { ...; }; }'.
+src/components/listingDetails/StudioBookTab.tsx(648,75): error TS7006: Parameter 'slot' implicitly has an 'any' type.
+src/components/listingDetails/StudioBookTab.tsx(939,51): error TS7006: Parameter 'existingSlot' implicitly has an 'any' type.
+src/components/listingDetails/StudioBookTab.tsx(1184,17): error TS2554: Expected 3 arguments, but got 4.
+src/components/ListingDetailsSheet.tsx(499,10): error TS2304: Cannot find name 'REPORT_REASONS'.
+src/components/ListingDetailsSheet.tsx(499,30): error TS7006: Parameter 'reason' implicitly has an 'any' type.

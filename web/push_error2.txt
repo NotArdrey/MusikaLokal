@@ -1,0 +1,37 @@
+remote: error: GH013: Repository rule violations found for refs/heads/web_ver1.        
+remote: 
+remote: - GITHUB PUSH PROTECTION        
+remote:   —————————————————————————————————————————        
+remote:     Resolve the following violations before pushing again        
+remote: 
+remote:     - Push cannot contain secrets        
+remote: 
+remote:             
+remote:      (?) Learn how to resolve a blocked push        
+remote:      https://docs.github.com/code-security/secret-scanning/working-with-secret-scanning-and-push-protection/working-with-push-protection-from-the-command-line#resolving-a-blocked-push        
+remote:             
+remote:             
+remote:       —— Stripe Test API Secret Key ————————————————————————        
+remote:        locations:        
+remote:          - commit: aed8a48ad81015d7b38a9f014495b1af3dfef09c        
+remote:            path: src/services/paymongo.ts:8        
+remote:          - commit: f5cb6f5a507af76faaedf52b3b342b229b2a3bad        
+remote:            path: src/services/paymongo.ts:8        
+remote:             
+remote:        (?) To push, remove secret from commit(s) or follow this URL to allow the secret.        
+remote:        https://github.com/AraragiSakamoto/MusikaLokal-Web/security/secret-scanning/unblock-secret/3BZtIeZ7cbNTCdYtOnuG98RjqOh        
+remote:             
+remote:             
+remote:       —— Stripe Test API Secret Key ————————————————————————        
+remote:        locations:        
+remote:          - commit: 8f05904879258d966c9561ff161191be3c237166        
+remote:            path: supabase/functions/withdrawals/index.ts:12        
+remote:             
+remote:        (?) To push, remove secret from commit(s) or follow this URL to allow the secret.        
+remote:        https://github.com/AraragiSakamoto/MusikaLokal-Web/security/secret-scanning/unblock-secret/3BZtIhPM0vhgxr7c61jMjxv8GI6        
+remote:             
+remote: 
+remote: 
+To https://github.com/AraragiSakamoto/MusikaLokal-Web.git
+ ! [remote rejected] web_ver1 -> web_ver1 (push declined due to repository rule violations)
+error: failed to push some refs to 'https://github.com/AraragiSakamoto/MusikaLokal-Web.git'
