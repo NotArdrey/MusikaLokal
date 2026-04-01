@@ -11,7 +11,6 @@ import {
     ScrollView,
     StatusBar,
     StyleSheet,
-    Switch,
     Text,
     TouchableOpacity,
     View,
@@ -52,6 +51,124 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../src/context/AuthContext";
 
 const debugLog = (..._args: unknown[]) => {};
+
+const clampValue = (value: number, min = 0, max = 1) => {
+  return Math.max(min, Math.min(max, value));
+};
+
+const normalizeSignal = (value: unknown) => {
+  if (typeof value !== "string") return "";
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const uniqueNormalizedSignals = (values: unknown[]) => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const value of values) {
+    const normalized = normalizeSignal(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+
+  return out;
+};
+
+const scoreFreshness = (createdAt: unknown) => {
+  if (typeof createdAt !== "string") return 0.35;
+
+  const created = new Date(createdAt).getTime();
+  if (Number.isNaN(created)) return 0.35;
+
+  const ageDays = Math.max(0, (Date.now() - created) / (1000 * 60 * 60 * 24));
+  if (ageDays <= 7) return 1;
+  if (ageDays <= 30) return 0.8;
+  if (ageDays <= 90) return 0.55;
+  return 0.35;
+};
+
+const buildOnDeviceReason = (
+  skillMatches: string[],
+  genreMatches: string[],
+  itemType: string,
+) => {
+  if (skillMatches.length > 0 && genreMatches.length > 0) {
+    return `Matches your ${skillMatches[0]} skills and ${genreMatches[0]} taste.`;
+  }
+  if (skillMatches.length > 0) {
+    return `Recommended because of your ${skillMatches[0]} background.`;
+  }
+  if (genreMatches.length > 0) {
+    return `Popular among ${genreMatches[0]} listeners and creators.`;
+  }
+  if (itemType === "Gig") {
+    return "Trending opportunity with strong current engagement.";
+  }
+  return "Strong overall quality and relevance right now.";
+};
+
+const rankForYouOnDevice = (
+  candidates: any[],
+  profileSignals: { skills: string[]; genres: string[] },
+  limit: number,
+) => {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return [];
+  }
+
+  const normalizedSkills = uniqueNormalizedSignals(profileSignals.skills);
+  const normalizedGenres = uniqueNormalizedSignals(profileSignals.genres);
+  const hasUserSignals = normalizedSkills.length > 0 || normalizedGenres.length > 0;
+  const safeLimit = Math.max(1, Math.min(limit || 20, candidates.length));
+
+  const ranked = candidates
+    .map((item: any) => {
+      const searchableText = normalizeSignal(
+        `${item.name || ""} ${item.genre || ""} ${item.location || ""} ${item.type || ""} ${item.group_type || ""}`,
+      );
+      const itemGenres = uniqueNormalizedSignals(
+        typeof item.genre === "string" ? item.genre.split(",") : [],
+      );
+
+      const skillMatches = normalizedSkills.filter((skill) => searchableText.includes(skill));
+      const genreMatches = normalizedGenres.filter(
+        (genre) => searchableText.includes(genre) || itemGenres.includes(genre),
+      );
+
+      const skillScore = normalizedSkills.length > 0
+        ? clampValue(skillMatches.length / Math.min(3, normalizedSkills.length))
+        : 0;
+      const genreScore = normalizedGenres.length > 0
+        ? clampValue(genreMatches.length / Math.min(3, normalizedGenres.length))
+        : 0;
+      const popularityScore = clampValue(Number(item.rating || 0) / 5);
+      const freshnessScore = scoreFreshness(item.created_at);
+
+      const blendedScore = hasUserSignals
+        ? (skillScore * 0.4 + genreScore * 0.35 + popularityScore * 0.2 + freshnessScore * 0.05)
+        : (popularityScore * 0.7 + freshnessScore * 0.3);
+
+      const aiScore = Math.round(clampValue(blendedScore) * 100);
+
+      return {
+        ...item,
+        similarity: aiScore / 100,
+        aiReason: buildOnDeviceReason(skillMatches, genreMatches, item.type || "listing"),
+      };
+    })
+    .sort((a, b) => {
+      const similarityDelta = Number(b.similarity || 0) - Number(a.similarity || 0);
+      if (similarityDelta !== 0) return similarityDelta;
+      return Number(b.rating || 0) - Number(a.rating || 0);
+    });
+
+  return ranked.slice(0, safeLimit);
+};
 
 const getTypeBadgeColor = (type: string) => {
   switch (type) {
@@ -142,9 +259,11 @@ export default function HomeScreen() {
   const [timeGreeting, setTimeGreeting] = useState("Hey");
 
   // AI Recommendation Mode
-  const [aiModeEnabled, setAiModeEnabled] = useState(true);
+  const aiModeEnabled = true;
   const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
   const [randomRecommendations, setRandomRecommendations] = useState<any[]>([]);
+  const [aiFeedProvider, setAiFeedProvider] = useState("On-Device CPU Ranker");
+  const [aiFeedMessage, setAiFeedMessage] = useState("");
 
   // ... refs ...
   const bottomSheetRef =
@@ -273,16 +392,16 @@ export default function HomeScreen() {
 
   // Effect to update featured/discover when AI recommendations become available
   useEffect(() => {
-    if (aiModeEnabled && aiRecommendations.length > 0) {
+    if (aiRecommendations.length > 0) {
       debugLog("🤖 Switching to AI recommendations");
       setFeatured(aiRecommendations.slice(0, 10));
       setDiscover(aiRecommendations.slice(10, 20));
-    } else if (!aiModeEnabled && randomRecommendations.length > 0) {
+    } else if (randomRecommendations.length > 0) {
       debugLog("🎲 Switching to random recommendations");
       setFeatured(randomRecommendations.slice(0, 10));
       setDiscover(randomRecommendations.slice(10, 20));
     }
-  }, [aiModeEnabled, aiRecommendations, randomRecommendations]);
+  }, [aiRecommendations, randomRecommendations]);
 
   useFocusEffect(
     useCallback(() => {
@@ -780,77 +899,56 @@ export default function HomeScreen() {
       const shuffled = [...allItemsList].sort(() => Math.random() - 0.5);
       setRandomRecommendations(shuffled.slice(0, 20));
 
-      // === AI RECOMMENDATIONS - Fetch from RPC if user is logged in ===
+      // === AI RECOMMENDATIONS - On-device CPU ranking (free, no paid AI API) ===
       if (userId) {
         try {
-          debugLog("🤖 Fetching AI recommendations for user:", userId);
-          const { data: aiData, error: aiError } = await supabase.rpc(
-            "get_ai_recommendations",
-            {
-              p_user_id: userId,
-              p_limit: 20,
-            },
+          debugLog("🤖 Building on-device For You recommendations for user:", userId);
+          const [skillsResult, genresResult] = await Promise.all([
+            supabase.from("profile_skills").select("skill").eq("profile_id", userId),
+            supabase.from("profile_genres").select("genre").eq("profile_id", userId),
+          ]);
+          const profileSignals = {
+            skills: (skillsResult.data || [])
+              .map((row: any) => row.skill)
+              .filter((value: any) => typeof value === "string" && value.trim().length > 0),
+            genres: (genresResult.data || [])
+              .map((row: any) => row.genre)
+              .filter((value: any) => typeof value === "string" && value.trim().length > 0),
+          };
+
+          const localRankedItems = rankForYouOnDevice(
+            allItemsList,
+            profileSignals,
+            20,
           );
 
-          if (aiError) {
-            debugLog("⚠️ AI recommendations error:", aiError);
-            setAiRecommendations([]);
-          } else if (aiData && aiData.length > 0) {
-            // Normalize AI recommendations
-            const normalizedAi = aiData.map((item: any) => ({
-              id: item.id,
-              type: item.type,
-              name: item.name,
-              image: item.images?.[0] || null,
-              images: item.images || [],
-              rating: item.rating || 0,
-              review_count: item.review_count || 0,
-              rate:
-                item.rate?.toString() ||
-                item.hourly_rate?.toString() ||
-                item.budget?.toString(),
-              hourly_rate: item.hourly_rate?.toString(),
-              budget: item.budget?.toString(),
-              location: item.location || "",
-              genre: item.genre || "",
-              embedding: item.embedding,
-              created_at: item.created_at,
-              updated_at: item.updated_at,
-              owner_id: item.owner_id,
-              organizer_id: item.organizer_id,
-              similarity: item.similarity, // AI similarity score
-            }));
-            debugLog(
-              "🤖 AI recommendations loaded:",
-              normalizedAi.length,
-              "items",
-            );
-            debugLog(
-              "🤖 Top 3 AI matches:",
-              normalizedAi.slice(0, 3).map((i: any) => ({
-                name: i.name,
-                similarity: (i.similarity * 100).toFixed(1) + "%",
-              })),
-            );
-            setAiRecommendations(normalizedAi);
+          setAiRecommendations(localRankedItems);
+          setAiFeedProvider("On-Device CPU Ranker");
+
+          const hasProfileSignals =
+            profileSignals.skills.length > 0 || profileSignals.genres.length > 0;
+
+          if (localRankedItems.length === 0) {
+            setAiFeedMessage("No listings available for ranking yet.");
+          } else if (hasProfileSignals) {
+            setAiFeedMessage("Personalized locally on your phone CPU. No paid AI API used.");
           } else {
-            debugLog(
-              "🤖 No AI recommendations - user has no interest vector yet",
-            );
-            setAiRecommendations([]);
+            setAiFeedMessage("Ranked locally on your phone CPU using popularity and freshness.");
           }
         } catch (aiErr) {
-          debugLog("🤖 AI fetch error:", aiErr);
+          debugLog("🤖 On-device ranking error, using general fallback:", aiErr);
           setAiRecommendations([]);
+          setAiFeedProvider("On-Device CPU Ranker");
+          setAiFeedMessage("Local personalization is temporarily unavailable. Showing general picks.");
         }
       } else {
         debugLog("🤖 No user logged in - skipping AI recommendations");
         setAiRecommendations([]);
+        setAiFeedProvider("On-Device CPU Ranker");
+        setAiFeedMessage("Sign in to unlock your personalized For You feed.");
       }
 
-      // Set featured/discover - AI mode uses AI recommendations if available
-      // This will be toggled by the user with the switch
-      // For initial load, use AI if enabled and available
+      // Seed featured/discover with fallback random results while AI feed initializes.
       setFeatured(shuffled.slice(0, 10));
       setDiscover(shuffled.slice(10, 20));
 
@@ -1469,14 +1567,12 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              Top Picks {aiModeEnabled ? "🤖" : "🎲"}
+              Top Picks 🤖
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
-              {aiModeEnabled
-                ? "AI-powered recommendations"
-                : "Random selection"}
+              AI-powered recommendations
             </Text>
           </View>
           <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
@@ -2202,14 +2298,12 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              For You {aiModeEnabled ? "🤖" : "🎲"}
+              For You 🤖
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
-              {aiModeEnabled
-                ? "Personalized picks based on your interests"
-                : "Random suggestions for comparison"}
+              TikTok-style feed tuned to your profile
             </Text>
           </View>
           <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
@@ -2286,6 +2380,11 @@ export default function HomeScreen() {
                   <Text style={styles.featuredLocation} numberOfLines={1}>
                     {uniqueItems[0].location}
                   </Text>
+                  {uniqueItems[0].aiReason ? (
+                    <Text style={styles.featuredReason} numberOfLines={2}>
+                      {uniqueItems[0].aiReason}
+                    </Text>
+                  ) : null}
                   <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                     {uniqueItems[0].hourly_rate && (
                       <Text style={styles.featuredPrice}>
@@ -2422,6 +2521,25 @@ export default function HomeScreen() {
                     {item.location || item.genre || "Location TBA"}
                   </Text>
                 </View>
+
+                {item.aiReason ? (
+                  <View style={styles.forYouReasonRow}>
+                    <Ionicons
+                      name="sparkles-outline"
+                      size={12}
+                      color={colors.primary}
+                    />
+                    <Text
+                      style={[
+                        styles.forYouReasonText,
+                        { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {item.aiReason}
+                    </Text>
+                  </View>
+                ) : null}
 
                 {/* Price - hide for Groups, handle Studio-specific pricing */}
                 {item.type !== "Group" &&
@@ -2568,18 +2686,13 @@ export default function HomeScreen() {
             borderRadius: 20,
             backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
             borderWidth: 1,
-            borderColor: aiModeEnabled
-              ? colors.primary
-              : isDark
-                ? "#374151"
-                : "#E5E7EB",
+            borderColor: colors.primary,
           }}
         >
           <View
             style={{
               flexDirection: "row",
               alignItems: "center",
-              justifyContent: "space-between",
             }}
           >
             <View style={{ flex: 1 }}>
@@ -2591,17 +2704,13 @@ export default function HomeScreen() {
                     width: 32,
                     height: 32,
                     borderRadius: 16,
-                    backgroundColor: aiModeEnabled
-                      ? colors.primary
-                      : isDark
-                        ? "#374151"
-                        : "#D1D5DB",
+                    backgroundColor: colors.primary,
                     alignItems: "center",
                     justifyContent: "center",
                   }}
                 >
                   <Ionicons
-                    name={aiModeEnabled ? "sparkles" : "shuffle"}
+                    name="sparkles"
                     size={18}
                     color="#FFF"
                   />
@@ -2614,7 +2723,7 @@ export default function HomeScreen() {
                       color: colors.text,
                     }}
                   >
-                    {aiModeEnabled ? "🤖 AI Recommendations" : "🎲 Random Mode"}
+                    ✨ For You AI
                   </Text>
                   <Text
                     style={{
@@ -2624,36 +2733,42 @@ export default function HomeScreen() {
                       marginTop: -2,
                     }}
                   >
-                    {aiModeEnabled
-                      ? `Personalized based on your interests${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ""}`
-                      : "Showing random listings for comparison"}
+                    {`Engine: ${aiFeedProvider}${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} picks` : ""}`}
                   </Text>
                 </View>
               </View>
             </View>
-            <Switch
-              value={aiModeEnabled}
-              onValueChange={(value) => {
-                setAiModeEnabled(value);
-                // Update featured/discover based on mode
-                if (value && aiRecommendations.length > 0) {
-                  setFeatured(aiRecommendations.slice(0, 10));
-                  setDiscover(aiRecommendations.slice(10, 20));
-                } else {
-                  setFeatured(randomRecommendations.slice(0, 10));
-                  setDiscover(randomRecommendations.slice(10, 20));
-                }
-              }}
-              trackColor={{
-                false: isDark ? "#374151" : "#D1D5DB",
-                true: colors.primary + "60",
-              }}
-              thumbColor={aiModeEnabled ? colors.primary : "#9CA3AF"}
-            />
           </View>
 
+          {aiFeedMessage ? (
+            <View
+              style={{
+                marginTop: 10,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Ionicons
+                name="information-circle-outline"
+                size={14}
+                color={colors.textSecondary}
+              />
+              <Text
+                style={{
+                  flex: 1,
+                  fontFamily: "Poppins_400Regular",
+                  fontSize: 11,
+                  color: colors.textSecondary,
+                }}
+              >
+                {aiFeedMessage}
+              </Text>
+            </View>
+          ) : null}
+
           {/* AI Similarity Preview */}
-          {aiModeEnabled && aiRecommendations.length > 0 && (
+          {aiRecommendations.length > 0 && (
             <View
               style={{
                 marginTop: 12,
@@ -2673,8 +2788,8 @@ export default function HomeScreen() {
                 }}
               >
                 {hasAiSimilarityMatches
-                  ? "Top Matches by AI Similarity"
-                  : "📊 Sorted by Popularity (No embeddings yet)"}
+                  ? "Top Matches This Session"
+                  : "Fresh recommendations for your profile"}
               </Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                 {aiPreviewItems.map((item) => (
@@ -2754,8 +2869,8 @@ export default function HomeScreen() {
                   flex: 1,
                 }}
               >
-                Start favoriting listings to build your interest profile. AI
-                will learn your preferences!
+                Add skills and genres in your profile, then browse listings to
+                improve your For You feed quality.
               </Text>
             </View>
           )}
@@ -3218,6 +3333,12 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_500Medium",
     fontSize: moderateScale(14),
   },
+  featuredReason: {
+    color: "rgba(255,255,255,0.92)",
+    fontFamily: "Poppins_400Regular",
+    fontSize: moderateScale(12),
+    marginTop: 4,
+  },
   featuredPrice: {
     color: "#FFF",
     fontFamily: "Poppins_600SemiBold",
@@ -3541,10 +3662,22 @@ const styles = StyleSheet.create({
     gap: 5,
     marginBottom: 4,
   },
+  forYouReasonRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 4,
+    marginBottom: 6,
+  },
   forYouText: {
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
     flex: 1,
+  },
+  forYouReasonText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    flex: 1,
+    lineHeight: 16,
   },
   forYouPrice: {
     fontFamily: "Poppins_700Bold",

@@ -13,8 +13,11 @@ export default function PaymentResultScreen() {
   const [loading, setLoading] = useState(true);
   const [bookingDetails, setBookingDetails] = useState<any>(null);
   const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
+  const [subscriptionActive, setSubscriptionActive] = useState(false);
 
-  const isSuccess = params.status === 'success';
+  const paymentStatus = params.status || 'pending';
+  const isSuccess = paymentStatus === 'success';
+  const isCancelled = paymentStatus === 'cancelled';
   const isSubscription = params.type === 'subscription';
 
   useEffect(() => {
@@ -34,11 +37,11 @@ export default function PaymentResultScreen() {
             setSubscriptionDetails(data);
           }
 
-          // If subscription payment was successful, refresh the auth context
+          // If payment callback is not cancelled, poll until subscription activation is visible.
           // The Edge Function already handled activating the subscription with admin privileges.
           // However, there might be a slight delay. We'll poll a few times to ensure we get the latest status.
-          if (isSuccess) {
-            console.log('✅ Subscription payment successful - polling for active status...');
+          if (!isCancelled) {
+            console.log('✅ Subscription callback received - polling for active status...');
 
             // Polling loop
             const maxRetries = 5;
@@ -62,6 +65,7 @@ export default function PaymentResultScreen() {
               if (profile?.subscription_status === 'active') {
                 console.log('✅ Polling confirmed active subscription!');
                 isActive = true;
+                setSubscriptionActive(true);
                 // Force one last update to context
                 if (checkSubscription) await checkSubscription();
                 break;
@@ -73,6 +77,7 @@ export default function PaymentResultScreen() {
             }
 
             if (!isActive) {
+              setSubscriptionActive(false);
               console.log('⚠️ Polling finished but status might still be pending. User can refresh manually.');
             }
           }
@@ -129,7 +134,7 @@ export default function PaymentResultScreen() {
     };
 
     fetchDetails();
-  }, [params.booking_id, params.plan_id, isSubscription, isSuccess]);
+  }, [params.booking_id, params.plan_id, isSubscription, isSuccess, isCancelled]);
 
   const handleGoToBookings = () => {
     router.replace({
@@ -169,16 +174,32 @@ export default function PaymentResultScreen() {
     );
   }
 
+  const subscriptionState = isSubscription
+    ? (isCancelled ? 'cancelled' : (subscriptionActive ? 'active' : 'processing'))
+    : (isSuccess ? 'success' : 'cancelled');
+
+  const statusColor = subscriptionState === 'cancelled'
+    ? '#EF4444'
+    : subscriptionState === 'processing'
+      ? '#F59E0B'
+      : '#10B981';
+
+  const statusIcon = subscriptionState === 'cancelled'
+    ? 'close-circle'
+    : subscriptionState === 'processing'
+      ? 'time'
+      : 'checkmark-circle';
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.card, { backgroundColor: colors.surface }]}>
         {/* Status Icon */}
         <View style={[
           styles.iconContainer,
-          { backgroundColor: isSuccess ? '#10B981' : '#EF4444' }
+          { backgroundColor: statusColor }
         ]}>
           <Ionicons
-            name={isSuccess ? 'checkmark-circle' : 'close-circle'}
+            name={statusIcon as any}
             size={64}
             color="white"
           />
@@ -186,21 +207,27 @@ export default function PaymentResultScreen() {
 
         {/* Status Title */}
         <Text style={[styles.title, { color: colors.text }]}>
-          {isSuccess
-            ? (isSubscription ? 'Subscription Activated!' : 'Payment Successful!')
-            : (isSubscription ? 'Subscription Cancelled' : 'Payment Cancelled')}
+          {isSubscription
+            ? (subscriptionState === 'active'
+              ? 'Subscription Activated!'
+              : subscriptionState === 'processing'
+                ? 'Subscription Processing'
+                : 'Subscription Cancelled')
+            : (isSuccess ? 'Payment Successful!' : 'Payment Cancelled')}
         </Text>
 
         {/* Status Description */}
         <Text style={[styles.description, { color: colors.textSecondary }]}>
-          {isSuccess
-            ? (isSubscription
+          {isSubscription
+            ? (subscriptionState === 'active'
               ? `Your ${subscriptionDetails?.name || 'subscription'} is now active! Enjoy all the premium features.`
-              : (bookingDetails?.payment_status === 'partial' || (bookingDetails?.payment_type === 'downpayment' && bookingDetails?.remaining_balance > 0)
+              : subscriptionState === 'processing'
+                ? 'Your payment was received. We are finalizing activation in the background. Please wait a moment, then check your wallet.'
+                : 'Your subscription was cancelled. You can subscribe anytime from your Wallet & Subscription page.')
+            : (isSuccess
+              ? (bookingDetails?.payment_status === 'partial' || (bookingDetails?.payment_type === 'downpayment' && bookingDetails?.remaining_balance > 0)
                 ? `Downpayment received! Your booking is confirmed. Remaining balance: ₱${bookingDetails?.remaining_balance?.toLocaleString() || 0}`
-                : 'Your studio booking has been confirmed and moved to Upcoming bookings.'))
-            : (isSubscription
-              ? 'Your subscription was cancelled. You can subscribe anytime from your Wallet & Subscription page.'
+                : 'Your studio booking has been confirmed and moved to Upcoming bookings.')
               : 'Your payment was cancelled. The booking is still in Pending - you can try again anytime.')}
         </Text>
 
@@ -236,13 +263,31 @@ export default function PaymentResultScreen() {
               <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Status</Text>
               <View style={[
                 styles.statusBadge,
-                { backgroundColor: isSuccess ? '#10B98120' : '#EF444420' }
+                {
+                  backgroundColor:
+                    subscriptionState === 'active'
+                      ? '#10B98120'
+                      : subscriptionState === 'processing'
+                        ? '#F59E0B20'
+                        : '#EF444420'
+                }
               ]}>
                 <Text style={[
                   styles.statusText,
-                  { color: isSuccess ? '#10B981' : '#EF4444' }
+                  {
+                    color:
+                      subscriptionState === 'active'
+                        ? '#10B981'
+                        : subscriptionState === 'processing'
+                          ? '#F59E0B'
+                          : '#EF4444'
+                  }
                 ]}>
-                  {isSuccess ? 'Active' : 'Cancelled'}
+                  {subscriptionState === 'active'
+                    ? 'Active'
+                    : subscriptionState === 'processing'
+                      ? 'Processing'
+                      : 'Cancelled'}
                 </Text>
               </View>
             </View>

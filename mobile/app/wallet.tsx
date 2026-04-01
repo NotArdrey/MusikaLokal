@@ -55,6 +55,13 @@ interface Subscription {
   plan?: SubscriptionPlan;
 }
 
+interface WithdrawalErrorPayload {
+  error?: string;
+  error_code?: string;
+  next_steps?: string[];
+  suggestion?: string;
+}
+
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
   const router = useRouter();
@@ -130,6 +137,97 @@ export default function WalletScreen() {
 
   const Alert = { alert: showAlertNative };
 
+  const parseFunctionErrorPayload = async (error: any): Promise<WithdrawalErrorPayload | null> => {
+    const context = error?.context;
+    if (!context) return null;
+
+    if (typeof context?.json === 'function') {
+      try {
+        const payload = await context.json();
+        if (payload && typeof payload === 'object') {
+          return payload as WithdrawalErrorPayload;
+        }
+      } catch {
+        // Ignore JSON parsing errors and continue with fallback handling.
+      }
+    }
+
+    if (typeof context === 'object') {
+      return context as WithdrawalErrorPayload;
+    }
+
+    return null;
+  };
+
+  const isMerchantNotReadyError = (message?: string, errorCode?: string) => {
+    const normalizedMessage = String(message || '').toLowerCase();
+    const normalizedCode = String(errorCode || '').toLowerCase();
+
+    return (
+      normalizedCode === 'merchant_not_ready' ||
+      normalizedMessage.includes("don't have permission to perform this operation") ||
+      normalizedMessage.includes('do not have permission to perform this operation') ||
+      (
+        normalizedMessage.includes('permission') &&
+        (
+          normalizedMessage.includes('disbursement') ||
+          normalizedMessage.includes('payout') ||
+          normalizedMessage.includes('cashout')
+        )
+      )
+    );
+  };
+
+  const formatMerchantOnboardingMessage = (nextSteps?: string[]) => {
+    const steps = Array.isArray(nextSteps) && nextSteps.length > 0
+      ? nextSteps
+      : [
+        'Complete your PayMongo merchant onboarding (KYC and business verification).',
+        'Request and enable disbursements or payouts on that merchant account.',
+        'Use the matching secret key for the same mode and account.',
+        'Retry with a small withdrawal amount.',
+      ];
+
+    return [
+      'Real cashout is currently unavailable for this account.',
+      'You can still test the flow in test mode.',
+      '',
+      'What to do next:',
+      ...steps.map((step, index) => `${index + 1}. ${step}`),
+    ].join('\n');
+  };
+
+  const showMerchantNotReadyAlert = (nextSteps?: string[]) => {
+    const buttons = hasRefundEligiblePayments
+      ? [
+        { text: 'Use Refund Method', onPress: () => setWithdrawalMethod('refund') },
+        { text: 'OK', style: 'cancel' as const },
+      ]
+      : [{ text: 'OK' }];
+
+    Alert.alert(
+      'Cashout Unavailable',
+      formatMerchantOnboardingMessage(nextSteps),
+      buttons,
+    );
+  };
+
+  const handleWithdrawalError = async (
+    fallbackTitle: string,
+    rawError: any,
+    payload?: WithdrawalErrorPayload | null,
+  ) => {
+    const parsedPayload = payload || await parseFunctionErrorPayload(rawError);
+    const errorMessage = parsedPayload?.error || rawError?.message || 'Failed to process withdrawal';
+
+    if (isMerchantNotReadyError(errorMessage, parsedPayload?.error_code)) {
+      showMerchantNotReadyAlert(parsedPayload?.next_steps);
+      return;
+    }
+
+    Alert.alert(fallbackTitle, errorMessage);
+  };
+
   const fetchWallet = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -196,26 +294,33 @@ export default function WalletScreen() {
 
       // 4. Get Subscription Plans (for studio/venue owners)
       if (profile?.role === 'studio-owner' || profile?.role === 'venue-owner') {
-        const { data: plan } = await supabase
+        const { data: plans, error: plansError } = await supabase
           .from('subscription_plans')
           .select('*')
           .eq('is_active', true)
-          .single();
+          .order('price', { ascending: true });
 
-        if (plan) {
-          setSubscriptionPlans([plan]);
+        if (plansError) throw plansError;
+
+        if (plans) {
+          setSubscriptionPlans(plans);
         }
 
-        // 5. Get User's Active Subscription
-        const { data: sub } = await supabase
+        // 5. Get User's latest subscription record
+        const { data: sub, error: subError } = await supabase
           .from('subscriptions')
           .select('*, plan:subscription_plans(*)')
           .eq('user_id', user.id)
-          .single();
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-        if (sub) {
-          setSubscription(sub);
-        }
+        if (subError) throw subError;
+
+        setSubscription(sub || null);
+      } else {
+        setSubscriptionPlans([]);
+        setSubscription(null);
       }
 
       // 6. Fetch Payout Methods
@@ -400,10 +505,13 @@ export default function WalletScreen() {
           }
         });
 
-        if (error) throw error;
+        if (error) {
+          await handleWithdrawalError('Withdrawal Failed', error);
+          return;
+        }
 
         if (data?.error) {
-          Alert.alert('Withdrawal Failed', data.error);
+          await handleWithdrawalError('Withdrawal Failed', null, data as WithdrawalErrorPayload);
           return;
         }
 
@@ -419,7 +527,7 @@ export default function WalletScreen() {
           }]
         );
       } catch (e: any) {
-        Alert.alert('Error', e?.message || 'Failed to process withdrawal');
+        await handleWithdrawalError('Error', e);
       } finally {
         setWithdrawing(false);
       }
@@ -443,16 +551,23 @@ export default function WalletScreen() {
         }
       });
 
-      if (error) throw error;
-
-      if (data?.error) {
-        Alert.alert('Withdrawal Failed', data.error);
+      if (error) {
+        await handleWithdrawalError('Withdrawal Failed', error);
         return;
       }
 
+      if (data?.error) {
+        await handleWithdrawalError('Withdrawal Failed', null, data as WithdrawalErrorPayload);
+        return;
+      }
+
+      const isMockCashout = Boolean((data as any)?.mock_cashout);
+
       Alert.alert(
-        'Withdrawal Submitted! ✓',
-        data?.message || 'Your payout will be processed within 1-3 business days.',
+        isMockCashout ? 'Mock Cashout Success (Test Mode)' : 'Withdrawal Submitted! ✓',
+        data?.message || (isMockCashout
+          ? 'Mock cashout recorded. No real money was transferred.'
+          : 'Your payout will be processed within 1-3 business days.'),
         [{
           text: 'OK', onPress: () => {
             setWithdrawModalVisible(false);
@@ -462,7 +577,7 @@ export default function WalletScreen() {
         }]
       );
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to process withdrawal');
+      await handleWithdrawalError('Error', e);
     } finally {
       setWithdrawing(false);
     }
@@ -646,18 +761,21 @@ export default function WalletScreen() {
         }
       });
 
-      if (paymentError) {
-        Alert.alert('Error', 'Failed to create subscription. Please try again.');
+      if (paymentError || !paymentData?.success) {
+        Alert.alert('Error', paymentData?.error || paymentError?.message || 'Failed to create subscription. Please try again.');
         return;
       }
 
-      if (paymentData?.checkout_url) {
-        const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
-        if (canOpen) {
-          await Linking.openURL(paymentData.checkout_url);
-        } else {
-          Alert.alert('Error', 'Unable to open payment page.');
-        }
+      if (!paymentData?.checkout_url) {
+        Alert.alert('Error', 'No checkout URL returned. Please try again.');
+        return;
+      }
+
+      const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
+      if (canOpen) {
+        await Linking.openURL(paymentData.checkout_url);
+      } else {
+        Alert.alert('Error', 'Unable to open payment page.');
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to initiate subscription.');
