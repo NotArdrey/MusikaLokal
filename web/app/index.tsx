@@ -25,6 +25,25 @@ export default function LoginScreen() {
   const { width } = Dimensions.get('window');
   const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
+  const resolvePostLoginRoute = (role?: string | null) => {
+    const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
+    return normalizedRole === 'admin' ? '/admin' : '/home';
+  };
+
+  const isSchemaQueryError = (errorLike: unknown) => {
+    const error = errorLike as { message?: string; details?: string; hint?: string; code?: string } | null;
+    const text = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+
+    return (
+      error?.code === '42P17' ||
+      text.includes('database error querying schema') ||
+      text.includes('infinite recursion detected in policy')
+    );
+  };
+
+  const schemaErrorLoginMessage =
+    'Database schema/policies are out of sync. Apply the latest Supabase migrations, then try logging in again.';
+
   // ... (existing initializeAuth is fine)
 
   // Check for verification success from deep link
@@ -178,6 +197,8 @@ export default function LoginScreen() {
           console.log('Token error detected, clearing storage and retrying...');
           await supabase.auth.signOut({ scope: 'local' });
           setLoginMessage({ type: 'error', text: 'Session expired. Please try again.' });
+        } else if (isSchemaQueryError(error)) {
+          setLoginMessage({ type: 'error', text: schemaErrorLoginMessage });
         } else {
           setLoginMessage({ type: 'error', text: error.message });
         }
@@ -210,11 +231,22 @@ export default function LoginScreen() {
           // 2. Check Profile (Source of Truth)
           let { data: profile, error: profileError } = await supabase
             .from('profiles')
-            .select('is_verified, id_document_expiry')
+            .select('is_verified, id_document_expiry, role')
             .eq('id', user.id)
             .maybeSingle();
 
           console.log('Profile check:', { profile, profileError });
+
+          if (profileError) {
+            if (isSchemaQueryError(profileError)) {
+              await supabase.auth.signOut({ scope: 'local' });
+              setLoginMessage({ type: 'error', text: schemaErrorLoginMessage });
+              showAlert('error', 'Database Setup Required', schemaErrorLoginMessage);
+              return;
+            }
+
+            console.error('Profile check failed:', profileError);
+          }
 
           // SELF-HEALING: If profile is missing but Auth Metadata says verified, recreate the profile
           if (!profile && metaVerified) {
@@ -233,11 +265,17 @@ export default function LoginScreen() {
 
             if (upsertError) {
               console.error('Failed to repair profile:', upsertError);
+              if (isSchemaQueryError(upsertError)) {
+                await supabase.auth.signOut({ scope: 'local' });
+                setLoginMessage({ type: 'error', text: schemaErrorLoginMessage });
+                showAlert('error', 'Database Setup Required', schemaErrorLoginMessage);
+                return;
+              }
             } else {
               console.log('Profile repaired successfully. Re-fetching...');
               const { data: newProfile } = await supabase
                 .from('profiles')
-                .select('is_verified, id_document_expiry')
+                .select('is_verified, id_document_expiry, role')
                 .eq('id', user.id)
                 .maybeSingle();
               profile = newProfile;
@@ -289,8 +327,11 @@ export default function LoginScreen() {
             );
           } else {
             // Verified & Profile Exists -> Allow Entry
-            console.log('Verification passed. Redirecting to Home.');
-            router.replace('/home' as any);
+            const postLoginRoute = resolvePostLoginRoute(
+              profile?.role || user.user_metadata?.role,
+            );
+            console.log('Verification passed. Redirecting to:', postLoginRoute);
+            router.replace(postLoginRoute as any);
           }
         }
       }

@@ -38,6 +38,8 @@ function Navbar() {
                     setManageRoute('/my_group');
                 } else if (data.role === 'venue-owner') {
                     setManageRoute('/my_venue');
+                } else if (data.role === 'admin') {
+                    setManageRoute('/admin');
                 } else {
                     setManageRoute('/manage');
                 }
@@ -63,6 +65,8 @@ function Navbar() {
             return 'profile';
         }
         if (
+            pathname === '/admin' ||
+            pathname.startsWith('/admin/') ||
             pathname === '/manage' ||
             pathname.startsWith('/manage/') ||
             pathname.includes('my_studio') ||

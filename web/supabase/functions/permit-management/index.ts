@@ -27,20 +27,26 @@ function jsonResponse(payload: unknown, status = 200) {
   });
 }
 
-function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
-  try {
-    const parts = token.replace("Bearer ", "").split(".");
-    if (parts.length !== 3) return null;
+async function getAuthenticatedUserId(
+  authHeader: string,
+  supabaseUrl: string,
+  anonKey: string,
+) {
+  const authClient = createClient(supabaseUrl, anonKey, {
+    global: {
+      headers: {
+        Authorization: authHeader,
+      },
+    },
+  });
 
-    let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    while (base64.length % 4) {
-      base64 += "=";
-    }
+  const {
+    data: { user },
+    error,
+  } = await authClient.auth.getUser();
 
-    return JSON.parse(atob(base64));
-  } catch {
-    return null;
-  }
+  if (error || !user?.id) return null;
+  return user.id;
 }
 
 function normalizePermitStatus(rawStatus?: string | null): PermitStatus {
@@ -102,26 +108,27 @@ serve(async (req: Request) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
+    const authHeader = req.headers.get("Authorization") || "";
     if (!authHeader) {
       return jsonResponse({ error: "Missing authorization header" }, 401);
     }
 
-    const jwtPayload = decodeJwtPayload(authHeader);
-    if (!jwtPayload?.sub) {
-      return jsonResponse({ error: "Invalid authorization token" }, 401);
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-    if (!supabaseUrl || !serviceRoleKey) {
+    if (!supabaseUrl || !serviceRoleKey || !anonKey) {
       return jsonResponse({ error: "Server misconfiguration" }, 500);
+    }
+
+    const userId = await getAuthenticatedUserId(authHeader, supabaseUrl, anonKey);
+    if (!userId) {
+      return jsonResponse({ error: "Invalid JWT" }, 401);
     }
 
     const client = createClient(supabaseUrl, serviceRoleKey);
 
-    const isAdmin = await assertAdmin(client, jwtPayload.sub);
+    const isAdmin = await assertAdmin(client, userId);
     if (!isAdmin) {
       return jsonResponse({ error: "Forbidden: admin role required" }, 403);
     }
@@ -230,7 +237,7 @@ serve(async (req: Request) => {
 
       const updatePayload: Record<string, unknown> = {
         permit_status: nextStatus,
-        permit_reviewed_by: jwtPayload.sub,
+        permit_reviewed_by: userId,
         permit_reviewed_at: new Date().toISOString(),
         permit_admin_notes: adminNotes || null,
         permit_rejection_reason: reviewAction === "reject" ? rejectionReason : null,
@@ -251,7 +258,7 @@ serve(async (req: Request) => {
         entity_type: entityType,
         entity_id: entityId,
         action: reviewAction === "approve" ? "approved" : "rejected",
-        performed_by: jwtPayload.sub,
+        performed_by: userId,
         previous_status: previousStatus,
         new_status: nextStatus,
         rejection_reason: reviewAction === "reject" ? rejectionReason : null,
@@ -271,7 +278,7 @@ serve(async (req: Request) => {
           entity_type: entityType,
           entity_id: entityId,
           action: reviewAction === "approve" ? "approved" : "rejected",
-          performed_by: jwtPayload.sub,
+          performed_by: userId,
           reason: reviewAction === "reject" ? rejectionReason : null,
           notes: adminNotes || null,
           metadata: {

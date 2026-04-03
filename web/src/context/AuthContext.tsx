@@ -373,7 +373,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(secureSession);
         if (secureSession) {
           setGuestMode(false);
-          checkAdmin(secureSession.user.id);
           fetchUserRole(secureSession.user.id);
         }
         setLoading(false);
@@ -420,7 +419,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(secureSession);
       if (secureSession) {
         setGuestMode(false);
-        checkAdmin(secureSession.user.id);
         fetchUserRole(secureSession.user.id);
       } else if (event !== "INITIAL_SESSION") {
         // Only reset state if this isn't the initial session load
@@ -508,11 +506,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [session?.user?.id, checkSubscription]);
 
-  const checkAdmin = async (userId: string) => {
-    // Optional: If you have an 'admin' role in your profiles table or metadata
-    setIsAdmin(false);
-  };
-
   const fetchUserRole = async (userId: string) => {
     try {
       console.log("🔍 Fetching role for user ID:", userId);
@@ -525,19 +518,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (error) {
         console.log("❌ Error fetching user role:", error.message, error);
         setUserRole(null);
+        setIsAdmin(false);
         return;
       }
 
       if (data && data.length > 0) {
-        console.log("✅ User role fetched:", data[0].role);
-        setUserRole(data[0].role);
+        const resolvedRole = data[0].role;
+        console.log("✅ User role fetched:", resolvedRole);
+        setUserRole(resolvedRole);
+        setIsAdmin(resolvedRole === "admin");
       } else {
         console.log("⚠️ No profile data found for user");
         setUserRole(null);
+        setIsAdmin(false);
       }
     } catch (error) {
       console.log("❌ Exception fetching user role:", error);
       setUserRole(null);
+      setIsAdmin(false);
     }
   };
 

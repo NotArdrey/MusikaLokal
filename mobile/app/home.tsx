@@ -260,6 +260,7 @@ export default function HomeScreen() {
 
   // AI Recommendation Mode
   const aiModeEnabled = true;
+  const showForYouAiCard = false;
   const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
   const [randomRecommendations, setRandomRecommendations] = useState<any[]>([]);
   const [aiFeedProvider, setAiFeedProvider] = useState("On-Device CPU Ranker");
@@ -393,11 +394,11 @@ export default function HomeScreen() {
   // Effect to update featured/discover when AI recommendations become available
   useEffect(() => {
     if (aiRecommendations.length > 0) {
-      debugLog("🤖 Switching to AI recommendations");
+      debugLog("Switching to AI recommendations");
       setFeatured(aiRecommendations.slice(0, 10));
       setDiscover(aiRecommendations.slice(10, 20));
     } else if (randomRecommendations.length > 0) {
-      debugLog("🎲 Switching to random recommendations");
+      debugLog("Switching to random recommendations");
       setFeatured(randomRecommendations.slice(0, 10));
       setDiscover(randomRecommendations.slice(10, 20));
     }
@@ -405,10 +406,10 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      debugLog("👁️ useFocusEffect triggered, userRole:", userRole);
+      debugLog("useFocusEffect triggered, userRole:", userRole);
       // Fetch data silently on focus if data already exists
       const isFirstLoad = featured.length === 0 && discover.length === 0;
-      debugLog("🏠 isFirstLoad:", isFirstLoad);
+      debugLog("isFirstLoad:", isFirstLoad);
       fetchHomeData(isFirstLoad);
       fetchUserProfile();
       fetchRecentlyViewed();
@@ -575,7 +576,7 @@ export default function HomeScreen() {
   };
 
   const fetchHomeData = async (showLoading = true) => {
-    debugLog("🏠 fetchHomeData called, showLoading:", showLoading);
+    debugLog("fetchHomeData called, showLoading:", showLoading);
     if (showLoading) setLoading(true);
     try {
       // Fetch based on Role
@@ -586,7 +587,7 @@ export default function HomeScreen() {
       let soloArtists: any[] = [];
 
       const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
-      debugLog("🏠 User role:", userRole, "isOwner:", isOwner);
+      debugLog("User role:", userRole, "isOwner:", isOwner);
 
       const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
         const eventDate = gig?.event_date ? new Date(gig.event_date) : null;
@@ -618,9 +619,9 @@ export default function HomeScreen() {
         .select("*")
         .order("created_at", { ascending: false })
         .limit(20);
-      if (gError) debugLog("❌ Error fetching groups:", gError);
+      if (gError) debugLog("Error fetching groups:", gError);
       groups = gData || [];
-      debugLog("🏠 Groups fetched:", groups.length);
+      debugLog("Groups fetched:", groups.length);
 
       // Fetch Solo Artists (Musicians who haven't created a group, or just all musicians)
       // We assume 'musician' role in profiles
@@ -631,12 +632,12 @@ export default function HomeScreen() {
         )
         .eq("role", "musician")
         .limit(20);
-      if (pError) debugLog("❌ Error fetching profiles:", pError);
+      if (pError) debugLog("Error fetching profiles:", pError);
 
       // Filter out profiles that might be owners of the groups already fetched?
       // For now, just show them as Solo Artists.
       soloArtists = pData || [];
-      debugLog("🏠 Solo artists fetched:", soloArtists.length);
+      debugLog("Solo artists fetched:", soloArtists.length);
 
       const groupOwnerPreferenceMap = new Map<string, boolean>();
       const groupOpenApplicationsMap = new Map<string, boolean>();
@@ -732,7 +733,7 @@ export default function HomeScreen() {
           .limit(20);
         if (sError) debugLog("Error fetching studios:", sError);
         studios = sData || [];
-        debugLog("🏠 Studios fetched:", studios.length);
+        debugLog("Studios fetched:", studios.length);
 
         // Fetch date overrides to calculate has_special_dates for each studio
         if (studios.length > 0) {
@@ -754,7 +755,7 @@ export default function HomeScreen() {
               ...studio,
               has_special_dates: studioDateOverridesMap[studio.id] || false,
             }));
-            debugLog("🏠 Studios augmented with date overrides");
+            debugLog("Studios augmented with date overrides");
           }
 
           // Fetch active promotions for studios
@@ -772,7 +773,7 @@ export default function HomeScreen() {
               ...studio,
               has_active_promotion: promoStudioIds.has(studio.id),
             }));
-            debugLog("🏠 Studios augmented with promotion flags");
+            debugLog("Studios augmented with promotion flags");
           }
         }
         const { data: gigData, error: gigError } = await supabase
@@ -783,13 +784,9 @@ export default function HomeScreen() {
           .limit(20);
         if (gigError) debugLog("Error fetching gigs:", gigError);
         gigs = gigData || [];
-        debugLog(
-          `📱 Fetched ${gigs.length} open gigs for role: ${userRole}`,
-        );
+        debugLog(`Fetched ${gigs.length} open gigs for role: ${userRole}`);
       } else {
-        debugLog(
-          `📱 Skipping gigs fetch - user is owner (role: ${userRole})`,
-        );
+        debugLog(`Skipping gigs fetch - user is owner (role: ${userRole})`);
       }
 
       // Normalize
@@ -878,7 +875,7 @@ export default function HomeScreen() {
         ? [...allGroups, ...allSoloArtists]
         : [...allGroups, ...allSoloArtists, ...allStudios, ...allGigs];
       debugLog(
-        `📊 Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Solo: ${allSoloArtists.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`,
+        `Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Solo: ${allSoloArtists.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`,
       );
 
       // === NEW ARRIVALS - Simple: Just sort by created_at and take top 10 ===
@@ -888,11 +885,7 @@ export default function HomeScreen() {
         return dateB - dateA; // Newest first
       });
 
-      debugLog(
-        "🆕 Setting New Arrivals:",
-        sortedByDate.length,
-        "items available",
-      );
+      debugLog("Setting New Arrivals:", sortedByDate.length, "items available");
       setNewArrivals(sortedByDate.slice(0, 10));
 
       // === RANDOM RECOMMENDATIONS - Simple random shuffle ===
@@ -902,7 +895,7 @@ export default function HomeScreen() {
       // === AI RECOMMENDATIONS - On-device CPU ranking (free, no paid AI API) ===
       if (userId) {
         try {
-          debugLog("🤖 Building on-device For You recommendations for user:", userId);
+          debugLog("Building on-device For You recommendations for user:", userId);
           const [skillsResult, genresResult] = await Promise.all([
             supabase.from("profile_skills").select("skill").eq("profile_id", userId),
             supabase.from("profile_genres").select("genre").eq("profile_id", userId),
@@ -936,25 +929,25 @@ export default function HomeScreen() {
             setAiFeedMessage("Ranked locally on your phone CPU using popularity and freshness.");
           }
         } catch (aiErr) {
-          debugLog("🤖 On-device ranking error, using general fallback:", aiErr);
+          debugLog("On-device ranking error, using general fallback:", aiErr);
           setAiRecommendations([]);
           setAiFeedProvider("On-Device CPU Ranker");
           setAiFeedMessage("Local personalization is temporarily unavailable. Showing general picks.");
         }
       } else {
-        debugLog("🤖 No user logged in - skipping AI recommendations");
+        debugLog("No user logged in - skipping AI recommendations");
         setAiRecommendations([]);
         setAiFeedProvider("On-Device CPU Ranker");
-        setAiFeedMessage("Sign in to unlock your personalized For You feed.");
+        setAiFeedMessage("");
       }
 
       // Seed featured/discover with fallback random results while AI feed initializes.
       setFeatured(shuffled.slice(0, 10));
       setDiscover(shuffled.slice(10, 20));
 
-      debugLog("✅ Home data loaded successfully");
+      debugLog("Home data loaded successfully");
     } catch (e) {
-      debugLog("❌ Error fetching home feed:", e);
+      debugLog("Error fetching home feed:", e);
     } finally {
       setLoading(false);
     }
@@ -1028,12 +1021,12 @@ export default function HomeScreen() {
 
   const saveToRecentlyViewed = async (item: any) => {
     try {
-      debugLog("💾 saveToRecentlyViewed called with:", item.name, item.type);
+      debugLog("saveToRecentlyViewed called with:", item.name, item.type);
       const AsyncStorage =
         require("@react-native-async-storage/async-storage").default;
       const existingJson = await AsyncStorage.getItem("recently_viewed_items");
       let items = existingJson ? JSON.parse(existingJson) : [];
-      debugLog("💾 Existing items count:", items.length);
+      debugLog("Existing items count:", items.length);
 
       // Remove if already exists to avoid duplicates
       items = items.filter((i: any) => i.id !== item.id);
@@ -1054,11 +1047,11 @@ export default function HomeScreen() {
         "recently_viewed_items",
         JSON.stringify(items),
       );
-      debugLog("💾 Saved! New count:", items.length);
+      debugLog("Saved. New count:", items.length);
 
       // Update state
       setRecentlyViewed(items);
-      debugLog("💾 State updated with", items.length, "items");
+      debugLog("State updated with", items.length, "items");
     } catch (e) {
       debugLog("Error saving to recently viewed:", e);
     }
@@ -1070,7 +1063,7 @@ export default function HomeScreen() {
         require("@react-native-async-storage/async-storage").default;
       const existingJson = await AsyncStorage.getItem("recently_viewed_items");
       debugLog(
-        "📚 Recently viewed from storage:",
+        "Recently viewed from storage:",
         existingJson ? "Found" : "Empty",
       );
       if (existingJson) {
@@ -1080,10 +1073,10 @@ export default function HomeScreen() {
             (item: any) => item.type === "Group" || item.type === "Artist",
           )
           : items;
-        debugLog("📚 Recently viewed items count:", guestFilteredItems.length);
+        debugLog("Recently viewed items count:", guestFilteredItems.length);
         setRecentlyViewed(guestFilteredItems.slice(0, 5)); // Show first 5
       } else {
-        debugLog("📚 No recently viewed items in storage");
+        debugLog("No recently viewed items in storage");
         setRecentlyViewed([]);
       }
     } catch (e) {
@@ -1420,7 +1413,7 @@ export default function HomeScreen() {
       );
 
       setUpcomingEvents(events.slice(0, 5)); // Show max 5 upcoming events
-      debugLog(`📅 Fetched ${events.length} upcoming events for musician`);
+      debugLog(`Fetched ${events.length} upcoming events for musician`);
     } catch (e) {
       debugLog("Error fetching upcoming events:", e);
     }
@@ -1549,7 +1542,7 @@ export default function HomeScreen() {
     };
 
     return (
-      <View style={styles.sectionContainer}>
+      <View style={[styles.sectionContainer, { marginTop: 20 }]}>
         {/* Header */}
         <View
           style={{
@@ -1567,7 +1560,7 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              Top Picks 🤖
+              Top Picks
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
@@ -2298,7 +2291,7 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              For You 🤖
+              For You
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
@@ -2356,8 +2349,8 @@ export default function HomeScreen() {
                   <View style={styles.featuredBadge}>
                     <Text style={styles.featuredBadgeText}>
                       {aiModeEnabled && uniqueItems[0].similarity
-                        ? `🤖 ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match`
-                        : "✨ Top Recommendation"}
+                        ? `AI ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match`
+                        : "Top Recommendation"}
                     </Text>
                   </View>
                   <View
@@ -2672,11 +2665,12 @@ export default function HomeScreen() {
       >
         {renderHero()}
 
-        <View style={{ paddingHorizontal: 24, marginTop: 16 }}>
+        <View style={{ paddingHorizontal: 24, marginTop: 8 }}>
           <ProfileCompletionBanner />
         </View>
 
         {/* AI Recommendation Comparison Toggle */}
+        {showForYouAiCard && userId && (
         <View
           style={{
             marginHorizontal: 24,
@@ -2723,7 +2717,7 @@ export default function HomeScreen() {
                       color: colors.text,
                     }}
                   >
-                    ✨ For You AI
+                    For You AI
                   </Text>
                   <Text
                     style={{
@@ -2875,6 +2869,7 @@ export default function HomeScreen() {
             </View>
           )}
         </View>
+        )}
 
         {renderHighlightsSection()}
 
@@ -3102,7 +3097,7 @@ const styles = StyleSheet.create({
   },
   heroContent: {
     position: "absolute",
-    bottom: height < 700 ? 16 : 40,
+    bottom: height < 700 ? 12 : 24,
     left: 24, // Standardized alignment
     right: 24, // Standardized alignment
     zIndex: 10,

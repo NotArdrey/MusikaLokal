@@ -54,6 +54,12 @@ export default function ProfileScreen() {
   }>({ active: [], upcoming: [], done: [] });
   const [gigSearchQuery, setGigSearchQuery] = useState("");
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
+  const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
+
+  const isMissingShowGigStatusesColumnError = (error: any) => {
+    const message = String(error?.message || "").toLowerCase();
+    return error?.code === "42703" && message.includes("show_gig_statuses");
+  };
 
   const filteredGigTimeline = useMemo(() => {
     const query = gigSearchQuery.trim().toLowerCase();
@@ -177,6 +183,12 @@ export default function ProfileScreen() {
       if (!profileData) {
         throw profileError ?? new Error("Profile not found");
       }
+
+      const hasGigVisibilityPreference = Object.prototype.hasOwnProperty.call(
+        profileData,
+        "show_gig_statuses",
+      );
+      setSupportsGigVisibilityPreference(hasGigVisibilityPreference);
 
       if (profileData.role === "musician") {
         const { data: ownedGroups } = await supabase
@@ -325,6 +337,16 @@ export default function ProfileScreen() {
       if (error) throw error;
     } catch (e: any) {
       setProfile((prev: any) => ({ ...(prev || {}), show_gig_statuses: previousValue }));
+      if (isMissingShowGigStatusesColumnError(e)) {
+        setSupportsGigVisibilityPreference(false);
+        setProfile((prev: any) => ({ ...(prev || {}), show_gig_statuses: true }));
+        showAlert(
+          "warning",
+          "Setting Unavailable",
+          "Gig status visibility preference is unavailable until the latest profile schema migration is applied.",
+        );
+        return;
+      }
       showAlert("error", "Update Failed", e?.message || "Failed to update gig visibility.");
     } finally {
       setUpdatingGigVisibility(false);
@@ -610,7 +632,7 @@ export default function ProfileScreen() {
               ))}
             </View>
 
-            {isOwner && profile?.role === "musician" && (
+            {isOwner && profile?.role === "musician" && supportsGigVisibilityPreference && (
               <View
                 style={[
                   styles.gigVisibilityCard,

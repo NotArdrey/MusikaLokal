@@ -85,7 +85,7 @@ export default function BookingsScreen() {
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const { width } = useWindowDimensions();
   const [modalMode, setModalMode] = useState<
-    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm"
+    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm" | "report_access"
   >("confirm");
 
   // Renew Contract State
@@ -137,6 +137,7 @@ export default function BookingsScreen() {
   const [userRole, setUserRole] = useState<string>("");
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
+  const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -197,6 +198,7 @@ export default function BookingsScreen() {
 
   useEffect(() => {
     setLocallyReportedLateBookings({});
+    setLocallyReportedAccessIssueBookings({});
   }, [userId]);
 
   // Track if user went to payment page (to auto-refresh on return)
@@ -1107,6 +1109,83 @@ export default function BookingsScreen() {
     }
   }
 
+  async function handleReportAccessIssue(
+    item: any,
+    reason: string,
+  ): Promise<boolean> {
+    if (!item?.id) {
+      showAlert("error", "Error", "Booking not found.");
+      return false;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-bookings", {
+        body: {
+          action: "create_incident",
+          booking_id: item.id,
+          issue_type: "cannot_access_studio",
+          notes: reason,
+          userId,
+        },
+      });
+
+      if (error) {
+        const errorContext = (error as any)?.context;
+        let contextBody: any = null;
+
+        try {
+          contextBody = errorContext?.json ? await errorContext.json() : null;
+        } catch {
+          contextBody = null;
+        }
+
+        const contextMessage =
+          (contextBody &&
+            typeof contextBody === "object" &&
+            (contextBody.error || contextBody.message)) ||
+          null;
+
+        if (contextMessage && typeof contextMessage === "string") {
+          throw new Error(contextMessage);
+        }
+
+        throw error;
+      }
+
+      if (data?.incident?.booking_id) {
+        setLocallyReportedAccessIssueBookings((prev) => ({
+          ...prev,
+          [data.incident.booking_id]: true,
+        }));
+      } else {
+        setLocallyReportedAccessIssueBookings((prev) => ({
+          ...prev,
+          [item.id]: true,
+        }));
+      }
+
+      if (userId) fetchBookings(userId);
+      setModalVisible(false);
+      setCancellationReason("");
+
+      showAlert(
+        "success",
+        "Report submitted",
+        "Your report was sent. The studio owner has been notified and the booking issue is now under review.",
+      );
+      return true;
+    } catch (e) {
+      debugLog("Error reporting access issue:", e);
+      const errorMessage =
+        (e as any)?.message ||
+        (typeof e === "string"
+          ? e
+          : "We could not submit your report. Please try again.");
+      showAlert("error", "Unable to submit report", errorMessage);
+      return false;
+    }
+  }
+
   const handleDetailsPress = (item: any) => {
     setSelectedItem(item);
     bookingDetailsRef.current?.present();
@@ -1157,6 +1236,15 @@ export default function BookingsScreen() {
     return Boolean(item?.has_late_report) || Boolean(locallyReportedLateBookings[item?.id]);
   };
 
+  const hasAccessIssueAlready = (item: any) => {
+    if (item?.type_id !== "studio_booking") return false;
+
+    return (
+      Boolean(item?.has_open_incident) ||
+      Boolean(locallyReportedAccessIssueBookings[item?.id])
+    );
+  };
+
   const isWithinLateReportWindow = (item: any) => {
     if (item?.type_id !== "studio_booking") return false;
     if (!item?.raw_date || !item?.start_time) return false;
@@ -1178,6 +1266,16 @@ export default function BookingsScreen() {
     if (hasLateReportAlready(item)) return false;
 
     return isWithinLateReportWindow(item);
+  };
+
+  const shouldShowAccessIssueReportButton = (item: any) => {
+    if (activeTab !== "Ongoing") return false;
+    if (item?.type_id !== "studio_booking") return false;
+    if (userRole !== "musician") return false;
+    if (item?.isCancelled) return false;
+    if (hasAccessIssueAlready(item)) return false;
+
+    return true;
   };
 
   const shouldShowMessageForItem = (item: any) => {
@@ -3800,6 +3898,69 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               )}
 
+                            {shouldShowAccessIssueReportButton(item) && (
+                              <TouchableOpacity activeOpacity={1}
+                                onPress={() => {
+                                  setSelectedItem(item);
+                                  setModalMode("report_access");
+                                  setCancellationReason("");
+                                  setModalVisible(true);
+                                }}
+                                style={[
+                                  styles.outlineButton,
+                                  {
+                                    borderColor: "#EF4444",
+                                    backgroundColor: isDark
+                                      ? "rgba(239, 68, 68, 0.14)"
+                                      : "#FEF2F2",
+                                    width: "100%",
+                                    alignItems: "center",
+                                    borderRadius: 100,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.outlineButtonText,
+                                    {
+                                      color: isDark ? "#FCA5A5" : "#B91C1C",
+                                    },
+                                  ]}
+                                >
+                                  Report Access Issue
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+
+                            {activeTab === "Ongoing" &&
+                              item.type_id === "studio_booking" &&
+                              userRole === "musician" &&
+                              hasAccessIssueAlready(item) && (
+                                <View
+                                  style={[
+                                    styles.outlineButton,
+                                    {
+                                      borderColor: colors.border,
+                                      backgroundColor: isDark
+                                        ? "rgba(148, 163, 184, 0.14)"
+                                        : "#F8FAFC",
+                                      width: "100%",
+                                      alignItems: "center",
+                                      borderRadius: 100,
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.outlineButtonText,
+                                      { color: colors.textSecondary },
+                                    ]}
+                                  >
+                                    Access Issue Reported
+                                  </Text>
+                                </View>
+                              )}
+
                             {/* Pay Balance / Clear Balance (F2F) Buttons */}
                             {activeTab === "Upcoming" &&
                               item.type_id === "studio_booking" &&
@@ -3995,6 +4156,8 @@ export default function BookingsScreen() {
                     ? "Renew Contract"
                     : modalMode === "clear_balance"
                       ? "Clear Remaining Balance"
+                      : modalMode === "report_access"
+                        ? "Report Access Issue"
                       : modalMode === "late_confirm"
                         ? "Confirm Late Report"
                       : modalMode === "late"
@@ -4024,6 +4187,8 @@ export default function BookingsScreen() {
                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
                     : modalMode === "clear_balance"
                       ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
+                      : modalMode === "report_access"
+                        ? "Please describe the issue so we can notify the studio owner and review this booking case."
                       : modalMode === "late_confirm"
                         ? `Send this late-arrival reason to the studio owner?\n\n${cancellationReason.trim()}`
                       : modalMode === "late"
@@ -4096,6 +4261,8 @@ export default function BookingsScreen() {
                     ? "Send Renewal Offer"
                     : modalMode === "clear_balance"
                         ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
+                        : modalMode === "report_access"
+                          ? "Submit Report"
                         : modalMode === "late_confirm"
                           ? "Send Report"
                         : modalMode === "late"
@@ -4122,7 +4289,8 @@ export default function BookingsScreen() {
             (modalMode === "cancel" ||
               modalMode === "decline" ||
               modalMode === "fire" ||
-              modalMode === "late") &&
+              modalMode === "late" ||
+              modalMode === "report_access") &&
             !(modalMode === "decline" && selectedItem?.leader_approval_required) &&
             !cancellationReason.trim()
           ) {
@@ -4170,6 +4338,14 @@ export default function BookingsScreen() {
 
             if (modalMode === "late") {
               setModalMode("late_confirm");
+              return;
+            }
+
+            if (modalMode === "report_access") {
+              await handleReportAccessIssue(
+                selectedItem,
+                cancellationReason.trim(),
+              );
               return;
             }
 
