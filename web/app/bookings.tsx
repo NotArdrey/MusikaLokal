@@ -2124,7 +2124,7 @@ export default function BookingsScreen() {
   if (isGuest) {
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <View style={[Platform.OS === 'web' && { maxWidth: 1024, alignSelf: 'center', width: '100%' }, { flex: 1 }]}>
+        <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
         <Header title="My Activity" />
         <GuestSignInGate message="Sign in to view your bookings and activity." />
         <Navbar />
@@ -2136,11 +2136,11 @@ export default function BookingsScreen() {
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <View style={[Platform.OS === 'web' && { maxWidth: 1024, alignSelf: 'center', width: '100%' }, { flex: 1 }]}>
+        <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
         <Header title={userRole === "venue-owner" ? "Manage Applications" : "My Activity"} />
 
         {/* Tab Navigation */}
-        <View style={[styles.tabContainer, width >= 768 && { maxWidth: 1024, alignSelf: 'center' as any, width: '100%' }]}>
+        <View style={[styles.tabContainer, width >= 768 && { width: '100%' }]}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -2164,7 +2164,7 @@ export default function BookingsScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.scrollContent,
-            width >= 768 && { maxWidth: 1024, alignSelf: 'center' as any, width: '100%' },
+            width >= 768 && { width: '100%' },
           ]}
         >
           {loading ? (

@@ -154,6 +154,7 @@ const AutoCardImage = ({
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
+  const { width } = useWindowDimensions();
   const { userRole, userId, isGuest } = useAuth();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
@@ -1372,7 +1373,7 @@ export default function HomeScreen() {
           </View>
 
           {/* Glassmorphism Search Pill */}
-          <BlurView intensity={60} tint="light" style={styles.searchPill}>
+          <BlurView intensity={60} tint="light" style={[styles.searchPill, Platform.OS === 'web' && width >= 768 && { maxWidth: 640, alignSelf: 'flex-start' }]}>
             <TouchableOpacity activeOpacity={1}
               style={styles.searchTouch}
               onPress={openSearchSheet}
@@ -1398,7 +1399,45 @@ export default function HomeScreen() {
     );
   };
 
-  // 2. Promotional Carousel & Top Picks (Redesigned as "Relevant")
+  // 1.5 Web SaaS Split Hero
+  const renderWebHero = () => {
+    return (
+      <View style={{ flexDirection: 'row', backgroundColor: '#FAFAFA', borderRadius: 32, padding: 48, marginTop: 16, minHeight: 480, overflow: 'hidden', alignItems: 'center' }}>
+        {/* Left Content */}
+        <View style={{ flex: 1, paddingRight: 40, zIndex: 10 }}>
+          <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 52, color: colors.text, lineHeight: 60 }}>
+            Best SaaS tools to{'\n'}<Text style={{ color: colors.primary }}>manage your music</Text>
+          </Text>
+          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 18, color: '#6B7280', marginTop: 24, marginBottom: 40, maxWidth: 480 }}>
+            Leave traditional booking methods and start switching to MusikaLokal. One platform for all your career needs.
+          </Text>
+          
+          <TouchableOpacity activeOpacity={0.8} onPress={openSearchSheet} style={{ backgroundColor: colors.primary, paddingVertical: 18, paddingHorizontal: 36, borderRadius: 100, alignSelf: 'flex-start', shadowColor: colors.primary, shadowOffset: {width: 0, height: 10}, shadowOpacity: 0.3, shadowRadius: 20 }}>
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#FFF' }}>Start your next gig now</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Right Floating Widgets (Mocking the SaaS UI) */}
+        <View style={{ flex: 1, position: 'relative', height: '100%', minHeight: 400 }}>
+           {/* Mock Data Card 1 */}
+           <View style={{ position: 'absolute', top: 0, right: 30, width: 220, backgroundColor: isDark ? '#374151' : '#FFF', borderRadius: 24, padding: 24, shadowColor: '#9CA3AF', shadowOffset: {width: 0, height: 20}, shadowOpacity: 0.15, shadowRadius: 40, elevation: 10 }}>
+              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Monthly Bookings</Text>
+              <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 40, color: colors.text, marginTop: 8 }}>124 <Text style={{ fontSize: 16, color: colors.primary, fontFamily: 'Poppins_600SemiBold' }}>+12%</Text></Text>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 48, marginTop: 24, gap: 6 }}>
+                 {[40, 60, 30, 80, 50].map((h, i) => <View key={i} style={{ flex: 1, height: `${h}%`, backgroundColor: i === 3 ? colors.primary : isDark ? '#4B5563' : '#F3F4F6', borderRadius: 6 }} />)}
+              </View>
+           </View>
+
+           {/* Mock Data Card 2 */}
+           <View style={{ position: 'absolute', bottom: 20, left: 10, width: 280, backgroundColor: isDark ? '#374151' : '#FFF', borderRadius: 24, padding: 24, shadowColor: '#9CA3AF', shadowOffset: {width: 0, height: 25}, shadowOpacity: 0.15, shadowRadius: 40, elevation: 10 }}>
+              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, textAlign: 'center' }}>Studio Traffic</Text>
+              <View style={{ width: 100, height: 100, borderRadius: 50, borderWidth: 20, borderColor: isDark ? '#4B5563' : '#111827', borderLeftColor: isDark ? '#1F2937' : '#F3F4F6', borderBottomColor: colors.primary, alignSelf: 'center', marginTop: 24 }} />
+              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', textAlign: 'center', marginTop: 24 }}>Keep your schedule updated to increase the number of interactions.</Text>
+           </View>
+        </View>
+      </View>
+    );
+  };
   const renderHighlightsSection = () => {
     if (topItems.length === 0) return null;
 
@@ -1715,7 +1754,7 @@ export default function HomeScreen() {
                 onPress={() => handleCardPress(item)}
                 style={[
                   styles.newArrivalCard,
-                  Platform.OS === 'web' && { flex: 1, minWidth: 280, maxWidth: 320 },
+                  Platform.OS === 'web' && { flex: 1, minWidth: 280, maxWidth: 320, shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: {height: 4, width: 0} },
                   { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
                 ]}
               >
@@ -2070,7 +2109,7 @@ export default function HomeScreen() {
     if (uniqueItems.length === 0) {
       return (
         <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          <Text style={[styles.sectionTitle, { color: Platform.OS === 'web' ? '#111827' : colors.text }]}>
             For You
           </Text>
           <View
@@ -2421,18 +2460,20 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[Platform.OS === 'web' && { maxWidth: 1024, alignSelf: 'center', width: '100%' }, { flex: 1 }]}>
+      <View style={{ flex: 1, width: '100%' }}>
       <StatusBar
         barStyle="light-content"
         translucent
         backgroundColor="transparent"
       />
 
-      <View
-        style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
-      >
-        <Header title="MusikaLokal" transparent={!isScrolled} />
-      </View>
+      {!(Platform.OS === 'web' && width >= 768) && (
+        <View
+          style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
+        >
+          <Header title="MusikaLokal" transparent={!isScrolled} />
+        </View>
+      )}
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -2452,8 +2493,8 @@ export default function HomeScreen() {
           />
         }
       >
-        <View style={[Platform.OS === 'web' && { maxWidth: 1280, width: '100%', alignSelf: 'center' }]}>
-        {renderHero()}
+        <View style={{ width: '100%', flex: 1 }}>
+        {Platform.OS === 'web' && width >= 768 ? renderWebHero() : renderHero()}
 
         <View style={{ paddingHorizontal: 24, marginTop: 16 }}>
           <ProfileCompletionBanner />
@@ -2461,7 +2502,7 @@ export default function HomeScreen() {
 
         {/* AI Recommendation Comparison Toggle */}
         <View
-          style={{
+          style={[{
             marginHorizontal: 24,
             marginTop: 20,
             marginBottom: 8,
@@ -2474,7 +2515,16 @@ export default function HomeScreen() {
               : isDark
                 ? "#374151"
                 : "#E5E7EB",
-          }}
+          }, Platform.OS === 'web' && width >= 768 && { 
+            alignSelf: 'center', marginHorizontal: 24, maxWidth: 640, width: '100%',
+            backgroundColor: '#FFFFFF', 
+            borderColor: 'transparent',
+            shadowColor: '#7C3AED', 
+            shadowOffset: {width: 0, height: 10}, 
+            shadowOpacity: 0.1, 
+            shadowRadius: 20, 
+            elevation: 8 
+          }]}
         >
           <View
             style={{
@@ -2697,15 +2747,12 @@ export default function HomeScreen() {
                     </Text>
                   </TouchableOpacity>
                 </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
+                <ResponsiveList
                   contentContainerStyle={{
                     paddingLeft: 24,
                     paddingRight: 24,
                     paddingVertical: 8,
                   }}
-                  decelerationRate="fast"
                   snapToInterval={240 + 16}
                 >
                   {recentlyViewed.map((item) => (
@@ -2715,7 +2762,8 @@ export default function HomeScreen() {
                       onPress={() => handleCardPress(item)}
                       style={[
                         styles.recentlyViewedCard,
-                        { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                        Platform.OS === 'web' && { flex: 1, minWidth: 240, maxWidth: 320, shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: {height: 4, width: 0} },
+                        { backgroundColor: Platform.OS === 'web' ? '#FFFFFF' : isDark ? "#1F2937" : "#FFFFFF" },
                       ]}
                     >
                       {/* Image Section */}
@@ -2813,7 +2861,7 @@ export default function HomeScreen() {
                       </View>
                     </TouchableOpacity>
                   ))}
-                </ScrollView>
+                </ResponsiveList>
               </View>
             )}
         </View>
@@ -2954,6 +3002,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     fontSize: moderateScale(20),
     marginLeft: 0, // Removed double margin
+    textAlign: Platform.OS === 'web' ? 'center' : 'auto',
   },
   sectionSubtitle: {
     fontFamily: "Poppins_400Regular",
@@ -2966,7 +3015,7 @@ const styles = StyleSheet.create({
   bentoGrid: {
     flexDirection: "row",
     gap: 12,
-    height: 280, // Fixed height for the bento block
+    height: Platform.OS === 'web' ? 420 : 280, // Fixed height for the bento block
   },
   bentoTouchableLarge: {
     flex: 1.5,

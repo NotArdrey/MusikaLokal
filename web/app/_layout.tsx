@@ -202,8 +202,8 @@ function RootContent() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, flexDirection: showSidebar ? 'row' : 'column' }}>
       {showSidebar && <SidebarNav />}
-      <View style={{ flex: 1, overflow: 'hidden', alignItems: showSidebar ? 'center' : undefined }}>
-        <View style={{ flex: 1, width: '100%', maxWidth: showSidebar ? 1200 : undefined }}>
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <View style={{ flex: 1, width: '100%' }}>
           <Stack
             screenOptions={{
               headerShown: false,

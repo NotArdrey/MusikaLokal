@@ -550,7 +550,7 @@ export default function AiSuggestionsScreen() {
             contentContainerStyle={[
                 styles.scrollContent,
                 { paddingBottom: 160 + insets.bottom },
-                isWebDesktop && { maxWidth: 1024, alignSelf: 'center' as const, width: '100%' as any, paddingHorizontal: 32 },
+                isWebDesktop && { width: '100%', paddingHorizontal: 32 },
             ]}
             showsVerticalScrollIndicator={false}
         >
@@ -600,7 +600,7 @@ export default function AiSuggestionsScreen() {
             contentContainerStyle={[
                 styles.scrollContent,
                 { paddingBottom: 160 + insets.bottom },
-                isWebDesktop && { maxWidth: 1024, alignSelf: 'center' as const, width: '100%' as any, paddingHorizontal: 32 },
+                isWebDesktop && { width: '100%', paddingHorizontal: 32 },
             ]}
             showsVerticalScrollIndicator={false}
         >
@@ -701,7 +701,7 @@ export default function AiSuggestionsScreen() {
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
-            <View style={[isWebDesktop && { maxWidth: 1024, alignSelf: 'center', width: '100%' }, { flex: 1 }]}>
+            <View style={[isWebDesktop && { width: '100%' }, { flex: 1 }]}>
                 <Header title="AI Suggestions" />
 
                 {isGuest ? (
