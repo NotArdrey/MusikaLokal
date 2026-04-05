@@ -119,8 +119,14 @@ interface DashboardMetrics {
 
 export default function AdminDashboard() {
   const { colors, isDark } = useTheme();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, session, roleResolved } = useAuth();
   const navigate = useNavigate();
+
+  const getAuthHeaders = useCallback(() => {
+    const token = session?.access_token;
+    if (!token) return undefined;
+    return { Authorization: `Bearer ${token}` };
+  }, [session?.access_token]);
 
   const [tab, setTab] = useState<Tab>("dashboard");
   const [loading, setLoading] = useState(true);
@@ -186,10 +192,13 @@ export default function AdminDashboard() {
 
   // Redirect non-admins
   useEffect(() => {
-    if (!isAdmin && !loading) {
+    if (!roleResolved) return;
+
+    if (!isAdmin) {
+      setLoading(false);
       navigate("/home", { replace: true });
     }
-  }, [isAdmin, loading, navigate]);
+  }, [isAdmin, roleResolved, navigate]);
 
   // Fetch dashboard metrics
   const fetchMetrics = useCallback(async () => {
@@ -198,6 +207,7 @@ export default function AdminDashboard() {
         "permit-management",
         {
           body: { action: "fetch_metrics" },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -217,11 +227,13 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getAuthHeaders]);
 
   useEffect(() => {
+    if (!roleResolved || !isAdmin || !session?.access_token) return;
+
     fetchMetrics();
-  }, [fetchMetrics]);
+  }, [fetchMetrics, roleResolved, isAdmin, session?.access_token]);
 
   // Fetch permit queue
   const fetchPermits = useCallback(async () => {
@@ -235,6 +247,7 @@ export default function AdminDashboard() {
             entityType: entityFilter,
             permitStatus: permitFilter,
           },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -246,7 +259,7 @@ export default function AdminDashboard() {
     } finally {
       setPermitLoading(false);
     }
-  }, [permitFilter, entityFilter]);
+  }, [permitFilter, entityFilter, getAuthHeaders]);
 
   useEffect(() => {
     if (tab === "permits") fetchPermits();
@@ -289,6 +302,7 @@ export default function AdminDashboard() {
             statusFilter: reportFilter,
             limit: 100,
           },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -306,7 +320,7 @@ export default function AdminDashboard() {
     } finally {
       setReportLoading(false);
     }
-  }, [reportFilter]);
+  }, [reportFilter, getAuthHeaders]);
 
   useEffect(() => {
     if (tab === "reports") fetchReports();
@@ -324,6 +338,7 @@ export default function AdminDashboard() {
             statusFilter: incidentFilter,
             limit: 100,
           },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -343,7 +358,7 @@ export default function AdminDashboard() {
     } finally {
       setIncidentLoading(false);
     }
-  }, [incidentFilter]);
+  }, [incidentFilter, getAuthHeaders]);
 
   useEffect(() => {
     if (tab === "reports") fetchBookingIncidents();
@@ -358,6 +373,7 @@ export default function AdminDashboard() {
           reportId,
           nextStatus,
         },
+        headers: getAuthHeaders(),
       });
 
       if (error) throw error;
@@ -396,6 +412,7 @@ export default function AdminDashboard() {
             incident_id: incidentId,
             resolution,
           },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -435,6 +452,7 @@ export default function AdminDashboard() {
             action: "fetch_audit",
             limit: 100,
           },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -452,7 +470,7 @@ export default function AdminDashboard() {
     } finally {
       setAuditLoading(false);
     }
-  }, []);
+  }, [getAuthHeaders]);
 
   useEffect(() => {
     if (tab === "audit") fetchAuditLog();
@@ -477,6 +495,7 @@ export default function AdminDashboard() {
           rejectionReason: reviewAction === "reject" ? rejectReason : "",
           adminNotes,
         },
+        headers: getAuthHeaders(),
       });
 
       if (error) throw error;
@@ -609,7 +628,7 @@ export default function AdminDashboard() {
     { id: "audit", label: "Audit Log", icon: IoTimeOutline },
   ];
 
-  if (loading) {
+  if (loading || !roleResolved) {
     return (
       <div className="page-container">
         <div className="flex items-center justify-center py-32">

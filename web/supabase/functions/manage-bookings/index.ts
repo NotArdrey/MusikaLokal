@@ -117,6 +117,80 @@ async function getRequesterRole(supabaseClient: any, userId: string) {
   return data?.role || null;
 }
 
+const reportTargetTableMap: Record<string, string> = {
+  group: "groups",
+  studio: "studios",
+  venue: "studios",
+  gig: "gigs",
+  user: "profiles",
+  profile: "profiles",
+};
+
+async function fetchReportTargetDetails(
+  supabaseAdmin: any,
+  rawTargetType: unknown,
+  rawTargetId: unknown,
+) {
+  const targetType = String(rawTargetType || "").trim().toLowerCase();
+  const targetId = String(rawTargetId || "").trim();
+  const table = reportTargetTableMap[targetType] || null;
+
+  if (!targetId) {
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: null,
+      owner_profile: null,
+    };
+  }
+
+  if (!table) {
+    return {
+      type: targetType,
+      id: targetId,
+      table: null,
+      record: null,
+      owner_profile: null,
+    };
+  }
+
+  const { data: record, error: recordError } = await supabaseAdmin
+    .from(table)
+    .select("*")
+    .eq("id", targetId)
+    .maybeSingle();
+
+  if (recordError) throw recordError;
+
+  const ownerId = String(
+    record?.owner_id ||
+      record?.organizer_id ||
+      record?.user_id ||
+      "",
+  ).trim();
+
+  let ownerProfile = null;
+  if (ownerId) {
+    const { data: ownerRow, error: ownerError } = await supabaseAdmin
+      .from("profiles")
+      .select("*")
+      .eq("id", ownerId)
+      .maybeSingle();
+
+    if (ownerError) throw ownerError;
+    ownerProfile = ownerRow || null;
+  }
+
+  return {
+    type: targetType,
+    id: targetId,
+    table,
+    record: record || null,
+    owner_profile: ownerProfile,
+  };
+}
+
 async function autoStartBookingsAndNotify(
   supabaseAdmin: any,
   userId: string,
@@ -242,7 +316,7 @@ serve(async (req: Request) => {
     const {
       data: { user: authUser },
       error: authUserError,
-    } = await supabaseClient.auth.getUser();
+    } = await supabaseClient.auth.getUser(authHeader.replace(/^Bearer\s+/i, ""));
 
     if (authUserError || !authUser) {
       return new Response(JSON.stringify({ code: 401, message: "Invalid JWT" }), {
@@ -2459,6 +2533,113 @@ serve(async (req: Request) => {
           message: `Balance of ₱${balanceAmount.toLocaleString()} cleared successfully`,
           amount: balanceAmount,
           booking_id,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    // ADMIN COMPAT: FETCH REPORT DETAILS
+    if (action === "fetch_report_details") {
+      const reportId = String(params?.reportId || "").trim();
+
+      if (!reportId) {
+        return new Response(JSON.stringify({ error: "Missing reportId" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const requesterRole = await getRequesterRole(supabaseClient, authUser.id);
+      if (requesterRole !== "admin") {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
+      const { data: report, error: reportError } = await supabaseAdmin
+        .from("reports")
+        .select("*")
+        .eq("id", reportId)
+        .maybeSingle();
+
+      if (reportError) throw reportError;
+
+      if (!report) {
+        return new Response(JSON.stringify({ error: "Report not found" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
+      let reporterProfile = null;
+      if (report.reporter_id) {
+        const { data: reporterRow, error: reporterError } = await supabaseAdmin
+          .from("profiles")
+          .select("*")
+          .eq("id", report.reporter_id)
+          .maybeSingle();
+
+        if (reporterError) throw reporterError;
+        reporterProfile = reporterRow || null;
+      }
+
+      const targetDetails = await fetchReportTargetDetails(
+        supabaseAdmin,
+        report.target_type,
+        report.target_id,
+      );
+
+      return new Response(
+        JSON.stringify({
+          report: {
+            ...report,
+            reporter_name: reporterProfile?.full_name || "Unknown",
+            reporter_email: reporterProfile?.email || "",
+          },
+          reporter_profile: reporterProfile,
+          target: targetDetails,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    // ADMIN COMPAT: FETCH USER DETAILS
+    if (action === "fetch_user_details") {
+      const userId = String(params?.userId || "").trim();
+
+      if (!userId) {
+        return new Response(JSON.stringify({ error: "Missing userId" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const requesterRole = await getRequesterRole(supabaseClient, authUser.id);
+      if (requesterRole !== "admin") {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profileError) throw profileError;
+
+      return new Response(
+        JSON.stringify({
+          item: profile || null,
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },

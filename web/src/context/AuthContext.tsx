@@ -27,6 +27,7 @@ type AuthContextType = {
   setGuestMode: (enabled: boolean) => Promise<void>;
   isAdmin: boolean;
   userRole: string | null;
+  roleResolved: boolean;
   userId: string | null;
   // System lock for unpaid balances
   isSystemLocked: boolean;
@@ -48,6 +49,7 @@ const AuthContext = createContext<AuthContextType>({
   setGuestMode: async () => { },
   isAdmin: false,
   userRole: null,
+  roleResolved: false,
   userId: null,
   isSystemLocked: false,
   unpaidBalance: 0,
@@ -68,8 +70,20 @@ export const useRequireAuth = () => {
 
   useEffect(() => {
     if (!loading && !session) {
-      // Not logged in - guests stay in Home, others go to login
-      router.replace(isGuest ? "/home" : "/");
+      // Before redirecting, verify with the Supabase client directly.
+      // React context may not have propagated the session yet after a fresh login.
+      if (!isGuest) {
+        supabase.auth.getSession().then(({ data: { session: directSession } }) => {
+          if (!directSession) {
+            router.replace("/");
+          }
+          // If directSession exists, context will catch up — don't redirect.
+        }).catch(() => {
+          router.replace("/");
+        });
+      } else {
+        router.replace("/home");
+      }
     }
   }, [session, loading, isGuest]);
 
@@ -86,6 +100,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isGuest, setIsGuest] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [roleResolved, setRoleResolved] = useState(false);
 
   // System lock state
   const [isSystemLocked, setIsSystemLocked] = useState(false);
@@ -332,6 +347,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(null);
       setIsAdmin(false);
       setUserRole(null);
+      setRoleResolved(true);
       setIsSystemLocked(false);
       setUnpaidBalance(0);
       setUnpaidBookings([]);
@@ -373,7 +389,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(secureSession);
         if (secureSession) {
           setGuestMode(false);
-          fetchUserRole(secureSession.user.id);
+          setRoleResolved(false);
+          void fetchUserRole(secureSession.user.id, secureSession);
+        } else {
+          setRoleResolved(true);
         }
         setLoading(false);
       } catch (error) {
@@ -398,6 +417,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(null);
         setIsAdmin(false);
         setUserRole(null);
+        setRoleResolved(true);
         setIsSystemLocked(false);
         setUnpaidBalance(0);
         setUnpaidBookings([]);
@@ -419,8 +439,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(secureSession);
       if (secureSession) {
         setGuestMode(false);
-        fetchUserRole(secureSession.user.id);
-      } else if (event !== "INITIAL_SESSION") {
+        setRoleResolved(false);
+        void fetchUserRole(secureSession.user.id, secureSession);
+      } else {
+        setRoleResolved(true);
+
+        if (event === "INITIAL_SESSION") {
+          setLoading(false);
+          return;
+        }
+
         // Only reset state if this isn't the initial session load
         setIsAdmin(false);
         setUserRole(null);
@@ -506,36 +534,80 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [session?.user?.id, checkSubscription]);
 
-  const fetchUserRole = async (userId: string) => {
+  const normalizeRole = (rawRole: unknown): string | null => {
+    if (typeof rawRole !== "string") return null;
+    const normalized = rawRole.trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+  };
+
+  const applyResolvedRole = (resolvedRole: string | null) => {
+    setUserRole(resolvedRole);
+    setIsAdmin(resolvedRole === "admin");
+    setRoleResolved(true);
+  };
+
+  const fetchUserRole = async (userId: string, activeSession?: Session | null) => {
+    const metadataRole = normalizeRole(
+      activeSession?.user?.user_metadata?.role ??
+      activeSession?.user?.app_metadata?.role ??
+      session?.user?.user_metadata?.role ??
+      session?.user?.app_metadata?.role,
+    );
+
     try {
       console.log("🔍 Fetching role for user ID:", userId);
       const { data, error } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", userId)
-        .limit(1);
+        .maybeSingle();
 
       if (error) {
         console.log("❌ Error fetching user role:", error.message, error);
-        setUserRole(null);
-        setIsAdmin(false);
+      }
+
+      const profileRole = normalizeRole(data?.role);
+      if (profileRole) {
+        console.log("✅ User role fetched from profiles:", profileRole);
+        applyResolvedRole(profileRole);
         return;
       }
 
-      if (data && data.length > 0) {
-        const resolvedRole = data[0].role;
-        console.log("✅ User role fetched:", resolvedRole);
-        setUserRole(resolvedRole);
-        setIsAdmin(resolvedRole === "admin");
-      } else {
-        console.log("⚠️ No profile data found for user");
-        setUserRole(null);
-        setIsAdmin(false);
+      if (metadataRole) {
+        console.log("ℹ️ Using role from session metadata:", metadataRole);
+        applyResolvedRole(metadataRole);
+        return;
       }
+
+      const { data: profileData, error: profileError } = await supabase.functions.invoke<any>(
+        "manage-profile",
+        {
+          body: { action: "fetch", userId },
+        },
+      );
+
+      if (!profileError) {
+        const functionRole = normalizeRole(profileData?.role);
+        if (functionRole) {
+          console.log("✅ User role fetched from manage-profile:", functionRole);
+          applyResolvedRole(functionRole);
+          return;
+        }
+      } else {
+        console.log("❌ Error fetching role from manage-profile:", profileError.message, profileError);
+      }
+
+      console.log("⚠️ No role data found for user");
+      applyResolvedRole(null);
     } catch (error) {
       console.log("❌ Exception fetching user role:", error);
-      setUserRole(null);
-      setIsAdmin(false);
+      if (metadataRole) {
+        console.log("ℹ️ Falling back to metadata role after exception:", metadataRole);
+        applyResolvedRole(metadataRole);
+        return;
+      }
+
+      applyResolvedRole(null);
     }
   };
 
@@ -548,6 +620,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setGuestMode,
         isAdmin,
         userRole,
+        roleResolved,
         userId: session?.user?.id || null,
         isSystemLocked,
         unpaidBalance,

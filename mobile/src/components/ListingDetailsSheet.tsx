@@ -536,6 +536,7 @@ const ListingDetailsSheet = forwardRef<
   const getReportTargetType = (listingType?: string) => {
     const normalized = (listingType || "").toLowerCase();
     if (normalized === "artist") return "profile";
+    if (normalized === "venue") return "studio";
     return normalized || "profile";
   };
 

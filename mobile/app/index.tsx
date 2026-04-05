@@ -186,9 +186,12 @@ export default function LoginScreen() {
       } else {
         // Login succeeded - VALIDATE VERIFICATION STATUS
         console.log('Auth success. Validating verification status...');
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user }, error: getUserError } = await supabase.auth.getUser();
 
-        if (user) {
+        if (!user) {
+          console.error('Failed to retrieve user after login:', getUserError?.message || 'user is null');
+          setLoginMessage({ type: 'error', text: 'Unable to verify your account. Please try again.' });
+        } else if (user) {
           const blockAdminAccess = async () => {
             await supabase.auth.signOut({ scope: 'local' });
             setLoginMessage({ type: 'error', text: 'Admin accounts are not supported in the mobile app.' });

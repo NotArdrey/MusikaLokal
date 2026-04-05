@@ -68,8 +68,20 @@ export const useRequireAuth = () => {
 
   useEffect(() => {
     if (!loading && !session) {
-      // Not logged in - guests stay in Home, others go to login
-      router.replace(isGuest ? "/home" : "/");
+      // Before redirecting, verify with the Supabase client directly.
+      // React context may not have propagated the session yet after a fresh login.
+      if (!isGuest) {
+        supabase.auth.getSession().then(({ data: { session: directSession } }) => {
+          if (!directSession) {
+            router.replace("/");
+          }
+          // If directSession exists, context will catch up — don't redirect.
+        }).catch(() => {
+          router.replace("/");
+        });
+      } else {
+        router.replace("/home");
+      }
     }
   }, [session, loading, isGuest]);
 

@@ -48,7 +48,15 @@ import ToReview from "./pages/ToReview";
 import Wallet from "./pages/Wallet";
 
 function AdminRoute() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, roleResolved } = useAuth();
+
+  if (!roleResolved) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white dark:bg-gray-900">
+        <span className="spinner" />
+      </div>
+    );
+  }
 
   if (!isAdmin) {
     return <Navigate to="/home" replace />;

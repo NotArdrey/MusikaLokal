@@ -205,9 +205,12 @@ export default function LoginScreen() {
       } else {
         // Login succeeded - VALIDATE VERIFICATION STATUS
         console.log('Auth success. Validating verification status...');
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user }, error: getUserError } = await supabase.auth.getUser();
 
-        if (user) {
+        if (!user) {
+          console.error('Failed to retrieve user after login:', getUserError?.message || 'user is null');
+          setLoginMessage({ type: 'error', text: 'Unable to verify your account. Please try again.' });
+        } else if (user) {
           // 1. Check Metadata (Fastest)
           const metaVerified = user.user_metadata?.is_verified;
           console.log('Metadata check:', { metaVerified });
