@@ -15,7 +15,9 @@
     "supabase:status": "supabase status",
     "supabase:reset": "supabase db reset",
     "supabase:diff": "supabase db diff -f local_schema",
-    "supabase:seed": "supabase db dump --local --data-only > supabase/seed.sql"
+    "supabase:seed": "supabase db dump --local --data-only > supabase/seed.sql",
+    "ai:setup-secrets": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-ai-secrets.ps1",
+    "ai:deploy-function": "supabase functions deploy instrument-suggestions --no-verify-jwt"
   },
   "dependencies": {
     "@expo-google-fonts/poppins": "^0.4.1",
@@ -78,6 +80,7 @@
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "expo-module-scripts": "^5.0.8",
+    "playwright": "^1.59.1",
     "supabase": "^2.74.5",
     "typescript": "~5.9.2"
   },

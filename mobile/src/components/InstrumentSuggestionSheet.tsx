@@ -22,6 +22,11 @@ import {
     SuggestionPurpose,
 } from '../types/instruments';
 
+const GROQ_REQUEST_HEADERS = (() => {
+    const key = (process.env.EXPO_PUBLIC_GROQ_API_KEY || '').trim();
+    return key ? { 'x-groq-api-key': key } : undefined;
+})();
+
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface InstrumentSuggestionSheetProps {
@@ -49,6 +54,8 @@ export default function InstrumentSuggestionSheet({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [step, setStep] = useState<'preferences' | 'results'>('preferences');
+    const [isAIPowered, setIsAIPowered] = useState(false);
+    const [aiProvider, setAIProvider] = useState('');
 
     // Track previous visible state to detect when modal opens
     const prevVisibleRef = useRef(visible);
@@ -63,6 +70,8 @@ export default function InstrumentSuggestionSheet({
             setStep('preferences');
             setSuggestions([]);
             setError(null);
+            setIsAIPowered(false);
+            setAIProvider('');
         }
     }, [visible, initialGenres]);
 
@@ -82,6 +91,7 @@ export default function InstrumentSuggestionSheet({
         
         try {
             const { data, error: funcError } = await supabase.functions.invoke('instrument-suggestions', {
+                headers: GROQ_REQUEST_HEADERS,
                 body: {
                     action: 'suggest',
                     genres: selectedGenres,
@@ -96,13 +106,20 @@ export default function InstrumentSuggestionSheet({
             
             if (data?.suggestions) {
                 setSuggestions(data.suggestions);
+                setIsAIPowered(Boolean(data.aiPowered));
+                setAIProvider(data.aiProvider || '');
                 setStep('results');
             } else {
-                setError('No suggestions found. Try different preferences.');
+                setError(data?.message || 'No suggestions found. Try different preferences.');
             }
         } catch (err: any) {
             console.error('Error fetching suggestions:', err);
-            setError(err.message || 'Failed to get suggestions');
+            const errorMessage = err.message?.toLowerCase() || '';
+            if (errorMessage.includes('non-2xx') || errorMessage.includes('edge function') || errorMessage.includes('fetch')) {
+                setError('Unable to get suggestions right now. Please try again later.');
+            } else {
+                setError(err.message || 'Failed to get suggestions');
+            }
         } finally {
             setLoading(false);
         }
@@ -231,7 +248,7 @@ export default function InstrumentSuggestionSheet({
 
     // Render suggestion card
     const renderSuggestionCard = (suggestion: InstrumentSuggestion, index: number) => {
-        const matchPercentage = Math.min(100, Math.round(suggestion.score * 5));
+        const matchPercentage = Math.max(0, Math.min(100, Math.round(suggestion.score)));
         
         return (
             <TouchableOpacity activeOpacity={1}
@@ -408,7 +425,9 @@ export default function InstrumentSuggestionSheet({
                 ✨ Top Instrument Suggestions
             </Text>
             <Text style={[styles.resultsSubtitle, { color: colors.textSecondary }]}>
-                Based on your music preferences and experience
+                {isAIPowered
+                    ? `Powered by ${aiProvider || 'AI'} based on your music preferences`
+                    : `Using ${aiProvider || 'local matching'} based on your music preferences`}
             </Text>
             
             {/* Suggestion Cards */}
@@ -424,9 +443,9 @@ export default function InstrumentSuggestionSheet({
                     <ActivityIndicator color={colors.primary} />
                 ) : (
                     <>
-                        <Ionicons name="refresh" size={18} color={colors.primary} />
+                        <Ionicons name={isAIPowered ? "sparkles" : "refresh"} size={18} color={colors.primary} />
                         <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>
-                            Refresh Suggestions
+                            {isAIPowered ? 'Get New AI Suggestions' : 'Refresh Smart Suggestions'}
                         </Text>
                     </>
                 )}

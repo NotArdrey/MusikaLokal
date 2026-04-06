@@ -13,6 +13,17 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import { useTheme } from '../src/context/ThemeContext';
 
 type OnboardingStep = 'role' | 'details' | 'verification' | 'email_verification';
+type SignupRole = 'musician' | 'venue-owner' | 'studio-owner';
+
+const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['musician', 'venue-owner', 'studio-owner'];
+
+const isAllowedSignupRole = (role: unknown): role is SignupRole => {
+    return typeof role === 'string' && ALLOWED_SIGNUP_ROLES.includes(role as SignupRole);
+};
+
+const isAdminRole = (role: unknown): boolean => {
+    return typeof role === 'string' && role.toLowerCase() === 'admin';
+};
 
 export default function SignupScreen() {
     const { colors, isDark } = useTheme();
@@ -29,7 +40,7 @@ export default function SignupScreen() {
     const { verified, session_id, check_verification } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string }>();
 
     // Form Fields
-    const [selectedRole, setSelectedRole] = useState<'musician' | 'venue-owner' | 'studio-owner' | null>(null);
+    const [selectedRole, setSelectedRole] = useState<SignupRole | null>(null);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -84,7 +95,9 @@ export default function SignupScreen() {
                         const { email: sEmail, password: sPassword, selectedRole: sRole, tempRef, sSessionId } = JSON.parse(savedState);
                         if (sEmail) setEmail(sEmail);
                         if (sPassword) setPassword(sPassword);
-                        if (sRole) setSelectedRole(sRole);
+                        if (isAllowedSignupRole(sRole)) {
+                            setSelectedRole(sRole);
+                        }
                         if (tempRef) setTempSessionRef(tempRef);
                         if (sSessionId) setSessionId(sSessionId);
 
@@ -332,7 +345,7 @@ export default function SignupScreen() {
 
 
     // Role options
-    const roleOptions = [
+    const roleOptions: { value: SignupRole; label: string; icon: 'musical-notes-outline' | 'business-outline' | 'mic-outline'; description: string }[] = [
         { value: 'musician' as const, label: 'Musical Artist', icon: 'musical-notes-outline' as const, description: 'Join bands, find gigs' },
         { value: 'venue-owner' as const, label: 'Venue Owner', icon: 'business-outline' as const, description: 'Host events, hire artists' },
         { value: 'studio-owner' as const, label: 'Studio Owner', icon: 'mic-outline' as const, description: 'Offer recording services' },
@@ -451,6 +464,13 @@ export default function SignupScreen() {
         setErrors({});
         const newErrors: any = {};
 
+        if (!isAllowedSignupRole(selectedRole)) {
+            setErrors({ role: 'Please select a valid account type.' });
+            Alert.alert('Unsupported Account Type', 'Admin accounts are not allowed in the mobile app.');
+            setStep('role');
+            return;
+        }
+
         // Basic Validation
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!email) newErrors.email = 'Required';
@@ -477,7 +497,13 @@ export default function SignupScreen() {
 
         try {
             // Check if profile exists (optional, nice to have to prevent dupe emails early)
-            const { data: profile } = await supabase.from('profiles').select('id, is_verified').eq('email', email.trim()).maybeSingle();
+            const { data: profile } = await supabase.from('profiles').select('id, is_verified, role').eq('email', email.trim()).maybeSingle();
+
+            if (isAdminRole(profile?.role)) {
+                Alert.alert('Unsupported Account Type', 'Admin accounts cannot be used in the mobile app.');
+                setLoading(false);
+                return;
+            }
 
             if (profile) {
                 if (profile.is_verified) {
@@ -511,6 +537,12 @@ export default function SignupScreen() {
                     setStep('details');
                 }
             }]);
+            return;
+        }
+
+        if (!isAllowedSignupRole(selectedRole) || isAdminRole(selectedRole)) {
+            Alert.alert('Unsupported Account Type', 'Admin accounts cannot be registered in the mobile app.');
+            setStep('role');
             return;
         }
 

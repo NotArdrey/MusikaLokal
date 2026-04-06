@@ -11,9 +11,10 @@ interface HeaderProps {
     title: string;
     transparent?: boolean;
     onBackPress?: () => void;
+    hideBackButton?: boolean;
 }
 
-function Header({ title, transparent, onBackPress }: HeaderProps) {
+function Header({ title, transparent, onBackPress, hideBackButton = false }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
@@ -42,7 +43,7 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
         [pathname],
     );
 
-    const backVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isManageDetailPath);
+    const backVisible = !hideBackButton && (!!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isManageDetailPath));
     const notifVisible = isMainNavPath && !isGuest;
     const addbtnvisible = isMyListingPath;
 

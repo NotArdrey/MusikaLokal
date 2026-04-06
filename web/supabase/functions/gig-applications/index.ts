@@ -6,21 +6,20 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
-function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
-    try {
-        const parts = token.replace('Bearer ', '').split('.')
-        if (parts.length !== 3) return null
-        let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-        while (base64.length % 4) {
-            base64 += '='
-        }
-        const payload = JSON.parse(atob(base64))
-        return payload
-    } catch (e) {
-        console.error('JWT decode error:', e)
-        return null
+function extractAccessToken(authHeader: string): string | null {
+    const trimmed = (authHeader || '').trim()
+    if (!trimmed) return null
+
+    if (trimmed.toLowerCase().startsWith('bearer ')) {
+        const token = trimmed.slice(7).trim()
+        return token || null
     }
+
+    return trimmed
 }
+
+const ALLOWED_ORGANIZER_STATUSES = new Set(['accepted', 'rejected', 'cancelled', 'completed', 'fired'])
+const ALLOWED_LEADER_DECISIONS = new Set(['approved', 'rejected'])
 
 Deno.serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
@@ -28,47 +27,45 @@ Deno.serve(async (req: Request) => {
     }
 
     try {
-        const authHeader = req.headers.get('Authorization');
-        console.log('DEBUG: Auth Header present:', !!authHeader);
-        if (authHeader) console.log('DEBUG: Auth Header length:', authHeader.length);
+        const authHeader = req.headers.get('Authorization') || ''
+        const accessToken = extractAccessToken(authHeader)
 
-        if (!authHeader) {
-            console.error('DEBUG: Missing authorization header');
-            // RETURN 200 FOR DEBUGGING
-            return new Response(JSON.stringify({ error: 'Missing authorization header', debug_auth_header: authHeader }), {
+        if (!accessToken) {
+            return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 200, 
+                status: 401,
             })
         }
 
-        const jwtPayload = decodeJwtPayload(authHeader)
-        console.log('DEBUG: JWT Payload:', JSON.stringify(jwtPayload));
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
-        if (!jwtPayload || !jwtPayload.sub) {
-            console.error('DEBUG: Invalid token payload');
-            // RETURN 200 FOR DEBUGGING
-            return new Response(JSON.stringify({ error: 'Invalid token', debug_jwt: jwtPayload }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 200, 
-            })
-        }
-
-        const authenticatedUserId = jwtPayload.sub
-
-        const supabaseClient = createClient(
-            // @ts-ignore
-            Deno.env.get('SUPABASE_URL') ?? '',
-            // @ts-ignore
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-        )
-
-        if (!Deno.env.get('SUPABASE_URL') || !Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')) {
+        if (!supabaseUrl || !serviceRoleKey) {
             console.error('Missing Supabase env vars');
             return new Response(JSON.stringify({ error: 'Server misconfiguration: Missing Supabase env vars' }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 500,
             })
         }
+
+        const supabaseClient = createClient(
+            supabaseUrl,
+            serviceRoleKey,
+        )
+
+        const {
+            data: { user: authUser },
+            error: authUserError,
+        } = await supabaseClient.auth.getUser(accessToken)
+
+        if (authUserError || !authUser) {
+            return new Response(JSON.stringify({ error: 'Invalid token' }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 401,
+            })
+        }
+
+        const authenticatedUserId = authUser.id
 
         const { action, ...params } = await req.json()
         const { userId } = params
@@ -85,6 +82,34 @@ Deno.serve(async (req: Request) => {
         // FETCH GIG APPLICATIONS (for gig owner)
         if (action === 'fetch_gig_applications') {
             const { gigId } = params;
+
+            if (!gigId) {
+                return new Response(JSON.stringify({ error: 'gigId is required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data: gigRecord, error: gigError } = await supabaseClient
+                .from('gigs')
+                .select('id, organizer_id')
+                .eq('id', gigId)
+                .single();
+
+            if (gigError || !gigRecord) {
+                return new Response(JSON.stringify({ error: 'Gig not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            if (gigRecord.organizer_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Forbidden' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
             const { data, error } = await supabaseClient
                 .from('gig_applications')
                 .select(`
@@ -93,6 +118,7 @@ Deno.serve(async (req: Request) => {
                     group:groups!group_id(id, name, genre, images, members, description, location, rate)
                 `)
                 .eq('gig_id', gigId)
+                .or('leader_approval_status.is.null,leader_approval_status.eq.approved')
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
@@ -123,6 +149,21 @@ Deno.serve(async (req: Request) => {
         if (action === 'update_application_status') {
             const { applicationId, status } = params;
 
+            if (!applicationId || !status) {
+                return new Response(JSON.stringify({ error: 'applicationId and status are required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const normalizedStatus = String(status).toLowerCase();
+            if (!ALLOWED_ORGANIZER_STATUSES.has(normalizedStatus)) {
+                return new Response(JSON.stringify({ error: `Invalid status: ${status}` }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
             const { data: appDetails, error: appError } = await supabaseClient
                 .from('gig_applications')
                 .select(`
@@ -136,9 +177,23 @@ Deno.serve(async (req: Request) => {
 
             if (appError) throw appError;
 
+            if (!appDetails || appDetails.gig?.organizer_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Forbidden' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
+            if (appDetails.leader_approval_status === 'pending') {
+                return new Response(JSON.stringify({ error: 'Application is still awaiting group leader approval' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
             const { data, error } = await supabaseClient
                 .from('gig_applications')
-                .update({ status })
+                .update({ status: normalizedStatus })
                 .eq('id', applicationId)
                 .select()
                 .single();
@@ -151,11 +206,11 @@ Deno.serve(async (req: Request) => {
             let notificationTitle = '';
             let notificationMessage = '';
 
-            if (status === 'rejected') {
+            if (normalizedStatus === 'rejected') {
                 notificationType = 'warning';
                 notificationTitle = 'Application Declined';
                 notificationMessage = `Your application for "${gigName}" has been declined.`;
-            } else if (status === 'accepted') {
+            } else if (normalizedStatus === 'accepted') {
                 notificationType = 'success';
                 notificationTitle = 'Application Accepted! 🎉';
                 notificationMessage = `Congratulations! Your application for "${gigName}" has been accepted.`;
@@ -172,8 +227,138 @@ Deno.serve(async (req: Request) => {
                         meta: {
                             gig_id: appDetails.gig_id,
                             application_id: applicationId,
-                            status: status
+                            status: normalizedStatus
                         }
+                    });
+            }
+
+            return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 });
+        }
+
+        // UPDATE LEADER APPROVAL (group leader approves/rejects member-submitted application)
+        if (action === 'update_leader_approval') {
+            const { applicationId, decision } = params;
+
+            if (!applicationId || !decision) {
+                return new Response(JSON.stringify({ error: 'applicationId and decision are required' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const normalizedDecision = String(decision).toLowerCase();
+            if (!ALLOWED_LEADER_DECISIONS.has(normalizedDecision)) {
+                return new Response(JSON.stringify({ error: `Invalid decision: ${decision}` }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 400,
+                })
+            }
+
+            const { data: appDetails, error: appError } = await supabaseClient
+                .from('gig_applications')
+                .select(`
+                    id,
+                    gig_id,
+                    group_id,
+                    applicant_id,
+                    submitted_by_user_id,
+                    status,
+                    leader_approval_status,
+                    gig:gig_id(id, name, organizer_id),
+                    group:group_id(id, name, owner_id)
+                `)
+                .eq('id', applicationId)
+                .single();
+
+            if (appError || !appDetails) {
+                return new Response(JSON.stringify({ error: 'Application not found' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 404,
+                })
+            }
+
+            if (!appDetails.group || appDetails.group.owner_id !== effectiveUserId) {
+                return new Response(JSON.stringify({ error: 'Only the group leader can review this application' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 403,
+                })
+            }
+
+            if (appDetails.status !== 'pending') {
+                return new Response(JSON.stringify({ error: 'Only pending applications can be reviewed by the group leader' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            if (appDetails.leader_approval_status && appDetails.leader_approval_status !== 'pending') {
+                return new Response(JSON.stringify({ error: 'Application has already been reviewed by the group leader' }), {
+                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                    status: 409,
+                })
+            }
+
+            const updates: Record<string, any> = {
+                leader_approval_status: normalizedDecision,
+                leader_reviewed_at: new Date().toISOString(),
+            };
+
+            if (normalizedDecision === 'rejected') {
+                updates.status = 'rejected';
+            }
+
+            const { data, error } = await supabaseClient
+                .from('gig_applications')
+                .update(updates)
+                .eq('id', applicationId)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            const gigName = appDetails.gig?.name || 'the gig';
+            const groupName = appDetails.group?.name || 'your group';
+            const submitterId = appDetails.submitted_by_user_id || appDetails.applicant_id;
+
+            if (submitterId && submitterId !== effectiveUserId) {
+                await supabaseClient
+                    .from('notifications')
+                    .insert({
+                        user_id: submitterId,
+                        type: normalizedDecision === 'approved' ? 'success' : 'warning',
+                        title:
+                            normalizedDecision === 'approved'
+                                ? 'Application Forwarded to Venue'
+                                : 'Application Rejected by Group Leader',
+                        message:
+                            normalizedDecision === 'approved'
+                                ? `Your ${groupName} application for "${gigName}" was approved by your group leader and sent to the venue owner.`
+                                : `Your ${groupName} application for "${gigName}" was rejected by your group leader.`,
+                        meta: {
+                            gig_id: appDetails.gig_id,
+                            application_id: applicationId,
+                            group_id: appDetails.group_id,
+                            leader_approval_status: normalizedDecision,
+                        },
+                    });
+            }
+
+            if (normalizedDecision === 'approved' && appDetails.gig?.organizer_id && appDetails.gig.organizer_id !== effectiveUserId) {
+                await supabaseClient
+                    .from('notifications')
+                    .insert({
+                        user_id: appDetails.gig.organizer_id,
+                        type: 'info',
+                        title: 'New Gig Application',
+                        message: `${groupName} has a new application for "${gigName}" awaiting your review.`,
+                        meta: {
+                            gig_id: appDetails.gig_id,
+                            application_id: applicationId,
+                            applicant_id: appDetails.applicant_id,
+                            group_id: appDetails.group_id,
+                            submitted_by_user_id: appDetails.submitted_by_user_id,
+                            leader_approved_by: effectiveUserId,
+                        },
                     });
             }
 

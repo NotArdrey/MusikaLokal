@@ -22,6 +22,8 @@ serve(async (req: Request) => {
             { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
         )
 
+        const _authToken = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
+
         const { action, ...params } = await req.json()
 
         // 1. FETCH PROFILE
@@ -30,7 +32,7 @@ serve(async (req: Request) => {
 
             // If no userId provided, use the authenticated user
             if (!userId) {
-                const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
+                const { data: { user }, error: authError } = await supabaseClient.auth.getUser(_authToken)
                 if (authError || !user) throw new Error('Unauthorized');
                 userId = user.id
             }
@@ -80,7 +82,7 @@ serve(async (req: Request) => {
             const { userId, full_name, bio, location, genres, skills } = params
 
             // Security check: Ensure userId matches auth user
-            const { data: { user }, error: authError } = await supabaseClient.auth.getUser()
+            const { data: { user }, error: authError } = await supabaseClient.auth.getUser(_authToken)
             if (authError || !user || user.id !== userId) throw new Error('Unauthorized update');
 
             const updates: any = {}

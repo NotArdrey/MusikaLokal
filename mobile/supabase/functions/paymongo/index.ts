@@ -282,6 +282,168 @@ async function createSubscriptionActivatedNotificationIfNeeded(
   }
 }
 
+async function activateSubscriptionFromVerifiedPayment(
+  supabaseAdmin: any,
+  {
+    userId,
+    planId,
+    checkoutSessionId,
+    paymentMethod,
+    paymentIntentId,
+    paidAmount,
+  }: {
+    userId: string;
+    planId: string;
+    checkoutSessionId?: string | null;
+    paymentMethod?: string | null;
+    paymentIntentId?: string | null;
+    paidAmount?: number;
+  },
+): Promise<{ success: boolean; planName?: string; error?: string }> {
+  try {
+    const { data: plan, error: planError } = await supabaseAdmin
+      .from("subscription_plans")
+      .select("*")
+      .eq("id", planId)
+      .single();
+
+    if (planError || !plan) {
+      return { success: false, error: "Subscription plan not found" };
+    }
+
+    const now = new Date();
+    const periodEnd = new Date(now);
+    periodEnd.setDate(periodEnd.getDate() + (plan.duration_days || 30));
+
+    const amountToRecord =
+      typeof paidAmount === "number" && paidAmount > 0
+        ? paidAmount
+        : Number(plan.price);
+
+    const { data: existingSub } = await supabaseAdmin
+      .from("subscriptions")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    let subscriptionId: string | null = null;
+
+    if (existingSub?.id) {
+      const updatePayload: Record<string, any> = {
+        plan_id: planId,
+        status: "active",
+        current_period_start: now.toISOString(),
+        current_period_end: periodEnd.toISOString(),
+        cancelled_at: null,
+        cancel_at_period_end: false,
+        last_payment_date: now.toISOString(),
+        last_payment_amount: amountToRecord,
+        updated_at: now.toISOString(),
+      };
+
+      if (paymentMethod) {
+        updatePayload.payment_method = paymentMethod;
+      }
+
+      if (checkoutSessionId) {
+        updatePayload.checkout_session_id = checkoutSessionId;
+      }
+
+      const { data: updatedSub, error: updateSubError } = await supabaseAdmin
+        .from("subscriptions")
+        .update(updatePayload)
+        .eq("id", existingSub.id)
+        .select("id")
+        .single();
+
+      if (updateSubError) {
+        return { success: false, error: updateSubError.message };
+      }
+
+      subscriptionId = updatedSub?.id || existingSub.id;
+    } else {
+      const insertPayload: Record<string, any> = {
+        user_id: userId,
+        plan_id: planId,
+        status: "active",
+        current_period_start: now.toISOString(),
+        current_period_end: periodEnd.toISOString(),
+        last_payment_date: now.toISOString(),
+        last_payment_amount: amountToRecord,
+      };
+
+      if (paymentMethod) {
+        insertPayload.payment_method = paymentMethod;
+      }
+
+      if (checkoutSessionId) {
+        insertPayload.checkout_session_id = checkoutSessionId;
+      }
+
+      const { data: insertedSub, error: insertSubError } = await supabaseAdmin
+        .from("subscriptions")
+        .insert(insertPayload)
+        .select("id")
+        .single();
+
+      if (insertSubError) {
+        return { success: false, error: insertSubError.message };
+      }
+
+      subscriptionId = insertedSub?.id || null;
+    }
+
+    await supabaseAdmin
+      .from("profiles")
+      .update({
+        subscription_status: "active",
+        subscription_expires_at: periodEnd.toISOString(),
+        subscription_plan_id: planId,
+      })
+      .eq("id", userId);
+
+    if (subscriptionId) {
+      let hasExistingPayment = false;
+
+      if (checkoutSessionId) {
+        const { data: existingPayment } = await supabaseAdmin
+          .from("subscription_payments")
+          .select("id")
+          .eq("checkout_session_id", checkoutSessionId)
+          .maybeSingle();
+
+        hasExistingPayment = !!existingPayment;
+      }
+
+      if (!hasExistingPayment) {
+        await supabaseAdmin.from("subscription_payments").insert({
+          subscription_id: subscriptionId,
+          user_id: userId,
+          amount: amountToRecord,
+          status: "paid",
+          payment_method: paymentMethod || null,
+          payment_intent_id: paymentIntentId || null,
+          checkout_session_id: checkoutSessionId || null,
+          billing_period_start: now.toISOString(),
+          billing_period_end: periodEnd.toISOString(),
+          paid_at: now.toISOString(),
+        });
+      }
+    }
+
+    await createSubscriptionActivatedNotificationIfNeeded(
+      supabaseAdmin,
+      userId,
+      planId,
+      plan.name,
+    );
+
+    return { success: true, planName: plan.name };
+  } catch (e: any) {
+    return { success: false, error: e?.message || "Subscription activation failed" };
+  }
+}
+
 serve(async (req: Request) => {
   console.log("🔵 PayMongo function called:", req.method, req.url);
 
@@ -381,10 +543,11 @@ serve(async (req: Request) => {
     let authenticatedUserId: string | null = null;
 
     if (action && !publicActions.has(action)) {
+      const token = (authHeader || "").replace(/^Bearer\s+/i, "");
       const {
         data: { user },
         error: authError,
-      } = await supabaseClient.auth.getUser();
+      } = await supabaseClient.auth.getUser(token);
 
       if (authError || !user) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -631,10 +794,10 @@ serve(async (req: Request) => {
         );
       }
 
-      if (!user_id || !plan_id || !amount) {
+      if (!user_id || !plan_id) {
         return new Response(
           JSON.stringify({
-            error: "Missing required fields: user_id, plan_id, amount",
+            error: "Missing required fields: user_id, plan_id",
           }),
           {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -721,8 +884,39 @@ serve(async (req: Request) => {
       console.log("🔵 Plan found:", { name: plan.name, price: plan.price });
 
       // Amount in centavos
-      // TEST MODE: Using 1 peso for testing - REMOVE FOR PRODUCTION
-      const amountInCentavos = 100; // Math.round(plan.price * 100);
+      const planPrice = Number(plan.price || 0);
+      if (!Number.isFinite(planPrice) || planPrice <= 0) {
+        return new Response(
+          JSON.stringify({
+            error: "Invalid plan price configuration",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 500,
+          },
+        );
+      }
+
+      // If client sends amount, ensure it exactly matches the server-side plan price.
+      if (amount !== undefined && amount !== null) {
+        const requestedAmount = Number(amount);
+        if (
+          !Number.isFinite(requestedAmount) ||
+          Math.abs(requestedAmount - planPrice) > 0.009
+        ) {
+          return new Response(
+            JSON.stringify({
+              error: "Invalid amount for selected subscription plan",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 400,
+            },
+          );
+        }
+      }
+
+      const amountInCentavos = Math.round(planPrice * 100);
       const subscriptionDescription =
         description || `${plan.name} Plan - Monthly Subscription`;
 
@@ -758,8 +952,8 @@ serve(async (req: Request) => {
               // QR Ph payment
               // For production, use live keys and add: gcash, paymaya, grab_pay
               payment_method_types: ["qrph"],
-              success_url: `${baseUrl}/functions/v1/paymongo?action=subscription_success&user_id=${user_id}&plan_id=${plan_id}${redirect_url ? "&redirect_url=" + encodeURIComponent(redirect_url) : ""}`,
-              cancel_url: `${baseUrl}/functions/v1/paymongo?action=subscription_cancelled&user_id=${user_id}${cancel_redirect_url ? "&redirect_url=" + encodeURIComponent(cancel_redirect_url) : ""}`,
+              success_url: `${baseUrl}/functions/v1/paymongo?action=subscription_success&plan_id=${plan_id}${redirect_url ? "&redirect_url=" + encodeURIComponent(redirect_url) : ""}`,
+              cancel_url: `${baseUrl}/functions/v1/paymongo?action=subscription_cancelled${cancel_redirect_url ? "&redirect_url=" + encodeURIComponent(cancel_redirect_url) : ""}`,
               reference_number: `sub_${user_id}_${Date.now()}`,
               metadata: {
                 type: "subscription",
@@ -1237,106 +1431,111 @@ serve(async (req: Request) => {
     // ====================================================================
     if (action === "subscription_success") {
       const url = new URL(req.url);
-      const userId = url.searchParams.get("user_id") || params.user_id;
-      const planId = url.searchParams.get("plan_id") || params.plan_id;
+      const checkoutSessionId =
+        url.searchParams.get("checkout_session_id") ||
+        url.searchParams.get("session_id") ||
+        url.searchParams.get("id") ||
+        params.checkout_session_id ||
+        params.session_id ||
+        params.id ||
+        null;
+      let resolvedPlanId = url.searchParams.get("plan_id") || params.plan_id;
       const clientRedirectUrl = url.searchParams.get("redirect_url");
+      let redirectStatus = "processing";
 
-      console.log("✅ Subscription payment success:", { userId, planId });
+      console.log("✅ Subscription payment success callback:", {
+        checkoutSessionId,
+        resolvedPlanId,
+      });
 
-      if (userId && planId) {
+      if (checkoutSessionId) {
         try {
-          // Get plan details
-          const { data: plan } = await supabaseAdmin
-            .from("subscription_plans")
-            .select("*")
-            .eq("id", planId)
-            .single();
+          const sessionData = await paymongoRequest(
+            `/checkout_sessions/${checkoutSessionId}`,
+          );
+          const sessionAttributes = sessionData?.data?.attributes || {};
+          const metadata = sessionAttributes.metadata || {};
+          const paymentIntentStatus =
+            sessionAttributes.payment_intent?.attributes?.status;
+          const payments = sessionAttributes.payments || [];
+          const isPaid = paymentIntentStatus === "succeeded" || payments.length > 0;
 
-          if (plan) {
-            const now = new Date();
-            const periodEnd = new Date(now);
-            periodEnd.setDate(periodEnd.getDate() + (plan.duration_days || 30));
+          const metadataUserId = metadata?.user_id;
+          const metadataPlanId = metadata?.plan_id;
+          const metadataType = metadata?.type;
+          const paymentMethod = payments[0]?.attributes?.source?.type || null;
+          const paidAmountCentavos = payments[0]?.attributes?.amount;
+          const paidAmount = paidAmountCentavos ? paidAmountCentavos / 100 : 0;
+          const paymentIntentId = sessionAttributes.payment_intent?.id || null;
 
-            // Check if user already has a subscription
-            const { data: existingSub } = await supabaseAdmin
-              .from("subscriptions")
-              .select("id")
-              .eq("user_id", userId)
-              .single();
+          if (metadataPlanId) {
+            resolvedPlanId = metadataPlanId;
+          }
 
-            if (existingSub) {
-              // Update existing subscription
-              await supabaseAdmin
-                .from("subscriptions")
-                .update({
-                  plan_id: planId,
-                  status: "active",
-                  current_period_start: now.toISOString(),
-                  current_period_end: periodEnd.toISOString(),
-                  cancelled_at: null,
-                  cancel_at_period_end: false,
-                  last_payment_date: now.toISOString(),
-                  last_payment_amount: plan.price,
-                  updated_at: now.toISOString(),
-                })
-                .eq("id", existingSub.id);
-            } else {
-              // Create new subscription
-              await supabaseAdmin.from("subscriptions").insert({
-                user_id: userId,
-                plan_id: planId,
-                status: "active",
-                current_period_start: now.toISOString(),
-                current_period_end: periodEnd.toISOString(),
-                last_payment_date: now.toISOString(),
-                last_payment_amount: plan.price,
-              });
-            }
-
-            // Update profile subscription status
-            await supabaseAdmin
-              .from("profiles")
-              .update({
-                subscription_status: "active",
-                subscription_expires_at: periodEnd.toISOString(),
-                subscription_plan_id: planId,
-              })
-              .eq("id", userId);
-
-            // Record payment in subscription_payments
-            const { data: sub } = await supabaseAdmin
-              .from("subscriptions")
-              .select("id")
-              .eq("user_id", userId)
-              .single();
-
-            if (sub) {
-              await supabaseAdmin.from("subscription_payments").insert({
-                subscription_id: sub.id,
-                user_id: userId,
-                amount: plan.price,
-                status: "paid",
-                billing_period_start: now.toISOString(),
-                billing_period_end: periodEnd.toISOString(),
-                paid_at: now.toISOString(),
-              });
-            }
-
-            await createSubscriptionActivatedNotificationIfNeeded(
+          if (
+            isPaid &&
+            metadataType === "subscription" &&
+            metadataUserId &&
+            metadataPlanId
+          ) {
+            const activationResult = await activateSubscriptionFromVerifiedPayment(
               supabaseAdmin,
-              userId,
-              planId,
-              plan.name,
+              {
+                userId: metadataUserId,
+                planId: metadataPlanId,
+                checkoutSessionId,
+                paymentMethod,
+                paymentIntentId,
+                paidAmount,
+              },
+            );
+
+            if (activationResult.success) {
+              redirectStatus = "success";
+            } else {
+              console.error(
+                "❌ subscription_success activation failed:",
+                activationResult.error,
+              );
+            }
+          } else {
+            console.warn(
+              "⚠️ subscription_success callback not yet verifiable; waiting for webhook",
+              {
+                isPaid,
+                metadataType,
+                hasUserId: !!metadataUserId,
+                hasPlanId: !!metadataPlanId,
+              },
             );
           }
         } catch (e) {
-          console.error("Error creating subscription:", e);
+          console.error("Error verifying subscription callback:", e);
         }
+      } else {
+        console.warn(
+          "⚠️ subscription_success callback missing checkout session id; waiting for webhook",
+        );
       }
 
-      const appDeepLink =
-        clientRedirectUrl ||
-        `musikalokal://payment-result?status=success&type=subscription&plan_id=${planId}`;
+      let appDeepLink =
+        `musikalokal://payment-result?status=${redirectStatus}&type=subscription${resolvedPlanId ? `&plan_id=${resolvedPlanId}` : ""}`;
+
+      if (clientRedirectUrl) {
+        try {
+          const redirectTarget = new URL(clientRedirectUrl);
+          redirectTarget.searchParams.set("status", redirectStatus);
+          redirectTarget.searchParams.set("type", "subscription");
+
+          if (resolvedPlanId) {
+            redirectTarget.searchParams.set("plan_id", resolvedPlanId);
+          }
+
+          appDeepLink = redirectTarget.toString();
+        } catch {
+          appDeepLink = clientRedirectUrl;
+        }
+      }
 
       return new Response(null, {
         status: 302,
@@ -1515,6 +1714,13 @@ serve(async (req: Request) => {
         const bookingId = metadata?.booking_id;
         const paymentMethod =
           event.data?.attributes?.payments?.[0]?.attributes?.source?.type;
+        const paymentAmountCentavos =
+          event.data?.attributes?.payments?.[0]?.attributes?.amount;
+        const paymentAmount = paymentAmountCentavos
+          ? paymentAmountCentavos / 100
+          : 0;
+        const paymentIntentId =
+          event.data?.attributes?.payment_intent?.id || null;
 
         // Check if this is a subscription payment
         if (metadata?.type === "subscription") {
@@ -1526,69 +1732,24 @@ serve(async (req: Request) => {
             paymentMethod,
           });
 
-          // Process subscription (similar to subscription_success handler)
+          // Process subscription payment using verified webhook payload
           if (userId && planId) {
-            const { data: plan } = await supabaseAdmin
-              .from("subscription_plans")
-              .select("*")
-              .eq("id", planId)
-              .single();
-
-            if (plan) {
-              const now = new Date();
-              const periodEnd = new Date(now);
-              periodEnd.setDate(
-                periodEnd.getDate() + (plan.duration_days || 30),
-              );
-
-              const { data: existingSub } = await supabaseAdmin
-                .from("subscriptions")
-                .select("id")
-                .eq("user_id", userId)
-                .single();
-
-              if (existingSub) {
-                await supabaseAdmin
-                  .from("subscriptions")
-                  .update({
-                    plan_id: planId,
-                    status: "active",
-                    current_period_start: now.toISOString(),
-                    current_period_end: periodEnd.toISOString(),
-                    cancelled_at: null,
-                    cancel_at_period_end: false,
-                    last_payment_date: now.toISOString(),
-                    last_payment_amount: plan.price,
-                    payment_method: paymentMethod,
-                    updated_at: now.toISOString(),
-                  })
-                  .eq("id", existingSub.id);
-              } else {
-                await supabaseAdmin.from("subscriptions").insert({
-                  user_id: userId,
-                  plan_id: planId,
-                  status: "active",
-                  current_period_start: now.toISOString(),
-                  current_period_end: periodEnd.toISOString(),
-                  last_payment_date: now.toISOString(),
-                  last_payment_amount: plan.price,
-                  payment_method: paymentMethod,
-                });
-              }
-
-              await supabaseAdmin
-                .from("profiles")
-                .update({
-                  subscription_status: "active",
-                  subscription_expires_at: periodEnd.toISOString(),
-                })
-                .eq("id", userId);
-
-              await createSubscriptionActivatedNotificationIfNeeded(
-                supabaseAdmin,
+            const activationResult = await activateSubscriptionFromVerifiedPayment(
+              supabaseAdmin,
+              {
                 userId,
                 planId,
-                plan.name,
+                checkoutSessionId: sessionId,
+                paymentMethod,
+                paymentIntentId,
+                paidAmount: paymentAmount,
+              },
+            );
+
+            if (!activationResult.success) {
+              console.error(
+                "❌ Webhook subscription activation failed:",
+                activationResult.error,
               );
             }
           }
@@ -1600,9 +1761,7 @@ serve(async (req: Request) => {
             paymentMethod,
             metadata,
           });
-          // Get payment amount from the payment
-          const paymentAmountCentavos = event.data?.attributes?.payments?.[0]?.attributes?.amount;
-          const paymentAmount = paymentAmountCentavos ? paymentAmountCentavos / 100 : 0;
+
           await processSuccessfulPayment(bookingId, paymentMethod, paymentAmount, metadata);
         }
       }

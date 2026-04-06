@@ -187,7 +187,7 @@ export default function MyGroupScreen() {
     return (
         <>
             <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <View style={[Platform.OS === 'web' && { maxWidth: 1024, alignSelf: 'center', width: '100%' }, { flex: 1 }]}>
+                <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
                     <Header title="My Group" />
 
                     <ScrollView

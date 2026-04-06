@@ -191,10 +191,13 @@ const StudioGigVenueAboutTab = ({
             numberOfLines={1}
             adjustsFontSizeToFit
           >
-                day: "numeric",
-                year: "numeric",
-              })
-              : "TBA"}
+              {group.date
+                ? new Date(group.date).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })
+                : "TBA"}
           </Text>
         </View>
       </View>

@@ -85,6 +85,8 @@ export default function ManageScreen() {
             router.replace('/my_group');
         } else if (role === 'venue-owner') {
             router.replace('/my_venue');
+        } else if (role === 'admin') {
+            router.replace('/admin');
         } else {
             setLoading(false);
         }

@@ -98,6 +98,7 @@ export default function GigDetailsScreen() {
       .from("gig_applications")
       .select("id, status, created_at, group_id, applicant_id")
       .eq("gig_id", gigId)
+      .or("leader_approval_status.is.null,leader_approval_status.eq.approved")
       .order("created_at", { ascending: false });
 
     if (error) throw error;
@@ -304,7 +305,11 @@ export default function GigDetailsScreen() {
         const {
           data: { user },
         } = await supabase.auth.getUser();
-        if (!user) return;
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!user || !session) return;
 
         const { error } = await supabase.functions.invoke("gig-applications", {
           body: {
@@ -312,6 +317,9 @@ export default function GigDetailsScreen() {
             applicationId,
             status,
             userId: user.id,
+          },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
           },
         });
         if (error) throw error;

@@ -256,7 +256,11 @@ export default function GigDetailsScreen() {
         const {
           data: { user },
         } = await supabase.auth.getUser();
-        if (!user) return;
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!user || !session) return;
 
         const { error } = await supabase.functions.invoke("gig-applications", {
           body: {
@@ -264,6 +268,9 @@ export default function GigDetailsScreen() {
             applicationId,
             status,
             userId: user.id,
+          },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
           },
         });
         if (error) throw error;

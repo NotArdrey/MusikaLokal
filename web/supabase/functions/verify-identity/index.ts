@@ -22,7 +22,8 @@ serve(async (req) => {
         const { action, userId } = await req.json()
 
         // 1. Verify User
-        const { data: { user }, error: userError } = await supabaseClient.auth.getUser()
+        const _token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser(_token)
         if (userError || !user) throw new Error('Unauthorized')
 
         if (action === 'create_session') {

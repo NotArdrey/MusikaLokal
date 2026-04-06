@@ -29,6 +29,173 @@ import {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+const GROQ_DIRECT_API_KEY = (process.env.EXPO_PUBLIC_GROQ_API_KEY || '').trim();
+const GROQ_REQUEST_HEADERS = (() => {
+    const key = GROQ_DIRECT_API_KEY;
+    return key ? { 'x-groq-api-key': key } : undefined;
+})();
+
+const GROQ_CHAT_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+const extractGroqJsonObject = (raw: string) => {
+    const fencedMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fencedMatch?.[1]) {
+        return fencedMatch[1].trim();
+    }
+
+    const firstBrace = raw.indexOf('{');
+    const lastBrace = raw.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+        return raw.slice(firstBrace, lastBrace + 1);
+    }
+
+    return raw;
+};
+
+const normalizeLearningCurve = (value: unknown): 'easy' | 'moderate' | 'challenging' => {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (normalized === 'easy' || normalized === 'moderate' || normalized === 'challenging') {
+        return normalized;
+    }
+    return 'moderate';
+};
+
+const enrichSuggestionsWithGroq = async (
+    baseSuggestions: InstrumentSuggestion[],
+    requestContext: {
+        genres: string[];
+        currentInstruments: string[];
+        userRoles: string[];
+        experienceLevel: ExperienceLevel;
+        purpose: SuggestionPurpose;
+        limit: number;
+    },
+): Promise<InstrumentSuggestion[] | null> => {
+    if (!GROQ_DIRECT_API_KEY || !Array.isArray(baseSuggestions) || baseSuggestions.length === 0) {
+        return null;
+    }
+
+    try {
+        const compactCandidates = baseSuggestions.slice(0, 16).map((item) => ({
+            name: item.name,
+            category: item.category,
+            difficulty: item.difficulty,
+            genres: item.genres,
+            description: item.description,
+            baseScore: item.score,
+            baseReason: item.matchReason,
+        }));
+
+        const userPrompt = [
+            'Personalize instrument recommendations for this user profile.',
+            `Genres: ${requestContext.genres.join(', ') || 'none'}`,
+            `Current skills/instruments: ${requestContext.currentInstruments.join(', ') || 'none'}`,
+            `User roles: ${requestContext.userRoles.join(', ') || 'none'}`,
+            `Experience level: ${requestContext.experienceLevel}`,
+            `Purpose: ${requestContext.purpose}`,
+            'Return JSON only with shape:',
+            '{"recommendations":[{"name":"Instrument Name","score":0-100,"headline":"short line","whyThisFits":"2 short sentences","learningCurve":"easy|moderate|challenging","timeToBasics":"X-Y weeks/months","proTip":"actionable tip","famousPlayers":["Name 1","Name 2"],"perfectFor":"short tag"}]}',
+            `Return up to ${requestContext.limit} entries using only names from candidates.`,
+            `Candidates: ${JSON.stringify(compactCandidates)}`,
+        ].join('\n');
+
+        const response = await fetch(GROQ_CHAT_API_URL, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${GROQ_DIRECT_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',
+                messages: [
+                    { role: 'system', content: 'You are an expert music gear advisor. Return JSON only.' },
+                    { role: 'user', content: userPrompt },
+                ],
+                temperature: 0.65,
+                max_tokens: 1600,
+                response_format: { type: 'json_object' },
+            }),
+        });
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const payload = await response.json();
+        const content = payload?.choices?.[0]?.message?.content;
+        if (!content || typeof content !== 'string') {
+            return null;
+        }
+
+        const parsed = JSON.parse(extractGroqJsonObject(content));
+        const recommendations = Array.isArray(parsed?.recommendations) ? parsed.recommendations : [];
+        if (recommendations.length === 0) {
+            return null;
+        }
+
+        const byName = new Map(baseSuggestions.map((item) => [item.name.toLowerCase(), item]));
+        const ranked: InstrumentSuggestion[] = [];
+
+        for (const rec of recommendations) {
+            const name = typeof rec?.name === 'string' ? rec.name.trim() : '';
+            if (!name) continue;
+
+            const base = byName.get(name.toLowerCase());
+            if (!base) continue;
+
+            const parsedScore = Number(rec?.score);
+            const score = Number.isFinite(parsedScore)
+                ? Math.max(0, Math.min(100, Math.round(parsedScore)))
+                : Math.max(0, Math.min(100, Math.round(base.score)));
+
+            ranked.push({
+                ...base,
+                score,
+                headline: typeof rec?.headline === 'string' && rec.headline.trim().length > 0
+                    ? rec.headline.trim().slice(0, 120)
+                    : base.headline,
+                matchReason: typeof rec?.whyThisFits === 'string' && rec.whyThisFits.trim().length > 0
+                    ? rec.whyThisFits.trim().slice(0, 400)
+                    : base.matchReason,
+                learningCurve: normalizeLearningCurve(rec?.learningCurve),
+                timeToBasics: typeof rec?.timeToBasics === 'string' && rec.timeToBasics.trim().length > 0
+                    ? rec.timeToBasics.trim().slice(0, 40)
+                    : base.timeToBasics,
+                proTip: typeof rec?.proTip === 'string' && rec.proTip.trim().length > 0
+                    ? rec.proTip.trim().slice(0, 220)
+                    : base.proTip,
+                famousPlayers: Array.isArray(rec?.famousPlayers)
+                    ? rec.famousPlayers.filter((value: unknown) => typeof value === 'string').slice(0, 2)
+                    : base.famousPlayers,
+                perfectFor: typeof rec?.perfectFor === 'string' && rec.perfectFor.trim().length > 0
+                    ? rec.perfectFor.trim().slice(0, 40)
+                    : base.perfectFor,
+                aiPowered: true,
+                aiProvider: 'Groq Direct',
+            });
+        }
+
+        if (ranked.length === 0) {
+            return null;
+        }
+
+        const used = new Set(ranked.map((item) => item.name.toLowerCase()));
+        for (const fallback of baseSuggestions) {
+            if (ranked.length >= requestContext.limit) break;
+            if (used.has(fallback.name.toLowerCase())) continue;
+            ranked.push({
+                ...fallback,
+                aiPowered: true,
+                aiProvider: 'Groq Direct',
+            });
+        }
+
+        return ranked.slice(0, requestContext.limit);
+    } catch {
+        return null;
+    }
+};
+
 export default function AiSuggestionsScreen() {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
@@ -47,6 +214,7 @@ export default function AiSuggestionsScreen() {
     const [currentInstruments, setCurrentInstruments] = useState<string[]>([]);
     const [isAIPowered, setIsAIPowered] = useState(false);
     const [aiProvider, setAIProvider] = useState<string>('');
+    const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
 
     // User profile data
     const [userRoles, setUserRoles] = useState<string[]>([]);
@@ -65,19 +233,35 @@ export default function AiSuggestionsScreen() {
 
             const { data: profile } = await supabase
                 .from('profiles')
-                .select('full_name, skills, genres')
+                .select('full_name')
                 .eq('id', user.id)
                 .single();
 
+            const [skillsResult, genresResult] = await Promise.all([
+                supabase
+                    .from('profile_skills')
+                    .select('skill')
+                    .eq('profile_id', user.id),
+                supabase
+                    .from('profile_genres')
+                    .select('genre')
+                    .eq('profile_id', user.id),
+            ]);
+
             if (profile) {
                 setUserName(profile.full_name || '');
+
                 // Skills = roles/instruments (e.g., "Guitarist", "Drummer")
-                const skills = profile.skills || [];
+                const skills = (skillsResult.data || [])
+                    .map((row: any) => row.skill)
+                    .filter((value: any) => typeof value === 'string' && value.trim().length > 0);
                 setUserRoles(skills);
                 setCurrentInstruments(skills); // Pre-fill current instruments from profile
 
                 // Genres from profile
-                const genres = profile.genres || [];
+                const genres = (genresResult.data || [])
+                    .map((row: any) => row.genre)
+                    .filter((value: any) => typeof value === 'string' && value.trim().length > 0);
                 setUserGenres(genres);
                 setSelectedGenres(genres); // Pre-select user's preferred genres
             }
@@ -101,9 +285,11 @@ export default function AiSuggestionsScreen() {
     const fetchSuggestions = async () => {
         setLoading(true);
         setError(null);
+        setSuggestionMessage(null);
 
         try {
             const { data, error: funcError } = await supabase.functions.invoke('instrument-suggestions', {
+                headers: GROQ_REQUEST_HEADERS,
                 body: {
                     action: 'suggest',
                     genres: selectedGenres,
@@ -118,17 +304,36 @@ export default function AiSuggestionsScreen() {
             if (funcError) throw funcError;
 
             if (data?.suggestions && data.suggestions.length > 0) {
-                setSuggestions(data.suggestions);
-                setIsAIPowered(data.aiPowered || false);
-                setAIProvider(data.aiProvider || '');
+                const aiActive = Boolean(data.aiPowered);
+                const baseSuggestions = data.suggestions as InstrumentSuggestion[];
+
+                if (!aiActive && GROQ_DIRECT_API_KEY) {
+                    const groqEnhanced = await enrichSuggestionsWithGroq(baseSuggestions, {
+                        genres: selectedGenres,
+                        currentInstruments,
+                        userRoles,
+                        experienceLevel,
+                        purpose,
+                        limit: 10,
+                    });
+
+                    if (groqEnhanced && groqEnhanced.length > 0) {
+                        setSuggestions(groqEnhanced);
+                        setIsAIPowered(true);
+                        setAIProvider('Groq Direct');
+                        setSuggestionMessage('AI-powered recommendations via your Groq key.');
+                        setStep('results');
+                        return;
+                    }
+                }
+
+                setSuggestions(baseSuggestions);
+                setIsAIPowered(aiActive);
+                setAIProvider(data.aiProvider || (aiActive ? 'AI' : 'Local Match'));
+                setSuggestionMessage(data.message || null);
                 setStep('results');
             } else {
-                // Check if it's an AI availability issue or no matches
-                if (data?.aiPowered === false || data?.aiProvider === 'none') {
-                    setError('AI service is temporarily unavailable. Please try again later or check your preferences.');
-                } else {
-                    setError('No suggestions found. Try different preferences.');
-                }
+                setError(data?.message || 'No suggestions found. Try different preferences.');
             }
         } catch (err: any) {
             console.error('Error fetching suggestions:', err);
@@ -139,6 +344,7 @@ export default function AiSuggestionsScreen() {
             } else {
                 setError('Failed to get suggestions. Please try again.');
             }
+            setSuggestionMessage(null);
         } finally {
             setLoading(false);
         }
@@ -585,12 +791,15 @@ export default function AiSuggestionsScreen() {
     );
 
     // Render results step
-    const renderResultsStep = () => (
-        <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: 160 + insets.bottom }]}
-            showsVerticalScrollIndicator={false}
-        >
+    const renderResultsStep = () => {
+        const badgeColor = isAIPowered ? '#8B5CF6' : '#2563EB';
+
+        return (
+            <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={[styles.scrollContent, { paddingBottom: 160 + insets.bottom }]}
+                showsVerticalScrollIndicator={false}
+            >
             {/* Back Button */}
             <TouchableOpacity activeOpacity={1}
                 onPress={() => setStep('preferences')}
@@ -613,7 +822,9 @@ export default function AiSuggestionsScreen() {
                         : 'Your Personalized Picks'}
                 </Text>
                 <Text style={[styles.aiHeaderSubtitle, { color: colors.textSecondary }]}>
-                    Powered by {aiProvider || 'AI'} • Analyzed your profile
+                    {isAIPowered
+                        ? `Powered by ${aiProvider || 'AI'} • Analyzed your profile`
+                        : `Using ${aiProvider || 'Local Match'} • Personalized from your profile`}
                 </Text>
 
                 {/* User Role Badge */}
@@ -652,9 +863,9 @@ export default function AiSuggestionsScreen() {
                 <Text style={[styles.resultsHeader, { color: colors.text }]}>
                     {suggestions.length} Perfect Matches
                 </Text>
-                <View style={[styles.aiBadgeMini, { backgroundColor: '#8B5CF6' }]}>
-                    <Ionicons name="sparkles" size={10} color="#FFFFFF" />
-                    <Text style={styles.aiBadgeMiniText}>AI</Text>
+                <View style={[styles.aiBadgeMini, { backgroundColor: badgeColor }]}>
+                    <Ionicons name={isAIPowered ? 'sparkles' : 'compass'} size={10} color="#FFFFFF" />
+                    <Text style={styles.aiBadgeMiniText}>{isAIPowered ? 'AI' : 'SMART'}</Text>
                 </View>
             </View>
             <Text style={[styles.resultsSubtitle, { color: colors.textSecondary }]}>
@@ -663,6 +874,13 @@ export default function AiSuggestionsScreen() {
                     : 'Curated just for you based on your musical profile'}
             </Text>
 
+            {!isAIPowered && suggestionMessage && (
+                <View style={[styles.fallbackInfoContainer, { backgroundColor: isDark ? '#1E3A8A20' : '#DBEAFE', borderColor: '#3B82F6' }]}>
+                    <Ionicons name="information-circle" size={16} color="#2563EB" />
+                    <Text style={styles.fallbackInfoText}>{suggestionMessage}</Text>
+                </View>
+            )}
+
             {/* Suggestion Cards */}
             {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}
 
@@ -670,21 +888,22 @@ export default function AiSuggestionsScreen() {
             <TouchableOpacity activeOpacity={1}
                 onPress={fetchSuggestions}
                 disabled={loading}
-                style={[styles.secondaryButton, { borderColor: '#8B5CF6', backgroundColor: '#8B5CF6' + '10' }]}
+                style={[styles.secondaryButton, { borderColor: badgeColor, backgroundColor: badgeColor + '10' }]}
             >
                 {loading ? (
-                    <ActivityIndicator color="#8B5CF6" />
+                    <ActivityIndicator color={badgeColor} />
                 ) : (
                     <>
-                        <Ionicons name="sparkles" size={18} color="#8B5CF6" />
-                        <Text style={[styles.secondaryButtonText, { color: '#8B5CF6' }]}>
-                            Get New AI Suggestions
+                        <Ionicons name={isAIPowered ? 'sparkles' : 'refresh'} size={18} color={badgeColor} />
+                        <Text style={[styles.secondaryButtonText, { color: badgeColor }]}>
+                            {isAIPowered ? 'Get New AI Suggestions' : 'Refresh Smart Suggestions'}
                         </Text>
                     </>
                 )}
             </TouchableOpacity>
-        </ScrollView>
-    );
+            </ScrollView>
+        );
+    };
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1017,6 +1236,22 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontFamily: 'Poppins_400Regular',
         marginBottom: 16,
+    },
+    fallbackInfoContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginBottom: 14,
+    },
+    fallbackInfoText: {
+        flex: 1,
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
+        color: '#1D4ED8',
     },
     suggestionCard: {
         padding: 16,

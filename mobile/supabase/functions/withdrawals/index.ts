@@ -8,9 +8,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// PayMongo API configuration - Using TEST API keys
-const PAYMONGO_SECRET_KEY = Deno.env.get('PAYMONGO_SECRET_KEY') || 'sk_test_yESi8KQWKn2mCE4ZnvKksGVk';
+// PayMongo API configuration
+const PAYMONGO_SECRET_KEY = Deno.env.get('PAYMONGO_SECRET_KEY') || '';
 const PAYMONGO_API_URL = 'https://api.paymongo.com/v1';
+const MOCK_CASHOUT_MODE = (Deno.env.get('MOCK_CASHOUT_MODE') || 'true').toLowerCase();
+const SHOULD_USE_MOCK_CASHOUT =
+  MOCK_CASHOUT_MODE !== 'false' ||
+  PAYMONGO_SECRET_KEY.length === 0 ||
+  PAYMONGO_SECRET_KEY.startsWith('sk_test_');
 
 // Minimum withdrawal amount in PHP
 const MIN_WITHDRAWAL_AMOUNT = 100;
@@ -44,6 +49,19 @@ const BANK_CODES: Record<string, string> = {
   'ctbc': 'CTBC',
 };
 
+const MERCHANT_ONBOARDING_STEPS = [
+  'Complete your PayMongo merchant onboarding (KYC and business verification).',
+  'Request and enable disbursements or payouts on that merchant account.',
+  'Use the matching secret key for the same mode and account.',
+  'Retry with a small withdrawal amount.',
+];
+
+const createMockReference = () => {
+  const timestamp = Date.now();
+  const suffix = crypto.randomUUID().slice(0, 8);
+  return `mock_wd_${timestamp}_${suffix}`;
+};
+
 // Helper function to create a PayMongo refund (no ID required)
 async function createPayMongoRefund(
   paymentId: string,
@@ -51,6 +69,10 @@ async function createPayMongoRefund(
   reason: string
 ): Promise<{ success: boolean; refund_id?: string; error?: string }> {
   try {
+    if (!PAYMONGO_SECRET_KEY) {
+      return { success: false, error: 'Payment service is not configured' };
+    }
+
     console.log('💸 Creating PayMongo refund:', { paymentId, amount, reason });
 
     // PayMongo Refund API: POST /v1/refunds
@@ -136,8 +158,18 @@ async function createPayMongoDisbursement(
   accountNumber: string,
   bankName?: string,
   description?: string
-): Promise<{ success: boolean; reference?: string; error?: string }> {
+): Promise<{
+  success: boolean;
+  reference?: string;
+  error?: string;
+  error_code?: string;
+  next_steps?: string[];
+}> {
   try {
+    if (!PAYMONGO_SECRET_KEY) {
+      return { success: false, error: 'Payment service is not configured' };
+    }
+
     // Build disbursement method based on type
     let disbursementMethod: any = {
       type: payoutType, // 'gcash', 'maya', or 'bank'
@@ -190,7 +222,29 @@ async function createPayMongoDisbursement(
 
     if (!response.ok) {
       console.error('PayMongo Disbursement Error:', JSON.stringify(data, null, 2));
-      const errorMessage = data.errors?.[0]?.detail || data.errors?.[0]?.code || 'Disbursement failed';
+      const apiError = data?.errors?.[0] || {};
+      const errorDetail = String(apiError.detail || '');
+      const errorCode = String(apiError.code || '');
+      const normalized = `${errorDetail} ${errorCode}`.toLowerCase();
+
+      const isPermissionError =
+        response.status === 403 ||
+        normalized.includes("don't have permission") ||
+        normalized.includes('do not have permission') ||
+        normalized.includes('not permitted') ||
+        normalized.includes('forbidden') ||
+        normalized.includes('permission');
+
+      if (isPermissionError) {
+        return {
+          success: false,
+          error: 'Cashout is not enabled for this PayMongo account yet.',
+          error_code: 'merchant_not_ready',
+          next_steps: MERCHANT_ONBOARDING_STEPS,
+        };
+      }
+
+      const errorMessage = errorDetail || errorCode || 'Disbursement failed';
       return { success: false, error: errorMessage };
     }
 
@@ -423,36 +477,59 @@ serve(async (req: Request) => {
         });
       }
 
-      // Calculate fee
-      const fee = FIXED_WITHDRAWAL_FEE + (amount * WITHDRAWAL_FEE_PERCENTAGE / 100);
-      const netAmount = amount - fee;
-
-      // ========================================
-      // CALL PAYMONGO DISBURSEMENTS API
-      // ========================================
-      console.log('📤 Initiating PayMongo disbursement...');
-      console.log(`Amount: ₱${netAmount}, Type: ${payoutMethod.type}, Account: ${payoutMethod.account_number}`);
-
-      const disbursementResult = await createPayMongoDisbursement(
-        netAmount,
-        payoutMethod.type,
-        payoutMethod.account_name,
-        payoutMethod.account_number,
-        payoutMethod.bank_name,
-        `MusikaLokal withdrawal for ${user.email}`
-      );
-
-      if (!disbursementResult.success) {
-        console.error('❌ PayMongo disbursement failed:', disbursementResult.error);
-        return new Response(JSON.stringify({ 
-          error: disbursementResult.error || 'Payout failed. Please try again or contact support.' 
+      const supportedPayoutTypes = ['gcash', 'maya', 'bank'];
+      if (!supportedPayoutTypes.includes(String(payoutMethod.type || '').toLowerCase())) {
+        return new Response(JSON.stringify({
+          error: `Unsupported payout type: ${payoutMethod.type}. Supported types are GCash, Maya, and Bank.`
         }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
-      console.log('✅ PayMongo disbursement successful! Reference:', disbursementResult.reference);
+      // Calculate fee
+      const fee = FIXED_WITHDRAWAL_FEE + (amount * WITHDRAWAL_FEE_PERCENTAGE / 100);
+      const netAmount = amount - fee;
+
+      let disbursementReference: string | undefined;
+      let mockCashout = false;
+
+      // ========================================
+      // CALL PAYMONGO DISBURSEMENTS API
+      // ========================================
+      if (SHOULD_USE_MOCK_CASHOUT) {
+        mockCashout = true;
+        disbursementReference = createMockReference();
+        console.log('🧪 Mock cashout mode enabled. Skipping PayMongo disbursement call.');
+        console.log(`Amount: ₱${netAmount}, Type: ${payoutMethod.type}, Account: ${payoutMethod.account_number}`);
+      } else {
+        console.log('📤 Initiating PayMongo disbursement...');
+        console.log(`Amount: ₱${netAmount}, Type: ${payoutMethod.type}, Account: ${payoutMethod.account_number}`);
+
+        const disbursementResult = await createPayMongoDisbursement(
+          netAmount,
+          payoutMethod.type,
+          payoutMethod.account_name,
+          payoutMethod.account_number,
+          payoutMethod.bank_name,
+          `MusikaLokal withdrawal for ${user.email}`
+        );
+
+        if (!disbursementResult.success) {
+          console.error('❌ PayMongo disbursement failed:', disbursementResult.error);
+          return new Response(JSON.stringify({ 
+            error: disbursementResult.error || 'Payout failed. Please try again or contact support.',
+            error_code: disbursementResult.error_code,
+            next_steps: disbursementResult.next_steps,
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        disbursementReference = disbursementResult.reference;
+        console.log('✅ PayMongo disbursement successful! Reference:', disbursementReference);
+      }
 
       // ========================================
       // DISBURSEMENT SUCCESS - UPDATE DATABASE
@@ -476,7 +553,7 @@ serve(async (req: Request) => {
           wallet_id: wallet.id,
           amount: amount,
           type: 'withdrawal',
-          description: `Withdrawal to ${payoutMethod.type.toUpperCase()} - ****${payoutMethod.account_number.slice(-4)}`,
+          description: `${mockCashout ? '[MOCK] ' : ''}Withdrawal to ${payoutMethod.type.toUpperCase()} - ****${payoutMethod.account_number.slice(-4)}`,
           is_credit: false,
           status: 'completed'
         })
@@ -500,7 +577,8 @@ serve(async (req: Request) => {
           payout_account_number: payoutMethod.account_number,
           payout_bank_name: payoutMethod.bank_name,
           status: 'completed',
-          reference_number: disbursementResult.reference,
+          reference_number: disbursementReference,
+          notes: mockCashout ? 'Mock cashout mode: no real disbursement was sent.' : null,
           processed_at: new Date().toISOString()
         })
         .select()
@@ -522,7 +600,7 @@ serve(async (req: Request) => {
             payout_account_name: payoutMethod.account_name,
             payout_account_number: payoutMethod.account_number,
             status: 'completed',
-            reference_number: disbursementResult.reference,
+            reference_number: disbursementReference,
             notes: 'Auto-created after DB error',
             processed_at: new Date().toISOString()
           });
@@ -541,8 +619,11 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ 
         success: true, 
         withdrawal: withdrawal,
-        reference: disbursementResult.reference,
-        message: `₱${netAmount.toLocaleString()} has been sent to your ${payoutMethod.type.toUpperCase()} account!`
+        reference: disbursementReference,
+        mock_cashout: mockCashout,
+        message: mockCashout
+          ? `Mock cashout successful. ₱${netAmount.toLocaleString()} was deducted for testing only (no real transfer sent).`
+          : `₱${netAmount.toLocaleString()} has been sent to your ${payoutMethod.type.toUpperCase()} account!`
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });

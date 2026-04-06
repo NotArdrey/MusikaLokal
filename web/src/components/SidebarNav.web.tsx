@@ -6,11 +6,28 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
+type AdminTab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
+
+const resolveAdminTab = (pathname: string): AdminTab => {
+    if (pathname.startsWith('/admin/permits')) return 'permits';
+    if (pathname.startsWith('/admin/users')) return 'users';
+    if (pathname.startsWith('/admin/reports')) return 'reports';
+    if (pathname.startsWith('/admin/audit')) return 'audit';
+    return 'dashboard';
+};
+
 export default function SidebarNav() {
     const { colors, isDark } = useTheme();
     const { isGuest, userRole } = useAuth();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
+
+    const isAdminContext = useMemo(
+        () => userRole === 'admin' || pathname === '/admin' || pathname.startsWith('/admin/'),
+        [userRole, pathname],
+    );
+
+    const activeAdminTab = useMemo(() => resolveAdminTab(pathname), [pathname]);
 
     const fetchUserRole = useCallback(async () => {
         if (isGuest) return; // Skip for guests
@@ -31,6 +48,8 @@ export default function SidebarNav() {
                     setManageRoute('/my_group');
                 } else if (data.role === 'venue-owner') {
                     setManageRoute('/my_venue');
+                } else if (data.role === 'admin') {
+                    setManageRoute('/admin');
                 } else {
                     setManageRoute('/manage');
                 }
@@ -47,6 +66,8 @@ export default function SidebarNav() {
     }, [fetchUserRole]);
 
     const activeTab = useMemo(() => {
+        if (isAdminContext) return activeAdminTab;
+
         if (pathname.includes('home')) return 'home';
         if (pathname.includes('bookings')) return 'activity';
         if (pathname.includes('ai_suggestions')) return 'ai-suggest';
@@ -66,18 +87,27 @@ export default function SidebarNav() {
             return 'manage';
         }
         return 'home';
-    }, [pathname]);
+    }, [isAdminContext, activeAdminTab, pathname]);
 
-    const navItems = useMemo(
-        () => [
+    const navItems = useMemo(() => {
+        if (isAdminContext) {
+            return [
+                { id: 'dashboard', icon: 'stats-chart', label: 'Dashboard', route: '/admin' },
+                { id: 'permits', icon: 'document-text', label: 'Permits', route: '/admin/permits' },
+                { id: 'users', icon: 'people', label: 'Users', route: '/admin/users' },
+                { id: 'reports', icon: 'shield-checkmark', label: 'Reports', route: '/admin/reports' },
+                { id: 'audit', icon: 'time', label: 'Audit', route: '/admin/audit' },
+            ];
+        }
+
+        return [
             { id: 'home', icon: 'home', label: 'Home', route: '/home' },
             { id: 'ai-suggest', icon: 'sparkles', label: 'AI Discovery', route: '/ai_suggestions' },
             { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
             { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
-            { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
-        ],
-        [manageRoute],
-    );
+            { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' },
+        ];
+    }, [isAdminContext, manageRoute]);
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
@@ -107,7 +137,10 @@ export default function SidebarNav() {
                                 styles.navItem, 
                                 isActive && { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }
                             ]}
-                            onPress={() => item.route && router.replace(item.route as any)}
+                            onPress={() => {
+                                if (!item.route) return;
+                                router.replace(item.route as any);
+                            }}
                         >
                             <Ionicons 
                                 name={isActive ? item.icon as any : `${item.icon}-outline` as any}

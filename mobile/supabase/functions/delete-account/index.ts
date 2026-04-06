@@ -29,10 +29,11 @@ serve(async (req) => {
         )
 
         // Get the user from the JWT
+        const token = authHeader.replace(/^Bearer\s+/i, '')
         const {
             data: { user },
             error: userError,
-        } = await supabaseClient.auth.getUser()
+        } = await supabaseClient.auth.getUser(token)
 
         if (userError || !user) {
             return new Response(JSON.stringify({ error: 'Unauthorized' }), {

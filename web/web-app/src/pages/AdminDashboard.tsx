@@ -24,6 +24,15 @@ type Tab = "dashboard" | "permits" | "users" | "reports" | "audit";
 type PermitFilter = "all" | "pending_review" | "approved" | "rejected" | "resubmitted";
 type EntityFilter = "all" | "studio" | "gig";
 type ReportFilter = "all" | "pending" | "resolved" | "dismissed";
+type BookingIncidentFilter =
+  | "all"
+  | "open"
+  | "responded"
+  | "manual_review"
+  | "resolved_refund"
+  | "resolved_no_refund"
+  | "dismissed";
+type BookingIncidentResolution = "resolved_refund" | "resolved_no_refund" | "dismissed";
 
 interface PermitItem {
   id: string;
@@ -77,6 +86,27 @@ interface ReportEntry {
   created_at: string;
 }
 
+interface BookingIncidentEntry {
+  id: string;
+  booking_id: string;
+  issue_type: string;
+  status: string;
+  reporter_notes: string | null;
+  counterparty_notes: string | null;
+  response_deadline_at: string | null;
+  created_at: string;
+  resolved_at: string | null;
+  resolution: string | null;
+  reporter_name: string;
+  reporter_email: string;
+  counterparty_name: string;
+  counterparty_email: string;
+  studio_name: string | null;
+  booking_date: string | null;
+  booking_start_time: string | null;
+  booking_end_time: string | null;
+}
+
 interface DashboardMetrics {
   totalUsers: number;
   totalStudios: number;
@@ -89,8 +119,14 @@ interface DashboardMetrics {
 
 export default function AdminDashboard() {
   const { colors, isDark } = useTheme();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, session, roleResolved } = useAuth();
   const navigate = useNavigate();
+
+  const getAuthHeaders = useCallback(() => {
+    const token = session?.access_token;
+    if (!token) return undefined;
+    return { Authorization: `Bearer ${token}` };
+  }, [session?.access_token]);
 
   const [tab, setTab] = useState<Tab>("dashboard");
   const [loading, setLoading] = useState(true);
@@ -134,6 +170,14 @@ export default function AdminDashboard() {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportActionLoading, setReportActionLoading] = useState<string | null>(null);
 
+  // Booking incident queue
+  const [bookingIncidents, setBookingIncidents] = useState<BookingIncidentEntry[]>([]);
+  const [incidentFilter, setIncidentFilter] =
+    useState<BookingIncidentFilter>("all");
+  const [incidentLoading, setIncidentLoading] = useState(false);
+  const [incidentActionLoading, setIncidentActionLoading] =
+    useState<string | null>(null);
+
   // Audit log
   const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -148,10 +192,13 @@ export default function AdminDashboard() {
 
   // Redirect non-admins
   useEffect(() => {
-    if (!isAdmin && !loading) {
+    if (!roleResolved) return;
+
+    if (!isAdmin) {
+      setLoading(false);
       navigate("/home", { replace: true });
     }
-  }, [isAdmin, loading, navigate]);
+  }, [isAdmin, roleResolved, navigate]);
 
   // Fetch dashboard metrics
   const fetchMetrics = useCallback(async () => {
@@ -160,6 +207,7 @@ export default function AdminDashboard() {
         "permit-management",
         {
           body: { action: "fetch_metrics" },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -179,11 +227,13 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getAuthHeaders]);
 
   useEffect(() => {
+    if (!roleResolved || !isAdmin || !session?.access_token) return;
+
     fetchMetrics();
-  }, [fetchMetrics]);
+  }, [fetchMetrics, roleResolved, isAdmin, session?.access_token]);
 
   // Fetch permit queue
   const fetchPermits = useCallback(async () => {
@@ -197,6 +247,7 @@ export default function AdminDashboard() {
             entityType: entityFilter,
             permitStatus: permitFilter,
           },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -208,7 +259,7 @@ export default function AdminDashboard() {
     } finally {
       setPermitLoading(false);
     }
-  }, [permitFilter, entityFilter]);
+  }, [permitFilter, entityFilter, getAuthHeaders]);
 
   useEffect(() => {
     if (tab === "permits") fetchPermits();
@@ -251,6 +302,7 @@ export default function AdminDashboard() {
             statusFilter: reportFilter,
             limit: 100,
           },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -268,11 +320,49 @@ export default function AdminDashboard() {
     } finally {
       setReportLoading(false);
     }
-  }, [reportFilter]);
+  }, [reportFilter, getAuthHeaders]);
 
   useEffect(() => {
     if (tab === "reports") fetchReports();
   }, [tab, fetchReports]);
+
+  // Fetch booking incidents
+  const fetchBookingIncidents = useCallback(async () => {
+    setIncidentLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "manage-bookings",
+        {
+          body: {
+            action: "admin_fetch_booking_incidents",
+            statusFilter: incidentFilter,
+            limit: 100,
+          },
+          headers: getAuthHeaders(),
+        },
+      );
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      setBookingIncidents(data?.items || []);
+    } catch (err: any) {
+      console.error("Error fetching booking incidents:", err);
+      setAlert({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message:
+          err?.message || "Failed to load booking incidents queue.",
+      });
+    } finally {
+      setIncidentLoading(false);
+    }
+  }, [incidentFilter, getAuthHeaders]);
+
+  useEffect(() => {
+    if (tab === "reports") fetchBookingIncidents();
+  }, [tab, fetchBookingIncidents]);
 
   const updateReportStatus = async (reportId: string, nextStatus: "resolved" | "dismissed") => {
     setReportActionLoading(reportId);
@@ -283,6 +373,7 @@ export default function AdminDashboard() {
           reportId,
           nextStatus,
         },
+        headers: getAuthHeaders(),
       });
 
       if (error) throw error;
@@ -307,6 +398,49 @@ export default function AdminDashboard() {
     }
   };
 
+  const resolveBookingIncident = async (
+    incidentId: string,
+    resolution: BookingIncidentResolution,
+  ) => {
+    setIncidentActionLoading(incidentId);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "manage-bookings",
+        {
+          body: {
+            action: "admin_resolve_booking_incident",
+            incident_id: incidentId,
+            resolution,
+          },
+          headers: getAuthHeaders(),
+        },
+      );
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      setAlert({
+        visible: true,
+        type: "success",
+        title: "Incident Updated",
+        message: `Incident marked as ${resolution.replace(/_/g, " ")}.`,
+      });
+
+      fetchBookingIncidents();
+    } catch (err: any) {
+      console.error("Error resolving booking incident:", err);
+      setAlert({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message:
+          err?.message || "Failed to resolve booking incident.",
+      });
+    } finally {
+      setIncidentActionLoading(null);
+    }
+  };
+
   // Fetch audit log
   const fetchAuditLog = useCallback(async () => {
     setAuditLoading(true);
@@ -318,6 +452,7 @@ export default function AdminDashboard() {
             action: "fetch_audit",
             limit: 100,
           },
+          headers: getAuthHeaders(),
         },
       );
 
@@ -335,7 +470,7 @@ export default function AdminDashboard() {
     } finally {
       setAuditLoading(false);
     }
-  }, []);
+  }, [getAuthHeaders]);
 
   useEffect(() => {
     if (tab === "audit") fetchAuditLog();
@@ -360,6 +495,7 @@ export default function AdminDashboard() {
           rejectionReason: reviewAction === "reject" ? rejectReason : "",
           adminNotes,
         },
+        headers: getAuthHeaders(),
       });
 
       if (error) throw error;
@@ -455,6 +591,24 @@ export default function AdminDashboard() {
     return map[status] || "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400";
   };
 
+  const incidentStatusChip = (status: string) => {
+    const map: Record<string, string> = {
+      open: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+      responded: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+      manual_review: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+      resolved_refund: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+      resolved_no_refund: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+      dismissed: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
+    };
+    return map[status] || "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400";
+  };
+
+  const formatIncidentIssue = (issueType: string) =>
+    String(issueType || "issue").replace(/_/g, " ");
+
+  const isIncidentActionable = (status: string) =>
+    ["open", "responded", "manual_review"].includes(status);
+
   const fmtDate = (d: string) => {
     if (!d) return "-";
     return new Date(d).toLocaleDateString("en-PH", {
@@ -474,7 +628,7 @@ export default function AdminDashboard() {
     { id: "audit", label: "Audit Log", icon: IoTimeOutline },
   ];
 
-  if (loading) {
+  if (loading || !roleResolved) {
     return (
       <div className="page-container">
         <div className="flex items-center justify-center py-32">
@@ -988,6 +1142,139 @@ export default function AdminDashboard() {
                 </div>
               )}
             </div>
+
+              {/* Booking Incident Queue */}
+              <div className="rounded-2xl border p-6" style={{ backgroundColor: cardBg, borderColor: borderCol }}>
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-base font-semibold" style={{ color: colors.text }}>
+                    Booking Incident Queue
+                  </h3>
+                  <select
+                    value={incidentFilter}
+                    onChange={(e) => setIncidentFilter(e.target.value as BookingIncidentFilter)}
+                    className="rounded-lg border px-3 py-2 text-sm"
+                    style={{
+                      backgroundColor: colors.inputBackground,
+                      borderColor: colors.inputBorder,
+                      color: colors.text,
+                    }}
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="open">Open</option>
+                    <option value="responded">Responded</option>
+                    <option value="manual_review">Manual Review</option>
+                    <option value="resolved_refund">Resolved (Refund)</option>
+                    <option value="resolved_no_refund">Resolved (No Refund)</option>
+                    <option value="dismissed">Dismissed</option>
+                  </select>
+                </div>
+
+                {incidentLoading ? (
+                  <div className="flex justify-center py-10">
+                    <span className="spinner" />
+                  </div>
+                ) : bookingIncidents.length === 0 ? (
+                  <div className="py-10 text-center">
+                    <p className="text-sm" style={{ color: colors.textSecondary }}>
+                      No booking incidents found for this filter.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {bookingIncidents.map((incident) => (
+                      <div
+                        key={incident.id}
+                        className="rounded-xl border p-4"
+                        style={{ borderColor: borderCol, backgroundColor: isDark ? "#111827" : "#F9FAFB" }}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="mb-1 flex flex-wrap items-center gap-2">
+                              <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${incidentStatusChip(incident.status)}`}>
+                                {incident.status.replace(/_/g, " ")}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                {formatIncidentIssue(incident.issue_type)}
+                              </span>
+                            </div>
+
+                            <p className="text-sm font-semibold" style={{ color: colors.text }}>
+                              {incident.studio_name || "Studio booking"}
+                            </p>
+                            <p className="text-xs" style={{ color: colors.textSecondary }}>
+                              Booking: {incident.booking_date || "-"}
+                              {incident.booking_start_time
+                                ? ` ${String(incident.booking_start_time).slice(0, 5)}`
+                                : ""}
+                              {incident.booking_end_time
+                                ? ` - ${String(incident.booking_end_time).slice(0, 5)}`
+                                : ""}
+                            </p>
+
+                            <p className="mt-2 text-xs" style={{ color: colors.textSecondary }}>
+                              Reporter: {incident.reporter_name} ({incident.reporter_email || "no email"})
+                            </p>
+                            <p className="text-xs" style={{ color: colors.textSecondary }}>
+                              Counterparty: {incident.counterparty_name} ({incident.counterparty_email || "no email"})
+                            </p>
+
+                            {incident.reporter_notes && (
+                              <p className="mt-2 text-sm" style={{ color: colors.textSecondary }}>
+                                <span className="font-semibold" style={{ color: colors.text }}>Reporter note:</span> {incident.reporter_notes}
+                              </p>
+                            )}
+
+                            {incident.counterparty_notes && (
+                              <p className="mt-1 text-sm" style={{ color: colors.textSecondary }}>
+                                <span className="font-semibold" style={{ color: colors.text }}>Counterparty note:</span> {incident.counterparty_notes}
+                              </p>
+                            )}
+
+                            {incident.resolution && (
+                              <p className="mt-1 text-sm" style={{ color: colors.textSecondary }}>
+                                <span className="font-semibold" style={{ color: colors.text }}>Resolution:</span> {incident.resolution}
+                              </p>
+                            )}
+
+                            <p className="mt-2 text-xs" style={{ color: colors.textSecondary }}>
+                              Created: {fmtDate(incident.created_at)}
+                              {incident.response_deadline_at
+                                ? ` · Response deadline: ${fmtDate(incident.response_deadline_at)}`
+                                : ""}
+                            </p>
+                          </div>
+
+                          {isIncidentActionable(incident.status) && (
+                            <div className="flex shrink-0 flex-wrap items-center gap-2">
+                              <button
+                                onClick={() => resolveBookingIncident(incident.id, "resolved_no_refund")}
+                                disabled={incidentActionLoading === incident.id}
+                                className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-green-700 disabled:opacity-60"
+                              >
+                                Resolve (No Refund)
+                              </button>
+                              <button
+                                onClick={() => resolveBookingIncident(incident.id, "resolved_refund")}
+                                disabled={incidentActionLoading === incident.id}
+                                className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60"
+                              >
+                                Resolve (Refund)
+                              </button>
+                              <button
+                                onClick={() => resolveBookingIncident(incident.id, "dismissed")}
+                                disabled={incidentActionLoading === incident.id}
+                                className="rounded-lg bg-slate-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-600 disabled:opacity-60"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
           </div>
         )}
 

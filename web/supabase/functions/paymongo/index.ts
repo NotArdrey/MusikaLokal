@@ -338,10 +338,11 @@ serve(async (req: Request) => {
     let authenticatedUserId: string | null = null;
 
     if (action && !publicActions.has(action)) {
+      const token = (authHeader || "").replace(/^Bearer\s+/i, "");
       const {
         data: { user },
         error: authError,
-      } = await supabaseClient.auth.getUser();
+      } = await supabaseClient.auth.getUser(token);
 
       if (authError || !user) {
         return new Response(JSON.stringify({ error: "Unauthorized" }), {

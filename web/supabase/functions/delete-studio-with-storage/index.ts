@@ -81,10 +81,11 @@ serve(async (req: Request) => {
 
     const serviceClient = createClient(supabaseUrl, serviceRoleKey);
 
+    const token = authHeader.replace(/^Bearer\s+/i, "");
     const {
       data: { user },
       error: userError,
-    } = await userClient.auth.getUser();
+    } = await userClient.auth.getUser(token);
 
     if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {

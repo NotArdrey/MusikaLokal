@@ -16,14 +16,9 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import CachedImage from "./CachedImage";
+import PagerView from "./PagerView";
 
 const debugLog = (..._args: unknown[]) => { };
-
-// Conditionally import PagerView only on native platforms
-let PagerView: any = null;
-if (Platform.OS !== "web") {
-  PagerView = require("react-native-pager-view").default;
-}
 
 interface ListingCardProps {
   item: any;

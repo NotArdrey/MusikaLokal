@@ -1,0 +1,504 @@
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:14:DROP VIEW IF EXISTS studio_bookings_with_cost CASCADE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:33:DROP TABLE IF EXISTS gig_applications CASCADE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:34:DROP TABLE IF EXISTS studio_bookings CASCADE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:217:CREATE TABLE studio_bookings (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:339:CREATE TABLE gig_applications (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:432:FROM studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:457:CREATE OR REPLACE VIEW studio_bookings_with_cost AS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:464:FROM studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:548:FROM studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:669:ALTER TABLE studio_bookings ENABLE ROW LEVEL SECURITY;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:670:ALTER TABLE gig_applications ENABLE ROW LEVEL SECURITY;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:673:CREATE POLICY "Public profiles are viewable by everyone"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:674:ON profiles FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:675:USING (TRUE);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:677:CREATE POLICY "Users can insert their own profile"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:678:ON profiles FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:679:WITH CHECK (auth.uid() = id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:681:CREATE POLICY "Users can update own profile"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:682:ON profiles FOR UPDATE
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:683:USING (auth.uid() = id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:686:CREATE POLICY "Groups are viewable by everyone"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:687:ON groups FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:688:USING (TRUE);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:690:CREATE POLICY "Users can create groups"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:691:ON groups FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:692:WITH CHECK (auth.uid() = owner_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:694:CREATE POLICY "Owners can update their groups"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:695:ON groups FOR UPDATE
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:696:USING (auth.uid() = owner_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:698:CREATE POLICY "Owners can delete their groups"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:700:USING (auth.uid() = owner_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:703:CREATE POLICY "Studios are viewable by everyone"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:704:ON studios FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:705:USING (TRUE);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:707:CREATE POLICY "Users can create studios"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:708:ON studios FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:709:WITH CHECK (auth.uid() = owner_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:711:CREATE POLICY "Owners can update their studios"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:712:ON studios FOR UPDATE
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:713:USING (auth.uid() = owner_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:715:CREATE POLICY "Owners can delete their studios"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:717:USING (auth.uid() = owner_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:720:CREATE POLICY "Gigs are viewable by everyone"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:721:ON gigs FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:722:USING (TRUE);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:724:CREATE POLICY "Users can create gigs"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:725:ON gigs FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:726:WITH CHECK (auth.uid() = organizer_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:728:CREATE POLICY "Organizers can update their gigs"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:729:ON gigs FOR UPDATE
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:730:USING (auth.uid() = organizer_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:732:CREATE POLICY "Organizers can delete their gigs"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:734:USING (auth.uid() = organizer_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:737:CREATE POLICY "Reviews are viewable by everyone"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:738:ON reviews FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:739:USING (TRUE);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:741:CREATE POLICY "Users can create reviews"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:742:ON reviews FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:743:WITH CHECK (auth.uid() = author_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:745:CREATE POLICY "Authors can update their reviews"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:746:ON reviews FOR UPDATE
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:747:USING (auth.uid() = author_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:749:CREATE POLICY "Authors can delete their reviews"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:751:USING (auth.uid() = author_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:754:CREATE POLICY "Users can view own favorites"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:755:ON favorites FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:756:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:758:CREATE POLICY "Users can insert own favorites"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:759:ON favorites FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:760:WITH CHECK (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:762:CREATE POLICY "Users can delete own favorites"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:764:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:767:CREATE POLICY "Users can insert reports"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:768:ON reports FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:769:WITH CHECK (auth.uid() = reporter_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:771:CREATE POLICY "Users can view own reports"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:772:ON reports FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:773:USING (auth.uid() = reporter_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:776:CREATE POLICY "Review likes are public"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:777:ON review_likes FOR SELECT TO public
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:778:USING (TRUE);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:780:CREATE POLICY "Users can toggle review likes"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:781:ON review_likes FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:782:WITH CHECK (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:784:CREATE POLICY "Users can remove review likes"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:786:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:789:CREATE POLICY "Review comments are public"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:790:ON review_comments FOR SELECT TO public
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:791:USING (TRUE);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:793:CREATE POLICY "Users can post review comments"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:794:ON review_comments FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:795:WITH CHECK (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:798:CREATE POLICY "Users can view own notifications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:799:ON notifications FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:800:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:802:CREATE POLICY "Users can update own notifications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:803:ON notifications FOR UPDATE TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:804:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:806:CREATE POLICY "Users can insert own notifications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:807:ON notifications FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:808:WITH CHECK (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:811:CREATE POLICY "Users can view own bookings"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:812:ON studio_bookings FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:813:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:815:CREATE POLICY "Users can create bookings"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:816:ON studio_bookings FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:817:WITH CHECK (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:819:CREATE POLICY "Users can update own bookings"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:820:ON studio_bookings FOR UPDATE TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:821:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:824:CREATE POLICY "Applicants can view own applications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:825:ON gig_applications FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:826:USING (auth.uid() = applicant_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:828:CREATE POLICY "Users can create applications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:829:ON gig_applications FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:830:WITH CHECK (auth.uid() = applicant_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:832:CREATE POLICY "Applicants can update own applications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:833:ON gig_applications FOR UPDATE TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:834:USING (auth.uid() = applicant_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:857:DROP POLICY IF EXISTS "Users can upload avatars" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:858:DROP POLICY IF EXISTS "Avatars are publicly viewable" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:859:DROP POLICY IF EXISTS "Users can upload portfolio" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:860:DROP POLICY IF EXISTS "Portfolio is publicly viewable" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:861:DROP POLICY IF EXISTS "Users can upload listings" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:862:DROP POLICY IF EXISTS "Listings are publicly viewable" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:865:CREATE POLICY "Users can upload avatars"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:866:ON storage.objects FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:868:WITH CHECK (bucket_id = 'avatars' AND auth.uid()::TEXT = (storage.foldername(name))[1]);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:870:CREATE POLICY "Avatars are publicly viewable"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:871:ON storage.objects FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:873:USING (bucket_id = 'avatars');
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:875:CREATE POLICY "Users can upload portfolio"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:876:ON storage.objects FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:878:WITH CHECK (bucket_id = 'portfolio' AND auth.uid()::TEXT = (storage.foldername(name))[1]);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:880:CREATE POLICY "Portfolio is publicly viewable"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:881:ON storage.objects FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:883:USING (bucket_id = 'portfolio');
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:885:CREATE POLICY "Users can upload listings"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:886:ON storage.objects FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:888:WITH CHECK (bucket_id = 'listings');
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:890:CREATE POLICY "Listings are publicly viewable"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:891:ON storage.objects FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:893:USING (bucket_id = 'listings');
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:905:CREATE INDEX IF NOT EXISTS idx_studio_bookings_studio_id ON studio_bookings(studio_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:906:CREATE INDEX IF NOT EXISTS idx_studio_bookings_user_id ON studio_bookings(user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:907:CREATE INDEX IF NOT EXISTS idx_gig_applications_gig_id ON gig_applications(gig_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:983:SECURITY DEFINER -- Run as admin to bypass RLS if needed, or ensure policy allows update
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1051:-- Add cancellation_reason column to studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1052:ALTER TABLE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1055:-- Add cancellation_reason column to gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1056:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1062:DROP POLICY IF EXISTS "Users can upload documents" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1063:DROP POLICY IF EXISTS "Users can view their documents" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1064:DROP POLICY IF EXISTS "Documents are publicly viewable" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1067:CREATE POLICY "Users can upload documents"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1068:ON storage.objects FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1070:WITH CHECK (bucket_id = 'documents');
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1072:CREATE POLICY "Users can view their documents"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1073:ON storage.objects FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1075:USING (bucket_id = 'documents' AND auth.uid()::TEXT = (storage.foldername(name))[1]);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1077:CREATE POLICY "Documents are publicly viewable"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1078:ON storage.objects FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1080:USING (bucket_id = 'documents');
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1114:FROM studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1140:-- Drop the restrictive policy
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1141:DROP POLICY IF EXISTS "Users can view their documents" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1143:-- Create a better policy that allows users to view documents in their folder
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1144:CREATE POLICY "Users can view documents in their folder"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1145:ON storage.objects FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1147:USING (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1165:DELETE FROM gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1170:FROM gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1175:ALTER TABLE gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1178:ALTER TABLE gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1184:ON studio_bookings (user_id, studio_id)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1187:CREATE INDEX IF NOT EXISTS idx_gig_applications_gig_applicant ON gig_applications(gig_id, applicant_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1188:CREATE INDEX IF NOT EXISTS idx_studio_bookings_user_studio_status ON studio_bookings(user_id, studio_id, status);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1190:DROP POLICY IF EXISTS "Applicants can view own applications" ON gig_applications;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1191:DROP POLICY IF EXISTS "Gig organizers can view applications" ON gig_applications;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1192:DROP POLICY IF EXISTS "Users can create applications" ON gig_applications;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1193:DROP POLICY IF EXISTS "Applicants can update own applications" ON gig_applications;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1195:CREATE POLICY "Applicants can view own applications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1196:ON gig_applications FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1197:USING (auth.uid() = applicant_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1199:CREATE POLICY "Gig organizers can view applications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1200:ON gig_applications FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1201:USING (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1204:WHERE gigs.id = gig_applications.gig_id
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1209:CREATE POLICY "Users can create applications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1210:ON gig_applications FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1211:WITH CHECK (auth.uid() = applicant_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1213:CREATE POLICY "Applicants can update own applications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1214:ON gig_applications FOR UPDATE TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1215:USING (auth.uid() = applicant_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1217:DROP POLICY IF EXISTS "Users can upload performance videos" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1218:DROP POLICY IF EXISTS "Users can view their performance videos" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1219:DROP POLICY IF EXISTS "Performance videos are publicly viewable" ON storage.objects;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1222:CREATE POLICY "Users can upload performance videos"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1223:ON storage.objects FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1225:WITH CHECK (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1231:CREATE POLICY "Users can view their performance videos"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1232:ON storage.objects FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1234:USING (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1240:CREATE POLICY "Performance videos are publicly viewable"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1241:ON storage.objects FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1243:USING (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1248:CREATE INDEX IF NOT EXISTS idx_gig_applications_applicant_id ON gig_applications(applicant_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1249:CREATE INDEX IF NOT EXISTS idx_gig_applications_status ON gig_applications(status);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1251:DROP VIEW IF EXISTS studio_bookings_with_cost CASCADE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1253:CREATE OR REPLACE VIEW studio_bookings_with_cost AS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1263:FROM studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1267:-- 2. Add RLS policy for studio owners to view bookings for their studios
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1268:DROP POLICY IF EXISTS "Studio owners can view bookings for their studios" ON studio_bookings;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1270:CREATE POLICY "Studio owners can view bookings for their studios"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1271:ON studio_bookings FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1272:USING (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1275:WHERE studios.id = studio_bookings.studio_id
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1280:-- 3. Add RLS policy for studio owners to update bookings for their studios (confirm/cancel)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1281:DROP POLICY IF EXISTS "Studio owners can update bookings for their studios" ON studio_bookings;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1283:CREATE POLICY "Studio owners can update bookings for their studios"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1284:ON studio_bookings FOR UPDATE TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1285:USING (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1288:WHERE studios.id = studio_bookings.studio_id
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1296:ALTER TABLE studio_bookings ADD COLUMN IF NOT EXISTS proof_url TEXT;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1299:ALTER TABLE studio_bookings ADD COLUMN IF NOT EXISTS reviewed_by_customer BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1300:ALTER TABLE studio_bookings ADD COLUMN IF NOT EXISTS reviewed_by_owner BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1302:ALTER TABLE gig_applications ADD COLUMN IF NOT EXISTS reviewed_by_applicant BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1303:ALTER TABLE gig_applications ADD COLUMN IF NOT EXISTS reviewed_by_organizer BOOLEAN DEFAULT FALSE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1306:ALTER TABLE reviews ADD COLUMN IF NOT EXISTS studio_booking_id UUID REFERENCES studio_bookings(id) ON DELETE SET NULL;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1307:ALTER TABLE reviews ADD COLUMN IF NOT EXISTS gig_application_id UUID REFERENCES gig_applications(id) ON DELETE SET NULL;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1393:-- STEP 1: Add time_slots JSONB column to studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1398:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1402:COMMENT ON COLUMN studio_bookings.time_slots IS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1412:UPDATE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1431:ON studio_bookings (user_id, studio_id, booking_date)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1475:-- Add cancellation_reason column to studio_bookings if it doesn't exist
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1476:ALTER TABLE studio_bookings ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1478:-- Add cancellation_reason column to gig_applications if it doesn't exist
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1479:ALTER TABLE gig_applications ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1531:SELECT 1 FROM studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1658:CREATE INDEX IF NOT EXISTS idx_studio_bookings_date_status
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1659:ON studio_bookings(studio_id, booking_date, status);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1661:CREATE INDEX IF NOT EXISTS idx_studio_bookings_time_slots
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1662:ON studio_bookings USING GIN (time_slots);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1669:WHERE table_name = 'studio_bookings'
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1673:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1678:DROP POLICY IF EXISTS "Gig organizers can update applications" ON gig_applications;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1680:CREATE POLICY "Gig organizers can update applications"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1681:ON gig_applications FOR UPDATE TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1682:USING (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1685:WHERE gigs.id = gig_applications.gig_id
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1692:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1693:DROP CONSTRAINT studio_bookings_status_check;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1695:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1696:ADD CONSTRAINT studio_bookings_status_check
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1700:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1703:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1704:DROP CONSTRAINT IF EXISTS studio_bookings_status_check;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1707:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1708:ADD CONSTRAINT studio_bookings_status_check
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1712:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1716:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1720:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1723:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1741:ALTER TABLE gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1747:UPDATE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1751:FROM studio_bookings b1
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1752:JOIN studio_bookings b2 ON b1.studio_id = b2.studio_id
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1767:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1786:ALTER TABLE gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1789:COMMENT ON COLUMN gig_applications.cv_url IS 'URL to the uploaded CV file';
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1827:FROM studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1891:DROP POLICY IF EXISTS "Users can view their transfer requests" ON leadership_transfer_requests;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1892:CREATE POLICY "Users can view their transfer requests"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1893:ON leadership_transfer_requests FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1894:USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1897:DROP POLICY IF EXISTS "Owners can create transfer requests" ON leadership_transfer_requests;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1898:CREATE POLICY "Owners can create transfer requests"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1899:ON leadership_transfer_requests FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1900:WITH CHECK (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1906:DROP POLICY IF EXISTS "Recipient can respond to transfer" ON leadership_transfer_requests;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1907:CREATE POLICY "Recipient can respond to transfer"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1908:ON leadership_transfer_requests FOR UPDATE TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase_schema.sql:1909:USING (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:53:CREATE POLICY "Users can view their own payout methods"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:54:ON payout_methods FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:55:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:57:CREATE POLICY "Users can insert their own payout methods"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:58:ON payout_methods FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:59:WITH CHECK (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:61:CREATE POLICY "Users can update their own payout methods"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:62:ON payout_methods FOR UPDATE
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:63:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:65:CREATE POLICY "Users can delete their own payout methods"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:67:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:70:CREATE POLICY "Users can view their own withdrawal requests"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:71:ON withdrawal_requests FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:72:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:74:CREATE POLICY "Users can create withdrawal requests"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:75:ON withdrawal_requests FOR INSERT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:76:WITH CHECK (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:78:CREATE POLICY "Users can cancel their pending withdrawal requests"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:79:ON withdrawal_requests FOR UPDATE
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260204_add_withdrawal_system.sql:80:USING (auth.uid() = user_id AND status = 'pending');
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260205000000_add_address_verification.sql:57:CREATE POLICY "Users can view own address verification sessions"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260205000000_add_address_verification.sql:58:ON address_verification_sessions FOR SELECT
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260205000000_add_address_verification.sql:59:USING (auth.uid() = user_id);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260205000000_add_address_verification.sql:62:CREATE POLICY "Service role can manage address verification sessions"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260205000000_add_address_verification.sql:64:USING (auth.role() = 'service_role');
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:40:-- 3. ADD REJECTED_AT TIMESTAMP TO GIG_APPLICATIONS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:43:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:46:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:49:COMMENT ON COLUMN gig_applications.rejected_at IS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:52:COMMENT ON COLUMN gig_applications.slot_type IS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:68:DROP TRIGGER IF EXISTS trigger_update_rejected_at ON gig_applications;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:70:BEFORE UPDATE ON gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:175:DROP TRIGGER IF EXISTS trigger_update_slot_counts ON gig_applications;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:177:AFTER UPDATE ON gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:182:DROP TRIGGER IF EXISTS trigger_insert_slot_counts ON gig_applications;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:184:AFTER INSERT ON gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:209:FROM gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:281:CREATE INDEX IF NOT EXISTS idx_gig_applications_rejected_at
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000000_gig_application_improvements.sql:282:ON gig_applications(gig_id, applicant_id, rejected_at)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000001_add_session_type_to_bookings.sql:1:-- Migration: Add session_type column to studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000001_add_session_type_to_bookings.sql:4:-- Add session_type column to studio_bookings table
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000001_add_session_type_to_bookings.sql:5:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000001_add_session_type_to_bookings.sql:10:COMMENT ON COLUMN studio_bookings.session_type IS 'Type of session booked: rehearsal (hourly time slots) or recording (whole-day booking)';
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000001_add_session_type_to_bookings.sql:16:UPDATE studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000002_add_partial_payment_status.sql:2:-- This fixes: "new row for relation \"studio_bookings\" violates check constraint \"studio_bookings_payment_status_check\""
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000002_add_partial_payment_status.sql:4:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000002_add_partial_payment_status.sql:5:DROP CONSTRAINT IF EXISTS studio_bookings_payment_status_check;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000002_add_partial_payment_status.sql:7:ALTER TABLE studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260206000002_add_partial_payment_status.sql:8:ADD CONSTRAINT studio_bookings_payment_status_check
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:3:ALTER TABLE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:8:booking_id uuid NOT NULL REFERENCES public.studio_bookings(id) ON DELETE CASCADE,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:24:DROP POLICY IF EXISTS "Participants can view attendance events" ON public.booking_attendance_events;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:25:CREATE POLICY "Participants can view attendance events"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:27:FOR SELECT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:28:USING (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:31:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:38:DROP POLICY IF EXISTS "Participants can insert attendance events" ON public.booking_attendance_events;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:39:CREATE POLICY "Participants can insert attendance events"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:41:FOR INSERT TO authenticated
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:42:WITH CHECK (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:47:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:77:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:185:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:198:UPDATE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260217000003_booking_attendance_without_edge_functions.sql:253:UPDATE public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000100_add_pending_relocation_status.sql:2:ALTER TABLE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000100_add_pending_relocation_status.sql:3:DROP CONSTRAINT IF EXISTS studio_bookings_status_check;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000100_add_pending_relocation_status.sql:5:ALTER TABLE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000100_add_pending_relocation_status.sql:6:ADD CONSTRAINT studio_bookings_status_check
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000110_relocation_expiry_safeguards.sql:4:ALTER TABLE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000110_relocation_expiry_safeguards.sql:5:DROP CONSTRAINT IF EXISTS studio_bookings_status_check;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000110_relocation_expiry_safeguards.sql:7:ALTER TABLE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000110_relocation_expiry_safeguards.sql:8:ADD CONSTRAINT studio_bookings_status_check
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000110_relocation_expiry_safeguards.sql:21:ALTER TABLE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000110_relocation_expiry_safeguards.sql:33:booking_id UUID NOT NULL REFERENCES public.studio_bookings(id) ON DELETE CASCADE,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000110_relocation_expiry_safeguards.sql:71:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000110_relocation_expiry_safeguards.sql:77:UPDATE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000200_safe_studio_delete.sql:48:FOR UPDATE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000200_safe_studio_delete.sql:64:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000200_safe_studio_delete.sql:70:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000200_safe_studio_delete.sql:88:'studio_bookings_total', (SELECT COUNT(*) FROM public.studio_bookings WHERE studio_id = p_studio_id),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:50:FOR UPDATE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:66:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:72:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:99:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:105:'gig_applications_total', (SELECT COUNT(*) FROM public.gig_applications WHERE gig_id = p_gig_id),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:113:'rejected', (SELECT COUNT(*) FROM public.gig_applications WHERE gig_id = p_gig_id AND status = 'rejected')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:272:FOR UPDATE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:309:FROM public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:396:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:400:UPDATE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000300_safe_gig_delete_and_update.sql:535:FROM public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000400_safe_group_delete.sql:45:FOR UPDATE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000400_safe_group_delete.sql:76:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000400_safe_group_delete.sql:82:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000400_safe_group_delete.sql:110:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260219000400_safe_group_delete.sql:125:'rejected', (SELECT COUNT(*) FROM public.gig_applications WHERE group_id = p_group_id AND status = 'rejected')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222000100_add_group_leader_approval_for_gig_applications.sql:3:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222000100_add_group_leader_approval_for_gig_applications.sql:10:UPDATE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222000100_add_group_leader_approval_for_gig_applications.sql:14:UPDATE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222000100_add_group_leader_approval_for_gig_applications.sql:19:CREATE INDEX IF NOT EXISTS idx_gig_applications_group_leader_approval
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222000100_add_group_leader_approval_for_gig_applications.sql:20:ON public.gig_applications(group_id, leader_approval_status, created_at DESC);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222143000_cutover_stats_views_to_projection_fields.sql:168:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222170000_contract_drop_legacy_columns.sql:234:CREATE OR REPLACE VIEW public.studio_bookings_with_cost AS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222170000_contract_drop_legacy_columns.sql:259:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:5:booking_id uuid NOT NULL REFERENCES public.studio_bookings(id) ON DELETE CASCADE,
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:23:PERFORM 1 FROM public.studio_bookings sb WHERE sb.id = p_booking_id;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:36:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:61:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:87:DROP TRIGGER IF EXISTS trg_studio_bookings_sync_slots_3nf_from_legacy ON public.studio_bookings;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:88:CREATE TRIGGER trg_studio_bookings_sync_slots_3nf_from_legacy
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:90:ON public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:100:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:109:CREATE OR REPLACE VIEW public.studio_bookings_legacy_projection AS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222183000_phase_b_booking_slots_expand_backfill_projection.sql:127:FROM public.studio_bookings sb;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:1:-- Phase B contract: drop legacy studio_bookings.time_slots
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:10:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:18:UPDATE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:27:FROM public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:38:CREATE OR REPLACE VIEW public.studio_bookings_legacy_projection AS
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:55:FROM public.studio_bookings sb;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:104:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:133:DROP TRIGGER IF EXISTS trg_studio_bookings_sync_slots_3nf_from_legacy ON public.studio_bookings;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:136:ALTER TABLE public.studio_bookings
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222184500_contract_drop_studio_bookings_time_slots.sql:147:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222193000_phase_c_p0_practical_3nf_guards.sql:202:('studio_bookings', 'modifiers_applied', 'Pricing/modifier audit payload retained for price traceability.'),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222214000_phase_c4_contract_drop_remaining_legacy_json_columns.sql:205:from public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:77:drop policy if exists "Users can view their conversations" on public.conversations;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:78:create policy "Users can view their conversations"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:80:for select
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:81:using (public.is_conversation_member(id));
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:83:drop policy if exists "Users can update their conversations" on public.conversations;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:84:create policy "Users can update their conversations"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:86:for update
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:87:using (public.is_conversation_member(id));
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:89:drop policy if exists "Users can create conversations" on public.conversations;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:90:create policy "Users can create conversations"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:92:for insert
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:93:with check (auth.uid() is not null);
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:95:drop policy if exists "Users can send messages in their conversations" on public.messages;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:96:create policy "Users can send messages in their conversations"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:98:for insert
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:99:with check (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:109:drop policy if exists "Users can send messages to their conversations" on public.messages;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:110:create policy "Users can send messages to their conversations"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:112:for insert
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:113:with check (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:123:drop policy if exists "Users can update messages" on public.messages;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:124:create policy "Users can update messages"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:126:for update
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:127:using (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:136:drop policy if exists "Users can view messages in their conversations" on public.messages;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:137:create policy "Users can view messages in their conversations"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:139:for select
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:140:using (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:149:drop policy if exists "Users can add reactions" on public.message_reactions;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:150:create policy "Users can add reactions"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:152:for insert
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:153:with check (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:164:drop policy if exists "Users can view reactions in their conversations" on public.message_reactions;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:165:create policy "Users can view reactions in their conversations"
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:167:for select
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260222223500_phase_c6_conversations_strict_3nf_contract.sql:168:using (
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226010000_fix_update_gig_safely_for_3nf.sql:62:FOR UPDATE OF g;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226010000_fix_update_gig_safely_for_3nf.sql:99:FROM public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226010000_fix_update_gig_safely_for_3nf.sql:186:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226010000_fix_update_gig_safely_for_3nf.sql:190:UPDATE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226010000_fix_update_gig_safely_for_3nf.sql:366:FROM public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226020000_fix_delete_gig_storage_cleanup_api.sql:36:FOR UPDATE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226020000_fix_delete_gig_storage_cleanup_api.sql:52:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226020000_fix_delete_gig_storage_cleanup_api.sql:58:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226020000_fix_delete_gig_storage_cleanup_api.sql:85:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226020000_fix_delete_gig_storage_cleanup_api.sql:91:'gig_applications_total', (SELECT COUNT(*) FROM public.gig_applications WHERE gig_id = p_gig_id),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226020000_fix_delete_gig_storage_cleanup_api.sql:99:'rejected', (SELECT COUNT(*) FROM public.gig_applications WHERE gig_id = p_gig_id AND status = 'rejected')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:3:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:6:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:9:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:12:CREATE INDEX IF NOT EXISTS idx_gig_applications_reconfirm_due
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:13:ON public.gig_applications (gig_id, reconfirmation_due_at)
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:81:FOR UPDATE OF g;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:101:UPDATE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:149:FROM public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:228:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:232:UPDATE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:258:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:263:UPDATE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:444:FROM public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:462:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:466:UPDATE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:488:FROM public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:559:FOR UPDATE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:576:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:593:FROM public.gig_applications ga
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:597:UPDATE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:610:'gig_applications_total', (SELECT COUNT(*) FROM public.gig_applications WHERE gig_id = p_gig_id),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:616:'pending', (SELECT COUNT(*) FROM public.gig_applications WHERE gig_id = p_gig_id AND status = 'pending'),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:617:'accepted', (SELECT COUNT(*) FROM public.gig_applications WHERE gig_id = p_gig_id AND status = 'accepted'),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:618:'cancelled', (SELECT COUNT(*) FROM public.gig_applications WHERE gig_id = p_gig_id AND status = 'cancelled'),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260226030000_gig_reconfirmation_and_delete_deadlock_fixes.sql:619:'rejected', (SELECT COUNT(*) FROM public.gig_applications WHERE gig_id = p_gig_id AND status = 'rejected')
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260227050000_fix_delete_studio_safely_3nf_storage_refs.sql:29:FOR UPDATE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260227050000_fix_delete_studio_safely_3nf_storage_refs.sql:45:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260227050000_fix_delete_studio_safely_3nf_storage_refs.sql:51:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260227050000_fix_delete_studio_safely_3nf_storage_refs.sql:69:'studio_bookings_total', (SELECT COUNT(*) FROM public.studio_bookings WHERE studio_id = p_studio_id),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260301000010_booking_auto_complete_cron.sql:15:UPDATE public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260302080000_fix_delete_studio_safely_storage_api.sql:35:FOR UPDATE;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260302080000_fix_delete_studio_safely_storage_api.sql:51:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260302080000_fix_delete_studio_safely_storage_api.sql:57:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260302080000_fix_delete_studio_safely_storage_api.sql:75:'studio_bookings_total', (SELECT COUNT(*) FROM public.studio_bookings WHERE studio_id = p_studio_id),
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260302093000_fix_attendance_notification_studio_media.sql:34:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260302103000_fix_are_slots_available_override_precedence.sql:72:FROM public.studio_bookings sb
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310073000_fix_gig_applications_status_check_for_completed.sql:1:-- Ensure gig_applications status domain supports contract lifecycle states used by the app.
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310073000_fix_gig_applications_status_check_for_completed.sql:4:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310073000_fix_gig_applications_status_check_for_completed.sql:5:DROP CONSTRAINT IF EXISTS gig_applications_status_check;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310073000_fix_gig_applications_status_check_for_completed.sql:7:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310073000_fix_gig_applications_status_check_for_completed.sql:8:ADD CONSTRAINT gig_applications_status_check
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310090000_expand_gig_applications_status_legacy_compat.sql:1:-- Expand gig_applications status domain for legacy row compatibility.
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310090000_expand_gig_applications_status_legacy_compat.sql:5:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310090000_expand_gig_applications_status_legacy_compat.sql:6:DROP CONSTRAINT IF EXISTS gig_applications_status_check;
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310090000_expand_gig_applications_status_legacy_compat.sql:8:ALTER TABLE public.gig_applications
+E:\React-Native-Projects\MusikaLokal\mobile\supabase\migrations\20260310090000_expand_gig_applications_status_legacy_compat.sql:9:ADD CONSTRAINT gig_applications_status_check

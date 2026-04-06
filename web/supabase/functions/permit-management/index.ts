@@ -17,6 +17,18 @@ const corsHeaders = {
 
 type PermitEntityType = "studio" | "gig";
 type ReviewAction = "approve" | "reject";
+type MetricsDateRange = "7d" | "30d" | "all";
+type IncidentCategory = "booking" | "profile" | "other";
+type QueryHealthTracker = { missingSchemaDetected: boolean };
+
+type RevenueTrendBucket = {
+  label: string;
+  startMs: number;
+  endMs: number;
+  gross: number;
+  payoutDeductions: number;
+  refunds: number;
+};
 
 type PermitStatus = "pending_review" | "approved" | "rejected" | "resubmitted";
 
@@ -27,20 +39,29 @@ function jsonResponse(payload: unknown, status = 200) {
   });
 }
 
-function decodeJwtPayload(token: string): { sub?: string; email?: string } | null {
-  try {
-    const parts = token.replace("Bearer ", "").split(".");
-    if (parts.length !== 3) return null;
+async function getAuthenticatedUserId(
+  authHeader: string,
+  supabaseUrl: string,
+  anonKey: string,
+) {
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return null;
 
-    let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    while (base64.length % 4) {
-      base64 += "=";
-    }
+  const authClient = createClient(supabaseUrl, anonKey, {
+    global: {
+      headers: {
+        Authorization: authHeader,
+      },
+    },
+  });
 
-    return JSON.parse(atob(base64));
-  } catch {
-    return null;
-  }
+  const {
+    data: { user },
+    error,
+  } = await authClient.auth.getUser(token);
+
+  if (error || !user?.id) return null;
+  return user.id;
 }
 
 function normalizePermitStatus(rawStatus?: string | null): PermitStatus {
@@ -63,6 +84,255 @@ function parseEntityType(rawValue: unknown): PermitEntityType | null {
 function parseReviewAction(rawValue: unknown): ReviewAction | null {
   const value = String(rawValue || "").trim().toLowerCase();
   if (value === "approve" || value === "reject") return value;
+  return null;
+}
+
+function normalizeMetricsDateRange(rawValue: unknown): MetricsDateRange {
+  const value = String(rawValue || "").trim().toLowerCase();
+  if (value === "7d" || value === "30d" || value === "all") return value;
+  return "30d";
+}
+
+function getRangeStartMs(dateRange: MetricsDateRange): number | null {
+  const now = Date.now();
+
+  if (dateRange === "7d") return now - 7 * 24 * 60 * 60 * 1000;
+  if (dateRange === "30d") return now - 30 * 24 * 60 * 60 * 1000;
+  return null;
+}
+
+function toTimestampMs(rawValue: unknown): number | null {
+  if (!rawValue) return null;
+  const value = String(rawValue).trim();
+  if (!value) return null;
+
+  const ts = new Date(value).getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function isInRange(rawValue: unknown, rangeStartMs: number | null): boolean {
+  if (!rangeStartMs) return true;
+  const ts = toTimestampMs(rawValue);
+  return ts !== null && ts >= rangeStartMs;
+}
+
+function toNumber(rawValue: unknown): number {
+  const value = Number(rawValue || 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function roundTo(value: number, digits = 2): number {
+  const factor = 10 ** digits;
+  return Math.round((Number(value) + Number.EPSILON) * factor) / factor;
+}
+
+function isMissingSchemaError(error: any) {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  const details = String(error?.details || "").toLowerCase();
+
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST116" ||
+    message.includes("does not exist") ||
+    message.includes("relation") ||
+    message.includes("column") ||
+    details.includes("does not exist")
+  );
+}
+
+async function safeCount(queryPromise: Promise<any>, tracker?: QueryHealthTracker) {
+  const result = await queryPromise;
+  if (result?.error) {
+    if (isMissingSchemaError(result.error)) {
+      if (tracker) tracker.missingSchemaDetected = true;
+      return 0;
+    }
+    throw result.error;
+  }
+
+  return toNumber(result?.count);
+}
+
+async function safeRows<T = any>(queryPromise: Promise<any>, tracker?: QueryHealthTracker): Promise<T[]> {
+  const result = await queryPromise;
+  if (result?.error) {
+    if (isMissingSchemaError(result.error)) {
+      if (tracker) tracker.missingSchemaDetected = true;
+      return [];
+    }
+    throw result.error;
+  }
+
+  return Array.isArray(result?.data) ? (result.data as T[]) : [];
+}
+
+function categorizeIncidentType(rawIssueType: unknown): IncidentCategory {
+  const issueType = String(rawIssueType || "").trim().toLowerCase();
+
+  if (
+    issueType.includes("booking") ||
+    issueType.includes("attendance") ||
+    issueType.includes("refund") ||
+    issueType.includes("payment") ||
+    issueType.includes("late") ||
+    issueType.includes("no_show") ||
+    issueType.includes("no-show")
+  ) {
+    return "booking";
+  }
+
+  if (
+    issueType.includes("profile") ||
+    issueType.includes("identity") ||
+    issueType.includes("fake") ||
+    issueType.includes("imperson") ||
+    issueType.includes("user")
+  ) {
+    return "profile";
+  }
+
+  return "other";
+}
+
+function formatIncidentLabel(rawIssueType: unknown): string {
+  const issueType = String(rawIssueType || "").trim();
+  if (!issueType) return "Unspecified";
+
+  return issueType
+    .replace(/_/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+async function fetchAuthActivityMetrics(client: any) {
+  const nowMs = Date.now();
+  const dayAgoMs = nowMs - 24 * 60 * 60 * 1000;
+  const monthAgoMs = nowMs - 30 * 24 * 60 * 60 * 1000;
+
+  let dau = 0;
+  let mau = 0;
+
+  const perPage = 200;
+
+  for (let page = 1; page <= 50; page += 1) {
+    const { data, error } = await client.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+
+    if (error) throw error;
+
+    const users = Array.isArray(data?.users) ? data.users : [];
+
+    for (const user of users) {
+      const lastSignInMs = toTimestampMs(user?.last_sign_in_at);
+      if (lastSignInMs === null) continue;
+
+      if (lastSignInMs >= dayAgoMs) dau += 1;
+      if (lastSignInMs >= monthAgoMs) mau += 1;
+    }
+
+    if (users.length < perPage) break;
+  }
+
+  return { dau, mau };
+}
+
+function sanitizeSearchTerm(rawValue: unknown) {
+  return String(rawValue || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[,%]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildRevenueTrendBuckets(
+  dateRange: MetricsDateRange,
+  nowMs: number,
+  rangeStartMs: number | null,
+): RevenueTrendBucket[] {
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  let bucketCount = 6;
+  let trendStartMs = nowMs - 180 * dayMs;
+  let labelMode: "daily" | "window" | "monthly" = "monthly";
+
+  if (dateRange === "7d") {
+    bucketCount = 7;
+    trendStartMs = nowMs - 7 * dayMs;
+    labelMode = "daily";
+  } else if (dateRange === "30d") {
+    bucketCount = 6;
+    trendStartMs = rangeStartMs ?? nowMs - 30 * dayMs;
+    labelMode = "window";
+  }
+
+  if (trendStartMs >= nowMs) {
+    trendStartMs = nowMs - dayMs;
+  }
+
+  const intervalMs = Math.max(1, Math.floor((nowMs - trendStartMs) / bucketCount));
+
+  const buckets: RevenueTrendBucket[] = [];
+  for (let i = 0; i < bucketCount; i += 1) {
+    const startMs = trendStartMs + i * intervalMs;
+    const endMs = i === bucketCount - 1 ? nowMs + 1 : trendStartMs + (i + 1) * intervalMs;
+
+    let label = "-";
+    if (labelMode === "daily") {
+      label = new Date(startMs).toLocaleDateString("en-US", {
+        weekday: "short",
+        timeZone: "UTC",
+      });
+    } else if (labelMode === "window") {
+      const startLabel = new Date(startMs).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+      const endLabel = new Date(Math.max(startMs, endMs - 1)).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+      label = `${startLabel} - ${endLabel}`;
+    } else {
+      label = new Date(startMs).toLocaleDateString("en-US", {
+        month: "short",
+        timeZone: "UTC",
+      });
+    }
+
+    buckets.push({
+      label,
+      startMs,
+      endMs,
+      gross: 0,
+      payoutDeductions: 0,
+      refunds: 0,
+    });
+  }
+
+  return buckets;
+}
+
+function findRevenueTrendBucket(
+  tsMs: number | null,
+  buckets: RevenueTrendBucket[],
+): RevenueTrendBucket | null {
+  if (tsMs === null) return null;
+
+  for (const bucket of buckets) {
+    if (tsMs >= bucket.startMs && tsMs < bucket.endMs) {
+      return bucket;
+    }
+  }
+
   return null;
 }
 
@@ -102,26 +372,27 @@ serve(async (req: Request) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
+    const authHeader = req.headers.get("Authorization") || "";
     if (!authHeader) {
       return jsonResponse({ error: "Missing authorization header" }, 401);
     }
 
-    const jwtPayload = decodeJwtPayload(authHeader);
-    if (!jwtPayload?.sub) {
-      return jsonResponse({ error: "Invalid authorization token" }, 401);
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-    if (!supabaseUrl || !serviceRoleKey) {
+    if (!supabaseUrl || !serviceRoleKey || !anonKey) {
       return jsonResponse({ error: "Server misconfiguration" }, 500);
+    }
+
+    const userId = await getAuthenticatedUserId(authHeader, supabaseUrl, anonKey);
+    if (!userId) {
+      return jsonResponse({ error: "Invalid JWT" }, 401);
     }
 
     const client = createClient(supabaseUrl, serviceRoleKey);
 
-    const isAdmin = await assertAdmin(client, jwtPayload.sub);
+    const isAdmin = await assertAdmin(client, userId);
     if (!isAdmin) {
       return jsonResponse({ error: "Forbidden: admin role required" }, 403);
     }
@@ -230,7 +501,7 @@ serve(async (req: Request) => {
 
       const updatePayload: Record<string, unknown> = {
         permit_status: nextStatus,
-        permit_reviewed_by: jwtPayload.sub,
+        permit_reviewed_by: userId,
         permit_reviewed_at: new Date().toISOString(),
         permit_admin_notes: adminNotes || null,
         permit_rejection_reason: reviewAction === "reject" ? rejectionReason : null,
@@ -251,7 +522,7 @@ serve(async (req: Request) => {
         entity_type: entityType,
         entity_id: entityId,
         action: reviewAction === "approve" ? "approved" : "rejected",
-        performed_by: jwtPayload.sub,
+        performed_by: userId,
         previous_status: previousStatus,
         new_status: nextStatus,
         rejection_reason: reviewAction === "reject" ? rejectionReason : null,
@@ -271,7 +542,7 @@ serve(async (req: Request) => {
           entity_type: entityType,
           entity_id: entityId,
           action: reviewAction === "approve" ? "approved" : "rejected",
-          performed_by: jwtPayload.sub,
+          performed_by: userId,
           reason: reviewAction === "reject" ? rejectionReason : null,
           notes: adminNotes || null,
           metadata: {
@@ -299,56 +570,538 @@ serve(async (req: Request) => {
     }
 
     if (action === "fetch_metrics") {
+      const dateRange = normalizeMetricsDateRange(params.dateRange);
+      const rangeStartMs = getRangeStartMs(dateRange);
+      const rangeStartIso = rangeStartMs ? new Date(rangeStartMs).toISOString() : null;
+      const nowMs = Date.now();
+      const searchTerm = sanitizeSearchTerm(params.searchQuery);
+      const queryHealthTracker: QueryHealthTracker = { missingSchemaDetected: false };
+      const revenueTrendBuckets = buildRevenueTrendBuckets(dateRange, nowMs, rangeStartMs);
+
       const [
-        usersCount,
-        studiosCount,
-        gigsCount,
+        totalUsers,
+        totalStudios,
+        totalGigs,
         pendingStudios,
         pendingGigs,
         approvedStudios,
         approvedGigs,
         rejectedStudios,
         rejectedGigs,
-        auditCount,
+        recentActions,
+        totalReports,
+        pendingReports,
+        escalatedReports,
+        openIncidents,
+        resolvedIncidents,
+        profileRows,
+        reportRows,
+        incidentRows,
+        bookingRows,
+        withdrawalRows,
+        subscriptionPaymentRows,
+        subscriptionPlanRows,
       ] = await Promise.all([
-        client.from("profiles").select("id", { count: "exact", head: true }),
-        client.from("studios").select("id", { count: "exact", head: true }),
-        client.from("gigs").select("id", { count: "exact", head: true }),
-        client
-          .from("studios")
-          .select("id", { count: "exact", head: true })
-          .in("permit_status", ["pending_review", "pending"]),
-        client
-          .from("gigs")
-          .select("id", { count: "exact", head: true })
-          .in("permit_status", ["pending_review", "pending"]),
-        client
-          .from("studios")
-          .select("id", { count: "exact", head: true })
-          .eq("permit_status", "approved"),
-        client
-          .from("gigs")
-          .select("id", { count: "exact", head: true })
-          .eq("permit_status", "approved"),
-        client
-          .from("studios")
-          .select("id", { count: "exact", head: true })
-          .eq("permit_status", "rejected"),
-        client
-          .from("gigs")
-          .select("id", { count: "exact", head: true })
-          .eq("permit_status", "rejected"),
-        client.from("permit_audit_log").select("id", { count: "exact", head: true }),
+        safeCount(client.from("profiles").select("id", { count: "exact", head: true }), queryHealthTracker),
+        safeCount(client.from("studios").select("id", { count: "exact", head: true }), queryHealthTracker),
+        safeCount(client.from("gigs").select("id", { count: "exact", head: true }), queryHealthTracker),
+        safeCount(
+          client
+            .from("studios")
+            .select("id", { count: "exact", head: true })
+            .in("permit_status", ["pending_review", "pending"]),
+          queryHealthTracker,
+        ),
+        safeCount(
+          client
+            .from("gigs")
+            .select("id", { count: "exact", head: true })
+            .in("permit_status", ["pending_review", "pending"]),
+          queryHealthTracker,
+        ),
+        safeCount(
+          client
+            .from("studios")
+            .select("id", { count: "exact", head: true })
+            .eq("permit_status", "approved"),
+          queryHealthTracker,
+        ),
+        safeCount(
+          client
+            .from("gigs")
+            .select("id", { count: "exact", head: true })
+            .eq("permit_status", "approved"),
+          queryHealthTracker,
+        ),
+        safeCount(
+          client
+            .from("studios")
+            .select("id", { count: "exact", head: true })
+            .eq("permit_status", "rejected"),
+          queryHealthTracker,
+        ),
+        safeCount(
+          client
+            .from("gigs")
+            .select("id", { count: "exact", head: true })
+            .eq("permit_status", "rejected"),
+          queryHealthTracker,
+        ),
+        safeCount(client.from("permit_audit_log").select("id", { count: "exact", head: true }), queryHealthTracker),
+        safeCount(client.from("reports").select("id", { count: "exact", head: true }), queryHealthTracker),
+        safeCount(
+          client
+            .from("reports")
+            .select("id", { count: "exact", head: true })
+            .eq("status", "pending"),
+          queryHealthTracker,
+        ),
+        safeCount(
+          client
+            .from("reports")
+            .select("id", { count: "exact", head: true })
+            .eq("escalation_status", "manual_review"),
+          queryHealthTracker,
+        ),
+        safeCount(
+          client
+            .from("booking_incidents")
+            .select("id", { count: "exact", head: true })
+            .in("status", ["open", "responded", "manual_review"]),
+          queryHealthTracker,
+        ),
+        safeCount(
+          client
+            .from("booking_incidents")
+            .select("id", { count: "exact", head: true })
+            .in("status", ["resolved_refund", "resolved_no_refund"]),
+          queryHealthTracker,
+        ),
+        safeRows(
+          client
+            .from("profiles")
+            .select("id, created_at, subscription_status, subscription_expires_at, subscription_plan_id"),
+          queryHealthTracker,
+        ),
+        safeRows(
+          client
+            .from("reports")
+            .select("id, reason, details, status, created_at, reviewed_at"),
+          queryHealthTracker,
+        ),
+        safeRows(
+          client
+            .from("booking_incidents")
+            .select("id, issue_type, status, created_at, resolved_at, reporter_notes, resolution"),
+          queryHealthTracker,
+        ),
+        safeRows(
+          client
+            .from("studio_bookings")
+            .select("id, booking_date, start_time, created_at, paid_at, payment_status, payment_amount, final_price"),
+          queryHealthTracker,
+        ),
+        safeRows(
+          client
+            .from("withdrawal_requests")
+            .select("id, status, amount, net_amount, created_at, reference_number, notes, payout_account_name"),
+          queryHealthTracker,
+        ),
+        safeRows(
+          client
+            .from("subscription_payments")
+            .select("id, amount, status, paid_at, created_at"),
+          queryHealthTracker,
+        ),
+        safeRows(
+          client
+            .from("subscription_plans")
+            .select("id, name"),
+          queryHealthTracker,
+        ),
       ]);
 
+      let dau = 0;
+      let mau = 0;
+      let authMetricsHealthy = true;
+
+      try {
+        const authActivity = await fetchAuthActivityMetrics(client);
+        dau = authActivity.dau;
+        mau = authActivity.mau;
+      } catch {
+        authMetricsHealthy = false;
+      }
+
+      const oneDayAgoMs = nowMs - 24 * 60 * 60 * 1000;
+      const newSignups24h = (profileRows as any[]).reduce((count, row) => {
+        const createdAtMs = toTimestampMs(row?.created_at);
+        if (createdAtMs !== null && createdAtMs >= oneDayAgoMs) {
+          return count + 1;
+        }
+        return count;
+      }, 0);
+
+      const activeSubscriptions = (profileRows as any[]).reduce((count, row) => {
+        const status = String(row?.subscription_status || "").trim().toLowerCase();
+        return status === "active" ? count + 1 : count;
+      }, 0);
+
+      const churnedSubscriptions = (profileRows as any[]).reduce((count, row) => {
+        const status = String(row?.subscription_status || "").trim().toLowerCase();
+        if (!["cancelled", "expired", "past_due"].includes(status)) return count;
+
+        const churnAt = toTimestampMs(row?.subscription_expires_at) ?? toTimestampMs(row?.created_at);
+        if (rangeStartMs && (churnAt === null || churnAt < rangeStartMs)) return count;
+
+        return count + 1;
+      }, 0);
+
+      const churnBase = activeSubscriptions + churnedSubscriptions;
+      const churnRatePercent = churnBase > 0
+        ? roundTo((churnedSubscriptions / churnBase) * 100, 1)
+        : 0;
+
+      const planNameById = new Map<string, string>();
+      for (const plan of subscriptionPlanRows as any[]) {
+        const id = String(plan?.id || "").trim();
+        if (!id) continue;
+        planNameById.set(id, String(plan?.name || "").trim().toLowerCase());
+      }
+
+      let subscriptionTierBasic = 0;
+      let subscriptionTierPro = 0;
+      let subscriptionTierOther = 0;
+
+      for (const profile of profileRows as any[]) {
+        const status = String(profile?.subscription_status || "").trim().toLowerCase();
+        if (status !== "active") continue;
+
+        const planId = String(profile?.subscription_plan_id || "").trim();
+        const normalizedPlan = (planNameById.get(planId) || planId).toLowerCase();
+
+        if (
+          normalizedPlan.includes("pro") ||
+          normalizedPlan.includes("premium") ||
+          normalizedPlan.includes("plus")
+        ) {
+          subscriptionTierPro += 1;
+        } else if (
+          normalizedPlan.includes("basic") ||
+          normalizedPlan.includes("starter") ||
+          normalizedPlan.includes("free")
+        ) {
+          subscriptionTierBasic += 1;
+        } else {
+          subscriptionTierOther += 1;
+        }
+      }
+
+      let grossBookingRevenue = 0;
+      let refundedBookingRevenue = 0;
+      let paidPaymentEvents = 0;
+      let failedPaymentEvents = 0;
+
+      const bookingSlotCounter = new Map<string, number>();
+
+      for (const booking of bookingRows as any[]) {
+        const activityDate = booking?.paid_at || booking?.created_at || booking?.booking_date;
+        if (!isInRange(activityDate, rangeStartMs)) continue;
+
+        const activityTsMs = toTimestampMs(activityDate);
+        const trendBucket = findRevenueTrendBucket(activityTsMs, revenueTrendBuckets);
+
+        const paymentStatus = String(booking?.payment_status || "").trim().toLowerCase();
+        const amount = toNumber(booking?.payment_amount) || toNumber(booking?.final_price);
+
+        if (["paid", "partial", "refunded", "refund_pending"].includes(paymentStatus)) {
+          grossBookingRevenue += amount;
+          if (trendBucket) trendBucket.gross += amount;
+        }
+
+        if (["refunded", "refund_pending"].includes(paymentStatus)) {
+          refundedBookingRevenue += amount;
+          if (trendBucket) trendBucket.refunds += amount;
+        }
+
+        if (["paid", "partial"].includes(paymentStatus)) {
+          paidPaymentEvents += 1;
+        }
+
+        if (paymentStatus === "failed") {
+          failedPaymentEvents += 1;
+        }
+
+        const bookingDate = String(booking?.booking_date || "").trim();
+        const startTime = String(booking?.start_time || "").trim();
+        if (!bookingDate || !startTime) continue;
+
+        const day = new Date(`${bookingDate}T00:00:00Z`).toLocaleDateString("en-US", {
+          weekday: "short",
+          timeZone: "UTC",
+        });
+        const hour = startTime.slice(0, 2).padStart(2, "0");
+        const slotLabel = `${day} ${hour}:00`;
+
+        bookingSlotCounter.set(slotLabel, (bookingSlotCounter.get(slotLabel) || 0) + 1);
+      }
+
+      let grossSubscriptionRevenue = 0;
+      for (const payment of subscriptionPaymentRows as any[]) {
+        const paidAt = payment?.paid_at || payment?.created_at;
+        if (!isInRange(paidAt, rangeStartMs)) continue;
+
+        const paidAtMs = toTimestampMs(paidAt);
+        const trendBucket = findRevenueTrendBucket(paidAtMs, revenueTrendBuckets);
+
+        const status = String(payment?.status || "").trim().toLowerCase();
+        if (status !== "paid") continue;
+
+        const amount = toNumber(payment?.amount);
+        grossSubscriptionRevenue += amount;
+        if (trendBucket) trendBucket.gross += amount;
+      }
+
+      let pendingPayouts = 0;
+      let completedPayoutsInRange = 0;
+      for (const withdrawal of withdrawalRows as any[]) {
+        const status = String(withdrawal?.status || "").trim().toLowerCase();
+        const amount = toNumber(withdrawal?.net_amount) || toNumber(withdrawal?.amount);
+        const withdrawalTsMs = toTimestampMs(withdrawal?.created_at);
+        const trendBucket = findRevenueTrendBucket(withdrawalTsMs, revenueTrendBuckets);
+
+        if (["pending", "processing"].includes(status)) {
+          pendingPayouts += amount;
+        }
+
+        if (status === "completed" && isInRange(withdrawal?.created_at, rangeStartMs)) {
+          completedPayoutsInRange += amount;
+          if (trendBucket) trendBucket.payoutDeductions += amount;
+        }
+      }
+
+      const grossRevenue = roundTo(grossBookingRevenue + grossSubscriptionRevenue, 2);
+      const netRevenue = roundTo(
+        Math.max(grossRevenue - completedPayoutsInRange - refundedBookingRevenue, 0),
+        2,
+      );
+
+      const revenueTrend = revenueTrendBuckets.map((bucket) => {
+        const gross = roundTo(bucket.gross, 2);
+        const net = roundTo(
+          Math.max(bucket.gross - bucket.refunds - bucket.payoutDeductions, 0),
+          2,
+        );
+
+        return {
+          label: bucket.label,
+          gross,
+          net,
+        };
+      });
+
+      let reportResolutionTotalHours = 0;
+      let reportResolutionCount = 0;
+
+      for (const report of reportRows as any[]) {
+        const status = String(report?.status || "").trim().toLowerCase();
+        if (status === "pending") continue;
+        if (!isInRange(report?.created_at, rangeStartMs)) continue;
+
+        const createdAtMs = toTimestampMs(report?.created_at);
+        const reviewedAtMs = toTimestampMs(report?.reviewed_at);
+
+        if (createdAtMs === null || reviewedAtMs === null || reviewedAtMs <= createdAtMs) {
+          continue;
+        }
+
+        reportResolutionTotalHours += (reviewedAtMs - createdAtMs) / (1000 * 60 * 60);
+        reportResolutionCount += 1;
+      }
+
+      const incidentBreakdownMap = new Map<
+        string,
+        {
+          key: string;
+          label: string;
+          category: IncidentCategory;
+          total: number;
+          open: number;
+          resolutionHoursTotal: number;
+          resolutionCount: number;
+        }
+      >();
+
+      let incidentResolutionTotalHours = 0;
+      let incidentResolutionCount = 0;
+      let openIncidentsInRange = 0;
+      let resolvedIncidentsInRange = 0;
+
+      for (const incident of incidentRows as any[]) {
+        if (!isInRange(incident?.created_at, rangeStartMs)) continue;
+
+        const issueTypeRaw = String(incident?.issue_type || "").trim().toLowerCase() || "unspecified";
+        const status = String(incident?.status || "").trim().toLowerCase();
+
+        const existing = incidentBreakdownMap.get(issueTypeRaw) || {
+          key: issueTypeRaw,
+          label: formatIncidentLabel(issueTypeRaw),
+          category: categorizeIncidentType(issueTypeRaw),
+          total: 0,
+          open: 0,
+          resolutionHoursTotal: 0,
+          resolutionCount: 0,
+        };
+
+        existing.total += 1;
+
+        if (["open", "responded", "manual_review"].includes(status)) {
+          existing.open += 1;
+          openIncidentsInRange += 1;
+        }
+
+        if (["resolved_refund", "resolved_no_refund", "dismissed"].includes(status)) {
+          resolvedIncidentsInRange += 1;
+
+          const createdAtMs = toTimestampMs(incident?.created_at);
+          const resolvedAtMs = toTimestampMs(incident?.resolved_at);
+
+          if (createdAtMs !== null && resolvedAtMs !== null && resolvedAtMs > createdAtMs) {
+            const durationHours = (resolvedAtMs - createdAtMs) / (1000 * 60 * 60);
+            existing.resolutionHoursTotal += durationHours;
+            existing.resolutionCount += 1;
+            incidentResolutionTotalHours += durationHours;
+            incidentResolutionCount += 1;
+          }
+        }
+
+        incidentBreakdownMap.set(issueTypeRaw, existing);
+      }
+
+      const incidentTypeBreakdown = Array.from(incidentBreakdownMap.values())
+        .map((entry) => ({
+          key: entry.key,
+          label: entry.label,
+          category: entry.category,
+          total: entry.total,
+          open: entry.open,
+          avgResolutionHours: entry.resolutionCount > 0
+            ? roundTo(entry.resolutionHoursTotal / entry.resolutionCount, 2)
+            : 0,
+        }))
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 8);
+
+      const peakActivitySlots = Array.from(bookingSlotCounter.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3);
+
+      let searchUsers = 0;
+      let searchReports = 0;
+      let searchIncidents = 0;
+      let searchTransactions = 0;
+
+      if (searchTerm.length >= 2) {
+        const ilikePattern = `%${searchTerm}%`;
+
+        [
+          searchUsers,
+          searchReports,
+          searchIncidents,
+          searchTransactions,
+        ] = await Promise.all([
+          safeCount(
+            client
+              .from("profiles")
+              .select("id", { count: "exact", head: true })
+              .or(`full_name.ilike.${ilikePattern},email.ilike.${ilikePattern}`),
+            queryHealthTracker,
+          ),
+          safeCount(
+            client
+              .from("reports")
+              .select("id", { count: "exact", head: true })
+              .or(`reason.ilike.${ilikePattern},details.ilike.${ilikePattern}`),
+            queryHealthTracker,
+          ),
+          safeCount(
+            client
+              .from("booking_incidents")
+              .select("id", { count: "exact", head: true })
+              .or(`issue_type.ilike.${ilikePattern},reporter_notes.ilike.${ilikePattern},resolution.ilike.${ilikePattern}`),
+            queryHealthTracker,
+          ),
+          safeCount(
+            client
+              .from("withdrawal_requests")
+              .select("id", { count: "exact", head: true })
+              .or(`reference_number.ilike.${ilikePattern},notes.ilike.${ilikePattern},payout_account_name.ilike.${ilikePattern}`),
+            queryHealthTracker,
+          ),
+        ]);
+      }
+
+      const paymentAttempts = paidPaymentEvents + failedPaymentEvents;
+      const paymongoSuccessRate = paymentAttempts > 0
+        ? roundTo((paidPaymentEvents / paymentAttempts) * 100, 1)
+        : 100;
+      const paymongoHealthy = paymentAttempts === 0 ? true : paymongoSuccessRate >= 60;
+
+      const avgReportResolutionHours = reportResolutionCount > 0
+        ? roundTo(reportResolutionTotalHours / reportResolutionCount, 2)
+        : 0;
+      const avgIncidentResolutionHours = incidentResolutionCount > 0
+        ? roundTo(incidentResolutionTotalHours / incidentResolutionCount, 2)
+        : 0;
+
+      const dbHealthy = !queryHealthTracker.missingSchemaDetected;
+      const apiHealthy = dbHealthy && authMetricsHealthy;
+
       return jsonResponse({
-        totalUsers: usersCount.count || 0,
-        totalStudios: studiosCount.count || 0,
-        totalGigs: gigsCount.count || 0,
-        pendingPermits: (pendingStudios.count || 0) + (pendingGigs.count || 0),
-        approvedPermits: (approvedStudios.count || 0) + (approvedGigs.count || 0),
-        rejectedPermits: (rejectedStudios.count || 0) + (rejectedGigs.count || 0),
-        recentActions: auditCount.count || 0,
+        dateRange,
+        rangeStart: rangeStartIso,
+        totalUsers,
+        totalStudios,
+        totalGigs,
+        pendingPermits: pendingStudios + pendingGigs,
+        approvedPermits: approvedStudios + approvedGigs,
+        rejectedPermits: rejectedStudios + rejectedGigs,
+        recentActions,
+        totalReports,
+        pendingReports,
+        escalatedReports,
+        openIncidents,
+        resolvedIncidents,
+        openIncidentsInRange,
+        resolvedIncidentsInRange,
+        activeSubscriptions,
+        churnRatePercent,
+        dau,
+        mau,
+        newSignups24h,
+        grossRevenue,
+        netRevenue,
+        pendingPayouts: roundTo(pendingPayouts, 2),
+        avgReportResolutionHours,
+        avgIncidentResolutionHours,
+        paymongoSuccessRate,
+        dbHealthy,
+        apiHealthy,
+        paymongoHealthy,
+        subscriptionTierBasic,
+        subscriptionTierPro,
+        subscriptionTierOther,
+        revenueTrend,
+        incidentTypeBreakdown,
+        peakActivitySlots,
+        searchSummary: {
+          users: searchUsers,
+          reports: searchReports,
+          incidents: searchIncidents,
+          transactions: searchTransactions,
+          total: searchUsers + searchReports + searchIncidents + searchTransactions,
+        },
       });
     }
 

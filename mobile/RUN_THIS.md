@@ -44,6 +44,26 @@ LEFT JOIN studios s ON sb.studio_id = s.id;
 
 ---
 
+## Step 4: Enable AI Suggestions (Required for true AI)
+The app works with local fallback suggestions by default, but true AI responses require provider keys.
+
+1. Add one or more keys in `.env`:
+  - `GROQ_API_KEY=...` (recommended free option)
+  - `GEMINI_API_KEY=...`
+  - `OPENAI_API_KEY=...`
+2. Login once to Supabase CLI:
+  - `npx supabase login`
+3. Push secrets to your project:
+  - `npm run ai:setup-secrets`
+4. Deploy the latest edge function:
+  - `npm run ai:deploy-function`
+
+Quick verification:
+- Call edge function with action `ai-status`.
+- `aiProvidersConfigured: true` means provider-backed AI can run.
+
+---
+
 ## ✅ Done!
 
 Your 3NF booking system is ready with:

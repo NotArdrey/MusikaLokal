@@ -88,6 +88,27 @@ const formatTimeInput = (text: string): string => {
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 
+const canonicalizeStudioType = (
+  value: unknown,
+): "Rehearsal" | "Recording" | null => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized.includes("rehearsal")) return "Rehearsal";
+  if (normalized.includes("recording")) return "Recording";
+  return null;
+};
+
+const resolveStudioTypeRows = (value: unknown): ("Rehearsal" | "Recording")[] => {
+  if (typeof value === "string" && value.trim().toLowerCase() === "both") {
+    return ["Rehearsal", "Recording"];
+  }
+
+  const singleType = canonicalizeStudioType(value);
+  return singleType ? [singleType] : [];
+};
+
 export default function AddStudioScreen() {
   const { colors, isDark } = useTheme();
   const { isSystemLocked, showLockAlert } = useAuth();
@@ -105,6 +126,35 @@ export default function AddStudioScreen() {
     "Rehearsal" | "Recording" | "Both"
   >("Both");
   const [pax, setPax] = useState("");
+
+  // Promotions state
+  interface PromotionItem {
+    id: string;
+    name: string;
+    description: string;
+    discount_type: "percentage" | "fixed_amount";
+    discount_value: string;
+    is_permanent: boolean;
+    start_date: string;
+    end_date: string;
+    applies_to: "rehearsal" | "recording" | "both";
+  }
+  const [promotions, setPromotions] = useState<PromotionItem[]>([]);
+  const [showPromotionForm, setShowPromotionForm] = useState(false);
+  const [editingPromotion, setEditingPromotion] = useState<PromotionItem | null>(null);
+  const [promotionForm, setPromotionForm] = useState({
+    name: "",
+    description: "",
+    discount_type: "percentage" as "percentage" | "fixed_amount",
+    discount_value: "",
+    is_permanent: true,
+    start_date: "",
+    end_date: "",
+    applies_to: "both" as "rehearsal" | "recording" | "both",
+  });
+  const [showPromoStartCalendar, setShowPromoStartCalendar] = useState(false);
+  const [showPromoEndCalendar, setShowPromoEndCalendar] = useState(false);
+
   const [modalVisible, setModalVisible] = useState(false);
   const [authorized, setAuthorized] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -341,6 +391,85 @@ export default function AddStudioScreen() {
     }
   };
 
+  // Promotion helpers
+  const resetPromotionForm = () => {
+    setPromotionForm({
+      name: "",
+      description: "",
+      discount_type: "percentage",
+      discount_value: "",
+      is_permanent: true,
+      start_date: "",
+      end_date: "",
+      applies_to: "both",
+    });
+    setEditingPromotion(null);
+  };
+
+  const handleSavePromotion = () => {
+    const { name, discount_type, discount_value, is_permanent, start_date, end_date, applies_to, description } = promotionForm;
+    if (!name.trim()) {
+      showAlert("error", "Required", "Please enter a promotion name.");
+      return;
+    }
+    const val = parseFloat(discount_value);
+    if (!val || val <= 0) {
+      showAlert("error", "Required", "Please enter a valid discount value.");
+      return;
+    }
+    if (discount_type === "percentage" && val > 100) {
+      showAlert("error", "Invalid Value", "Percentage discount cannot exceed 100%.");
+      return;
+    }
+    if (!is_permanent && (!start_date || !end_date)) {
+      showAlert("error", "Required", "Please select both start and end dates for time-limited promotions.");
+      return;
+    }
+    if (!is_permanent && end_date < start_date) {
+      showAlert("error", "Invalid Dates", "End date must be on or after start date.");
+      return;
+    }
+
+    const promoItem: PromotionItem = {
+      id: editingPromotion?.id || Date.now().toString(),
+      name: name.trim(),
+      description: description.trim(),
+      discount_type,
+      discount_value,
+      is_permanent,
+      start_date: is_permanent ? "" : start_date,
+      end_date: is_permanent ? "" : end_date,
+      applies_to,
+    };
+
+    if (editingPromotion) {
+      setPromotions((prev) => prev.map((p) => (p.id === editingPromotion.id ? promoItem : p)));
+    } else {
+      setPromotions((prev) => [...prev, promoItem]);
+    }
+    resetPromotionForm();
+    setShowPromotionForm(false);
+  };
+
+  const handleEditPromotion = (promo: PromotionItem) => {
+    setEditingPromotion(promo);
+    setPromotionForm({
+      name: promo.name,
+      description: promo.description,
+      discount_type: promo.discount_type,
+      discount_value: promo.discount_value,
+      is_permanent: promo.is_permanent,
+      start_date: promo.start_date,
+      end_date: promo.end_date,
+      applies_to: promo.applies_to,
+    });
+    setShowPromotionForm(true);
+  };
+
+  const handleRemovePromotion = (id: string) => {
+    setPromotions((prev) => prev.filter((p) => p.id !== id));
+  };
+
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
       if (!studioName.trim()) {
@@ -403,6 +532,32 @@ export default function AddStudioScreen() {
           "Please upload at least one studio photo",
         );
         return false;
+      }
+      // Validate promotions if any
+      for (const promo of promotions) {
+        if (!promo.name.trim()) {
+          showAlert("error", "Invalid Promotion", "Each promotion must have a name.");
+          return false;
+        }
+        const val = parseFloat(promo.discount_value);
+        if (!val || val <= 0) {
+          showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" must have a positive discount value.`);
+          return false;
+        }
+        if (promo.discount_type === "percentage" && val > 100) {
+          showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" percentage cannot exceed 100%.`);
+          return false;
+        }
+        if (!promo.is_permanent) {
+          if (!promo.start_date || !promo.end_date) {
+            showAlert("error", "Invalid Promotion", `Time-limited promotion "${promo.name}" must have start and end dates.`);
+            return false;
+          }
+          if (promo.end_date < promo.start_date) {
+            showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" end date must be on or after start date.`);
+            return false;
+          }
+        }
       }
     }
     return true;
@@ -617,6 +772,7 @@ export default function AddStudioScreen() {
           business_permit_url: payload.business_permit_url,
           latitude: payload.latitude,
           longitude: payload.longitude,
+          permit_status: 'pending_review',
         })
         .select()
         .single();
@@ -637,12 +793,7 @@ export default function AddStudioScreen() {
 
       const studioId = data.id;
 
-      const normalizedTypes =
-        payload.type === 'Both'
-          ? ['Rehearsal', 'Recording']
-          : payload.type
-            ? [payload.type]
-            : [];
+      const normalizedTypes = resolveStudioTypeRows(payload.type);
 
       if (normalizedTypes.length > 0) {
         const { error: typesError } = await supabase
@@ -718,6 +869,29 @@ export default function AddStudioScreen() {
         off_peak_dates: bookingSettings.off_peak_dates || [],
       });
 
+      // Insert promotions
+      if (promotions.length > 0) {
+        const { error: promosError } = await supabase
+          .from("studio_promotions")
+          .insert(
+            promotions.map((promo) => ({
+              studio_id: studioId,
+              name: promo.name,
+              description: promo.description || null,
+              discount_type: promo.discount_type,
+              discount_value: parseFloat(promo.discount_value),
+              is_permanent: promo.is_permanent,
+              start_date: promo.is_permanent ? null : promo.start_date,
+              end_date: promo.is_permanent ? null : promo.end_date,
+              applies_to: promo.applies_to,
+              is_active: true,
+            })),
+          );
+        if (promosError) {
+          console.warn("Failed to save promotions:", promosError.message);
+        }
+      }
+
       // Insert operating hours
       const dayMap: { [key: string]: number } = {
         'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
@@ -787,11 +961,7 @@ export default function AddStudioScreen() {
 
   const handleSuccessRedirect = () => {
     setModalVisible(false);
-    if (newStudioId) {
-      router.push({ pathname: "/manage_studio", params: { id: newStudioId } });
-    } else {
-      router.back();
-    }
+    router.push({ pathname: "/bookings", params: { tab: "Pending" } });
   };
 
   // Start address verification (before studio creation)
@@ -1955,6 +2125,429 @@ export default function AddStudioScreen() {
                       >
                         /song
                       </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+
+              {/* Promotions (Optional) */}
+              <View style={styles.inputContainer}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                  <View>
+                    <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+                      Promotions (Optional)
+                    </Text>
+                    <Text style={[styles.inputSubLabel, { color: colors.textSecondary }]}>
+                      Offer discounts to attract more bookings
+                    </Text>
+                  </View>
+                  {!showPromotionForm && promotions.length < 5 && (
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        resetPromotionForm();
+                        setShowPromotionForm(true);
+                      }}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 4,
+                        backgroundColor: colors.primary + "15",
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                      }}
+                    >
+                      <Ionicons name="add" size={16} color={colors.primary} />
+                      <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
+                        Add
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Existing promotions list */}
+                {promotions.map((promo) => (
+                  <View
+                    key={promo.id}
+                    style={{
+                      backgroundColor: isDark ? "#1e1b4b" : "#EEF2FF",
+                      borderWidth: 1,
+                      borderColor: colors.primary + "40",
+                      borderRadius: 12,
+                      padding: 14,
+                      marginTop: 10,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Ionicons name="pricetag-outline" size={14} color={colors.primary} />
+                          <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, fontSize: 14 }}>
+                            {promo.name}
+                          </Text>
+                        </View>
+                        <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                          {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
+                          {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
+                        </Text>
+                        <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                          {promo.is_permanent
+                            ? "Always available"
+                            : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        <TouchableOpacity activeOpacity={0.8} onPress={() => handleEditPromotion(promo)}>
+                          <Ionicons name="create-outline" size={18} color={colors.primary} />
+                        </TouchableOpacity>
+                        <TouchableOpacity activeOpacity={0.8} onPress={() => handleRemovePromotion(promo.id)}>
+                          <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+
+                {promotions.length >= 5 && !showPromotionForm && (
+                  <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 8 }}>
+                    Maximum of 5 promotions reached.
+                  </Text>
+                )}
+
+                {/* Add/Edit promotion form */}
+                {showPromotionForm && (
+                  <View
+                    style={{
+                      backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
+                      borderRadius: 12,
+                      padding: 16,
+                      marginTop: 12,
+                      borderWidth: 1,
+                      borderColor: isDark ? "#374151" : "#E5E7EB",
+                    }}
+                  >
+                    <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, fontSize: 14, marginBottom: 12 }}>
+                      {editingPromotion ? "Edit Promotion" : "New Promotion"}
+                    </Text>
+
+                    {/* Name */}
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                      Promotion Name *
+                    </Text>
+                    <TextInput
+                      value={promotionForm.name}
+                      onChangeText={(t) => setPromotionForm((p) => ({ ...p, name: t }))}
+                      placeholder='e.g. "Summer Sale"'
+                      placeholderTextColor={colors.textSecondary}
+                      style={{
+                        backgroundColor: isDark ? "#111827" : "#FFF",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        borderRadius: 10,
+                        padding: 12,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 14,
+                        marginBottom: 12,
+                      }}
+                    />
+
+                    {/* Description */}
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                      Description (Optional)
+                    </Text>
+                    <TextInput
+                      value={promotionForm.description}
+                      onChangeText={(t) => setPromotionForm((p) => ({ ...p, description: t }))}
+                      placeholder="Brief description of this promo"
+                      placeholderTextColor={colors.textSecondary}
+                      multiline
+                      style={{
+                        backgroundColor: isDark ? "#111827" : "#FFF",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        borderRadius: 10,
+                        padding: 12,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 14,
+                        marginBottom: 12,
+                        minHeight: 60,
+                        textAlignVertical: "top",
+                      }}
+                    />
+
+                    {/* Discount Type Toggle */}
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                      Discount Type
+                    </Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                      {(["percentage", "fixed_amount"] as const).map((dt) => (
+                        <TouchableOpacity
+                          key={dt}
+                          activeOpacity={0.8}
+                          onPress={() => setPromotionForm((p) => ({ ...p, discount_type: dt }))}
+                          style={{
+                            flex: 1,
+                            paddingVertical: 10,
+                            borderRadius: 10,
+                            borderWidth: 1.5,
+                            borderColor: promotionForm.discount_type === dt ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
+                            backgroundColor: promotionForm.discount_type === dt ? colors.primary + "15" : "transparent",
+                            alignItems: "center",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontFamily: "Poppins_600SemiBold",
+                              fontSize: 12,
+                              color: promotionForm.discount_type === dt ? colors.primary : colors.textSecondary,
+                            }}
+                          >
+                            {dt === "percentage" ? "Percentage (%)" : "Fixed Amount (₱)"}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {/* Value */}
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                      Discount Value *
+                    </Text>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        backgroundColor: isDark ? "#111827" : "#FFF",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        borderRadius: 10,
+                        paddingHorizontal: 12,
+                        marginBottom: 12,
+                      }}
+                    >
+                      {promotionForm.discount_type === "fixed_amount" && (
+                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginRight: 4 }}>₱</Text>
+                      )}
+                      <TextInput
+                        value={promotionForm.discount_value}
+                        onChangeText={(t) => setPromotionForm((p) => ({ ...p, discount_value: t }))}
+                        placeholder={promotionForm.discount_type === "percentage" ? "e.g. 20" : "e.g. 50"}
+                        placeholderTextColor={colors.textSecondary}
+                        keyboardType="numeric"
+                        style={{
+                          flex: 1,
+                          padding: 12,
+                          color: colors.text,
+                          fontFamily: "Poppins_500Medium",
+                          fontSize: 14,
+                        }}
+                      />
+                      {promotionForm.discount_type === "percentage" && (
+                        <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, marginLeft: 4 }}>%</Text>
+                      )}
+                      {promotionForm.discount_type === "fixed_amount" && (
+                        <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 12, marginLeft: 4 }}>/hr</Text>
+                      )}
+                    </View>
+
+                    {/* Duration Toggle */}
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                      Duration
+                    </Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                      {([
+                        { key: true, label: "Regular (Always)" },
+                        { key: false, label: "Time-Limited" },
+                      ] as const).map((opt) => (
+                        <TouchableOpacity
+                          key={String(opt.key)}
+                          activeOpacity={0.8}
+                          onPress={() => setPromotionForm((p) => ({ ...p, is_permanent: opt.key as boolean }))}
+                          style={{
+                            flex: 1,
+                            paddingVertical: 10,
+                            borderRadius: 10,
+                            borderWidth: 1.5,
+                            borderColor: promotionForm.is_permanent === opt.key ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
+                            backgroundColor: promotionForm.is_permanent === opt.key ? colors.primary + "15" : "transparent",
+                            alignItems: "center",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontFamily: "Poppins_600SemiBold",
+                              fontSize: 12,
+                              color: promotionForm.is_permanent === opt.key ? colors.primary : colors.textSecondary,
+                            }}
+                          >
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {/* Date pickers for time-limited */}
+                    {!promotionForm.is_permanent && (
+                      <View style={{ marginBottom: 12 }}>
+                        <View style={{ flexDirection: "row", gap: 8 }}>
+                          <TouchableOpacity
+                            activeOpacity={0.8}
+                            onPress={() => { setShowPromoStartCalendar(!showPromoStartCalendar); setShowPromoEndCalendar(false); }}
+                            style={{
+                              flex: 1,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 8,
+                              backgroundColor: isDark ? "#111827" : "#FFF",
+                              borderWidth: 1,
+                              borderColor: isDark ? "#374151" : "#E5E7EB",
+                              borderRadius: 10,
+                              padding: 12,
+                            }}
+                          >
+                            <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+                            <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 12, color: promotionForm.start_date ? colors.text : colors.textSecondary }}>
+                              {promotionForm.start_date
+                                ? new Date(promotionForm.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                                : "Start Date"}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            activeOpacity={0.8}
+                            onPress={() => { setShowPromoEndCalendar(!showPromoEndCalendar); setShowPromoStartCalendar(false); }}
+                            style={{
+                              flex: 1,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              gap: 8,
+                              backgroundColor: isDark ? "#111827" : "#FFF",
+                              borderWidth: 1,
+                              borderColor: isDark ? "#374151" : "#E5E7EB",
+                              borderRadius: 10,
+                              padding: 12,
+                            }}
+                          >
+                            <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+                            <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 12, color: promotionForm.end_date ? colors.text : colors.textSecondary }}>
+                              {promotionForm.end_date
+                                ? new Date(promotionForm.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                                : "End Date"}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        {showPromoStartCalendar && (
+                          <View style={{ marginTop: 8 }}>
+                            <Calendar
+                              onDayPress={(day: any) => {
+                                setPromotionForm((p) => ({ ...p, start_date: day.dateString }));
+                                setShowPromoStartCalendar(false);
+                              }}
+                              markedDates={promotionForm.start_date ? { [promotionForm.start_date]: { selected: true, selectedColor: colors.primary } } : {}}
+                              minDate={new Date().toISOString().split("T")[0]}
+                              theme={{
+                                backgroundColor: "transparent",
+                                calendarBackground: "transparent",
+                                textSectionTitleColor: colors.textSecondary,
+                                selectedDayBackgroundColor: colors.primary,
+                                todayTextColor: colors.primary,
+                                dayTextColor: colors.text,
+                                monthTextColor: colors.text,
+                                arrowColor: colors.primary,
+                              }}
+                            />
+                          </View>
+                        )}
+                        {showPromoEndCalendar && (
+                          <View style={{ marginTop: 8 }}>
+                            <Calendar
+                              onDayPress={(day: any) => {
+                                setPromotionForm((p) => ({ ...p, end_date: day.dateString }));
+                                setShowPromoEndCalendar(false);
+                              }}
+                              markedDates={promotionForm.end_date ? { [promotionForm.end_date]: { selected: true, selectedColor: colors.primary } } : {}}
+                              minDate={promotionForm.start_date || new Date().toISOString().split("T")[0]}
+                              theme={{
+                                backgroundColor: "transparent",
+                                calendarBackground: "transparent",
+                                textSectionTitleColor: colors.textSecondary,
+                                selectedDayBackgroundColor: colors.primary,
+                                todayTextColor: colors.primary,
+                                dayTextColor: colors.text,
+                                monthTextColor: colors.text,
+                                arrowColor: colors.primary,
+                              }}
+                            />
+                          </View>
+                        )}
+                      </View>
+                    )}
+
+                    {/* Applies to Toggle */}
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                      Applies To
+                    </Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+                      {(["both", "rehearsal", "recording"] as const).map((at) => (
+                        <TouchableOpacity
+                          key={at}
+                          activeOpacity={0.8}
+                          onPress={() => setPromotionForm((p) => ({ ...p, applies_to: at }))}
+                          style={{
+                            flex: 1,
+                            paddingVertical: 10,
+                            borderRadius: 10,
+                            borderWidth: 1.5,
+                            borderColor: promotionForm.applies_to === at ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
+                            backgroundColor: promotionForm.applies_to === at ? colors.primary + "15" : "transparent",
+                            alignItems: "center",
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontFamily: "Poppins_600SemiBold",
+                              fontSize: 11,
+                              color: promotionForm.applies_to === at ? colors.primary : colors.textSecondary,
+                            }}
+                          >
+                            {at === "both" ? "Both" : at === "rehearsal" ? "Rehearsal" : "Recording"}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+
+                    {/* Save / Cancel */}
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={() => { resetPromotionForm(); setShowPromotionForm(false); }}
+                        style={{
+                          flex: 1,
+                          paddingVertical: 12,
+                          borderRadius: 10,
+                          borderWidth: 1.5,
+                          borderColor: isDark ? "#374151" : "#E5E7EB",
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 13, color: colors.textSecondary }}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={handleSavePromotion}
+                        style={{
+                          flex: 1,
+                          paddingVertical: 12,
+                          borderRadius: 10,
+                          backgroundColor: colors.primary,
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 13, color: "#FFF" }}>
+                          {editingPromotion ? "Update" : "Save"}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                 )}
@@ -3510,6 +4103,33 @@ export default function AddStudioScreen() {
                     </View>
                   )}
                 </View>
+
+                {/* Promotions review */}
+                {promotions.length > 0 && (
+                  <>
+                    <View
+                      style={[
+                        styles.divider,
+                        { backgroundColor: isDark ? "#374151" : "#E5E7EB" },
+                      ]}
+                    />
+                    <View>
+                      <Text style={styles.reviewLabel}>
+                        Promotions ({promotions.length})
+                      </Text>
+                      {promotions.map((promo) => (
+                        <View key={promo.id} style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
+                          <Ionicons name="pricetag-outline" size={12} color={colors.primary} />
+                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
+                            "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
+                            {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
+                            {" "}• {promo.is_permanent ? "Regular" : `${promo.start_date} – ${promo.end_date}`}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </>
+                )}
 
                 <View
                   style={[

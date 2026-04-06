@@ -51,6 +51,14 @@ export interface InstrumentSuggestionResponse {
   suggestions: InstrumentSuggestion[];
   message: string;
   aiPowered: boolean; // Indicates if suggestions were AI-generated
+  aiProvider?: string;
+  fallbackReason?: 'none' | 'missing_api_keys' | 'provider_unavailable' | 'no_matches';
+  providerStatus?: {
+    groqConfigured: boolean;
+    geminiConfigured: boolean;
+    openaiConfigured: boolean;
+    anyConfigured: boolean;
+  };
 }
 
 export interface GenresResponse {

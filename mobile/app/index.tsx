@@ -18,6 +18,10 @@ interface AlertState {
   buttons: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
 }
 
+const isAdminRole = (role: unknown): boolean => {
+  return typeof role === 'string' && role.toLowerCase() === 'admin';
+};
+
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
   const { setGuestMode } = useAuth();
@@ -182,9 +186,29 @@ export default function LoginScreen() {
       } else {
         // Login succeeded - VALIDATE VERIFICATION STATUS
         console.log('Auth success. Validating verification status...');
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user }, error: getUserError } = await supabase.auth.getUser();
 
-        if (user) {
+        if (!user) {
+          console.error('Failed to retrieve user after login:', getUserError?.message || 'user is null');
+          setLoginMessage({ type: 'error', text: 'Unable to verify your account. Please try again.' });
+        } else if (user) {
+          const blockAdminAccess = async () => {
+            await supabase.auth.signOut({ scope: 'local' });
+            setLoginMessage({ type: 'error', text: 'Admin accounts are not supported in the mobile app.' });
+            showAlert(
+              'warning',
+              'Unsupported Account Type',
+              'Admin accounts cannot be used in the mobile app. Please use the admin dashboard.',
+              [{ text: 'OK', style: 'default' }],
+            );
+          };
+
+          if (isAdminRole(user.user_metadata?.role)) {
+            console.log('Blocked admin login from metadata role.');
+            await blockAdminAccess();
+            return;
+          }
+
           // 1. Check Metadata (Fastest)
           const metaVerified = user.user_metadata?.is_verified;
           console.log('Metadata check:', { metaVerified });
@@ -208,11 +232,17 @@ export default function LoginScreen() {
           // 2. Check Profile (Source of Truth)
           let { data: profile, error: profileError } = await supabase
             .from('profiles')
-            .select('is_verified, id_document_expiry')
+            .select('is_verified, id_document_expiry, role')
             .eq('id', user.id)
             .maybeSingle();
 
           console.log('Profile check:', { profile, profileError });
+
+          if (isAdminRole(profile?.role)) {
+            console.log('Blocked admin login from profile role.');
+            await blockAdminAccess();
+            return;
+          }
 
           // SELF-HEALING: If profile is missing but Auth Metadata says verified, recreate the profile
           if (!profile && metaVerified) {
@@ -235,11 +265,17 @@ export default function LoginScreen() {
               console.log('Profile repaired successfully. Re-fetching...');
               const { data: newProfile } = await supabase
                 .from('profiles')
-                .select('is_verified, id_document_expiry')
+                .select('is_verified, id_document_expiry, role')
                 .eq('id', user.id)
                 .maybeSingle();
               profile = newProfile;
             }
+          }
+
+          if (isAdminRole(profile?.role)) {
+            console.log('Blocked admin login from repaired profile role.');
+            await blockAdminAccess();
+            return;
           }
 
           // If profile is STILL missing OR unverified -> BLOCK

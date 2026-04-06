@@ -18,13 +18,13 @@ verify_jwt = false
 
 [functions.login-redirect]
 [functions.manage-profile]
-verify_jwt = true
+verify_jwt = false
 [functions.manage-bookings]
 verify_jwt = false
 [functions.manage-notifications]
 verify_jwt = false
 [functions.manage-listings]
-verify_jwt = true
+verify_jwt = false
 [functions.manage-details]
 verify_jwt = false
 [functions.verify-identity]
@@ -34,4 +34,13 @@ verify_jwt = false
 [functions.search-content]
 verify_jwt = false
 [functions.instrument-suggestions]
+verify_jwt = false
+
+[functions.admin-users-management]
+verify_jwt = false
+
+[functions.admin-reports-management]
+verify_jwt = false
+
+[functions.permit-management]
 verify_jwt = false

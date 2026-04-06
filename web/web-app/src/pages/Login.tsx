@@ -29,6 +29,25 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const isSchemaQueryError = (errorLike: unknown) => {
+    const error = errorLike as { message?: string; details?: string; hint?: string; code?: string } | null;
+    const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+
+    return (
+      error?.code === "42P17" ||
+      text.includes("database error querying schema") ||
+      text.includes("infinite recursion detected in policy")
+    );
+  };
+
+  const schemaErrorLoginMessage =
+    "Database schema/policies are out of sync. Apply the latest Supabase migrations, then try logging in again.";
+
+  const resolvePostLoginRoute = (role?: string | null) => {
+    const normalizedRole = typeof role === "string" ? role.trim().toLowerCase() : "";
+    return normalizedRole === "admin" ? "/admin" : "/home";
+  };
+
   const verified = searchParams.get("verified");
   const accountCreated = searchParams.get("accountCreated");
   const createdEmail = searchParams.get("email");
@@ -157,6 +176,8 @@ export default function LoginPage() {
             type: "error",
             text: "Too many attempts. Please wait.",
           });
+        } else if (isSchemaQueryError(error)) {
+          setLoginMessage({ type: "error", text: schemaErrorLoginMessage });
         } else {
           setLoginMessage({ type: "error", text: error.message });
         }
@@ -176,14 +197,23 @@ export default function LoginPage() {
             return;
           }
 
-          let { data: profile } = await supabase
+          let { data: profile, error: profileError } = await supabase
             .from("profiles")
-            .select("is_verified, id_document_expiry")
+            .select("is_verified, id_document_expiry, role")
             .eq("id", user.id)
             .maybeSingle();
 
+          if (profileError) {
+            if (isSchemaQueryError(profileError)) {
+              await supabase.auth.signOut({ scope: "local" });
+              setLoginMessage({ type: "error", text: schemaErrorLoginMessage });
+              showAlert("error", "Database Setup Required", schemaErrorLoginMessage);
+              return;
+            }
+          }
+
           if (!profile && metaVerified) {
-            await supabase.from("profiles").upsert({
+            const { error: upsertError } = await supabase.from("profiles").upsert({
               id: user.id,
               email: user.email,
               full_name:
@@ -193,9 +223,17 @@ export default function LoginPage() {
               verification_status: "APPROVED",
               didit_session_id: user.user_metadata?.didit_session_id,
             });
+
+            if (upsertError && isSchemaQueryError(upsertError)) {
+              await supabase.auth.signOut({ scope: "local" });
+              setLoginMessage({ type: "error", text: schemaErrorLoginMessage });
+              showAlert("error", "Database Setup Required", schemaErrorLoginMessage);
+              return;
+            }
+
             const { data: newProfile } = await supabase
               .from("profiles")
-              .select("is_verified, id_document_expiry")
+              .select("is_verified, id_document_expiry, role")
               .eq("id", user.id)
               .maybeSingle();
             profile = newProfile;
@@ -222,7 +260,9 @@ export default function LoginPage() {
               "Your ID document has expired. Please update your verification.",
             );
           } else {
-            navigate("/home", { replace: true });
+            navigate(resolvePostLoginRoute(profile?.role || user.user_metadata?.role), {
+              replace: true,
+            });
           }
         }
       }

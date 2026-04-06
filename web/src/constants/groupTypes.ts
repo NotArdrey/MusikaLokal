@@ -148,3 +148,28 @@ export const PH_MUSIC_GROUP_TYPES: GroupTypeDefinition[] = [
         example: "Manila Killa",
     },
 ];
+
+const PH_GROUP_TYPE_IDS = new Set(PH_MUSIC_GROUP_TYPES.map((type) => type.id));
+
+export const mapDbGroupTypeToUiGroupType = (groupType?: string): string => {
+    const normalized = String(groupType || "").trim().toLowerCase();
+
+    if (PH_GROUP_TYPE_IDS.has(normalized)) {
+        return normalized;
+    }
+
+    if (normalized === "duo") {
+        return "acoustic_duo";
+    }
+
+    return "standard_opm_band";
+};
+
+export const mapUiGroupTypeToDbGroupType = (groupType?: string): "duo" | "band" => {
+    const normalized = String(groupType || "").trim().toLowerCase();
+    return normalized === "duo" || normalized === "acoustic_duo" ? "duo" : "band";
+};
+
+export const isDuoGroupType = (groupType?: string): boolean => {
+    return mapUiGroupTypeToDbGroupType(groupType) === "duo";
+};

@@ -95,6 +95,102 @@ async function insertNotificationIfMissing(
   });
 }
 
+function isMissingTableError(error: any, tableName: string) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  const normalizedTable = tableName.toLowerCase();
+
+  return (
+    (code === "42P01" && message.includes(normalizedTable)) ||
+    (code === "PGRST205" && message.includes(normalizedTable))
+  );
+}
+
+async function getRequesterRole(supabaseClient: any, userId: string) {
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.role || null;
+}
+
+const reportTargetTableMap: Record<string, string> = {
+  group: "groups",
+  studio: "studios",
+  venue: "studios",
+  gig: "gigs",
+  user: "profiles",
+  profile: "profiles",
+};
+
+async function fetchReportTargetDetails(
+  supabaseAdmin: any,
+  rawTargetType: unknown,
+  rawTargetId: unknown,
+) {
+  const targetType = String(rawTargetType || "").trim().toLowerCase();
+  const targetId = String(rawTargetId || "").trim();
+  const table = reportTargetTableMap[targetType] || null;
+
+  if (!targetId) {
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: null,
+      owner_profile: null,
+    };
+  }
+
+  if (!table) {
+    return {
+      type: targetType,
+      id: targetId,
+      table: null,
+      record: null,
+      owner_profile: null,
+    };
+  }
+
+  const { data: record, error: recordError } = await supabaseAdmin
+    .from(table)
+    .select("*")
+    .eq("id", targetId)
+    .maybeSingle();
+
+  if (recordError) throw recordError;
+
+  const ownerId = String(
+    record?.owner_id ||
+      record?.organizer_id ||
+      record?.user_id ||
+      "",
+  ).trim();
+
+  let ownerProfile = null;
+  if (ownerId) {
+    const { data: ownerRow, error: ownerError } = await supabaseAdmin
+      .from("profiles")
+      .select("*")
+      .eq("id", ownerId)
+      .maybeSingle();
+
+    if (ownerError) throw ownerError;
+    ownerProfile = ownerRow || null;
+  }
+
+  return {
+    type: targetType,
+    id: targetId,
+    table,
+    record: record || null,
+    owner_profile: ownerProfile,
+  };
+}
+
 async function autoStartBookingsAndNotify(
   supabaseAdmin: any,
   userId: string,
@@ -220,7 +316,7 @@ serve(async (req: Request) => {
     const {
       data: { user: authUser },
       error: authUserError,
-    } = await supabaseClient.auth.getUser();
+    } = await supabaseClient.auth.getUser(authHeader.replace(/^Bearer\s+/i, ""));
 
     if (authUserError || !authUser) {
       return new Response(JSON.stringify({ code: 401, message: "Invalid JWT" }), {
@@ -275,6 +371,31 @@ serve(async (req: Request) => {
           .order("booking_date", { ascending: false });
 
         if (bookingError) throw bookingError;
+
+        const openIncidentBookingIds = new Set<string>();
+        const musicianBookingIds = (bookings || [])
+          .map((booking: any) => booking.id)
+          .filter(Boolean);
+
+        if (musicianBookingIds.length > 0) {
+          const { data: openIncidents, error: incidentError } = await supabaseClient
+            .from("booking_incidents")
+            .select("booking_id")
+            .in("booking_id", musicianBookingIds)
+            .in("status", ["open", "responded", "manual_review"]);
+
+          if (incidentError) {
+            if (!isMissingTableError(incidentError, "booking_incidents")) {
+              console.log("Error fetching open booking incidents:", incidentError);
+            }
+          } else {
+            (openIncidents || []).forEach((incident: any) => {
+              if (incident?.booking_id) {
+                openIncidentBookingIds.add(incident.booking_id);
+              }
+            });
+          }
+        }
 
         // Process Studio Bookings
         // @ts-ignore
@@ -335,6 +456,7 @@ serve(async (req: Request) => {
             reviewed_by_customer: b.reviewed_by_customer || false,
             reviewed_by_owner: b.reviewed_by_owner || false,
             proof_url: b.proof_url,
+            has_open_incident: openIncidentBookingIds.has(b.id),
             // Payment-related fields for musician to see payment status
             payment_status: b.payment_status || "unpaid",
             payment_amount: b.payment_amount || b.final_price,
@@ -409,6 +531,7 @@ serve(async (req: Request) => {
           if (bookingError) throw bookingError;
 
           const lateReportByBooking = new Map<string, { count: number; latestAt: string | null }>();
+          const openIncidentBookingIds = new Set<string>();
           const bookingIds = (bookings || []).map((booking: any) => booking.id).filter(Boolean);
 
           if (bookingIds.length > 0) {
@@ -434,6 +557,24 @@ serve(async (req: Request) => {
                     count: 1,
                     latestAt: event.created_at || null,
                   });
+                }
+              });
+            }
+
+            const { data: openIncidents, error: incidentError } = await supabaseClient
+              .from("booking_incidents")
+              .select("booking_id")
+              .in("booking_id", bookingIds)
+              .in("status", ["open", "responded", "manual_review"]);
+
+            if (incidentError) {
+              if (!isMissingTableError(incidentError, "booking_incidents")) {
+                console.log("Error fetching open booking incidents for studio owner:", incidentError);
+              }
+            } else {
+              (openIncidents || []).forEach((incident: any) => {
+                if (incident?.booking_id) {
+                  openIncidentBookingIds.add(incident.booking_id);
                 }
               });
             }
@@ -513,6 +654,7 @@ serve(async (req: Request) => {
               relocation_proposed_date: b.relocation_proposed_date,
               relocation_proposed_start_time: b.relocation_proposed_start_time,
               relocation_proposed_end_time: b.relocation_proposed_end_time,
+              has_open_incident: openIncidentBookingIds.has(b.id),
               has_late_report: Boolean(lateReportMeta),
               late_report_count: lateReportMeta?.count || 0,
               late_reported_at: lateReportMeta?.latestAt || null,
@@ -1723,7 +1865,208 @@ serve(async (req: Request) => {
       });
     }
 
-    // 3A. PARTIAL SLOT APPROVAL (Studio Owner)
+    // 3A. CREATE INCIDENT REPORT (Musician/Owner)
+    if (action === "create_incident") {
+      const { booking_id, issue_type, notes, userId } = params;
+
+      if (!booking_id || !issue_type) {
+        return new Response(
+          JSON.stringify({ error: "booking_id and issue_type are required." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const reporterUserId = userId || authUser.id;
+
+      if (reporterUserId !== authUser.id) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
+      const { data: bookingDetails, error: bookingError } = await supabaseClient
+        .from("studio_bookings")
+        .select("id, user_id, studio_id, status, booking_date, start_time, studio:studios(name, owner_id)")
+        .eq("id", booking_id)
+        .maybeSingle();
+
+      if (bookingError) throw bookingError;
+
+      if (!bookingDetails) {
+        return new Response(JSON.stringify({ error: "Booking not found." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
+      if (["cancelled", "completed"].includes(bookingDetails.status)) {
+        return new Response(
+          JSON.stringify({ error: "This booking can no longer be reported." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const musicianId = bookingDetails.user_id;
+      const studioOwnerId = bookingDetails.studio?.owner_id || null;
+
+      const isMusicianReporter = reporterUserId === musicianId;
+      const isOwnerReporter = Boolean(studioOwnerId && reporterUserId === studioOwnerId);
+
+      if (!isMusicianReporter && !isOwnerReporter) {
+        return new Response(
+          JSON.stringify({ error: "You are not allowed to report this booking." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          },
+        );
+      }
+
+      const counterpartyUserId = isMusicianReporter ? studioOwnerId : musicianId;
+
+      if (!counterpartyUserId) {
+        return new Response(
+          JSON.stringify({ error: "Unable to identify the other participant for this booking." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const { data: existingIncident, error: existingIncidentError } = await supabaseClient
+        .from("booking_incidents")
+        .select("id, status")
+        .eq("booking_id", booking_id)
+        .in("status", ["open", "responded", "manual_review"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingIncidentError) {
+        if (isMissingTableError(existingIncidentError, "booking_incidents")) {
+          return new Response(
+            JSON.stringify({
+              error:
+                "Incident reporting is not available yet. Please apply the latest database migrations.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 503,
+            },
+          );
+        }
+        throw existingIncidentError;
+      }
+
+      if (existingIncident) {
+        return new Response(
+          JSON.stringify({
+            error: "There is already an active incident report for this booking.",
+            incident_id: existingIncident.id,
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const incidentDetails =
+        typeof notes === "string" && notes.trim() ? notes.trim() : null;
+
+      const { data: incidentRow, error: insertIncidentError } = await supabaseAdmin
+        .from("booking_incidents")
+        .insert({
+          booking_id,
+          issue_type,
+          status: "open",
+          reporter_user_id: reporterUserId,
+          counterparty_user_id: counterpartyUserId,
+          reporter_notes: incidentDetails,
+          response_deadline_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        })
+        .select("*")
+        .single();
+
+      if (insertIncidentError) {
+        if (isMissingTableError(insertIncidentError, "booking_incidents")) {
+          return new Response(
+            JSON.stringify({
+              error:
+                "Incident reporting is not available yet. Please apply the latest database migrations.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 503,
+            },
+          );
+        }
+        throw insertIncidentError;
+      }
+
+      const { error: holdPayoutError } = await supabaseAdmin.rpc("hold_booking_payout", {
+        p_booking_id: booking_id,
+        p_reason: `${issue_type} reported`,
+        p_reverse_existing: true,
+      });
+
+      if (
+        holdPayoutError &&
+        holdPayoutError.code !== "42883" &&
+        holdPayoutError.code !== "PGRST202"
+      ) {
+        console.error("Failed to hold payout for incident:", holdPayoutError);
+      }
+
+      const studioName = bookingDetails.studio?.name || "the studio";
+      const issueLabel = String(issue_type).replaceAll("_", " ");
+
+      await insertNotificationIfMissing(supabaseAdmin, {
+        user_id: counterpartyUserId,
+        type: "warning",
+        title: "Booking Incident Reported",
+        message: `A booking issue was reported for ${studioName} (${bookingDetails.booking_date} ${bookingDetails.start_time}). Issue: ${issueLabel}.`,
+        image: null,
+        meta: {
+          booking_id,
+          incident_id: incidentRow.id,
+          issue_type,
+          event_type: "booking_incident_created",
+        },
+      });
+
+      await insertNotificationIfMissing(supabaseAdmin, {
+        user_id: reporterUserId,
+        type: "info",
+        title: "Incident Report Submitted",
+        message: `Your report for the booking at ${studioName} was submitted. We will keep payout on hold while this is reviewed.`,
+        image: null,
+        meta: {
+          booking_id,
+          incident_id: incidentRow.id,
+          issue_type,
+          event_type: "booking_incident_acknowledged",
+        },
+      });
+
+      return new Response(
+        JSON.stringify({ success: true, incident: incidentRow }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 201,
+        },
+      );
+    }
+
+    // 3B. PARTIAL SLOT APPROVAL (Studio Owner)
     if (action === "partial_slot_approval") {
       const {
         booking_id,
@@ -2617,6 +2960,373 @@ serve(async (req: Request) => {
           amount: balanceAmount,
           booking_id,
         }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    // ADMIN COMPAT: FETCH REPORT DETAILS
+    if (action === "fetch_report_details") {
+      const reportId = String(params?.reportId || "").trim();
+
+      if (!reportId) {
+        return new Response(JSON.stringify({ error: "Missing reportId" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const requesterRole = await getRequesterRole(supabaseClient, authUser.id);
+      if (requesterRole !== "admin") {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
+      const { data: report, error: reportError } = await supabaseAdmin
+        .from("reports")
+        .select("*")
+        .eq("id", reportId)
+        .maybeSingle();
+
+      if (reportError) throw reportError;
+
+      if (!report) {
+        return new Response(JSON.stringify({ error: "Report not found" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
+      let reporterProfile = null;
+      if (report.reporter_id) {
+        const { data: reporterRow, error: reporterError } = await supabaseAdmin
+          .from("profiles")
+          .select("*")
+          .eq("id", report.reporter_id)
+          .maybeSingle();
+
+        if (reporterError) throw reporterError;
+        reporterProfile = reporterRow || null;
+      }
+
+      const targetDetails = await fetchReportTargetDetails(
+        supabaseAdmin,
+        report.target_type,
+        report.target_id,
+      );
+
+      return new Response(
+        JSON.stringify({
+          report: {
+            ...report,
+            reporter_name: reporterProfile?.full_name || "Unknown",
+            reporter_email: reporterProfile?.email || "",
+          },
+          reporter_profile: reporterProfile,
+          target: targetDetails,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    // ADMIN COMPAT: FETCH USER DETAILS
+    if (action === "fetch_user_details") {
+      const userId = String(params?.userId || "").trim();
+
+      if (!userId) {
+        return new Response(JSON.stringify({ error: "Missing userId" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const requesterRole = await getRequesterRole(supabaseClient, authUser.id);
+      if (requesterRole !== "admin") {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
+      const { data: profile, error: profileError } = await supabaseAdmin
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profileError) throw profileError;
+
+      return new Response(
+        JSON.stringify({
+          item: profile || null,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        },
+      );
+    }
+
+    // ADMIN: FETCH BOOKING INCIDENTS QUEUE
+    if (action === "admin_fetch_booking_incidents") {
+      const { statusFilter = "all", limit = 100 } = params;
+
+      const requesterRole = await getRequesterRole(supabaseClient, authUser.id);
+      if (requesterRole !== "admin") {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
+      let incidentQuery = supabaseAdmin
+        .from("booking_incidents")
+        .select(
+          "id, booking_id, reporter_user_id, counterparty_user_id, issue_type, status, reporter_notes, counterparty_notes, response_deadline_at, responded_at, resolved_at, resolved_by_user_id, resolution, created_at",
+        )
+        .order("created_at", { ascending: false })
+        .limit(Math.min(Math.max(Number(limit) || 100, 1), 200));
+
+      if (statusFilter && statusFilter !== "all") {
+        incidentQuery = incidentQuery.eq("status", statusFilter);
+      }
+
+      const { data: incidents, error: incidentError } = await incidentQuery;
+
+      if (incidentError) {
+        if (isMissingTableError(incidentError, "booking_incidents")) {
+          return new Response(
+            JSON.stringify({
+              error:
+                "Booking incidents are not available yet. Apply the latest booking incident migration first.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 503,
+            },
+          );
+        }
+        throw incidentError;
+      }
+
+      const bookingIds = [...new Set((incidents || []).map((item: any) => item.booking_id).filter(Boolean))];
+      const profileIds = [
+        ...new Set(
+          (incidents || [])
+            .flatMap((item: any) => [
+              item.reporter_user_id,
+              item.counterparty_user_id,
+              item.resolved_by_user_id,
+            ])
+            .filter(Boolean),
+        ),
+      ];
+
+      const bookingMap = new Map<string, any>();
+      if (bookingIds.length > 0) {
+        const { data: bookings, error: bookingsError } = await supabaseAdmin
+          .from("studio_bookings")
+          .select("id, booking_date, start_time, end_time, studio_id, studio:studios(name)")
+          .in("id", bookingIds);
+
+        if (bookingsError) throw bookingsError;
+
+        (bookings || []).forEach((booking: any) => {
+          bookingMap.set(booking.id, booking);
+        });
+      }
+
+      const profileMap = new Map<string, any>();
+      if (profileIds.length > 0) {
+        const { data: profiles, error: profilesError } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", profileIds);
+
+        if (profilesError) throw profilesError;
+
+        (profiles || []).forEach((profile: any) => {
+          profileMap.set(profile.id, profile);
+        });
+      }
+
+      const items = (incidents || []).map((incident: any) => {
+        const booking = bookingMap.get(incident.booking_id);
+        const reporter = profileMap.get(incident.reporter_user_id);
+        const counterparty = profileMap.get(incident.counterparty_user_id);
+        const resolver = profileMap.get(incident.resolved_by_user_id);
+
+        return {
+          ...incident,
+          studio_name: booking?.studio?.name || null,
+          booking_date: booking?.booking_date || null,
+          booking_start_time: booking?.start_time || null,
+          booking_end_time: booking?.end_time || null,
+          reporter_name: reporter?.full_name || "Unknown",
+          reporter_email: reporter?.email || "",
+          counterparty_name: counterparty?.full_name || "Unknown",
+          counterparty_email: counterparty?.email || "",
+          resolver_name: resolver?.full_name || null,
+        };
+      });
+
+      return new Response(JSON.stringify({ items }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // ADMIN: RESOLVE BOOKING INCIDENT
+    if (action === "admin_resolve_booking_incident") {
+      const { incident_id, resolution, admin_notes } = params;
+      const allowedResolutions = [
+        "resolved_refund",
+        "resolved_no_refund",
+        "dismissed",
+      ];
+
+      if (!incident_id || !allowedResolutions.includes(resolution)) {
+        return new Response(
+          JSON.stringify({
+            error:
+              "incident_id and valid resolution are required (resolved_refund | resolved_no_refund | dismissed).",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const requesterRole = await getRequesterRole(supabaseClient, authUser.id);
+      if (requesterRole !== "admin") {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
+      const { data: incident, error: incidentError } = await supabaseAdmin
+        .from("booking_incidents")
+        .select(
+          "id, booking_id, status, issue_type, reporter_user_id, counterparty_user_id, booking:studio_bookings(booking_date, start_time, studio:studios(name))",
+        )
+        .eq("id", incident_id)
+        .maybeSingle();
+
+      if (incidentError) {
+        if (isMissingTableError(incidentError, "booking_incidents")) {
+          return new Response(
+            JSON.stringify({
+              error:
+                "Booking incidents are not available yet. Apply the latest booking incident migration first.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 503,
+            },
+          );
+        }
+        throw incidentError;
+      }
+
+      if (!incident) {
+        return new Response(JSON.stringify({ error: "Incident not found." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
+      if (!["open", "responded", "manual_review"].includes(incident.status)) {
+        return new Response(
+          JSON.stringify({ error: "This incident is already resolved." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const fallbackResolutionNote =
+        resolution === "resolved_refund"
+          ? "Admin resolved incident with refund outcome."
+          : resolution === "resolved_no_refund"
+            ? "Admin resolved incident with no-refund outcome."
+            : "Admin dismissed incident.";
+
+      const resolverNotes =
+        typeof admin_notes === "string" && admin_notes.trim()
+          ? admin_notes.trim()
+          : fallbackResolutionNote;
+
+      const { data: updatedIncident, error: updateIncidentError } = await supabaseAdmin
+        .from("booking_incidents")
+        .update({
+          status: resolution,
+          resolved_at: new Date().toISOString(),
+          resolved_by_user_id: authUser.id,
+          resolution: resolverNotes,
+        })
+        .eq("id", incident_id)
+        .select("*")
+        .single();
+
+      if (updateIncidentError) throw updateIncidentError;
+
+      if (resolution !== "resolved_refund") {
+        const { error: payoutReleaseError } = await supabaseAdmin.rpc(
+          "release_booking_payout",
+          {
+            p_booking_id: incident.booking_id,
+            p_reason: `Admin resolved incident ${incident_id}: ${resolution}`,
+          },
+        );
+
+        if (
+          payoutReleaseError &&
+          payoutReleaseError.code !== "42883" &&
+          payoutReleaseError.code !== "PGRST202"
+        ) {
+          console.error("Failed to release booking payout:", payoutReleaseError);
+        }
+      }
+
+      const studioName = incident?.booking?.studio?.name || "the studio";
+      const whenLabel = [incident?.booking?.booking_date, incident?.booking?.start_time]
+        .filter(Boolean)
+        .join(" ");
+      const resolutionLabel = String(resolution).replace(/_/g, " ");
+
+      const notifyTargets = [
+        incident.reporter_user_id,
+        incident.counterparty_user_id,
+      ].filter(Boolean) as string[];
+
+      for (const userId of [...new Set(notifyTargets)]) {
+        await insertNotificationIfMissing(supabaseAdmin, {
+          user_id: userId,
+          type: "info",
+          title: "Booking Incident Resolved",
+          message: `An admin resolved the booking incident for ${studioName}${whenLabel ? ` (${whenLabel})` : ""} as ${resolutionLabel}.`,
+          image: null,
+          meta: {
+            incident_id,
+            booking_id: incident.booking_id,
+            resolution,
+            event_type: "booking_incident_resolved_by_admin",
+          },
+        });
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, incident: updatedIncident }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 200,
