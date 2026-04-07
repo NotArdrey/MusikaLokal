@@ -26,6 +26,7 @@ import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBann
 import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import { useTheme } from "../src/context/ThemeContext";
+import { rerankHomeFeedWithLocalLLM } from "../src/services/offlineLlmEnhancer";
 
 const { width, height } = Dimensions.get("window");
 
@@ -276,6 +277,7 @@ export default function HomeScreen() {
   const restoreSearchAfterDetailsCloseRef = React.useRef(false);
   const homeRealtimeRefreshTimerRef =
     React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const homeLlmRequestIdRef = React.useRef(0);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
   );
@@ -596,6 +598,7 @@ export default function HomeScreen() {
   const fetchHomeData = async (showLoading = true) => {
     debugLog("fetchHomeData called, showLoading:", showLoading);
     if (showLoading) setLoading(true);
+    const llmRequestId = ++homeLlmRequestIdRef.current;
     try {
       // Fetch based on Role
       // If Owner, ONLY fetch groups (musicians)
@@ -933,6 +936,7 @@ export default function HomeScreen() {
             20,
           );
 
+          // Keep feed realtime: show local ranking immediately while LLM rerank runs.
           setAiRecommendations(localRankedItems);
           setAiFeedProvider("On-Device CPU Ranker");
 
@@ -946,6 +950,24 @@ export default function HomeScreen() {
           } else {
             setAiFeedMessage("Ranked locally on your phone CPU using popularity and freshness.");
           }
+
+          void (async () => {
+            const llmResult = await rerankHomeFeedWithLocalLLM({
+              candidates: localRankedItems,
+              profileSignals,
+              limit: 20,
+            });
+
+            if (llmRequestId !== homeLlmRequestIdRef.current) {
+              return;
+            }
+
+            if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
+              setAiRecommendations(llmResult.recommendations);
+              setAiFeedProvider(llmResult.aiProvider);
+              setAiFeedMessage(llmResult.message);
+            }
+          })();
         } catch (aiErr) {
           debugLog("On-device ranking error, using general fallback:", aiErr);
           setAiRecommendations([]);

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -19,6 +20,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { generateOfflineSuggestionsWithLocalLLM } from '../src/services/offlineLlmEnhancer';
 import {
     EXPERIENCE_OPTIONS,
     ExperienceLevel,
@@ -29,173 +31,13 @@ import {
 } from '../src/types/instruments';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const OFFLINE_PROFILE_CACHE_KEY = 'offline_instrument_profile_v1';
 
-const GROQ_DIRECT_API_KEY = (process.env.EXPO_PUBLIC_GROQ_API_KEY || '').trim();
-const GROQ_REQUEST_HEADERS = (() => {
-    const key = GROQ_DIRECT_API_KEY;
-    return key ? { 'x-groq-api-key': key } : undefined;
-})();
-
-const GROQ_CHAT_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-
-const extractGroqJsonObject = (raw: string) => {
-    const fencedMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fencedMatch?.[1]) {
-        return fencedMatch[1].trim();
-    }
-
-    const firstBrace = raw.indexOf('{');
-    const lastBrace = raw.lastIndexOf('}');
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-        return raw.slice(firstBrace, lastBrace + 1);
-    }
-
-    return raw;
-};
-
-const normalizeLearningCurve = (value: unknown): 'easy' | 'moderate' | 'challenging' => {
-    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-    if (normalized === 'easy' || normalized === 'moderate' || normalized === 'challenging') {
-        return normalized;
-    }
-    return 'moderate';
-};
-
-const enrichSuggestionsWithGroq = async (
-    baseSuggestions: InstrumentSuggestion[],
-    requestContext: {
-        genres: string[];
-        currentInstruments: string[];
-        userRoles: string[];
-        experienceLevel: ExperienceLevel;
-        purpose: SuggestionPurpose;
-        limit: number;
-    },
-): Promise<InstrumentSuggestion[] | null> => {
-    if (!GROQ_DIRECT_API_KEY || !Array.isArray(baseSuggestions) || baseSuggestions.length === 0) {
-        return null;
-    }
-
-    try {
-        const compactCandidates = baseSuggestions.slice(0, 16).map((item) => ({
-            name: item.name,
-            category: item.category,
-            difficulty: item.difficulty,
-            genres: item.genres,
-            description: item.description,
-            baseScore: item.score,
-            baseReason: item.matchReason,
-        }));
-
-        const userPrompt = [
-            'Personalize instrument recommendations for this user profile.',
-            `Genres: ${requestContext.genres.join(', ') || 'none'}`,
-            `Current skills/instruments: ${requestContext.currentInstruments.join(', ') || 'none'}`,
-            `User roles: ${requestContext.userRoles.join(', ') || 'none'}`,
-            `Experience level: ${requestContext.experienceLevel}`,
-            `Purpose: ${requestContext.purpose}`,
-            'Return JSON only with shape:',
-            '{"recommendations":[{"name":"Instrument Name","score":0-100,"headline":"short line","whyThisFits":"2 short sentences","learningCurve":"easy|moderate|challenging","timeToBasics":"X-Y weeks/months","proTip":"actionable tip","famousPlayers":["Name 1","Name 2"],"perfectFor":"short tag"}]}',
-            `Return up to ${requestContext.limit} entries using only names from candidates.`,
-            `Candidates: ${JSON.stringify(compactCandidates)}`,
-        ].join('\n');
-
-        const response = await fetch(GROQ_CHAT_API_URL, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${GROQ_DIRECT_API_KEY}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile',
-                messages: [
-                    { role: 'system', content: 'You are an expert music gear advisor. Return JSON only.' },
-                    { role: 'user', content: userPrompt },
-                ],
-                temperature: 0.65,
-                max_tokens: 1600,
-                response_format: { type: 'json_object' },
-            }),
-        });
-
-        if (!response.ok) {
-            return null;
-        }
-
-        const payload = await response.json();
-        const content = payload?.choices?.[0]?.message?.content;
-        if (!content || typeof content !== 'string') {
-            return null;
-        }
-
-        const parsed = JSON.parse(extractGroqJsonObject(content));
-        const recommendations = Array.isArray(parsed?.recommendations) ? parsed.recommendations : [];
-        if (recommendations.length === 0) {
-            return null;
-        }
-
-        const byName = new Map(baseSuggestions.map((item) => [item.name.toLowerCase(), item]));
-        const ranked: InstrumentSuggestion[] = [];
-
-        for (const rec of recommendations) {
-            const name = typeof rec?.name === 'string' ? rec.name.trim() : '';
-            if (!name) continue;
-
-            const base = byName.get(name.toLowerCase());
-            if (!base) continue;
-
-            const parsedScore = Number(rec?.score);
-            const score = Number.isFinite(parsedScore)
-                ? Math.max(0, Math.min(100, Math.round(parsedScore)))
-                : Math.max(0, Math.min(100, Math.round(base.score)));
-
-            ranked.push({
-                ...base,
-                score,
-                headline: typeof rec?.headline === 'string' && rec.headline.trim().length > 0
-                    ? rec.headline.trim().slice(0, 120)
-                    : base.headline,
-                matchReason: typeof rec?.whyThisFits === 'string' && rec.whyThisFits.trim().length > 0
-                    ? rec.whyThisFits.trim().slice(0, 400)
-                    : base.matchReason,
-                learningCurve: normalizeLearningCurve(rec?.learningCurve),
-                timeToBasics: typeof rec?.timeToBasics === 'string' && rec.timeToBasics.trim().length > 0
-                    ? rec.timeToBasics.trim().slice(0, 40)
-                    : base.timeToBasics,
-                proTip: typeof rec?.proTip === 'string' && rec.proTip.trim().length > 0
-                    ? rec.proTip.trim().slice(0, 220)
-                    : base.proTip,
-                famousPlayers: Array.isArray(rec?.famousPlayers)
-                    ? rec.famousPlayers.filter((value: unknown) => typeof value === 'string').slice(0, 2)
-                    : base.famousPlayers,
-                perfectFor: typeof rec?.perfectFor === 'string' && rec.perfectFor.trim().length > 0
-                    ? rec.perfectFor.trim().slice(0, 40)
-                    : base.perfectFor,
-                aiPowered: true,
-                aiProvider: 'Groq Direct',
-            });
-        }
-
-        if (ranked.length === 0) {
-            return null;
-        }
-
-        const used = new Set(ranked.map((item) => item.name.toLowerCase()));
-        for (const fallback of baseSuggestions) {
-            if (ranked.length >= requestContext.limit) break;
-            if (used.has(fallback.name.toLowerCase())) continue;
-            ranked.push({
-                ...fallback,
-                aiPowered: true,
-                aiProvider: 'Groq Direct',
-            });
-        }
-
-        return ranked.slice(0, requestContext.limit);
-    } catch {
-        return null;
-    }
-};
+interface CachedOfflineProfile {
+    full_name: string;
+    roles: string[];
+    genres: string[];
+}
 
 export default function AiSuggestionsScreen() {
     const { colors, isDark } = useTheme();
@@ -229,10 +71,32 @@ export default function AiSuggestionsScreen() {
         loadUserProfile();
     }, [refreshKey]);
 
+    const applyProfileSignals = (profile: CachedOfflineProfile) => {
+        const safeRoles = Array.isArray(profile.roles)
+            ? profile.roles.filter((value) => typeof value === 'string' && value.trim().length > 0)
+            : [];
+        const safeGenres = Array.isArray(profile.genres)
+            ? profile.genres.filter((value) => typeof value === 'string' && value.trim().length > 0)
+            : [];
+
+        setUserName(profile.full_name || '');
+        setUserRoles(safeRoles);
+        setCurrentInstruments(safeRoles);
+        setUserGenres(safeGenres);
+        setSelectedGenres(safeGenres);
+    };
+
     const loadUserProfile = async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            if (!user) {
+                const cachedRaw = await AsyncStorage.getItem(OFFLINE_PROFILE_CACHE_KEY);
+                if (cachedRaw) {
+                    const cached = JSON.parse(cachedRaw) as CachedOfflineProfile;
+                    applyProfileSignals(cached);
+                }
+                return;
+            }
 
             const { data: profile } = await supabase
                 .from('profiles')
@@ -267,9 +131,26 @@ export default function AiSuggestionsScreen() {
                     .filter((value: any) => typeof value === 'string' && value.trim().length > 0);
                 setUserGenres(genres);
                 setSelectedGenres(genres); // Pre-select user's preferred genres
+
+                const cachePayload: CachedOfflineProfile = {
+                    full_name: profile.full_name || '',
+                    roles: skills,
+                    genres,
+                };
+                await AsyncStorage.setItem(OFFLINE_PROFILE_CACHE_KEY, JSON.stringify(cachePayload));
             }
         } catch (err) {
             console.error('Error loading profile:', err);
+
+            try {
+                const cachedRaw = await AsyncStorage.getItem(OFFLINE_PROFILE_CACHE_KEY);
+                if (cachedRaw) {
+                    const cached = JSON.parse(cachedRaw) as CachedOfflineProfile;
+                    applyProfileSignals(cached);
+                }
+            } catch {
+                // Keep empty profile state if cache is unavailable.
+            }
         } finally {
             setLoadingProfile(false);
         }
@@ -284,69 +165,37 @@ export default function AiSuggestionsScreen() {
         );
     }, []);
 
-    // Fetch AI suggestions
+    // Fetch on-device LLM suggestions (no local-ranking fallback)
     const fetchSuggestions = async () => {
         setLoading(true);
         setError(null);
         setSuggestionMessage(null);
 
         try {
-            const { data, error: funcError } = await supabase.functions.invoke('instrument-suggestions', {
-                headers: GROQ_REQUEST_HEADERS,
-                body: {
-                    action: 'suggest',
-                    genres: selectedGenres,
-                    currentInstruments,
-                    userRoles, // Pass user's roles/instruments from profile
-                    experienceLevel,
-                    purpose,
-                    limit: 10,
-                }
+            const generated = await generateOfflineSuggestionsWithLocalLLM({
+                genres: selectedGenres,
+                currentInstruments,
+                userRoles,
+                experienceLevel,
+                purpose,
+                limit: 10,
             });
 
-            if (funcError) throw funcError;
-
-            if (data?.suggestions && data.suggestions.length > 0) {
-                const aiActive = Boolean(data.aiPowered);
-                const baseSuggestions = data.suggestions as InstrumentSuggestion[];
-
-                if (!aiActive && GROQ_DIRECT_API_KEY) {
-                    const groqEnhanced = await enrichSuggestionsWithGroq(baseSuggestions, {
-                        genres: selectedGenres,
-                        currentInstruments,
-                        userRoles,
-                        experienceLevel,
-                        purpose,
-                        limit: 10,
-                    });
-
-                    if (groqEnhanced && groqEnhanced.length > 0) {
-                        setSuggestions(groqEnhanced);
-                        setIsAIPowered(true);
-                        setAIProvider('Groq Direct');
-                        setSuggestionMessage('AI-powered recommendations via your Groq key.');
-                        setStep('results');
-                        return;
-                    }
-                }
-
-                setSuggestions(baseSuggestions);
-                setIsAIPowered(aiActive);
-                setAIProvider(data.aiProvider || (aiActive ? 'AI' : 'Local Match'));
-                setSuggestionMessage(data.message || null);
+            if (generated.suggestions.length > 0 && generated.aiPowered) {
+                setSuggestions(generated.suggestions);
+                setIsAIPowered(true);
+                setAIProvider(generated.aiProvider);
+                setSuggestionMessage(generated.message);
                 setStep('results');
             } else {
-                setError(data?.message || 'No suggestions found. Try different preferences.');
+                setSuggestions([]);
+                setIsAIPowered(false);
+                setAIProvider(generated.aiProvider || 'On-Device LLM');
+                setError(generated.message || 'Unable to generate LLM suggestions right now.');
             }
         } catch (err: any) {
             console.error('Error fetching suggestions:', err);
-            // Show user-friendly error instead of technical details
-            const errorMessage = err.message?.toLowerCase() || '';
-            if (errorMessage.includes('non-2xx') || errorMessage.includes('edge function') || errorMessage.includes('fetch')) {
-                setError('Unable to get suggestions right now. Please try again later.');
-            } else {
-                setError('Failed to get suggestions. Please try again.');
-            }
+            setError('Failed to generate on-device LLM suggestions. Please try again.');
             setSuggestionMessage(null);
         } finally {
             setLoading(false);
@@ -388,7 +237,7 @@ export default function AiSuggestionsScreen() {
                             You're a <Text style={{ color: '#8B5CF6', fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
                         </Text>
                         <Text style={[styles.profileHint, { color: colors.textSecondary }]}>
-                            AI will suggest instruments that complement your role
+                            On-device LLM generates instruments that complement your role
                         </Text>
                     </>
                 ) : (
@@ -877,7 +726,7 @@ export default function AiSuggestionsScreen() {
                     : 'Curated just for you based on your musical profile'}
             </Text>
 
-            {!isAIPowered && suggestionMessage && (
+            {suggestionMessage && (
                 <View style={[styles.fallbackInfoContainer, { backgroundColor: isDark ? '#1E3A8A20' : '#DBEAFE', borderColor: '#3B82F6' }]}>
                     <Ionicons name="information-circle" size={16} color="#2563EB" />
                     <Text style={styles.fallbackInfoText}>{suggestionMessage}</Text>
@@ -899,7 +748,7 @@ export default function AiSuggestionsScreen() {
                     <>
                         <Ionicons name={isAIPowered ? 'sparkles' : 'refresh'} size={18} color={badgeColor} />
                         <Text style={[styles.secondaryButtonText, { color: badgeColor }]}>
-                            {isAIPowered ? 'Get New AI Suggestions' : 'Refresh Smart Suggestions'}
+                            {isAIPowered ? 'Get New AI Suggestions' : 'Retry AI Suggestions'}
                         </Text>
                     </>
                 )}

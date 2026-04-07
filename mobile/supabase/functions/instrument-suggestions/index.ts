@@ -21,6 +21,7 @@ const corsHeaders = {
 const ENV_GROQ_API_KEY = Deno.env.get('GROQ_API_KEY')?.trim() || '';
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')?.trim() || '';
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')?.trim() || '';
+const LOCAL_ONLY_MODE = true;
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
@@ -53,7 +54,7 @@ function getAIProviderStatus(groqApiKey: string): AIProviderStatus {
         groqConfigured,
         geminiConfigured,
         openaiConfigured,
-        anyConfigured: groqConfigured || geminiConfigured || openaiConfigured,
+        anyConfigured: LOCAL_ONLY_MODE ? false : groqConfigured || geminiConfigured || openaiConfigured,
     };
 }
 
@@ -886,6 +887,8 @@ serve(async (req: Request) => {
 
                 if (aiPowered) {
                     message = `AI-powered recommendations via ${aiProvider}`;
+                } else if (LOCAL_ONLY_MODE) {
+                    message = 'Local-only mode is active. Showing smart local recommendations.';
                 } else if (fallbackReason === 'missing_api_keys') {
                     message = 'AI providers are not configured yet. Showing smart local recommendations.';
                 } else if (fallbackReason === 'provider_unavailable') {
@@ -909,9 +912,11 @@ serve(async (req: Request) => {
                 result = {
                     aiProvidersConfigured: status.anyConfigured,
                     providerStatus: status,
-                    message: status.anyConfigured
-                        ? 'At least one AI provider is configured.'
-                        : 'No AI provider keys configured. Set GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY, or pass x-groq-api-key.'
+                    message: LOCAL_ONLY_MODE
+                        ? 'Local-only mode is active. External AI providers are disabled.'
+                        : status.anyConfigured
+                            ? 'At least one AI provider is configured.'
+                            : 'No AI provider keys configured. Set GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY, or pass x-groq-api-key.'
                 };
                 break;
 

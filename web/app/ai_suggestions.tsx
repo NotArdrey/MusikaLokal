@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -21,6 +22,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { generateOfflineSuggestionsWithLocalLLM } from '../src/services/offlineLlmEnhancer';
 import {
     EXPERIENCE_OPTIONS,
     ExperienceLevel,
@@ -32,6 +34,13 @@ import {
 
 const { width } = Dimensions.get('window');
 const SCREEN_WIDTH = Platform.OS === 'web' ? Math.min(width, 1024) : width;
+const OFFLINE_PROFILE_CACHE_KEY = 'offline_instrument_profile_v1';
+
+interface CachedOfflineProfile {
+    full_name: string;
+    roles: string[];
+    genres: string[];
+}
 
 export default function AiSuggestionsScreen() {
     const { colors, isDark } = useTheme();
@@ -55,6 +64,7 @@ export default function AiSuggestionsScreen() {
     const [currentInstruments, setCurrentInstruments] = useState<string[]>([]);
     const [isAIPowered, setIsAIPowered] = useState(false);
     const [aiProvider, setAIProvider] = useState<string>('');
+    const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
 
     // User profile data
     const [userRoles, setUserRoles] = useState<string[]>([]);
@@ -66,31 +76,84 @@ export default function AiSuggestionsScreen() {
         loadUserProfile();
     }, [refreshKey]);
 
+    const applyProfileSignals = (profile: CachedOfflineProfile) => {
+        const safeRoles = Array.isArray(profile.roles)
+            ? profile.roles.filter((value) => typeof value === 'string' && value.trim().length > 0)
+            : [];
+        const safeGenres = Array.isArray(profile.genres)
+            ? profile.genres.filter((value) => typeof value === 'string' && value.trim().length > 0)
+            : [];
+
+        setUserName(profile.full_name || '');
+        setUserRoles(safeRoles);
+        setCurrentInstruments(safeRoles);
+        setUserGenres(safeGenres);
+        setSelectedGenres(safeGenres);
+    };
+
     const loadUserProfile = async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            if (!user) {
+                const cachedRaw = await AsyncStorage.getItem(OFFLINE_PROFILE_CACHE_KEY);
+                if (cachedRaw) {
+                    const cached = JSON.parse(cachedRaw) as CachedOfflineProfile;
+                    applyProfileSignals(cached);
+                }
+                return;
+            }
 
             const { data: profile } = await supabase
                 .from('profiles')
-                .select('full_name, skills, genres')
+                .select('full_name')
                 .eq('id', user.id)
                 .single();
 
+            const [skillsResult, genresResult] = await Promise.all([
+                supabase
+                    .from('profile_skills')
+                    .select('skill')
+                    .eq('profile_id', user.id),
+                supabase
+                    .from('profile_genres')
+                    .select('genre')
+                    .eq('profile_id', user.id),
+            ]);
+
             if (profile) {
                 setUserName(profile.full_name || '');
-                // Skills = roles/instruments (e.g., "Guitarist", "Drummer")
-                const skills = profile.skills || [];
-                setUserRoles(skills);
-                setCurrentInstruments(skills); // Pre-fill current instruments from profile
 
-                // Genres from profile
-                const genres = profile.genres || [];
+                const skills = (skillsResult.data || [])
+                    .map((row: any) => row.skill)
+                    .filter((value: any) => typeof value === 'string' && value.trim().length > 0);
+                setUserRoles(skills);
+                setCurrentInstruments(skills);
+
+                const genres = (genresResult.data || [])
+                    .map((row: any) => row.genre)
+                    .filter((value: any) => typeof value === 'string' && value.trim().length > 0);
                 setUserGenres(genres);
-                setSelectedGenres(genres); // Pre-select user's preferred genres
+                setSelectedGenres(genres);
+
+                const cachePayload: CachedOfflineProfile = {
+                    full_name: profile.full_name || '',
+                    roles: skills,
+                    genres,
+                };
+                await AsyncStorage.setItem(OFFLINE_PROFILE_CACHE_KEY, JSON.stringify(cachePayload));
             }
         } catch (err) {
             console.error('Error loading profile:', err);
+
+            try {
+                const cachedRaw = await AsyncStorage.getItem(OFFLINE_PROFILE_CACHE_KEY);
+                if (cachedRaw) {
+                    const cached = JSON.parse(cachedRaw) as CachedOfflineProfile;
+                    applyProfileSignals(cached);
+                }
+            } catch {
+                // Keep empty profile state if cache is unavailable.
+            }
         } finally {
             setLoadingProfile(false);
         }
@@ -109,44 +172,34 @@ export default function AiSuggestionsScreen() {
     const fetchSuggestions = async () => {
         setLoading(true);
         setError(null);
+        setSuggestionMessage(null);
 
         try {
-            const { data, error: funcError } = await supabase.functions.invoke('instrument-suggestions', {
-                body: {
-                    action: 'suggest',
-                    genres: selectedGenres,
-                    currentInstruments,
-                    userRoles, // Pass user's roles/instruments from profile
-                    experienceLevel,
-                    purpose,
-                    limit: 10,
-                }
+            const generated = await generateOfflineSuggestionsWithLocalLLM({
+                genres: selectedGenres,
+                currentInstruments,
+                userRoles,
+                experienceLevel,
+                purpose,
+                limit: 10,
             });
 
-            if (funcError) throw funcError;
-
-            if (data?.suggestions && data.suggestions.length > 0) {
-                setSuggestions(data.suggestions);
-                setIsAIPowered(data.aiPowered || false);
-                setAIProvider(data.aiProvider || '');
+            if (generated.suggestions.length > 0 && generated.aiPowered) {
+                setSuggestions(generated.suggestions);
+                setIsAIPowered(true);
+                setAIProvider(generated.aiProvider || 'On-Device LLM');
+                setSuggestionMessage(generated.message);
                 setStep('results');
             } else {
-                // Check if it's an AI availability issue or no matches
-                if (data?.aiPowered === false || data?.aiProvider === 'none') {
-                    setError('AI service is temporarily unavailable. Please try again later or check your preferences.');
-                } else {
-                    setError('No suggestions found. Try different preferences.');
-                }
+                setSuggestions([]);
+                setIsAIPowered(false);
+                setAIProvider(generated.aiProvider || 'On-Device LLM');
+                setError(generated.message || 'Unable to generate LLM suggestions right now.');
             }
         } catch (err: any) {
             console.error('Error fetching suggestions:', err);
-            // Show user-friendly error instead of technical details
-            const errorMessage = err.message?.toLowerCase() || '';
-            if (errorMessage.includes('non-2xx') || errorMessage.includes('edge function') || errorMessage.includes('fetch')) {
-                setError('Unable to get suggestions right now. Please try again later.');
-            } else {
-                setError('Failed to get suggestions. Please try again.');
-            }
+            setError('Failed to generate on-device LLM suggestions. Please try again.');
+            setSuggestionMessage(null);
         } finally {
             setLoading(false);
         }
@@ -187,7 +240,7 @@ export default function AiSuggestionsScreen() {
                             You're a <Text style={{ color: '#8B5CF6', fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
                         </Text>
                         <Text style={[styles.profileHint, { color: colors.textSecondary }]}>
-                            AI will suggest instruments that complement your role
+                            On-device LLM generates instruments that complement your role
                         </Text>
                     </>
                 ) : (
@@ -597,110 +650,123 @@ export default function AiSuggestionsScreen() {
     );
 
     // Render results step
-    const renderResultsStep = () => (
-        <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={[
-                styles.scrollContent,
-                { paddingBottom: 160 + insets.bottom },
-                isWebDesktop && { width: '100%', paddingHorizontal: 32 },
-            ]}
-            showsVerticalScrollIndicator={false}
-        >
-            {/* Back Button */}
-            <TouchableOpacity activeOpacity={1}
-                onPress={() => setStep('preferences')}
-                style={styles.backButton}
+    const renderResultsStep = () => {
+        const badgeColor = isAIPowered ? '#8B5CF6' : '#2563EB';
+
+        return (
+            <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={[
+                    styles.scrollContent,
+                    { paddingBottom: 160 + insets.bottom },
+                    isWebDesktop && { width: '100%', paddingHorizontal: 32 },
+                ]}
+                showsVerticalScrollIndicator={false}
             >
-                <Ionicons name="arrow-back" size={20} color={colors.primary} />
-                <Text style={[styles.backButtonText, { color: colors.primary }]}>
-                    Change Preferences
-                </Text>
-            </TouchableOpacity>
+                {/* Back Button */}
+                <TouchableOpacity activeOpacity={1}
+                    onPress={() => setStep('preferences')}
+                    style={styles.backButton}
+                >
+                    <Ionicons name="arrow-back" size={20} color={colors.primary} />
+                    <Text style={[styles.backButtonText, { color: colors.primary }]}>
+                        Change Preferences
+                    </Text>
+                </TouchableOpacity>
 
-            {/* AI Header Card */}
-            <View style={[styles.aiHeaderCard, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: '#8B5CF6' }]}>
-                <View style={styles.aiHeaderIcon}>
-                    <Ionicons name="sparkles" size={32} color="#8B5CF6" />
-                </View>
-                <Text style={[styles.aiHeaderTitle, { color: colors.text }]}>
-                    {userRoles.length > 0
-                        ? `Perfect for a ${userRoles[0]}`
-                        : 'Your Personalized Picks'}
-                </Text>
-                <Text style={[styles.aiHeaderSubtitle, { color: colors.textSecondary }]}>
-                    Powered by {aiProvider || 'AI'} • Analyzed your profile
-                </Text>
-
-                {/* User Role Badge */}
-                {userRoles.length > 0 && (
-                    <View style={[styles.roleBadge, { backgroundColor: '#8B5CF6' }]}>
-                        <Ionicons name="person" size={12} color="#FFFFFF" />
-                        <Text style={styles.roleBadgeText}>{userRoles.join(' • ')}</Text>
+                {/* AI Header Card */}
+                <View style={[styles.aiHeaderCard, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: '#8B5CF6' }]}>
+                    <View style={styles.aiHeaderIcon}>
+                        <Ionicons name="sparkles" size={32} color="#8B5CF6" />
                     </View>
-                )}
+                    <Text style={[styles.aiHeaderTitle, { color: colors.text }]}>
+                        {userRoles.length > 0
+                            ? `Perfect for a ${userRoles[0]}`
+                            : 'Your Personalized Picks'}
+                    </Text>
+                    <Text style={[styles.aiHeaderSubtitle, { color: colors.textSecondary }]}>
+                        {isAIPowered
+                            ? `Powered by ${aiProvider || 'AI'} • Analyzed your profile`
+                            : `Using ${aiProvider || 'On-Device LLM'} • Personalized from your profile`}
+                    </Text>
 
-                {/* Preferences Tags */}
-                <View style={styles.preferenceTags}>
-                    {selectedGenres.slice(0, 3).map(genre => (
-                        <View key={genre} style={[styles.preferenceTag, { backgroundColor: '#8B5CF6' + '20' }]}>
-                            <Text style={[styles.preferenceTagText, { color: '#8B5CF6' }]}>{genre}</Text>
-                        </View>
-                    ))}
-                    {selectedGenres.length > 3 && (
-                        <View style={[styles.preferenceTag, { backgroundColor: '#8B5CF6' + '20' }]}>
-                            <Text style={[styles.preferenceTagText, { color: '#8B5CF6' }]}>+{selectedGenres.length - 3} more</Text>
+                    {/* User Role Badge */}
+                    {userRoles.length > 0 && (
+                        <View style={[styles.roleBadge, { backgroundColor: '#8B5CF6' }]}>
+                            <Ionicons name="person" size={12} color="#FFFFFF" />
+                            <Text style={styles.roleBadgeText}>{userRoles.join(' • ')}</Text>
                         </View>
                     )}
-                </View>
-                <View style={styles.preferenceTags}>
-                    <View style={[styles.preferenceTag, { backgroundColor: colors.primary + '20' }]}>
-                        <Text style={[styles.preferenceTagText, { color: colors.primary }]}>{experienceLevel}</Text>
-                    </View>
-                    <View style={[styles.preferenceTag, { backgroundColor: colors.primary + '20' }]}>
-                        <Text style={[styles.preferenceTagText, { color: colors.primary }]}>{purpose}</Text>
-                    </View>
-                </View>
-            </View>
 
-            {/* Results Count */}
-            <View style={styles.resultsCountRow}>
-                <Text style={[styles.resultsHeader, { color: colors.text }]}>
-                    {suggestions.length} Perfect Matches
+                    {/* Preferences Tags */}
+                    <View style={styles.preferenceTags}>
+                        {selectedGenres.slice(0, 3).map(genre => (
+                            <View key={genre} style={[styles.preferenceTag, { backgroundColor: '#8B5CF6' + '20' }]}>
+                                <Text style={[styles.preferenceTagText, { color: '#8B5CF6' }]}>{genre}</Text>
+                            </View>
+                        ))}
+                        {selectedGenres.length > 3 && (
+                            <View style={[styles.preferenceTag, { backgroundColor: '#8B5CF6' + '20' }]}>
+                                <Text style={[styles.preferenceTagText, { color: '#8B5CF6' }]}>+{selectedGenres.length - 3} more</Text>
+                            </View>
+                        )}
+                    </View>
+                    <View style={styles.preferenceTags}>
+                        <View style={[styles.preferenceTag, { backgroundColor: colors.primary + '20' }]}>
+                            <Text style={[styles.preferenceTagText, { color: colors.primary }]}>{experienceLevel}</Text>
+                        </View>
+                        <View style={[styles.preferenceTag, { backgroundColor: colors.primary + '20' }]}>
+                            <Text style={[styles.preferenceTagText, { color: colors.primary }]}>{purpose}</Text>
+                        </View>
+                    </View>
+                </View>
+
+                {/* Results Count */}
+                <View style={styles.resultsCountRow}>
+                    <Text style={[styles.resultsHeader, { color: colors.text }]}>
+                        {suggestions.length} Perfect Matches
+                    </Text>
+                    <View style={[styles.aiBadgeMini, { backgroundColor: badgeColor }]}>
+                        <Ionicons name={isAIPowered ? 'sparkles' : 'compass'} size={10} color="#FFFFFF" />
+                        <Text style={styles.aiBadgeMiniText}>{isAIPowered ? 'AI' : 'SMART'}</Text>
+                    </View>
+                </View>
+                <Text style={[styles.resultsSubtitle, { color: colors.textSecondary }]}>
+                    {userRoles.length > 0
+                        ? `Instruments that complement your role as a ${userRoles[0]}`
+                        : 'Curated just for you based on your musical profile'}
                 </Text>
-                <View style={[styles.aiBadgeMini, { backgroundColor: '#8B5CF6' }]}>
-                    <Ionicons name="sparkles" size={10} color="#FFFFFF" />
-                    <Text style={styles.aiBadgeMiniText}>AI</Text>
-                </View>
-            </View>
-            <Text style={[styles.resultsSubtitle, { color: colors.textSecondary }]}>
-                {userRoles.length > 0
-                    ? `Instruments that complement your role as a ${userRoles[0]}`
-                    : 'Curated just for you based on your musical profile'}
-            </Text>
 
-            {/* Suggestion Cards */}
-            {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}
-
-            {/* Refresh Button */}
-            <TouchableOpacity activeOpacity={1}
-                onPress={fetchSuggestions}
-                disabled={loading}
-                style={[styles.secondaryButton, { borderColor: '#8B5CF6', backgroundColor: '#8B5CF6' + '10' }]}
-            >
-                {loading ? (
-                    <ActivityIndicator color="#8B5CF6" />
-                ) : (
-                    <>
-                        <Ionicons name="sparkles" size={18} color="#8B5CF6" />
-                        <Text style={[styles.secondaryButtonText, { color: '#8B5CF6' }]}>
-                            Get New AI Suggestions
-                        </Text>
-                    </>
+                {suggestionMessage && (
+                    <View style={[styles.fallbackInfoContainer, { backgroundColor: isDark ? '#1E3A8A20' : '#DBEAFE', borderColor: '#3B82F6' }]}>
+                        <Ionicons name="information-circle" size={16} color="#2563EB" />
+                        <Text style={styles.fallbackInfoText}>{suggestionMessage}</Text>
+                    </View>
                 )}
-            </TouchableOpacity>
-        </ScrollView>
-    );
+
+                {/* Suggestion Cards */}
+                {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}
+
+                {/* Refresh Button */}
+                <TouchableOpacity activeOpacity={1}
+                    onPress={fetchSuggestions}
+                    disabled={loading}
+                    style={[styles.secondaryButton, { borderColor: badgeColor, backgroundColor: badgeColor + '10' }]}
+                >
+                    {loading ? (
+                        <ActivityIndicator color={badgeColor} />
+                    ) : (
+                        <>
+                            <Ionicons name={isAIPowered ? 'sparkles' : 'refresh'} size={18} color={badgeColor} />
+                            <Text style={[styles.secondaryButtonText, { color: badgeColor }]}>
+                                {isAIPowered ? 'Get New AI Suggestions' : 'Retry AI Suggestions'}
+                            </Text>
+                        </>
+                    )}
+                </TouchableOpacity>
+            </ScrollView>
+        );
+    };
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1035,6 +1101,22 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontFamily: 'Poppins_400Regular',
         marginBottom: 16,
+    },
+    fallbackInfoContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginBottom: 12,
+    },
+    fallbackInfoText: {
+        flex: 1,
+        color: '#1D4ED8',
+        fontSize: 12,
+        fontFamily: 'Poppins_500Medium',
     },
     suggestionCard: {
         padding: 16,

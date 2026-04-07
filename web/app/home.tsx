@@ -30,6 +30,7 @@ import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBann
 import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import { useTheme } from "../src/context/ThemeContext";
+import { rerankHomeFeedWithLocalLLM } from "../src/services/offlineLlmEnhancer";
 
 const { width, height } = Dimensions.get("window");
 
@@ -56,6 +57,124 @@ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../src/context/AuthContext";
 
 const debugLog = (..._args: unknown[]) => {};
+
+const clampValue = (value: number, min = 0, max = 1) => {
+  return Math.max(min, Math.min(max, value));
+};
+
+const normalizeSignal = (value: unknown) => {
+  if (typeof value !== "string") return "";
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const uniqueNormalizedSignals = (values: unknown[]) => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const value of values) {
+    const normalized = normalizeSignal(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+
+  return out;
+};
+
+const scoreFreshness = (createdAt: unknown) => {
+  if (typeof createdAt !== "string") return 0.35;
+
+  const created = new Date(createdAt).getTime();
+  if (Number.isNaN(created)) return 0.35;
+
+  const ageDays = Math.max(0, (Date.now() - created) / (1000 * 60 * 60 * 24));
+  if (ageDays <= 7) return 1;
+  if (ageDays <= 30) return 0.8;
+  if (ageDays <= 90) return 0.55;
+  return 0.35;
+};
+
+const buildOnDeviceReason = (
+  skillMatches: string[],
+  genreMatches: string[],
+  itemType: string,
+) => {
+  if (skillMatches.length > 0 && genreMatches.length > 0) {
+    return `Matches your ${skillMatches[0]} skills and ${genreMatches[0]} taste.`;
+  }
+  if (skillMatches.length > 0) {
+    return `Recommended because of your ${skillMatches[0]} background.`;
+  }
+  if (genreMatches.length > 0) {
+    return `Popular among ${genreMatches[0]} listeners and creators.`;
+  }
+  if (itemType === "Gig") {
+    return "Trending opportunity with strong current engagement.";
+  }
+  return "Strong overall quality and relevance right now.";
+};
+
+const rankForYouOnDevice = (
+  candidates: any[],
+  profileSignals: { skills: string[]; genres: string[] },
+  limit: number,
+) => {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return [];
+  }
+
+  const normalizedSkills = uniqueNormalizedSignals(profileSignals.skills);
+  const normalizedGenres = uniqueNormalizedSignals(profileSignals.genres);
+  const hasUserSignals = normalizedSkills.length > 0 || normalizedGenres.length > 0;
+  const safeLimit = Math.max(1, Math.min(limit || 20, candidates.length));
+
+  const ranked = candidates
+    .map((item: any) => {
+      const searchableText = normalizeSignal(
+        `${item.name || ""} ${item.genre || ""} ${item.location || ""} ${item.type || ""} ${item.group_type || ""}`,
+      );
+      const itemGenres = uniqueNormalizedSignals(
+        typeof item.genre === "string" ? item.genre.split(",") : [],
+      );
+
+      const skillMatches = normalizedSkills.filter((skill) => searchableText.includes(skill));
+      const genreMatches = normalizedGenres.filter(
+        (genre) => searchableText.includes(genre) || itemGenres.includes(genre),
+      );
+
+      const skillScore = normalizedSkills.length > 0
+        ? clampValue(skillMatches.length / Math.min(3, normalizedSkills.length))
+        : 0;
+      const genreScore = normalizedGenres.length > 0
+        ? clampValue(genreMatches.length / Math.min(3, normalizedGenres.length))
+        : 0;
+      const popularityScore = clampValue(Number(item.rating || 0) / 5);
+      const freshnessScore = scoreFreshness(item.created_at);
+
+      const blendedScore = hasUserSignals
+        ? (skillScore * 0.4 + genreScore * 0.35 + popularityScore * 0.2 + freshnessScore * 0.05)
+        : (popularityScore * 0.7 + freshnessScore * 0.3);
+
+      const aiScore = Math.round(clampValue(blendedScore) * 100);
+
+      return {
+        ...item,
+        similarity: aiScore / 100,
+        aiReason: buildOnDeviceReason(skillMatches, genreMatches, item.type || "listing"),
+      };
+    })
+    .sort((a, b) => {
+      const similarityDelta = Number(b.similarity || 0) - Number(a.similarity || 0);
+      if (similarityDelta !== 0) return similarityDelta;
+      return Number(b.rating || 0) - Number(a.rating || 0);
+    });
+
+  return ranked.slice(0, safeLimit);
+};
 
 const ResponsiveList = ({ children, style, contentContainerStyle, snapToInterval, ...props }: any) => {
   const { width } = useWindowDimensions();
@@ -173,6 +292,8 @@ export default function HomeScreen() {
   const [aiModeEnabled, setAiModeEnabled] = useState(true);
   const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
   const [randomRecommendations, setRandomRecommendations] = useState<any[]>([]);
+  const [aiFeedProvider, setAiFeedProvider] = useState("On-Device CPU Ranker");
+  const [aiFeedMessage, setAiFeedMessage] = useState("");
 
   // ... refs ...
   const bottomSheetRef =
@@ -184,6 +305,7 @@ export default function HomeScreen() {
   const restoreSearchAfterDetailsCloseRef = React.useRef(false);
   const homeRealtimeRefreshTimerRef =
     React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const homeLlmRequestIdRef = React.useRef(0);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
   );
@@ -493,6 +615,7 @@ export default function HomeScreen() {
   const fetchHomeData = async (showLoading = true) => {
     debugLog("🏠 fetchHomeData called, showLoading:", showLoading);
     if (showLoading) setLoading(true);
+    const llmRequestId = ++homeLlmRequestIdRef.current;
     try {
       // Fetch based on Role
       // If Owner, ONLY fetch groups (musicians)
@@ -796,72 +919,73 @@ export default function HomeScreen() {
       const shuffled = [...allItemsList].sort(() => Math.random() - 0.5);
       setRandomRecommendations(shuffled.slice(0, 20));
 
-      // === AI RECOMMENDATIONS - Fetch from RPC if user is logged in ===
+      // === AI RECOMMENDATIONS - On-device CPU ranking + optional local LLM rerank ===
       if (userId) {
         try {
-          debugLog("🤖 Fetching AI recommendations for user:", userId);
-          const { data: aiData, error: aiError } = await supabase.rpc(
-            "get_ai_recommendations",
-            {
-              p_user_id: userId,
-              p_limit: 20,
-            },
+          debugLog("🤖 Building on-device For You recommendations for user:", userId);
+          const [skillsResult, genresResult] = await Promise.all([
+            supabase.from("profile_skills").select("skill").eq("profile_id", userId),
+            supabase.from("profile_genres").select("genre").eq("profile_id", userId),
+          ]);
+
+          const profileSignals = {
+            skills: (skillsResult.data || [])
+              .map((row: any) => row.skill)
+              .filter((value: any) => typeof value === "string" && value.trim().length > 0),
+            genres: (genresResult.data || [])
+              .map((row: any) => row.genre)
+              .filter((value: any) => typeof value === "string" && value.trim().length > 0),
+          };
+
+          const localRankedItems = rankForYouOnDevice(
+            allItemsList,
+            profileSignals,
+            20,
           );
 
-          if (aiError) {
-            debugLog("⚠️ AI recommendations error:", aiError);
-            setAiRecommendations([]);
-          } else if (aiData && aiData.length > 0) {
-            // Normalize AI recommendations
-            const normalizedAi = aiData.map((item: any) => ({
-              id: item.id,
-              type: item.type,
-              name: item.name,
-              image: item.images?.[0] || null,
-              images: item.images || [],
-              rating: item.rating || 0,
-              review_count: item.review_count || 0,
-              rate:
-                item.rate?.toString() ||
-                item.hourly_rate?.toString() ||
-                item.budget?.toString(),
-              hourly_rate: item.hourly_rate?.toString(),
-              budget: item.budget?.toString(),
-              location: item.location || "",
-              genre: item.genre || "",
-              embedding: item.embedding,
-              created_at: item.created_at,
-              updated_at: item.updated_at,
-              owner_id: item.owner_id,
-              organizer_id: item.organizer_id,
-              similarity: item.similarity, // AI similarity score
-            }));
-            debugLog(
-              "🤖 AI recommendations loaded:",
-              normalizedAi.length,
-              "items",
-            );
-            debugLog(
-              "🤖 Top 3 AI matches:",
-              normalizedAi.slice(0, 3).map((i: any) => ({
-                name: i.name,
-                similarity: (i.similarity * 100).toFixed(1) + "%",
-              })),
-            );
-            setAiRecommendations(normalizedAi);
+          // Keep feed realtime: show local ranking immediately while LLM rerank runs.
+          setAiRecommendations(localRankedItems);
+          setAiFeedProvider("On-Device CPU Ranker");
+
+          const hasProfileSignals =
+            profileSignals.skills.length > 0 || profileSignals.genres.length > 0;
+
+          if (localRankedItems.length === 0) {
+            setAiFeedMessage("No listings available for ranking yet.");
+          } else if (hasProfileSignals) {
+            setAiFeedMessage("Personalized locally on your device CPU. No paid AI API used.");
           } else {
-            debugLog(
-              "🤖 No AI recommendations - user has no interest vector yet",
-            );
-            setAiRecommendations([]);
+            setAiFeedMessage("Ranked locally using popularity and freshness.");
           }
+
+          void (async () => {
+            const llmResult = await rerankHomeFeedWithLocalLLM({
+              candidates: localRankedItems,
+              profileSignals,
+              limit: 20,
+            });
+
+            if (llmRequestId !== homeLlmRequestIdRef.current) {
+              return;
+            }
+
+            if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
+              setAiRecommendations(llmResult.recommendations);
+              setAiFeedProvider(llmResult.aiProvider);
+              setAiFeedMessage(llmResult.message);
+            }
+          })();
         } catch (aiErr) {
-          debugLog("🤖 AI fetch error:", aiErr);
+          debugLog("🤖 On-device ranking error, using general fallback:", aiErr);
           setAiRecommendations([]);
+          setAiFeedProvider("On-Device CPU Ranker");
+          setAiFeedMessage("Local personalization is temporarily unavailable. Showing general picks.");
         }
       } else {
         debugLog("🤖 No user logged in - skipping AI recommendations");
         setAiRecommendations([]);
+        setAiFeedProvider("On-Device CPU Ranker");
+        setAiFeedMessage("");
       }
 
       // Set featured/discover - AI mode uses AI recommendations if available
@@ -1483,7 +1607,7 @@ export default function HomeScreen() {
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
               {aiModeEnabled
-                ? "AI-powered recommendations"
+                ? "On-device personalized recommendations"
                 : "Random selection"}
             </Text>
           </View>
@@ -2179,7 +2303,7 @@ export default function HomeScreen() {
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
               {aiModeEnabled
-                ? "Personalized picks based on your interests"
+                ? "Personalized picks reranked on-device in realtime"
                 : "Random suggestions for comparison"}
             </Text>
           </View>
@@ -2594,7 +2718,7 @@ export default function HomeScreen() {
                     }}
                   >
                     {aiModeEnabled
-                      ? `Personalized based on your interests${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ""}`
+                      ? `${aiFeedProvider}${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ""}`
                       : "Showing random listings for comparison"}
                   </Text>
                 </View>
@@ -2642,8 +2766,8 @@ export default function HomeScreen() {
                 }}
               >
                 {hasAiSimilarityMatches
-                  ? "Top Matches by AI Similarity"
-                  : "📊 Sorted by Popularity (No embeddings yet)"}
+                  ? `Top Matches (${aiFeedProvider})`
+                  : "Locally ranked by popularity and freshness"}
               </Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                 {aiPreviewItems.map((item) => (
@@ -2723,8 +2847,37 @@ export default function HomeScreen() {
                   flex: 1,
                 }}
               >
-                Start favoriting listings to build your interest profile. AI
-                will learn your preferences!
+                {aiFeedMessage || "Add profile skills and genres for stronger local ranking signals."}
+              </Text>
+            </View>
+          )}
+
+          {aiModeEnabled && aiFeedMessage.length > 0 && aiRecommendations.length > 0 && (
+            <View
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTopWidth: 1,
+                borderTopColor: isDark ? "#374151" : "#E5E7EB",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Ionicons
+                name="information-circle"
+                size={16}
+                color={colors.textSecondary}
+              />
+              <Text
+                style={{
+                  fontFamily: "Poppins_400Regular",
+                  fontSize: 11,
+                  color: colors.textSecondary,
+                  flex: 1,
+                }}
+              >
+                {aiFeedMessage}
               </Text>
             </View>
           )}
