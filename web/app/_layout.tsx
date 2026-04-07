@@ -59,38 +59,70 @@ function RootContent() {
     loading,
     subscriptionRequired,
     subscriptionChecked,
+    identityRequired,
+    identityChecked,
   } =
     useAuth();
   const segments = useSegments();
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
 
-  // Handle subscription gate for owners
+  // Handle global identity/subscription gates
   useEffect(() => {
     if (loading) return;
-    // Wait for subscription check to complete before making decisions
-    if (!subscriptionChecked) return;
+
+    if (session && (!subscriptionChecked || !identityChecked)) return;
+
+    const segmentStrings = segments.map((segment) => String(segment));
+    const currentScreen =
+      segmentStrings.length > 0
+        ? segmentStrings[segmentStrings.length - 1]
+        : "index";
+
+    const isScreenAllowed = (allowedScreens: string[]) => {
+      return (
+        allowedScreens.some((screen) => segmentStrings.includes(screen)) ||
+        allowedScreens.includes(currentScreen)
+      );
+    };
+
+    if (session && identityRequired) {
+      const identityAllowedScreens = [
+        "identity_verification",
+        "account_details",
+        "settings",
+        "wallet",
+        "subscription_required",
+        "payment-result",
+        "help_support",
+        "privacy_policy",
+        "terms_and_conditions",
+      ];
+
+      if (!isScreenAllowed(identityAllowedScreens)) {
+        console.log("🪪 Identity verification required, redirecting to verification screen");
+        router.replace("/identity_verification");
+      }
+      return;
+    }
 
     // If user is logged in and subscription is required
     if (session && subscriptionRequired) {
       // Allow access to certain screens even without subscription
       const allowedScreens = [
         "subscription_required",
+        "identity_verification",
+        "account_details",
         "payment-result",
         "settings",
+        "wallet",
         "help_support",
         "privacy_policy",
         "terms_and_conditions",
       ];
-      const segmentStrings = segments.map((segment) => String(segment));
-      // segments array can be empty on initial load or root
-      const currentScreen = segmentStrings.length > 0 ? segmentStrings[segmentStrings.length - 1] : "index";
 
       console.log(`🔒 Layout Check: Screen=${currentScreen}, Segments=${JSON.stringify(segments)}, SubRequired=${subscriptionRequired}`);
 
-      // Check if any part of the path is in allowed screens (better for nested routes)
-      const isAllowed =
-        allowedScreens.some((screen) => segmentStrings.includes(screen)) ||
-        allowedScreens.includes(currentScreen);
+      const isAllowed = isScreenAllowed(allowedScreens);
 
       if (!isAllowed) {
         console.log(
@@ -99,7 +131,15 @@ function RootContent() {
         router.replace("/subscription_required");
       }
     }
-  }, [session, subscriptionRequired, subscriptionChecked, loading, segments]);
+  }, [
+    session,
+    subscriptionRequired,
+    subscriptionChecked,
+    identityRequired,
+    identityChecked,
+    loading,
+    segments,
+  ]);
 
   // Handle deep links for payment redirects
   useEffect(() => {

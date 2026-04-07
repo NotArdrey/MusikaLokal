@@ -274,6 +274,8 @@ export default function HomeScreen() {
   const recentlyViewedSheetRef =
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const restoreSearchAfterDetailsCloseRef = React.useRef(false);
+  const homeRealtimeRefreshTimerRef =
+    React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
   );
@@ -452,34 +454,50 @@ export default function HomeScreen() {
   // Handler for realtime updates - defined before useEffect that uses it
   const handleRealtimeUpdate = useCallback(() => {
     debugLog("Realtime update received - refreshing home data...");
-    // Debounce or just call it? Basic call for now.
-    // False to silent refresh
-    fetchHomeData(false);
+    if (homeRealtimeRefreshTimerRef.current) return;
+
+    homeRealtimeRefreshTimerRef.current = setTimeout(() => {
+      homeRealtimeRefreshTimerRef.current = null;
+      // Silent refresh to keep UI stable during realtime bursts.
+      fetchHomeData(false);
+    }, 450);
   }, [userRole, userId]);
 
   // Realtime Updates
   useEffect(() => {
-    const channel = supabase
-      .channel("public:home_updates")
-      .on(
+    const channel = supabase.channel("public:home_updates");
+
+    const realtimeTables = [
+      "gigs",
+      "studios",
+      "groups",
+      "profiles",
+      "gig_applications",
+      "studio_promotions",
+      "studio_date_overrides",
+      "profile_skills",
+      "profile_genres",
+      "group_media",
+      "studio_media",
+      "gig_media",
+      "reviews",
+    ];
+
+    realtimeTables.forEach((table) => {
+      channel.on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "gigs" },
+        { event: "*", schema: "public", table },
         () => handleRealtimeUpdate(),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "studios" },
-        () => handleRealtimeUpdate(),
-      )
-      // Assuming 'groups' or 'profiles' is the underlying table. Using 'groups' based on views.
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "groups" },
-        () => handleRealtimeUpdate(),
-      )
-      .subscribe();
+      );
+    });
+
+    channel.subscribe();
 
     return () => {
+      if (homeRealtimeRefreshTimerRef.current) {
+        clearTimeout(homeRealtimeRefreshTimerRef.current);
+        homeRealtimeRefreshTimerRef.current = null;
+      }
       supabase.removeChannel(channel);
     };
   }, [handleRealtimeUpdate]);

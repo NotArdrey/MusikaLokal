@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -112,6 +112,8 @@ const resolveStudioTypeRows = (value: unknown): ("Rehearsal" | "Recording")[] =>
 export default function AddStudioScreen() {
   const { colors, isDark } = useTheme();
   const { isSystemLocked, showLockAlert } = useAuth();
+  const params = useLocalSearchParams<{ refresh?: string }>();
+  const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
   const [step, setStep] = useState(1);
   const [studioName, setStudioName] = useState("");
   const [description, setDescription] = useState("");
@@ -353,7 +355,7 @@ export default function AddStudioScreen() {
   // Role-based access control
   useEffect(() => {
     checkAuthorization();
-  }, []);
+  }, [refreshKey]);
 
   const checkAuthorization = async () => {
     try {

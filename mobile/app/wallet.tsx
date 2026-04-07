@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -65,6 +65,8 @@ interface WithdrawalErrorPayload {
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
   const router = useRouter();
+  const params = useLocalSearchParams<{ refresh?: string }>();
+  const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
   const [modalVisible, setModalVisible] = useState(false);
   const [subscriptionModalVisible, setSubscriptionModalVisible] = useState(false);
   const [cancelSubscriptionModalVisible, setCancelSubscriptionModalVisible] = useState(false);
@@ -437,7 +439,39 @@ export default function WalletScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchWallet();
-    }, [])
+      let isActive = true;
+      let walletChannel: ReturnType<typeof supabase.channel> | null = null;
+
+      const setupWalletRealtime = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!isActive || !user) return;
+
+        walletChannel = supabase
+          .channel(`wallet-realtime-${user.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'wallets',
+              filter: `user_id=eq.${user.id}`,
+            },
+            () => {
+              fetchWallet();
+            },
+          )
+          .subscribe();
+      };
+
+      void setupWalletRealtime();
+
+      return () => {
+        isActive = false;
+        if (walletChannel) {
+          void supabase.removeChannel(walletChannel);
+        }
+      };
+    }, [walletRefreshKey])
   );
 
   const onRefresh = () => {

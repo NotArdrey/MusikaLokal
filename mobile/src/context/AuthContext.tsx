@@ -39,6 +39,10 @@ type AuthContextType = {
   subscriptionRequired: boolean;
   subscriptionChecked: boolean;
   checkSubscription: () => Promise<void>;
+  identityStatus: string | null;
+  identityRequired: boolean;
+  identityChecked: boolean;
+  checkIdentityStatus: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -58,6 +62,10 @@ const AuthContext = createContext<AuthContextType>({
   subscriptionRequired: false,
   subscriptionChecked: false,
   checkSubscription: async () => { },
+  identityStatus: null,
+  identityRequired: false,
+  identityChecked: false,
+  checkIdentityStatus: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -110,6 +118,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
   const [subscriptionRequired, setSubscriptionRequired] = useState(false);
   const [subscriptionChecked, setSubscriptionChecked] = useState(false);
+  const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null);
+  const [identityStatus, setIdentityStatus] = useState<string | null>(null);
+  const [identityRequired, setIdentityRequired] = useState(false);
+  const [identityChecked, setIdentityChecked] = useState(false);
+  const [identityExpiresAt, setIdentityExpiresAt] = useState<string | null>(null);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -122,6 +135,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     message: "",
   });
   const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const profileRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const subscriptionExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const identityExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showAlert = useCallback(
     (
@@ -154,6 +170,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (!session?.user?.id) {
       setSubscriptionStatus(null);
       setSubscriptionRequired(false);
+      setSubscriptionExpiresAt(null);
       setSubscriptionChecked(true);
       return;
     }
@@ -179,10 +196,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             console.log("📋 Profile not found, metadata role requires subscription:", metadataRole);
             setSubscriptionStatus(null);
             setSubscriptionRequired(true);
+            setSubscriptionExpiresAt(null);
+          } else {
+            setSubscriptionStatus(null);
+            setSubscriptionRequired(false);
+            setSubscriptionExpiresAt(null);
           }
         } else {
           // Other errors (network, etc) - don't lock out user, keep subscriptionRequired false
           console.log("📋 Non-critical error, not locking user:", error.code);
+        }
+        if (error.code !== "PGRST116") {
+          setSubscriptionExpiresAt(null);
         }
         setSubscriptionChecked(true);
         return;
@@ -205,6 +230,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         setSubscriptionStatus(isActive ? "active" : status);
         setSubscriptionRequired(!isActive);
+          setSubscriptionExpiresAt(expiresAt || null);
 
         console.log("📋 Subscription check:", {
           role: profile?.role,
@@ -218,6 +244,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // Musicians don't need subscription
         setSubscriptionStatus(null);
         setSubscriptionRequired(false);
+        setSubscriptionExpiresAt(null);
         setSubscriptionChecked(true);
       }
     } catch (e: any) {
@@ -229,12 +256,95 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           console.log("📋 Exception (profile not found), metadata role requires subscription:", metadataRole);
           setSubscriptionStatus(null);
           setSubscriptionRequired(true);
+          setSubscriptionExpiresAt(null);
+        } else {
+          setSubscriptionStatus(null);
+          setSubscriptionRequired(false);
+          setSubscriptionExpiresAt(null);
         }
       } else {
         // General error - don't lock out user
         console.log("📋 General exception, not locking user");
+        setSubscriptionExpiresAt(null);
       }
       setSubscriptionChecked(true);
+    }
+  }, [session?.user?.id]);
+
+  const checkIdentityStatus = useCallback(async () => {
+    if (!session?.user?.id) {
+      setIdentityStatus(null);
+      setIdentityRequired(false);
+      setIdentityExpiresAt(null);
+      setIdentityChecked(true);
+      return;
+    }
+
+    setIdentityRequired(false);
+
+    try {
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("is_verified, verification_status, id_document_expiry")
+        .eq("id", session.user.id)
+        .maybeSingle();
+
+      if (error) {
+        console.log("Error checking identity status:", error);
+
+        if (error.code === "PGRST116") {
+          const metadataVerified = session.user?.user_metadata?.is_verified;
+          const needsVerification = metadataVerified !== true;
+          setIdentityStatus(needsVerification ? "UNVERIFIED" : null);
+          setIdentityRequired(needsVerification);
+          setIdentityExpiresAt(null);
+        } else {
+          setIdentityStatus(null);
+          setIdentityRequired(false);
+          setIdentityExpiresAt(null);
+        }
+
+        setIdentityChecked(true);
+        return;
+      }
+
+      const normalizedStatus =
+        typeof profile?.verification_status === "string"
+          ? profile.verification_status.toUpperCase()
+          : null;
+
+      const expiryIso = profile?.id_document_expiry || null;
+      let isExpired = false;
+      if (expiryIso) {
+        const parsed = new Date(expiryIso);
+        if (!Number.isNaN(parsed.getTime())) {
+          isExpired = parsed <= new Date();
+        }
+      }
+
+      const verified = profile?.is_verified === true;
+      const needsVerification = !verified || isExpired;
+
+      setIdentityStatus(
+        isExpired ? "EXPIRED" : normalizedStatus || (verified ? "APPROVED" : "UNVERIFIED"),
+      );
+      setIdentityRequired(needsVerification);
+      setIdentityExpiresAt(expiryIso);
+      setIdentityChecked(true);
+
+      console.log("🪪 Identity check:", {
+        verified,
+        status: normalizedStatus,
+        expiryIso,
+        isExpired,
+        required: needsVerification,
+      });
+    } catch (e) {
+      console.log("Error in checkIdentityStatus:", e);
+      setIdentityStatus(null);
+      setIdentityRequired(false);
+      setIdentityExpiresAt(null);
+      setIdentityChecked(true);
     }
   }, [session?.user?.id]);
 
@@ -350,6 +460,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSubscriptionStatus(null);
       setSubscriptionRequired(false);
       setSubscriptionChecked(true);
+      setSubscriptionExpiresAt(null);
+      setIdentityStatus(null);
+      setIdentityRequired(false);
+      setIdentityChecked(true);
+      setIdentityExpiresAt(null);
       setLoading(false);
     };
 
@@ -417,6 +532,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSubscriptionStatus(null);
         setSubscriptionRequired(false);
         setSubscriptionChecked(true);
+        setSubscriptionExpiresAt(null);
+        setIdentityStatus(null);
+        setIdentityRequired(false);
+        setIdentityChecked(true);
+        setIdentityExpiresAt(null);
         setLoading(false);
         return;
       }
@@ -444,6 +564,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSubscriptionStatus(null);
         setSubscriptionRequired(false);
         setSubscriptionChecked(true);
+        setSubscriptionExpiresAt(null);
+        setIdentityStatus(null);
+        setIdentityRequired(false);
+        setIdentityChecked(true);
+        setIdentityExpiresAt(null);
       }
       setLoading(false);
     });
@@ -517,8 +642,161 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       checkSubscription();
     } else {
       setSubscriptionChecked(true); // No session, no check needed
+      setSubscriptionExpiresAt(null);
     }
   }, [session?.user?.id, checkSubscription]);
+
+  // Check identity verification and expiry when session changes
+  useEffect(() => {
+    if (session?.user?.id) {
+      setIdentityChecked(false);
+      checkIdentityStatus();
+    } else {
+      setIdentityChecked(true);
+      setIdentityStatus(null);
+      setIdentityRequired(false);
+      setIdentityExpiresAt(null);
+    }
+  }, [session?.user?.id, checkIdentityStatus]);
+
+  // Re-check subscription, identity, and lock state whenever the profile row changes.
+  useEffect(() => {
+    const activeUserId = session?.user?.id;
+
+    if (!activeUserId) {
+      if (profileRealtimeChannelRef.current) {
+        supabase.removeChannel(profileRealtimeChannelRef.current);
+        profileRealtimeChannelRef.current = null;
+      }
+      return;
+    }
+
+    const channel = supabase
+      .channel(`auth-profile:${activeUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profiles",
+          filter: `id=eq.${activeUserId}`,
+        },
+        async () => {
+          await Promise.all([
+            checkSubscription(),
+            checkIdentityStatus(),
+            checkSystemLock(),
+          ]);
+        },
+      )
+      .subscribe();
+
+    profileRealtimeChannelRef.current = channel;
+
+    return () => {
+      supabase.removeChannel(channel);
+      if (profileRealtimeChannelRef.current === channel) {
+        profileRealtimeChannelRef.current = null;
+      }
+    };
+  }, [session?.user?.id, checkSubscription, checkIdentityStatus, checkSystemLock]);
+
+  // Re-check on app foreground to catch expiry transitions after backgrounding.
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const appStateSub = AppState.addEventListener("change", (nextState: AppStateStatus) => {
+      if (nextState === "active") {
+        void Promise.all([
+          checkSubscription(),
+          checkIdentityStatus(),
+          checkSystemLock(),
+        ]);
+      }
+    });
+
+    return () => {
+      appStateSub.remove();
+    };
+  }, [session?.user?.id, checkSubscription, checkIdentityStatus, checkSystemLock]);
+
+  // Trigger re-check exactly when subscription expiry timestamp is reached.
+  useEffect(() => {
+    if (subscriptionExpiryTimerRef.current) {
+      clearTimeout(subscriptionExpiryTimerRef.current);
+      subscriptionExpiryTimerRef.current = null;
+    }
+
+    if (!subscriptionExpiresAt || !session?.user?.id) {
+      return;
+    }
+
+    const expiryDate = new Date(subscriptionExpiresAt);
+    if (Number.isNaN(expiryDate.getTime())) {
+      return;
+    }
+
+    const schedule = () => {
+      const remainingMs = expiryDate.getTime() - Date.now() + 1000;
+      if (remainingMs <= 0) {
+        void checkSubscription();
+        return;
+      }
+
+      const nextDelay = Math.min(remainingMs, 2_147_483_647);
+      subscriptionExpiryTimerRef.current = setTimeout(() => {
+        schedule();
+      }, nextDelay);
+    };
+
+    schedule();
+
+    return () => {
+      if (subscriptionExpiryTimerRef.current) {
+        clearTimeout(subscriptionExpiryTimerRef.current);
+        subscriptionExpiryTimerRef.current = null;
+      }
+    };
+  }, [subscriptionExpiresAt, session?.user?.id, checkSubscription]);
+
+  // Trigger re-check exactly when identity document expiry timestamp is reached.
+  useEffect(() => {
+    if (identityExpiryTimerRef.current) {
+      clearTimeout(identityExpiryTimerRef.current);
+      identityExpiryTimerRef.current = null;
+    }
+
+    if (!identityExpiresAt || !session?.user?.id) {
+      return;
+    }
+
+    const expiryDate = new Date(identityExpiresAt);
+    if (Number.isNaN(expiryDate.getTime())) {
+      return;
+    }
+
+    const schedule = () => {
+      const remainingMs = expiryDate.getTime() - Date.now() + 1000;
+      if (remainingMs <= 0) {
+        void checkIdentityStatus();
+        return;
+      }
+
+      const nextDelay = Math.min(remainingMs, 2_147_483_647);
+      identityExpiryTimerRef.current = setTimeout(() => {
+        schedule();
+      }, nextDelay);
+    };
+
+    schedule();
+
+    return () => {
+      if (identityExpiryTimerRef.current) {
+        clearTimeout(identityExpiryTimerRef.current);
+        identityExpiryTimerRef.current = null;
+      }
+    };
+  }, [identityExpiresAt, session?.user?.id, checkIdentityStatus]);
 
   const checkAdmin = async (userId: string) => {
     // Optional: If you have an 'admin' role in your profiles table or metadata
@@ -572,6 +850,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         subscriptionRequired,
         subscriptionChecked,
         checkSubscription,
+        identityStatus,
+        identityRequired,
+        identityChecked,
+        checkIdentityStatus,
       }}
     >
       {children}

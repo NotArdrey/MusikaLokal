@@ -39,6 +39,31 @@ export default function AccountDetailsScreen() {
     }
   };
 
+  const getIdentitySubtitle = () => {
+    if (!profile) return 'Status unavailable';
+
+    const expiryRaw = profile?.id_document_expiry;
+    const expiryDate = expiryRaw ? new Date(expiryRaw) : null;
+    const hasValidExpiry = !!expiryDate && !Number.isNaN(expiryDate.getTime());
+    const isExpired = !!expiryDate && hasValidExpiry && expiryDate <= new Date();
+
+    if (isExpired && expiryDate) {
+      return `Expired on ${expiryDate.toLocaleDateString()}`;
+    }
+
+    if (profile?.is_verified) {
+      if (hasValidExpiry && expiryDate) {
+        return `Verified • Expires ${expiryDate.toLocaleDateString()}`;
+      }
+      return 'Verified';
+    }
+
+    const status = typeof profile?.verification_status === 'string'
+      ? profile.verification_status.replace(/_/g, ' ')
+      : '';
+    return status ? `Status: ${status}` : 'Not verified';
+  };
+
   const renderSection = (title: string, children: React.ReactNode) => (
     <View style={styles.sectionContainer}>
       <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
@@ -114,7 +139,8 @@ export default function AccountDetailsScreen() {
           {renderSection('Security', (
             <>
               {renderItem('Change Email', 'Update your email address', () => router.push('/change_email'), false, <Ionicons name="at-outline" size={16} color={colors.text} />)}
-              {renderItem('Change Password', 'Update your password', () => router.push('/change_password'), true, <Ionicons name="lock-closed-outline" size={16} color={colors.text} />)}
+              {renderItem('Change Password', 'Update your password', () => router.push('/change_password'), false, <Ionicons name="lock-closed-outline" size={16} color={colors.text} />)}
+              {renderItem('Identity Verification', getIdentitySubtitle(), () => router.push('/identity_verification'), true, <Ionicons name="card-outline" size={16} color={colors.text} />)}
             </>
           ))}
 

@@ -490,24 +490,32 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     // Realtime Search Updates
     useEffect(() => {
-      const channel = supabase
-        .channel("public:search_updates")
-        .on(
+      const channel = supabase.channel("public:search_updates");
+
+      const realtimeTables = [
+        "gigs",
+        "studios",
+        "groups",
+        "profiles",
+        "studio_promotions",
+        "studio_date_overrides",
+        "profile_skills",
+        "profile_genres",
+        "group_media",
+        "studio_media",
+        "gig_media",
+        "reviews",
+      ];
+
+      realtimeTables.forEach((table) => {
+        channel.on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "gigs" },
+          { event: "*", schema: "public", table },
           () => setRefreshTrigger((prev) => prev + 1),
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "studios" },
-          () => setRefreshTrigger((prev) => prev + 1),
-        )
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: "groups" },
-          () => setRefreshTrigger((prev) => prev + 1),
-        )
-        .subscribe();
+        );
+      });
+
+      channel.subscribe();
 
       return () => {
         supabase.removeChannel(channel);

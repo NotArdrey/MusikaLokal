@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -14,6 +14,8 @@ import { useTheme } from '../src/context/ThemeContext';
 export default function MyGroupScreen() {
     const { colors, isDark } = useTheme();
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+    const params = useLocalSearchParams<{ refresh?: string }>();
+    const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const [modalVisible, setModalVisible] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [selectedName, setSelectedName] = useState('');
@@ -99,10 +101,17 @@ export default function MyGroupScreen() {
 
     useFocusEffect(
         useCallback(() => {
-            if (isAuthenticated && userId) {
+            if (!isAuthenticated || !userId) return;
+
+            fetchGroups();
+            const refreshInterval = setInterval(() => {
                 fetchGroups();
-            }
-        }, [isAuthenticated, userId])
+            }, 30000);
+
+            return () => {
+                clearInterval(refreshInterval);
+            };
+        }, [isAuthenticated, userId, refreshKey])
     );
 
     const onRefresh = () => {

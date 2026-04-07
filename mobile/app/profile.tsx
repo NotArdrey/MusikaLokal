@@ -292,6 +292,7 @@ export default function ProfileScreen() {
   const MENU_ITEMS = [
     { label: "Edit Profile", icon: "person-outline", route: "/edit_profile" },
     { label: "Wallet", icon: "wallet-outline", route: "/wallet" },
+    { label: "Identity Verification", icon: "card-outline", route: "/identity_verification" },
     { label: "Settings", icon: "settings-outline", route: "/settings" },
   ];
 

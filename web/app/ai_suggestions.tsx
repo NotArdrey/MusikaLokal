@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -36,6 +37,8 @@ export default function AiSuggestionsScreen() {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
+    const params = useLocalSearchParams<{ refresh?: string }>();
+    const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const { width: winWidth } = useWindowDimensions();
     const isWebDesktop = Platform.OS === 'web' && winWidth >= 768;
 
@@ -61,7 +64,7 @@ export default function AiSuggestionsScreen() {
     // Load user profile on mount
     useEffect(() => {
         loadUserProfile();
-    }, []);
+    }, [refreshKey]);
 
     const loadUserProfile = async () => {
         try {
