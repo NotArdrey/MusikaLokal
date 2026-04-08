@@ -28,6 +28,7 @@ interface GigApplyTabProps {
   cvFile: any;
   cvUrl: string;
   setCvFile: (file: any) => void;
+  setCvUrl: (value: string) => void;
   videoUrl: string;
   setVideoUrl: (value: string) => void;
   isSubmittingApplication: boolean;
@@ -56,6 +57,7 @@ const GigApplyTab = ({
   cvFile,
   cvUrl,
   setCvFile,
+  setCvUrl,
   videoUrl,
   setVideoUrl,
   isSubmittingApplication,
@@ -191,6 +193,43 @@ const GigApplyTab = ({
     groupAlreadyApplied ||
     isFormIncomplete;
 
+  const handleAutoFillTestData = () => {
+    if (!pitchMessage.trim()) {
+      setPitchMessage(
+        isGroupApplicationFlow
+          ? "Hi! I would love to join and contribute consistently to your group."
+          : "Hi! I am a strong fit for this event and available for all required schedules.",
+      );
+    }
+
+    if (!videoUrl.trim()) {
+      setVideoUrl("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
+    }
+
+    if (!cvFile && !cvUrl) {
+      setCvUrl(
+        "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+      );
+    }
+
+    const enabledSlotTypes = getEnabledSlotTypes();
+    if (
+      enabledSlotTypes.length > 0 &&
+      (!selectedSlotType || !enabledSlotTypes.includes(selectedSlotType))
+    ) {
+      setSelectedSlotType(enabledSlotTypes[0]);
+    }
+
+    if (
+      !isGroupApplicationFlow &&
+      musicianTypeRequired === "group" &&
+      !selectedGroupId &&
+      filteredGroups.length > 0
+    ) {
+      setSelectedGroupId(filteredGroups[0].id);
+    }
+  };
+
   return (
     <View style={styles.tabContent}>
       {isBlocked && (
@@ -221,6 +260,34 @@ const GigApplyTab = ({
           </View>
         </View>
       )}
+
+      <TouchableOpacity activeOpacity={1}
+        onPress={handleAutoFillTestData}
+        style={{
+          alignSelf: "flex-start",
+          flexDirection: "row",
+          alignItems: "center",
+          backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
+          borderWidth: 1,
+          borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
+          borderRadius: 999,
+          paddingHorizontal: 14,
+          paddingVertical: 8,
+          marginBottom: 16,
+          gap: 8,
+        }}
+      >
+        <Ionicons name="flask-outline" size={15} color={colors.primary} />
+        <Text
+          style={{
+            color: colors.primary,
+            fontFamily: "Poppins_600SemiBold",
+            fontSize: 12,
+          }}
+        >
+          Auto Fill Test Data
+        </Text>
+      </TouchableOpacity>
 
       {!isGroupApplicationFlow && (() => {
         const canApplyAsSolo =

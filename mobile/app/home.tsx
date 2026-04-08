@@ -4,16 +4,16 @@ import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Dimensions,
-    InteractionManager,
-    RefreshControl,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Dimensions,
+  InteractionManager,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
@@ -27,6 +27,7 @@ import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import { useTheme } from "../src/context/ThemeContext";
 import { rerankHomeFeedWithLocalLLM } from "../src/services/offlineLlmEnhancer";
+import { startBackgroundPreparation, isModelPreparing, onModelReady } from "../src/services/musikaLlmAdapter";
 
 const { width, height } = Dimensions.get("window");
 
@@ -51,7 +52,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../src/context/AuthContext";
 
-const debugLog = (..._args: unknown[]) => {};
+const debugLog = (..._args: unknown[]) => { };
 
 const clampValue = (value: number, min = 0, max = 1) => {
   return Math.max(min, Math.min(max, value));
@@ -261,11 +262,57 @@ export default function HomeScreen() {
 
   // AI Recommendation Mode
   const aiModeEnabled = true;
+  const strictLlmModeForAiPages = true;
   const showForYouAiCard = false;
   const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
   const [randomRecommendations, setRandomRecommendations] = useState<any[]>([]);
-  const [aiFeedProvider, setAiFeedProvider] = useState("On-Device CPU Ranker");
+  const [aiFeedProvider, setAiFeedProvider] = useState("On-Device LLM (Required)");
   const [aiFeedMessage, setAiFeedMessage] = useState("");
+  const [isOnDeviceLlmReady, setIsOnDeviceLlmReady] = useState(false);
+  const [isHomeLlmRerankPending, setIsHomeLlmRerankPending] = useState(false);
+
+  const homeAiStatusLabel = useMemo(() => {
+    if (!userId) return "AI status: Sign in required";
+
+    const providerText = aiFeedProvider || "On-Device LLM (Required)";
+    const hasResults = aiRecommendations.length > 0;
+    const providerUsesLlm = providerText.toLowerCase().includes("llm");
+    const llmActive = providerUsesLlm && hasResults;
+
+    if (llmActive) {
+      return `AI status: Working (${providerText})`;
+    }
+
+    if (isModelPreparing()) {
+      return "AI status: Downloading LLM model...";
+    }
+
+    if (isOnDeviceLlmReady && hasResults) {
+      return providerUsesLlm
+        ? `AI status: Working (${providerText})`
+        : `AI status: On-device LLM ready (${providerText} feed active)`;
+    }
+
+    if (isOnDeviceLlmReady) {
+      return "AI status: On-device LLM ready";
+    }
+
+    if (aiFeedMessage && aiFeedMessage.trim().length > 0) {
+      return `AI status: ${aiFeedMessage}`;
+    }
+
+    if (hasResults) {
+      return `AI status: Working (${providerText})`;
+    }
+
+    return "AI status: Initializing...";
+  }, [
+    userId,
+    aiFeedProvider,
+    aiFeedMessage,
+    aiRecommendations.length,
+    isOnDeviceLlmReady,
+  ]);
 
   // ... refs ...
   const bottomSheetRef =
@@ -277,7 +324,9 @@ export default function HomeScreen() {
   const restoreSearchAfterDetailsCloseRef = React.useRef(false);
   const homeRealtimeRefreshTimerRef =
     React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const homeDataFetchInFlightRef = React.useRef(false);
   const homeLlmRequestIdRef = React.useRef(0);
+  const homeLlmRerankInFlightRef = React.useRef(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
   );
@@ -408,6 +457,49 @@ export default function HomeScreen() {
     }
   }, [aiRecommendations, randomRecommendations]);
 
+  useEffect(() => {
+    if (!userId) return;
+
+    const providerText = aiFeedProvider || "On-Device LLM (Required)";
+    const providerUsesLlm = providerText.toLowerCase().includes("llm");
+    const llmFeedActive = providerUsesLlm && aiRecommendations.length > 0;
+    const llmActive = isOnDeviceLlmReady || llmFeedActive;
+
+    console.log("[HOME_AI_STATUS]", {
+      provider: providerText,
+      picks: aiRecommendations.length,
+      llmActive,
+      llmFeedActive,
+      llmFeedPending: isHomeLlmRerankPending,
+      llmReady: isOnDeviceLlmReady,
+      message: aiFeedMessage || "",
+    });
+  }, [
+    userId,
+    aiFeedProvider,
+    aiFeedMessage,
+    aiRecommendations.length,
+    isHomeLlmRerankPending,
+    isOnDeviceLlmReady,
+  ]);
+
+  // Kick off LLM model download + initialization in background as early
+  // as possible so it's ready by the time AI features are needed.
+  useEffect(() => {
+    startBackgroundPreparation();
+  }, []);
+
+  // Re-fetch home feed AI recommendations once the on-device LLM becomes ready.
+  const fetchHomeDataRef = React.useRef<((showLoading?: boolean) => Promise<void>) | null>(null);
+  useEffect(() => {
+    return onModelReady(() => {
+      setIsOnDeviceLlmReady(true);
+      if (!homeDataFetchInFlightRef.current) {
+        fetchHomeDataRef.current?.(false);
+      }
+    });
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       debugLog("useFocusEffect triggered, userRole:", userRole);
@@ -423,7 +515,7 @@ export default function HomeScreen() {
       // Load which New Arrivals have already been viewed
       void AsyncStorage.getItem('viewed_new_arrivals').then(json => {
         if (json) setViewedNewArrivals(new Set(JSON.parse(json)));
-      }).catch(() => {});
+      }).catch(() => { });
 
       const reopenListingId = Array.isArray(params.reopenListingId)
         ? params.reopenListingId[0]
@@ -597,8 +689,8 @@ export default function HomeScreen() {
 
   const fetchHomeData = async (showLoading = true) => {
     debugLog("fetchHomeData called, showLoading:", showLoading);
+    homeDataFetchInFlightRef.current = true;
     if (showLoading) setLoading(true);
-    const llmRequestId = ++homeLlmRequestIdRef.current;
     try {
       // Fetch based on Role
       // If Owner, ONLY fetch groups (musicians)
@@ -913,7 +1005,7 @@ export default function HomeScreen() {
       const shuffled = [...allItemsList].sort(() => Math.random() - 0.5);
       setRandomRecommendations(shuffled.slice(0, 20));
 
-      // === AI RECOMMENDATIONS - On-device CPU ranking (free, no paid AI API) ===
+      // === AI RECOMMENDATIONS - Prefer on-device LLM, fallback to on-device CPU ranking ===
       if (userId) {
         try {
           debugLog("Building on-device For You recommendations for user:", userId);
@@ -935,49 +1027,87 @@ export default function HomeScreen() {
             profileSignals,
             20,
           );
-
-          // Keep feed realtime: show local ranking immediately while LLM rerank runs.
-          setAiRecommendations(localRankedItems);
-          setAiFeedProvider("On-Device CPU Ranker");
-
           const hasProfileSignals =
             profileSignals.skills.length > 0 || profileSignals.genres.length > 0;
 
+          setAiRecommendations([]);
+          setAiFeedProvider("On-Device LLM (Required)");
           if (localRankedItems.length === 0) {
-            setAiFeedMessage("No listings available for ranking yet.");
+            setAiFeedMessage("No listings available for LLM feed ranking yet.");
+          } else if (homeLlmRerankInFlightRef.current) {
+            setAiFeedMessage("On-device LLM rerank is already running for Home feed.");
+          } else if (isOnDeviceLlmReady) {
+            setAiFeedMessage("On-device LLM rerank is running for Home feed.");
           } else if (hasProfileSignals) {
-            setAiFeedMessage("Personalized locally on your phone CPU. No paid AI API used.");
+            setAiFeedMessage("Preparing on-device LLM feed for your profile.");
           } else {
-            setAiFeedMessage("Ranked locally on your phone CPU using popularity and freshness.");
+            setAiFeedMessage("Preparing on-device LLM feed.");
           }
 
+          if (homeLlmRerankInFlightRef.current) {
+            return;
+          }
+
+          const llmRequestId = ++homeLlmRequestIdRef.current;
+          homeLlmRerankInFlightRef.current = true;
+          setIsHomeLlmRerankPending(true);
+
           void (async () => {
-            const llmResult = await rerankHomeFeedWithLocalLLM({
-              candidates: localRankedItems,
-              profileSignals,
-              limit: 20,
-            });
+            try {
+              const llmResult = await rerankHomeFeedWithLocalLLM({
+                candidates: localRankedItems,
+                profileSignals,
+                limit: 20,
+              });
 
-            if (llmRequestId !== homeLlmRequestIdRef.current) {
-              return;
-            }
+              if (llmRequestId !== homeLlmRequestIdRef.current) {
+                return;
+              }
 
-            if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
-              setAiRecommendations(llmResult.recommendations);
-              setAiFeedProvider(llmResult.aiProvider);
-              setAiFeedMessage(llmResult.message);
+              if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
+                setAiRecommendations(llmResult.recommendations);
+                setAiFeedProvider(llmResult.aiProvider || "On-Device LLM");
+                setAiFeedMessage(
+                  llmResult.message ||
+                  "Realtime For You feed reranked by on-device LLM.",
+                );
+                return;
+              }
+
+              if (strictLlmModeForAiPages) {
+                setAiRecommendations([]);
+                setAiFeedProvider("On-Device LLM (Required)");
+                setAiFeedMessage(
+                  llmResult.message ||
+                  "On-device LLM is required for Home AI mode on this build.",
+                );
+                return;
+              }
+
+              if (llmResult.message && llmResult.message.trim().length > 0) {
+                setAiFeedMessage(llmResult.message);
+              }
+            } finally {
+              if (llmRequestId === homeLlmRequestIdRef.current) {
+                homeLlmRerankInFlightRef.current = false;
+                setIsHomeLlmRerankPending(false);
+              }
             }
           })();
         } catch (aiErr) {
-          debugLog("On-device ranking error, using general fallback:", aiErr);
+          debugLog("On-device ranking error:", aiErr);
           setAiRecommendations([]);
-          setAiFeedProvider("On-Device CPU Ranker");
-          setAiFeedMessage("Local personalization is temporarily unavailable. Showing general picks.");
+          setAiFeedProvider("On-Device LLM (Required)");
+          setAiFeedMessage(
+            strictLlmModeForAiPages
+              ? "Home AI mode requires on-device LLM runtime/model on this build."
+              : "Local personalization is temporarily unavailable. Showing general picks.",
+          );
         }
       } else {
         debugLog("No user logged in - skipping AI recommendations");
         setAiRecommendations([]);
-        setAiFeedProvider("On-Device CPU Ranker");
+        setAiFeedProvider("On-Device LLM (Required)");
         setAiFeedMessage("");
       }
 
@@ -989,9 +1119,11 @@ export default function HomeScreen() {
     } catch (e) {
       debugLog("Error fetching home feed:", e);
     } finally {
+      homeDataFetchInFlightRef.current = false;
       setLoading(false);
     }
   };
+  fetchHomeDataRef.current = fetchHomeData;
 
   const handleCardPress = async (item: any) => {
     debugLog("=== handleCardPress called ===");
@@ -1008,7 +1140,7 @@ export default function HomeScreen() {
       setViewedNewArrivals(prev => {
         const next = new Set(prev);
         next.add(item.id);
-        AsyncStorage.setItem('viewed_new_arrivals', JSON.stringify([...next])).catch(() => {});
+        AsyncStorage.setItem('viewed_new_arrivals', JSON.stringify([...next])).catch(() => { });
         return next;
       });
     }
@@ -1315,7 +1447,7 @@ export default function HomeScreen() {
                   ? `${formattedStartTime} - ${formattedEndTime}`
                   : formattedStartTime
                     ? formattedStartTime
-                  : "Time TBA",
+                    : "Time TBA",
               location: gig.location || "Location TBA",
               image: gig.images?.[0] || null,
               budget: gig.budget,
@@ -1434,7 +1566,7 @@ export default function HomeScreen() {
                   ? `${formattedStartTime} - ${formattedEndTime}`
                   : formattedStartTime
                     ? formattedStartTime
-                  : "Time TBA",
+                    : "Time TBA",
               location: studio?.address || "Address TBA",
               image: studio?.images?.[0] || null,
               price: booking.final_price || booking.total_price,
@@ -1921,117 +2053,117 @@ export default function HomeScreen() {
                   { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
                 ]}
               >
-              {/* Image Section */}
-              <View style={styles.newArrivalImageContainer}>
-                {((item.images && item.images.length > 0) || item.image) ? (
-                  <AutoCardImage
-                    image={item.image}
-                    images={item.images}
-                    style={styles.newArrivalImage}
-                    width={560}
-                    height={280}
-                    cacheVersion={item.updated_at || item.created_at || item.id}
-                  />
-                ) : (
+                {/* Image Section */}
+                <View style={styles.newArrivalImageContainer}>
+                  {((item.images && item.images.length > 0) || item.image) ? (
+                    <AutoCardImage
+                      image={item.image}
+                      images={item.images}
+                      style={styles.newArrivalImage}
+                      width={560}
+                      height={280}
+                      cacheVersion={item.updated_at || item.created_at || item.id}
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.newArrivalImagePlaceholder,
+                        { backgroundColor: colors.primary + "20" },
+                      ]}
+                    >
+                      <Ionicons
+                        name={
+                          item.type === "Gig"
+                            ? "musical-notes"
+                            : item.type === "Studio"
+                              ? "business"
+                              : "people"
+                        }
+                        size={32}
+                        color={colors.primary}
+                      />
+                    </View>
+                  )}
+                  {/* Type Badge */}
                   <View
                     style={[
-                      styles.newArrivalImagePlaceholder,
-                      { backgroundColor: colors.primary + "20" },
+                      styles.newArrivalTypeBadge,
+                      { backgroundColor: getTypeBadgeColor(item.type) },
                     ]}
                   >
-                    <Ionicons
-                      name={
-                        item.type === "Gig"
-                          ? "musical-notes"
-                          : item.type === "Studio"
-                            ? "business"
-                            : "people"
-                      }
-                      size={32}
-                      color={colors.primary}
-                    />
-                  </View>
-                )}
-                {/* Type Badge */}
-                <View
-                  style={[
-                    styles.newArrivalTypeBadge,
-                    { backgroundColor: getTypeBadgeColor(item.type) },
-                  ]}
-                >
-                  <Text style={styles.newArrivalTypeBadgeText}>
-                    {item.type}
-                  </Text>
-                </View>
-                {/* NEW Dot Badge – hidden once the listing has been viewed */}
-                {!viewedNewArrivals.has(item.id) && (
-                  <View style={styles.newArrivalNewBadge}>
-                    <View style={styles.newArrivalNewDot} />
-                    <Text style={styles.newArrivalNewBadgeText}>NEW</Text>
-                  </View>
-                )}
-              </View>
-
-              {/* Details Section */}
-              <View style={styles.newArrivalDetails}>
-                <Text
-                  style={[styles.newArrivalName, { color: colors.text }]}
-                  numberOfLines={1}
-                >
-                  {item.name}
-                </Text>
-
-                {/* Location/Genre */}
-                <View style={styles.newArrivalRow}>
-                  <Ionicons
-                    name="location-outline"
-                    size={14}
-                    color={colors.textSecondary}
-                  />
-                  <Text
-                    style={[
-                      styles.newArrivalText,
-                      { color: colors.textSecondary },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {item.location || item.genre || "Location TBA"}
-                  </Text>
-                </View>
-
-                {/* Rating */}
-                <View style={styles.newArrivalRow}>
-                  <Ionicons name="star" size={14} color="#FCD34D" />
-                  <Text
-                    style={[
-                      styles.newArrivalText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {item.rating > 0
-                      ? `${item.rating.toFixed(1)} (${item.review_count || 0})`
-                      : "No ratings yet"}
-                  </Text>
-                </View>
-
-                {/* Price */}
-                {priceLabel && (
-                  <Text
-                    style={[styles.newArrivalPrice, { color: colors.primary }]}
-                  >
-                    {priceLabel}
-                  </Text>
-                )}
-                {/* Promo Badge */}
-                {item.type === "Studio" && item.has_active_promotion && (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
-                    <Ionicons name="pricetag" size={10} color="#10B981" />
-                    <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
-                      Promo available
+                    <Text style={styles.newArrivalTypeBadgeText}>
+                      {item.type}
                     </Text>
                   </View>
-                )}
-              </View>
+                  {/* NEW Dot Badge – hidden once the listing has been viewed */}
+                  {!viewedNewArrivals.has(item.id) && (
+                    <View style={styles.newArrivalNewBadge}>
+                      <View style={styles.newArrivalNewDot} />
+                      <Text style={styles.newArrivalNewBadgeText}>NEW</Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Details Section */}
+                <View style={styles.newArrivalDetails}>
+                  <Text
+                    style={[styles.newArrivalName, { color: colors.text }]}
+                    numberOfLines={1}
+                  >
+                    {item.name}
+                  </Text>
+
+                  {/* Location/Genre */}
+                  <View style={styles.newArrivalRow}>
+                    <Ionicons
+                      name="location-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.newArrivalText,
+                        { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.location || item.genre || "Location TBA"}
+                    </Text>
+                  </View>
+
+                  {/* Rating */}
+                  <View style={styles.newArrivalRow}>
+                    <Ionicons name="star" size={14} color="#FCD34D" />
+                    <Text
+                      style={[
+                        styles.newArrivalText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {item.rating > 0
+                        ? `${item.rating.toFixed(1)} (${item.review_count || 0})`
+                        : "No ratings yet"}
+                    </Text>
+                  </View>
+
+                  {/* Price */}
+                  {priceLabel && (
+                    <Text
+                      style={[styles.newArrivalPrice, { color: colors.primary }]}
+                    >
+                      {priceLabel}
+                    </Text>
+                  )}
+                  {/* Promo Badge */}
+                  {item.type === "Studio" && item.has_active_promotion && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                      <Ionicons name="pricetag" size={10} color="#10B981" />
+                      <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                        Promo available
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </TouchableOpacity>
             );
           })}
@@ -2241,12 +2373,12 @@ export default function HomeScreen() {
                       {
                         backgroundColor:
                           event.status === "Confirmed" ||
-                          event.status === "Accepted"
+                            event.status === "Accepted"
                             ? "#10B98115"
                             : "#F59E0B15",
                         borderColor:
                           event.status === "Confirmed" ||
-                          event.status === "Accepted"
+                            event.status === "Accepted"
                             ? "#10B981"
                             : "#F59E0B",
                       },
@@ -2258,7 +2390,7 @@ export default function HomeScreen() {
                         {
                           color:
                             event.status === "Confirmed" ||
-                            event.status === "Accepted"
+                              event.status === "Accepted"
                               ? "#10B981"
                               : "#F59E0B",
                         },
@@ -2709,206 +2841,240 @@ export default function HomeScreen() {
           <ProfileCompletionBanner />
         </View>
 
-        {/* AI Recommendation Comparison Toggle */}
-        {showForYouAiCard && userId && (
-        <View
-          style={{
-            marginHorizontal: 24,
-            marginTop: 20,
-            marginBottom: 8,
-            padding: 16,
-            borderRadius: 20,
-            backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-            borderWidth: 1,
-            borderColor: colors.primary,
-          }}
-        >
+        {userId && (
           <View
             style={{
+              marginHorizontal: 24,
+              marginTop: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              borderRadius: 12,
+              backgroundColor: isDark ? "#1F2937" : "#EFF6FF",
+              borderWidth: 1,
+              borderColor: isDark ? "#374151" : "#BFDBFE",
               flexDirection: "row",
               alignItems: "center",
+              gap: 8,
             }}
           >
-            <View style={{ flex: 1 }}>
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-              >
+            <Ionicons
+              name={homeAiStatusLabel.includes("Working") ? "checkmark-circle" : "information-circle"}
+              size={16}
+              color={homeAiStatusLabel.includes("Working") ? "#10B981" : colors.primary}
+            />
+            <Text
+              style={{
+                flex: 1,
+                color: colors.text,
+                fontFamily: "Poppins_500Medium",
+                fontSize: 12,
+              }}
+            >
+              {homeAiStatusLabel}
+            </Text>
+          </View>
+        )}
+
+        {/* AI Recommendation Comparison Toggle */}
+        {showForYouAiCard && userId && (
+          <View
+            style={{
+              marginHorizontal: 24,
+              marginTop: 20,
+              marginBottom: 8,
+              padding: 16,
+              borderRadius: 20,
+              backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+              borderWidth: 1,
+              borderColor: colors.primary,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+              }}
+            >
+              <View style={{ flex: 1 }}>
                 <View
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: colors.primary,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
                 >
-                  <Ionicons
-                    name="sparkles"
-                    size={18}
-                    color="#FFF"
-                  />
-                </View>
-                <View>
-                  <Text
+                  <View
                     style={{
-                      fontFamily: "Poppins_600SemiBold",
-                      fontSize: 14,
-                      color: colors.text,
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      backgroundColor: colors.primary,
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                   >
-                    For You AI
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: "Poppins_400Regular",
-                      fontSize: 11,
-                      color: colors.textSecondary,
-                      marginTop: -2,
-                    }}
-                  >
-                    {`Engine: ${aiFeedProvider}${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} picks` : ""}`}
-                  </Text>
+                    <Ionicons
+                      name="sparkles"
+                      size={18}
+                      color="#FFF"
+                    />
+                  </View>
+                  <View>
+                    <Text
+                      style={{
+                        fontFamily: "Poppins_600SemiBold",
+                        fontSize: 14,
+                        color: colors.text,
+                      }}
+                    >
+                      For You AI
+                    </Text>
+                    <Text
+                      style={{
+                        fontFamily: "Poppins_400Regular",
+                        fontSize: 11,
+                        color: colors.textSecondary,
+                        marginTop: -2,
+                      }}
+                    >
+                      {`Engine: ${aiFeedProvider}${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} picks` : ""}`}
+                    </Text>
+                  </View>
                 </View>
               </View>
             </View>
-          </View>
 
-          {aiFeedMessage ? (
-            <View
-              style={{
-                marginTop: 10,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              <Ionicons
-                name="information-circle-outline"
-                size={14}
-                color={colors.textSecondary}
-              />
-              <Text
+            {aiFeedMessage ? (
+              <View
                 style={{
-                  flex: 1,
-                  fontFamily: "Poppins_400Regular",
-                  fontSize: 11,
-                  color: colors.textSecondary,
+                  marginTop: 10,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
                 }}
               >
-                {aiFeedMessage}
-              </Text>
-            </View>
-          ) : null}
+                <Ionicons
+                  name="information-circle-outline"
+                  size={14}
+                  color={colors.textSecondary}
+                />
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily: "Poppins_400Regular",
+                    fontSize: 11,
+                    color: colors.textSecondary,
+                  }}
+                >
+                  {aiFeedMessage}
+                </Text>
+              </View>
+            ) : null}
 
-          {/* AI Similarity Preview */}
-          {aiRecommendations.length > 0 && (
-            <View
-              style={{
-                marginTop: 12,
-                paddingTop: 12,
-                borderTopWidth: 1,
-                borderTopColor: isDark ? "#374151" : "#E5E7EB",
-              }}
-            >
-              <Text
+            {/* AI Similarity Preview */}
+            {aiRecommendations.length > 0 && (
+              <View
                 style={{
-                  fontFamily: "Poppins_500Medium",
-                  fontSize: 11,
-                  color: colors.textSecondary,
-                  marginBottom: 8,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTopWidth: 1,
+                  borderTopColor: isDark ? "#374151" : "#E5E7EB",
                 }}
               >
-                {hasAiSimilarityMatches
-                  ? "Top Matches This Session"
-                  : "Fresh recommendations for your profile"}
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                {aiPreviewItems.map((item) => (
-                  <View
-                    key={item.id}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      backgroundColor: isDark ? "#374151" : "#E5E7EB",
-                      paddingHorizontal: 10,
-                      paddingVertical: 5,
-                      borderRadius: 12,
-                      gap: 4,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontFamily: "Poppins_500Medium",
-                        fontSize: 11,
-                        color: colors.text,
-                      }}
-                      numberOfLines={1}
-                    >
-                      {item.name?.substring(0, 15)}
-                      {item.name?.length > 15 ? "..." : ""}
-                    </Text>
+                <Text
+                  style={{
+                    fontFamily: "Poppins_500Medium",
+                    fontSize: 11,
+                    color: colors.textSecondary,
+                    marginBottom: 8,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  {hasAiSimilarityMatches
+                    ? "Top Matches This Session"
+                    : "Fresh recommendations for your profile"}
+                </Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                  {aiPreviewItems.map((item) => (
                     <View
+                      key={item.id}
                       style={{
-                        backgroundColor:
-                          item.similarity > 0.1 ? colors.primary : "#6B7280",
-                        paddingHorizontal: 5,
-                        paddingVertical: 1,
-                        borderRadius: 6,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                        borderRadius: 12,
+                        gap: 4,
                       }}
                     >
                       <Text
                         style={{
-                          fontFamily: "Poppins_600SemiBold",
-                          fontSize: 9,
-                          color: "#FFF",
+                          fontFamily: "Poppins_500Medium",
+                          fontSize: 11,
+                          color: colors.text,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {item.name?.substring(0, 15)}
+                        {item.name?.length > 15 ? "..." : ""}
+                      </Text>
+                      <View
+                        style={{
+                          backgroundColor:
+                            item.similarity > 0.1 ? colors.primary : "#6B7280",
+                          paddingHorizontal: 5,
+                          paddingVertical: 1,
+                          borderRadius: 6,
                         }}
                       >
-                        {item.similarity > 0.1
-                          ? `${((item.similarity || 0) * 100).toFixed(0)}%`
-                          : item.type}
-                      </Text>
+                        <Text
+                          style={{
+                            fontFamily: "Poppins_600SemiBold",
+                            fontSize: 9,
+                            color: "#FFF",
+                          }}
+                        >
+                          {item.similarity > 0.1
+                            ? `${((item.similarity || 0) * 100).toFixed(0)}%`
+                            : item.type}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                ))}
+                  ))}
+                </View>
               </View>
-            </View>
-          )}
+            )}
 
-          {/* No AI Data Message */}
-          {aiModeEnabled && aiRecommendations.length === 0 && userId && (
-            <View
-              style={{
-                marginTop: 12,
-                paddingTop: 12,
-                borderTopWidth: 1,
-                borderTopColor: isDark ? "#374151" : "#E5E7EB",
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <Ionicons
-                name="information-circle"
-                size={16}
-                color={colors.textSecondary}
-              />
-              <Text
+            {/* No AI Data Message */}
+            {aiModeEnabled && aiRecommendations.length === 0 && userId && (
+              <View
                 style={{
-                  fontFamily: "Poppins_400Regular",
-                  fontSize: 11,
-                  color: colors.textSecondary,
-                  flex: 1,
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTopWidth: 1,
+                  borderTopColor: isDark ? "#374151" : "#E5E7EB",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
                 }}
               >
-                Add skills and genres in your profile, then browse listings to
-                improve your For You feed quality.
-              </Text>
-            </View>
-          )}
-        </View>
+                <Ionicons
+                  name="information-circle"
+                  size={16}
+                  color={colors.textSecondary}
+                />
+                <Text
+                  style={{
+                    fontFamily: "Poppins_400Regular",
+                    fontSize: 11,
+                    color: colors.textSecondary,
+                    flex: 1,
+                  }}
+                >
+                  Add skills and genres in your profile, then browse listings to
+                  improve your For You feed quality.
+                </Text>
+              </View>
+            )}
+          </View>
         )}
 
         {renderHighlightsSection()}
@@ -2921,150 +3087,150 @@ export default function HomeScreen() {
 
         {/* Recently Viewed Section - Custom Cards */}
         {recentlyViewed.length > 0 && (
-              <View style={styles.sectionContainer}>
-                <View
+          <View style={styles.sectionContainer}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingHorizontal: 24,
+                marginBottom: 12,
+              }}
+            >
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                Recently Viewed
+              </Text>
+              <TouchableOpacity activeOpacity={1} onPress={openRecentlyViewedSheet}>
+                <Text
                   style={{
-                    flexDirection: "row",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    paddingHorizontal: 24,
-                    marginBottom: 12,
+                    color: colors.primary,
+                    fontFamily: "Poppins_500Medium",
+                    fontSize: moderateScale(12),
                   }}
                 >
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                    Recently Viewed
-                  </Text>
-                  <TouchableOpacity activeOpacity={1} onPress={openRecentlyViewedSheet}>
-                    <Text
-                      style={{
-                        color: colors.primary,
-                        fontFamily: "Poppins_500Medium",
-                        fontSize: moderateScale(12),
-                      }}
-                    >
-                      See all
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{
-                    paddingLeft: 24,
-                    paddingRight: 24,
-                    paddingVertical: 8,
-                  }}
-                  decelerationRate="fast"
-                  snapToInterval={240 + 16}
+                  See all
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{
+                paddingLeft: 24,
+                paddingRight: 24,
+                paddingVertical: 8,
+              }}
+              decelerationRate="fast"
+              snapToInterval={240 + 16}
+            >
+              {recentlyViewed.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  activeOpacity={1}
+                  onPress={() => handleCardPress(item)}
+                  style={[
+                    styles.recentlyViewedCard,
+                    { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                  ]}
                 >
-                  {recentlyViewed.map((item) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      activeOpacity={1}
-                      onPress={() => handleCardPress(item)}
+                  {/* Image Section */}
+                  <View style={styles.recentlyViewedImageContainer}>
+                    {((item.images && item.images.length > 0) || item.image) ? (
+                      <AutoCardImage
+                        image={item.image}
+                        images={item.images}
+                        style={styles.recentlyViewedImage}
+                        width={480}
+                        height={200}
+                        cacheVersion={item.updated_at || item.created_at || item.id}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.recentlyViewedImagePlaceholder,
+                          { backgroundColor: colors.primary + "20" },
+                        ]}
+                      >
+                        <Ionicons
+                          name={
+                            item.type === "Gig"
+                              ? "musical-notes"
+                              : item.type === "Studio"
+                                ? "business"
+                                : "people"
+                          }
+                          size={24}
+                          color={colors.primary}
+                        />
+                      </View>
+                    )}
+                    {/* Type Badge */}
+                    <View
                       style={[
-                        styles.recentlyViewedCard,
-                        { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                        styles.recentlyViewedTypeBadge,
+                        { backgroundColor: getTypeBadgeColor(item.type) },
                       ]}
                     >
-                      {/* Image Section */}
-                      <View style={styles.recentlyViewedImageContainer}>
-                        {((item.images && item.images.length > 0) || item.image) ? (
-                          <AutoCardImage
-                            image={item.image}
-                            images={item.images}
-                            style={styles.recentlyViewedImage}
-                            width={480}
-                            height={200}
-                            cacheVersion={item.updated_at || item.created_at || item.id}
-                          />
-                        ) : (
-                          <View
-                            style={[
-                              styles.recentlyViewedImagePlaceholder,
-                              { backgroundColor: colors.primary + "20" },
-                            ]}
-                          >
-                            <Ionicons
-                              name={
-                                item.type === "Gig"
-                                  ? "musical-notes"
-                                  : item.type === "Studio"
-                                    ? "business"
-                                    : "people"
-                              }
-                              size={24}
-                              color={colors.primary}
-                            />
-                          </View>
-                        )}
-                        {/* Type Badge */}
-                        <View
-                          style={[
-                            styles.recentlyViewedTypeBadge,
-                            { backgroundColor: getTypeBadgeColor(item.type) },
-                          ]}
-                        >
-                          <Text style={styles.recentlyViewedTypeBadgeText}>
-                            {item.type}
-                          </Text>
-                        </View>
-                      </View>
+                      <Text style={styles.recentlyViewedTypeBadgeText}>
+                        {item.type}
+                      </Text>
+                    </View>
+                  </View>
 
-                      {/* Details Section */}
-                      <View style={styles.recentlyViewedDetails}>
-                        <Text
-                          style={[
-                            styles.recentlyViewedName,
-                            { color: colors.text },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item.name}
-                        </Text>
+                  {/* Details Section */}
+                  <View style={styles.recentlyViewedDetails}>
+                    <Text
+                      style={[
+                        styles.recentlyViewedName,
+                        { color: colors.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.name}
+                    </Text>
 
-                        {/* Location/Genre */}
-                        <View style={styles.recentlyViewedRow}>
-                          <Ionicons
-                            name="location-outline"
-                            size={12}
-                            color={colors.textSecondary}
-                          />
-                          <Text
-                            style={[
-                              styles.recentlyViewedText,
-                              { color: colors.textSecondary },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {item.location || item.genre || "Location TBA"}
-                          </Text>
-                        </View>
+                    {/* Location/Genre */}
+                    <View style={styles.recentlyViewedRow}>
+                      <Ionicons
+                        name="location-outline"
+                        size={12}
+                        color={colors.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.recentlyViewedText,
+                          { color: colors.textSecondary },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {item.location || item.genre || "Location TBA"}
+                      </Text>
+                    </View>
 
-                        {/* Rating - Compact */}
-                        <View style={styles.recentlyViewedRow}>
-                          <Ionicons name="star" size={12} color="#FCD34D" />
-                          <Text
-                            style={[
-                              styles.recentlyViewedText,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            {item.rating > 0 ? item.rating.toFixed(1) : "New"}
-                          </Text>
-                          <View style={{ flex: 1 }} />
-                          <Ionicons
-                            name="time-outline"
-                            size={12}
-                            color={colors.textSecondary}
-                          />
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
+                    {/* Rating - Compact */}
+                    <View style={styles.recentlyViewedRow}>
+                      <Ionicons name="star" size={12} color="#FCD34D" />
+                      <Text
+                        style={[
+                          styles.recentlyViewedText,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        {item.rating > 0 ? item.rating.toFixed(1) : "New"}
+                      </Text>
+                      <View style={{ flex: 1 }} />
+                      <Ionicons
+                        name="time-outline"
+                        size={12}
+                        color={colors.textSecondary}
+                      />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
       </ScrollView>
 
       <Navbar />
@@ -3076,7 +3242,7 @@ export default function HomeScreen() {
       />
       <SearchBottomSheet
         ref={searchSheetRef}
-        onClose={() => {}}
+        onClose={() => { }}
         onItemPress={(id) => {
           debugLog("=== SearchBottomSheet onItemPress ===");
           debugLog("Item ID from search:", id);
@@ -3087,7 +3253,7 @@ export default function HomeScreen() {
       />
       <RecentlyViewedSheet
         ref={recentlyViewedSheetRef}
-        onClose={() => {}}
+        onClose={() => { }}
         onItemPress={(id) => {
           debugLog("=== RecentlyViewedSheet onItemPress ===");
           debugLog("Item ID from recently viewed:", id);

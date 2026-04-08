@@ -2,12 +2,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Session } from "@supabase/supabase-js";
 import { router } from "expo-router";
 import React, {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useRef,
-    useState,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import { clearSupabaseAuthStorage, supabase } from "../../lib/supabase";
@@ -230,7 +230,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         setSubscriptionStatus(isActive ? "active" : status);
         setSubscriptionRequired(!isActive);
-          setSubscriptionExpiresAt(expiresAt || null);
+        setSubscriptionExpiresAt(expiresAt || null);
 
         console.log("📋 Subscription check:", {
           role: profile?.role,

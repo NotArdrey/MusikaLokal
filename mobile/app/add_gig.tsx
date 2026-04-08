@@ -413,6 +413,73 @@ export default function AddGigScreen() {
     else router.back();
   };
 
+  const handleAutoFillTestData = () => {
+    const eventDateValue = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+
+    setGigName((prev) => prev.trim() || "Test Gig Night");
+    setDescription(
+      (prev) =>
+        prev.trim() ||
+        "QA test listing for quick booking and application flow checks.",
+    );
+    setAddress((prev) => prev.trim() || "Makati City, Metro Manila");
+    setLatitude((prev) => prev ?? 14.5547);
+    setLongitude((prev) => prev ?? 121.0244);
+    setCost((prev) => prev.trim() || "5000");
+    setEventDate(eventDateValue);
+    setEventStartTime("06:00 PM");
+    setEventEndTime("09:00 PM");
+    setEventSchedules((prev) =>
+      prev.length > 0
+        ? prev
+        : [
+          {
+            date: eventDateValue,
+            start_time: "06:00 PM",
+            end_time: "09:00 PM",
+          },
+        ],
+    );
+    setImages((prev) =>
+      prev.length > 0
+        ? prev
+        : [
+          "https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=1200&h=900&fit=crop",
+        ],
+    );
+    setThumbnailIndex(0);
+    setRequiredGenres((prev) => (prev.length > 0 ? prev : ["OPM", "Pop"]));
+    setRequiredInstruments((prev) =>
+      prev.length > 0 ? prev : ["Vocals", "Guitar"],
+    );
+    setMusicianType("both");
+    setSoloSlotsNeeded((prev) => (prev > 0 ? prev : 1));
+    setDuoSlotsNeeded((prev) => (prev > 0 ? prev : 1));
+    setPreferredGroupTypes((prev) =>
+      prev.length > 0
+        ? prev
+        : PH_MUSIC_GROUP_TYPES.length > 0
+          ? [PH_MUSIC_GROUP_TYPES[0].id]
+          : [],
+    );
+    setExperienceLevel((prev) => prev || "Intermediate");
+    setSoloRolesNeeded((prev) => (prev.length > 0 ? prev : ["Vocalist"]));
+    setDuoRolesNeeded((prev) =>
+      prev.length > 0 ? prev : ["Acoustic Duo"],
+    );
+    setBandRolesNeeded((prev) =>
+      prev.length > 0 ? prev : ["House Band"],
+    );
+
+    showAlert(
+      "success",
+      "Test Autofill Applied",
+      "Sample gig values were filled for testing.",
+    );
+  };
+
   const createGig = async () => {
     if (creating) return;
     setCreating(true);
@@ -1128,6 +1195,35 @@ export default function AddGigScreen() {
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Create Gig" />
+
+        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+          <TouchableOpacity activeOpacity={1}
+            onPress={handleAutoFillTestData}
+            style={{
+              alignSelf: "flex-start",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
+              borderWidth: 1,
+              borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
+              borderRadius: 999,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+            }}
+          >
+            <Ionicons name="flask-outline" size={15} color={colors.primary} />
+            <Text
+              style={{
+                color: colors.primary,
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 12,
+              }}
+            >
+              Auto Fill Test Data
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
