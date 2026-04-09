@@ -2531,8 +2531,8 @@ export default function EditGigScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
-              Equipments
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}> 
+              Provided equipments
             </Text>
             <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
               <View

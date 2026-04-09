@@ -173,3 +173,269 @@ const LOCAL_CATALOG: LocalInstrumentProfile[] = [
 
 export const getOfflineInstrumentCatalog = (): LocalInstrumentProfile[] =>
   LOCAL_CATALOG.map((item) => ({ ...item }));
+
+const LEVEL_SCORE: Record<ExperienceLevel, number> = {
+  beginner: 1,
+  intermediate: 2,
+  advanced: 3,
+};
+
+const PURPOSE_CATEGORY_BOOST: Record<SuggestionPurpose, InstrumentCategory[]> = {
+  band: ["strings", "percussion", "wind", "keyboards", "vocals"],
+  solo: ["strings", "keyboards", "vocals", "amplification"],
+  studio: ["recording", "electronic", "keyboards", "vocals"],
+  production: ["electronic", "recording", "keyboards", "amplification"],
+};
+
+const CATEGORY_PRO_TIPS: Record<InstrumentCategory, string> = {
+  strings: "Practice transitions with a metronome for 10 minutes daily.",
+  keyboards: "Start with simple chord progressions before adding voicing complexity.",
+  percussion: "Train consistency first; tempo control beats speed every time.",
+  wind: "Work on breath support and long tones before advanced runs.",
+  electronic: "Save presets by genre so you can build sounds faster in sessions.",
+  vocals: "Record dry takes and listen back to improve pitch and control.",
+  amplification: "Keep gain staging clean to avoid unwanted clipping or noise.",
+  recording: "Use reference tracks and level-match before making EQ decisions.",
+};
+
+const ROLE_CATEGORY_COMPLEMENTS: Array<{ keywords: string[]; categories: InstrumentCategory[] }> = [
+  { keywords: ["guitar", "guitarist"], categories: ["percussion", "keyboards", "recording"] },
+  { keywords: ["drum", "drummer"], categories: ["strings", "keyboards", "recording"] },
+  { keywords: ["bass", "bassist"], categories: ["percussion", "keyboards", "recording"] },
+  { keywords: ["vocal", "singer"], categories: ["keyboards", "recording", "electronic"] },
+  { keywords: ["producer", "beat", "dj"], categories: ["electronic", "recording", "amplification"] },
+  { keywords: ["piano", "keys", "keyboard"], categories: ["vocals", "strings", "recording"] },
+];
+
+const normalize = (value: string) => value.trim().toLowerCase();
+
+const hashString = (value: string) => {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+};
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const inferLearningCurve = (
+  userLevel: ExperienceLevel,
+  instrumentLevel: ExperienceLevel,
+): "easy" | "moderate" | "challenging" => {
+  const diff = LEVEL_SCORE[instrumentLevel] - LEVEL_SCORE[userLevel];
+  if (diff <= -1) return "easy";
+  if (diff === 0) return "moderate";
+  return "challenging";
+};
+
+const estimateTimeToBasics = (
+  learningCurve: "easy" | "moderate" | "challenging",
+  userLevel: ExperienceLevel,
+): string => {
+  if (learningCurve === "easy") {
+    if (userLevel === "advanced") return "3-10 days";
+    if (userLevel === "intermediate") return "1-3 weeks";
+    return "3-6 weeks";
+  }
+
+  if (learningCurve === "moderate") {
+    if (userLevel === "advanced") return "2-4 weeks";
+    if (userLevel === "intermediate") return "4-8 weeks";
+    return "2-4 months";
+  }
+
+  if (userLevel === "advanced") return "4-10 weeks";
+  if (userLevel === "intermediate") return "2-4 months";
+  return "4-8 months";
+};
+
+const computeRoleBoost = (
+  categories: InstrumentCategory[],
+  normalizedRoles: string[],
+): number => {
+  if (normalizedRoles.length === 0) return 0;
+
+  let boost = 0;
+  for (const roleRule of ROLE_CATEGORY_COMPLEMENTS) {
+    const hasRoleKeyword = roleRule.keywords.some((keyword) =>
+      normalizedRoles.some((role) => role.includes(keyword)),
+    );
+
+    if (hasRoleKeyword && roleRule.categories.some((cat) => categories.includes(cat))) {
+      boost += 5;
+    }
+  }
+
+  return Math.min(15, boost);
+};
+
+const buildHeadline = (item: LocalInstrumentProfile, purpose: SuggestionPurpose) => {
+  const purposeLabel =
+    purpose === "band"
+      ? "band-ready"
+      : purpose === "solo"
+      ? "solo-friendly"
+      : purpose === "studio"
+      ? "studio-focused"
+      : "production-ready";
+
+  return `${item.name} is a ${purposeLabel} upgrade`;
+};
+
+const buildPerfectFor = (item: LocalInstrumentProfile, purpose: SuggestionPurpose) => {
+  if (purpose === "band") {
+    if (item.category === "percussion") return "groove backbone";
+    if (item.category === "vocals") return "frontline vocals";
+    return "band arrangement";
+  }
+
+  if (purpose === "solo") {
+    if (item.category === "amplification") return "live looping";
+    return "solo performance";
+  }
+
+  if (purpose === "studio") {
+    if (item.category === "recording") return "recording workflow";
+    return "studio sessions";
+  }
+
+  return item.category === "electronic" ? "beat production" : "home production";
+};
+
+const diversifyByCategory = (
+  rankedItems: InstrumentSuggestion[],
+  limit: number,
+): InstrumentSuggestion[] => {
+  const selected: InstrumentSuggestion[] = [];
+  const selectedNames = new Set<string>();
+  const categoryCounts = new Map<InstrumentCategory, number>();
+
+  const pushIfEligible = (
+    item: InstrumentSuggestion,
+    maxPerCategory: number,
+  ) => {
+    const nameKey = item.name.toLowerCase();
+    if (selectedNames.has(nameKey)) return false;
+
+    const currentCount = categoryCounts.get(item.category) || 0;
+    if (currentCount >= maxPerCategory) return false;
+
+    selected.push(item);
+    selectedNames.add(nameKey);
+    categoryCounts.set(item.category, currentCount + 1);
+    return true;
+  };
+
+  for (const item of rankedItems) {
+    pushIfEligible(item, 1);
+    if (selected.length >= limit) {
+      return selected.slice(0, limit);
+    }
+  }
+
+  const softCap = Math.max(2, Math.ceil(limit / 3));
+  for (const item of rankedItems) {
+    pushIfEligible(item, softCap);
+    if (selected.length >= limit) {
+      return selected.slice(0, limit);
+    }
+  }
+
+  for (const item of rankedItems) {
+    const nameKey = item.name.toLowerCase();
+    if (selectedNames.has(nameKey)) continue;
+    selected.push(item);
+    selectedNames.add(nameKey);
+    if (selected.length >= limit) {
+      return selected.slice(0, limit);
+    }
+  }
+
+  return selected.slice(0, limit);
+};
+
+export const getOfflineInstrumentSuggestions = ({
+  genres,
+  currentInstruments,
+  userRoles,
+  experienceLevel,
+  purpose,
+  limit,
+}: {
+  genres: string[];
+  currentInstruments: string[];
+  userRoles: string[];
+  experienceLevel: ExperienceLevel;
+  purpose: SuggestionPurpose;
+  limit: number;
+}): InstrumentSuggestion[] => {
+  const normalizedGenres = genres.map(normalize);
+  const normalizedCurrent = currentInstruments.map(normalize);
+  const normalizedRoles = userRoles.map(normalize);
+  const purposeBoostCategories = PURPOSE_CATEGORY_BOOST[purpose];
+
+  const ranked = LOCAL_CATALOG
+    .filter((item) => {
+      const itemName = normalize(item.name);
+      return !normalizedCurrent.some((owned) => owned.includes(itemName) || itemName.includes(owned));
+    })
+    .map((item) => {
+      const itemGenresNormalized = item.genres.map(normalize);
+      const genreMatches = normalizedGenres.filter((genre) => itemGenresNormalized.includes(genre));
+
+      let score = 52;
+      score += Math.min(36, genreMatches.length * 12);
+
+      if (purposeBoostCategories.includes(item.category)) {
+        score += 12;
+      }
+
+      const experienceDelta = LEVEL_SCORE[item.difficulty] - LEVEL_SCORE[experienceLevel];
+      if (experienceDelta === 0) score += 10;
+      else if (experienceDelta < 0) score += 8;
+      else if (experienceDelta === 1) score += 4;
+      else score -= 5;
+
+      score += computeRoleBoost([item.category], normalizedRoles);
+      score += hashString(item.name) % 5;
+
+      const safeScore = clamp(Math.round(score), 40, 98);
+      const learningCurve = inferLearningCurve(experienceLevel, item.difficulty);
+      const timeToBasics = estimateTimeToBasics(learningCurve, experienceLevel);
+
+      const reasons: string[] = [];
+      if (genreMatches.length > 0) {
+        reasons.push(`Great fit for your ${genreMatches.slice(0, 2).join(" and ")} preferences.`);
+      }
+      if (normalizedRoles.length > 0) {
+        reasons.push(`Complements your current role setup as ${userRoles.slice(0, 2).join(" / ")}.`);
+      }
+      reasons.push(item.description);
+
+      return {
+        name: item.name,
+        image: item.image,
+        score: safeScore,
+        headline: buildHeadline(item, purpose),
+        matchReason: reasons.join(" "),
+        learningCurve,
+        timeToBasics,
+        proTip: CATEGORY_PRO_TIPS[item.category],
+        famousPlayers: item.famousPlayers.slice(0, 2),
+        perfectFor: buildPerfectFor(item, purpose),
+        genres: item.genres,
+        difficulty: item.difficulty,
+        category: item.category,
+        description: item.description,
+        relatedInstruments: item.relatedInstruments,
+        aiPowered: false,
+        aiProvider: "On-Device Local Ranker",
+      } as InstrumentSuggestion;
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const safeLimit = clamp(limit || 10, 3, 20);
+  return diversifyByCategory(ranked, safeLimit);
+};

@@ -220,7 +220,8 @@ export default function AiSuggestionsScreen() {
                     generated.aiProvider ||
                     (generated.aiPowered ? 'On-Device LLM' : 'On-Device Local Ranker')
                 );
-                setSuggestionMessage(generated.message || null);
+                // Only show an informational suggestion message when the result was AI-powered.
+                setSuggestionMessage(generated.aiPowered ? generated.message : null);
                 setStep('results');
                 return;
             }
@@ -233,14 +234,12 @@ export default function AiSuggestionsScreen() {
                 generatedMessage: generated.message || '',
             });
 
-            if (fallbackSuggestions.length > 0) {
+                if (fallbackSuggestions.length > 0) {
                 setSuggestions(fallbackSuggestions);
                 setIsAIPowered(false);
                 setAIProvider('On-Device Local Ranker');
-                setSuggestionMessage(
-                    generated.message ||
-                    'On-device LLM is not ready yet. Showing smart local suggestions.'
-                );
+                // Local fallback is intentionally non-erroneous; do not show an alert-like message.
+                setSuggestionMessage(null);
                 setStep('results');
             } else {
                 setSuggestions([]);
@@ -268,7 +267,7 @@ export default function AiSuggestionsScreen() {
                 setSuggestions(fallbackSuggestions);
                 setIsAIPowered(false);
                 setAIProvider('On-Device Local Ranker');
-                setSuggestionMessage('On-device LLM is temporarily unavailable. Showing smart local suggestions.');
+                setSuggestionMessage(null);
                 setStep('results');
             } else {
                 setError('Failed to generate suggestions right now. Please try again.');

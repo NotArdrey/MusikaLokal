@@ -10,12 +10,13 @@ import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
+import SubscriptionRequiredScreen from "./subscription_required";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -68,6 +69,8 @@ function RootContent() {
     useAuth();
   const segments = useSegments();
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
+
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
 
   // Handle global identity/subscription gates
   useEffect(() => {
@@ -128,10 +131,10 @@ function RootContent() {
       const isAllowed = isScreenAllowed(allowedScreens);
 
       if (!isAllowed) {
-        console.log(
-          "🔒 Subscription required, redirecting to subscription page",
-        );
-        router.replace("/subscription_required");
+        console.log("🔒 Subscription required, showing subscription modal");
+        setShowSubscriptionModal(true);
+      } else {
+        setShowSubscriptionModal(false);
       }
     }
   }, [
@@ -237,6 +240,20 @@ function RootContent() {
           animation: "fade", // Smooth fade transition for tab switching
         }}
       />
+
+      {showSubscriptionModal && (
+        <View style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.45)',
+          zIndex: 9999,
+        }}>
+          <SubscriptionRequiredScreen />
+        </View>
+      )}
     </View>
   );
 }

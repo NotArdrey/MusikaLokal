@@ -728,7 +728,7 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
   if (!module) {
     return buildLocalFallback(
       "module_unavailable",
-      "On-device LLM runtime is not installed on this build. Showing smart local suggestions.",
+      "Using smart local suggestions.",
     );
   }
 
@@ -749,7 +749,7 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
   if (!ready) {
     return buildLocalFallback(
       "model_not_ready",
-      "On-device LLM model is not ready yet. Showing smart local suggestions.",
+      "Using smart local suggestions.",
     );
   }
 
@@ -770,7 +770,7 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
   if (candidates.length === 0) {
     return buildLocalFallback(
       "candidate_filter_empty",
-      "No candidate instruments available for LLM generation.",
+      "Using smart local suggestions.",
     );
   }
 
@@ -790,7 +790,7 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
     if (!raw) {
       return buildLocalFallback(
         "empty_llm_output",
-        "On-device LLM produced no output in time. Showing smart local suggestions.",
+        "Using smart local suggestions.",
       );
     }
 
@@ -806,7 +806,7 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
     if (suggestions.length === 0) {
       return buildLocalFallback(
         "invalid_llm_output",
-        "On-device LLM output was invalid for this request. Showing smart local suggestions.",
+        "Using smart local suggestions.",
       );
     }
 
@@ -836,7 +836,7 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
 
     return buildLocalFallback(
       "llm_exception",
-      "On-device LLM timed out. Showing smart local suggestions.",
+      "Using smart local suggestions.",
     );
   }
 };
