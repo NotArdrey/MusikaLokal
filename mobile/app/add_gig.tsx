@@ -1336,7 +1336,7 @@ export default function AddGigScreen() {
         >
           {step === 1 && (
             <View>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>\n+                Amenities\n+              </Text>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
                 Gig Information
               </Text>
               {renderInput(

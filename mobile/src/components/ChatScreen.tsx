@@ -80,6 +80,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const [showOptions, setShowOptions] = useState(false);
     const [otherUserOnline, setOtherUserOnline] = useState(false);
     const [otherUserLastSeen, setOtherUserLastSeen] = useState<Date | null>(null);
+    const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
     const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
     const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
@@ -184,29 +185,31 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         return map;
     }, [participants]);
 
+    const reversedMessages = React.useMemo(() => [...messages].reverse(), [messages]);
+
     // Mark messages as read when viewing
     useEffect(() => {
         markAsRead();
     }, [messages.length, markAsRead]);
 
-    // Auto-scroll to bottom on new messages
-    useEffect(() => {
-        if (messages.length > 0) {
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, 100);
-        }
-    }, [messages.length]);
-
     // Scroll to bottom when keyboard opens so latest messages stay visible
     useEffect(() => {
         const keyboardShowEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-        const sub = Keyboard.addListener(keyboardShowEvent, () => {
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, Platform.OS === 'ios' ? 50 : 150);
+        const keyboardHideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+        const showSub = Keyboard.addListener(keyboardShowEvent, () => {
+            setIsKeyboardVisible(true);
+            // With inverted list, no need to scroll on keyboard open - it naturally stays anchored to the bottom
         });
-        return () => sub.remove();
+
+        const hideSub = Keyboard.addListener(keyboardHideEvent, () => {
+            setIsKeyboardVisible(false);
+        });
+
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
     }, []);
 
     const handleSend = async () => {
@@ -241,14 +244,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // Index of the last message I sent that has been seen (read_at set) — Messenger-style
     const lastSeenMessageIndex = React.useMemo(() => {
         if (isGroupChat) return -1;
-        let lastIdx = -1;
-        messages.forEach((m, i) => {
-            if (m.sender_id === currentUserId && m.read_at) {
-                lastIdx = i;
-            }
-        });
-        return lastIdx;
-    }, [messages, currentUserId, isGroupChat]);
+        return reversedMessages.findIndex(m => m.sender_id === currentUserId && m.read_at);
+    }, [reversedMessages, currentUserId, isGroupChat]);
 
     // Pick and send a file/document (5 MB limit)
     const handlePickFile = async () => {
@@ -330,22 +327,28 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
     const renderMessage = ({ item, index }: { item: Message; index: number }) => {
         const isMe = item.sender_id === currentUserId;
-        const showDate = index === 0 ||
-            formatDate(messages[index - 1].created_at) !== formatDate(item.created_at);
+        
+        // Since reversedMessages holds newest at index 0,
+        // message ABOVE visually is index + 1 (older chronologically).
+        // message BELOW visually is index - 1 (newer chronologically).
+        const olderMessage = index < reversedMessages.length - 1 ? reversedMessages[index + 1] : null;
+        const newerMessage = index > 0 ? reversedMessages[index - 1] : null;
 
-        // For group chats, check if we should show sender name
-        const prevMessage = index > 0 ? messages[index - 1] : null;
-        const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+        // Show date header if it's the oldest message or the date changes from the older message
+        const showDate = !olderMessage ||
+            formatDate(olderMessage.created_at) !== formatDate(item.created_at);
+
+        // For group chats, check if we should show sender name (if older message is from someone else or day changed)
         const showSenderName = isGroupChat && !isMe && (
-            index === 0 ||
-            prevMessage?.sender_id !== item.sender_id ||
+            !olderMessage ||
+            olderMessage.sender_id !== item.sender_id ||
             showDate
         );
 
-        // Tail: last message in a run (next message is from a different sender or date changes)
-        const isLastInRun = !nextMessage ||
-            nextMessage.sender_id !== item.sender_id ||
-            formatDate(nextMessage.created_at) !== formatDate(item.created_at);
+        // Tail: last message in a run (newer message is from a different sender or date changes)
+        const isLastInRun = !newerMessage ||
+            newerMessage.sender_id !== item.sender_id ||
+            formatDate(newerMessage.created_at) !== formatDate(item.created_at);
 
         // Get sender info from message or participant map
         const senderProfile = item.sender || participantMap.get(item.sender_id);
@@ -540,11 +543,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
 
     return (
-        <KeyboardAvoidingView
-            style={[styles.container, { backgroundColor: colors.background }]}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-        >
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
             {/* Header */}
             <View style={[
                 styles.header,
@@ -679,7 +678,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             />
 
             {/* Messages */}
-            <View style={styles.messagesContainer}>
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                style={styles.messagesContainer}
+                keyboardVerticalOffset={0}
+            >
                 {loading ? (
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator size="large" color={colors.primary} />
@@ -699,14 +702,14 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 ) : (
                     <FlatList
                         ref={flatListRef}
-                        data={messages}
+                        data={reversedMessages}
                         keyExtractor={(item) => item.id}
                         renderItem={renderMessage}
                         contentContainerStyle={styles.messagesList}
-                        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
                         showsVerticalScrollIndicator={false}
                         keyboardShouldPersistTaps="handled"
                         keyboardDismissMode="interactive"
+                        inverted={true}
                     />
                 )}
 
@@ -716,7 +719,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     {
                         backgroundColor: colors.background,
                         borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
-                        paddingBottom: Math.max(insets.bottom, 8) + (Platform.OS === 'ios' ? 4 : 2),
+                        paddingBottom: isKeyboardVisible
+                            ? (Platform.OS === 'ios' ? 6 : 4)
+                            : Math.max(insets.bottom, 8) + (Platform.OS === 'ios' ? 4 : 2),
                         borderTopWidth: StyleSheet.hairlineWidth,
                     },
                 ]}>
@@ -758,7 +763,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                         </TouchableOpacity>
                     )}
                 </View>
-            </View>
+            </KeyboardAvoidingView>
 
             {/* Reaction Picker Modal */}
             <Modal
@@ -832,7 +837,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 buttons={alertConfig.buttons}
                 onClose={() => setAlertVisible(false)}
             />
-        </KeyboardAvoidingView>
+        </View>
     );
 };
 

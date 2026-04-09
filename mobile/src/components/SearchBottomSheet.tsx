@@ -1112,6 +1112,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_500Medium",
     fontSize: 15,
     padding: 0,
+    textAlignVertical: "center",
   },
   filterButton: {
     width: 48,
