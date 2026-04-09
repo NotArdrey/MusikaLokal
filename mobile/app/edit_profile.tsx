@@ -509,6 +509,28 @@ export default function EditProfileScreen() {
     }
   }
 
+  const handleAutoFillTestData = () => {
+    setContactNumber((prev) => prev.trim() || "09171234567");
+    setLocation((prev) => prev.trim() || "Mandaluyong City, Metro Manila");
+    setBio(
+      (prev) =>
+        prev.trim() ||
+        "QA test musician profile used to validate booking and application experiences.",
+    );
+    setSelectedRoles((prev) =>
+      prev.length > 0 ? prev : [ROLES[0], ROLES[3]].filter(Boolean),
+    );
+    setSelectedGenres((prev) =>
+      prev.length > 0 ? prev : [GENRES[0], GENRES[1]].filter(Boolean),
+    );
+
+    showAlert(
+      "success",
+      "Test Autofill Applied",
+      "Sample profile values were filled for testing.",
+    );
+  };
+
   if (loading) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
@@ -529,6 +551,36 @@ export default function EditProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        <View style={{ marginBottom: 12 }}>
+          <TouchableOpacity
+            style={{
+              alignSelf: "flex-start",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
+              borderWidth: 1,
+              borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
+              borderRadius: 999,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+            }}
+            onPress={handleAutoFillTestData}
+            activeOpacity={1}
+          >
+            <Ionicons name="flask-outline" size={15} color={colors.primary} />
+            <Text
+              style={{
+                color: colors.primary,
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 12,
+              }}
+            >
+              Auto Fill Test Data
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Avatar */}
         <View style={styles.avatarContainer}>
           <View style={styles.avatarWrapper}>

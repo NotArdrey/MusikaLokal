@@ -6,16 +6,21 @@ import {
   SuggestionPurpose,
 } from "../types/instruments";
 import {
+  getOfflineInstrumentSuggestions,
   getOfflineInstrumentCatalog,
   LocalInstrumentProfile,
 } from "../utils/offlineInstrumentRecommender";
+import { musikaLlmAdapter } from "./musikaLlmAdapter";
 
 const CACHE_PREFIX = "offline_llm_enhanced_suggestions:";
 const LLM_ONLY_CACHE_PREFIX = "offline_llm_only_suggestions:";
 const HOME_FEED_CACHE_PREFIX = "offline_llm_home_feed:";
 const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
-const GENERATION_TIMEOUT_MS = 3500;
-const HOME_FEED_TIMEOUT_MS = 1800;
+const GENERATION_TIMEOUT_MS = 30000;
+const HOME_FEED_TIMEOUT_MS = 60000;
+const HOME_FEED_MAX_TOKENS = 120;
+const HOME_FEED_MAX_LLM_CANDIDATES = 8;
+const HOME_FEED_LLM_TARGET_COUNT = 6;
 
 interface OfflineLlmNativeModule {
   isModelReady?: (() => Promise<boolean>) | (() => boolean);
@@ -78,6 +83,7 @@ interface LlmOnlyRec {
 }
 
 interface HomeFeedLlmRec {
+  idx?: unknown;
   id?: unknown;
   score?: unknown;
   reason?: unknown;
@@ -153,6 +159,12 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T
 };
 
 const getNativeOfflineLlmModule = (): OfflineLlmNativeModule | null => {
+  // Prefer the JS-level llama.rn adapter (real on-device LLM)
+  if (musikaLlmAdapter) {
+    return musikaLlmAdapter as unknown as OfflineLlmNativeModule;
+  }
+
+  // Fallback: legacy native module bridge
   const nativeModule = (NativeModules as Record<string, unknown>)
     .MusikaOfflineLLM as OfflineLlmNativeModule | undefined;
 
@@ -163,6 +175,20 @@ const extractJsonObject = (raw: string) => {
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fenced?.[1]) {
     return fenced[1].trim();
+  }
+
+  const fencedArray = raw.match(/```(?:json)?\s*(\[[\s\S]*?\])```/i);
+  if (fencedArray?.[1]) {
+    return fencedArray[1].trim();
+  }
+
+  const firstBracket = raw.indexOf("[");
+  const lastBracket = raw.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    const arrayCandidate = raw.slice(firstBracket, lastBracket + 1);
+    if (arrayCandidate.includes("{") || /\d/.test(arrayCandidate)) {
+      return arrayCandidate;
+    }
   }
 
   const firstBrace = raw.indexOf("{");
@@ -370,15 +396,23 @@ const generateWithNativeLlm = async (
   module: OfflineLlmNativeModule,
   systemPrompt: string,
   userPrompt: string,
-  timeoutMs = GENERATION_TIMEOUT_MS,
+  options: {
+    timeoutMs?: number;
+    maxTokens?: number;
+    temperature?: number;
+  } = {},
 ): Promise<string | null> => {
+  const timeoutMs = options.timeoutMs ?? GENERATION_TIMEOUT_MS;
+  const maxTokens = options.maxTokens ?? 650;
+  const temperature = options.temperature ?? 0.3;
+
   if (typeof module.generateJson === "function") {
     const result = await withTimeout(
       module.generateJson({
         prompt: userPrompt,
         systemPrompt,
-        maxTokens: 650,
-        temperature: 0.3,
+        maxTokens,
+        temperature,
       }),
       timeoutMs,
     );
@@ -390,8 +424,8 @@ const generateWithNativeLlm = async (
   if (typeof module.generateText === "function") {
     const result = await withTimeout(
       module.generateText(`${systemPrompt}\n\n${userPrompt}`, {
-        maxTokens: 650,
-        temperature: 0.3,
+        maxTokens,
+        temperature,
       }),
       timeoutMs,
     );
@@ -594,8 +628,8 @@ const mapLlmOnlySuggestions = (
           : "Practice short focused sessions and track your progress weekly.",
       famousPlayers: Array.isArray(rec?.famousPlayers)
         ? rec.famousPlayers
-            .filter((value: unknown) => typeof value === "string")
-            .slice(0, 2)
+          .filter((value: unknown) => typeof value === "string")
+          .slice(0, 2)
         : candidate.famousPlayers.slice(0, 2),
       perfectFor:
         typeof rec?.perfectFor === "string" && rec.perfectFor.trim().length > 0
@@ -623,11 +657,60 @@ const mapLlmOnlySuggestions = (
 export const generateOfflineSuggestionsWithLocalLLM = async (
   input: GenerateOfflineSuggestionsWithLlmInput,
 ): Promise<EnhanceOfflineSuggestionsResult> => {
+  const traceId = `llm-suggest-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
+  const startedAt = Date.now();
   const safeLimit = clamp(input.limit || 10, 3, 20);
   const cacheKey = buildLlmOnlyCacheKey({ ...input, limit: safeLimit });
 
+  console.log("[OFFLINE_LLM_SUGGESTIONS] Start", {
+    traceId,
+    safeLimit,
+    genresCount: input.genres.length,
+    currentInstrumentsCount: input.currentInstruments.length,
+    userRolesCount: input.userRoles.length,
+    experienceLevel: input.experienceLevel,
+    purpose: input.purpose,
+  });
+
+  const buildLocalFallback = (
+    stage: string,
+    message: string,
+  ): EnhanceOfflineSuggestionsResult => {
+    const suggestions = getOfflineInstrumentSuggestions({
+      genres: input.genres,
+      currentInstruments: input.currentInstruments,
+      userRoles: input.userRoles,
+      experienceLevel: input.experienceLevel,
+      purpose: input.purpose,
+      limit: safeLimit,
+    });
+
+    console.log("[OFFLINE_LLM_SUGGESTIONS] Local fallback", {
+      traceId,
+      stage,
+      suggestionsCount: suggestions.length,
+      message,
+      elapsedMs: Date.now() - startedAt,
+    });
+
+    return {
+      suggestions,
+      aiPowered: false,
+      aiProvider: "On-Device Local Ranker",
+      message,
+    };
+  };
+
   const cached = await getCachedSuggestions<InstrumentSuggestion>(cacheKey);
   if (cached && cached.length > 0) {
+    console.log("[OFFLINE_LLM_SUGGESTIONS] Cache hit", {
+      traceId,
+      suggestionsCount: cached.length,
+      elapsedMs: Date.now() - startedAt,
+    });
+
     return {
       suggestions: cached,
       aiPowered: true,
@@ -636,26 +719,38 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
     };
   }
 
+  console.log("[OFFLINE_LLM_SUGGESTIONS] Cache miss", {
+    traceId,
+    cacheKeyPreview: cacheKey.slice(0, 28),
+  });
+
   const module = getNativeOfflineLlmModule();
   if (!module) {
-    return {
-      suggestions: [],
-      aiPowered: false,
-      aiProvider: "On-Device LLM",
-      message:
-        "On-device LLM runtime is not installed on this build. Suggestions require the LLM runtime.",
-    };
+    return buildLocalFallback(
+      "module_unavailable",
+      "On-device LLM runtime is not installed on this build. Showing smart local suggestions.",
+    );
   }
 
+  console.log("[OFFLINE_LLM_SUGGESTIONS] Native module detected", {
+    traceId,
+    hasGenerateJson: typeof module.generateJson === "function",
+    hasGenerateText: typeof module.generateText === "function",
+    hasIsModelReady: typeof module.isModelReady === "function",
+    hasPrepareModel: typeof module.prepareModel === "function",
+  });
+
   const ready = await ensureModelReady(module);
+  console.log("[OFFLINE_LLM_SUGGESTIONS] Model readiness check", {
+    traceId,
+    ready,
+  });
+
   if (!ready) {
-    return {
-      suggestions: [],
-      aiPowered: false,
-      aiProvider: "On-Device LLM",
-      message:
-        "On-device LLM model is not ready yet. Suggestions require a ready local model.",
-    };
+    return buildLocalFallback(
+      "model_not_ready",
+      "On-device LLM model is not ready yet. Showing smart local suggestions.",
+    );
   }
 
   const normalizedCurrent = input.currentInstruments.map(normalize);
@@ -666,13 +761,17 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
     );
   });
 
+  console.log("[OFFLINE_LLM_SUGGESTIONS] Candidate filter", {
+    traceId,
+    catalogCount: getOfflineInstrumentCatalog().length,
+    candidatesCount: candidates.length,
+  });
+
   if (candidates.length === 0) {
-    return {
-      suggestions: [],
-      aiPowered: false,
-      aiProvider: "On-Device LLM",
-      message: "No candidate instruments available for LLM generation.",
-    };
+    return buildLocalFallback(
+      "candidate_filter_empty",
+      "No candidate instruments available for LLM generation.",
+    );
   }
 
   try {
@@ -682,29 +781,42 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
     );
     const raw = await generateWithNativeLlm(module, systemPrompt, userPrompt);
 
+    console.log("[OFFLINE_LLM_SUGGESTIONS] LLM response received", {
+      traceId,
+      hasRaw: Boolean(raw),
+      rawLength: raw ? raw.length : 0,
+    });
+
     if (!raw) {
-      return {
-        suggestions: [],
-        aiPowered: false,
-        aiProvider: "On-Device LLM",
-        message: "On-device LLM produced no output. No local-ranking fallback is enabled.",
-      };
+      return buildLocalFallback(
+        "empty_llm_output",
+        "On-device LLM produced no output in time. Showing smart local suggestions.",
+      );
     }
 
     const parsed = parseLlmOnlyResult(raw);
     const suggestions = mapLlmOnlySuggestions(parsed, candidates, safeLimit);
 
+    console.log("[OFFLINE_LLM_SUGGESTIONS] Parse result", {
+      traceId,
+      parsedCount: parsed.length,
+      mappedSuggestionsCount: suggestions.length,
+    });
+
     if (suggestions.length === 0) {
-      return {
-        suggestions: [],
-        aiPowered: false,
-        aiProvider: "On-Device LLM",
-        message:
-          "On-device LLM output was invalid for this request. No local-ranking fallback is enabled.",
-      };
+      return buildLocalFallback(
+        "invalid_llm_output",
+        "On-device LLM output was invalid for this request. Showing smart local suggestions.",
+      );
     }
 
     await setCachedSuggestions<InstrumentSuggestion>(cacheKey, suggestions);
+
+    console.log("[OFFLINE_LLM_SUGGESTIONS] Success", {
+      traceId,
+      suggestionsCount: suggestions.length,
+      elapsedMs: Date.now() - startedAt,
+    });
 
     return {
       suggestions,
@@ -712,14 +824,20 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
       aiProvider: "On-Device LLM",
       message: "Generated by on-device LLM. No internet or paid API used.",
     };
-  } catch {
-    return {
-      suggestions: [],
-      aiPowered: false,
-      aiProvider: "On-Device LLM",
-      message:
-        "On-device LLM timed out. No local-ranking fallback is enabled.",
-    };
+  } catch (error: unknown) {
+    console.warn("[OFFLINE_LLM_SUGGESTIONS] Generation failed", {
+      traceId,
+      elapsedMs: Date.now() - startedAt,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : String(error),
+    });
+
+    return buildLocalFallback(
+      "llm_exception",
+      "On-device LLM timed out. Showing smart local suggestions.",
+    );
   }
 };
 
@@ -743,14 +861,75 @@ const buildHomeFeedCacheKey = (input: RerankHomeFeedInput) => {
 const parseHomeFeedLlmResult = (raw: string): HomeFeedLlmRec[] => {
   try {
     const parsed = JSON.parse(extractJsonObject(raw));
-    if (!Array.isArray(parsed?.recommendations)) {
-      return [];
+    const normalizeRec = (entry: unknown): HomeFeedLlmRec | null => {
+      if (typeof entry === "number") {
+        return { idx: entry };
+      }
+
+      if (typeof entry === "string") {
+        const numericMatch = entry.match(/\d+/);
+        return numericMatch ? { idx: Number(numericMatch[0]) } : null;
+      }
+
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const record = entry as Record<string, unknown>;
+      return {
+        idx:
+          record.idx ??
+          record.index ??
+          record.candidate_idx ??
+          record.candidateIndex ??
+          record.rank,
+        id: record.id ?? record.candidate_id ?? record.candidateId,
+        score: record.score ?? record.rating ?? record.relevance,
+        reason:
+          record.reason ??
+          record.why ??
+          record.rationale ??
+          record.explanation,
+      };
+    };
+
+    const rawRecommendations = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.recommendations)
+        ? parsed.recommendations
+        : Array.isArray(parsed?.ranking)
+          ? parsed.ranking
+          : Array.isArray(parsed?.results)
+            ? parsed.results
+            : Array.isArray(parsed?.items)
+              ? parsed.items
+              : [];
+
+    return rawRecommendations
+      .map((entry: unknown) => normalizeRec(entry))
+      .filter((entry: HomeFeedLlmRec | null): entry is HomeFeedLlmRec => entry !== null);
+  } catch {
+    const regexMatches = Array.from(raw.matchAll(/(?:idx|index|candidate)\D{0,6}(\d{1,2})/gi));
+    if (regexMatches.length > 0) {
+      return regexMatches.map((match) => ({ idx: Number(match[1]) }));
     }
 
-    return parsed.recommendations as HomeFeedLlmRec[];
-  } catch {
     return [];
   }
+};
+
+const compactHomeFeedField = (value: unknown, maxLength: number): string => {
+  if (typeof value !== "string") return "";
+
+  const normalized = value
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}~`;
 };
 
 export const rerankHomeFeedWithLocalLLM = async (
@@ -760,6 +939,7 @@ export const rerankHomeFeedWithLocalLLM = async (
   const baseCandidates = Array.isArray(input.candidates)
     ? input.candidates.slice(0, Math.max(safeLimit, 24))
     : [];
+  const llmCandidates = baseCandidates.slice(0, HOME_FEED_MAX_LLM_CANDIDATES);
 
   if (baseCandidates.length === 0) {
     return {
@@ -807,31 +987,44 @@ export const rerankHomeFeedWithLocalLLM = async (
   }
 
   try {
-    const compactCandidates = baseCandidates.map((item: any) => ({
-      id: item.id,
-      type: item.type,
-      name: item.name,
-      genre: item.genre,
-      location: item.location,
-      rating: item.rating,
-      baseScore: Math.round(Number(item.similarity || 0) * 100),
-      baseReason: item.aiReason || "",
+    const compactSkills = input.profileSignals.skills
+      .slice(0, 4)
+      .map((value) => compactHomeFeedField(value, 20))
+      .filter(Boolean);
+    const compactGenres = input.profileSignals.genres
+      .slice(0, 4)
+      .map((value) => compactHomeFeedField(value, 20))
+      .filter(Boolean);
+
+    // Use simple numeric indices instead of UUIDs so the small LLM can
+    // reliably reference candidates in its output.
+    const compactCandidates = llmCandidates.map((item: any, idx: number) => ({
+      idx,
+      t: compactHomeFeedField(item.type, 8),
+      n: compactHomeFeedField(item.name, 28),
+      g: compactHomeFeedField(item.genre, 18),
+      s: Math.round(Number(item.similarity || 0) * 100),
     }));
+    const llmTargetCount = Math.min(HOME_FEED_LLM_TARGET_COUNT, llmCandidates.length);
 
     const systemPrompt =
-      "You are an on-device feed ranking model. Return strict JSON only with candidate ids and short reasons.";
+      "You are an on-device feed ranking model. Return strict JSON only. Prefer a compact ranking with candidate idx numbers.";
 
     const userPrompt = [
       "Rerank this For You feed for realtime relevance.",
-      `Skills: ${input.profileSignals.skills.join(", ") || "none"}`,
-      `Genres: ${input.profileSignals.genres.join(", ") || "none"}`,
-      `Limit: ${safeLimit}`,
-      "Return JSON shape:",
-      '{"recommendations":[{"id":"candidate-id","score":0-100,"reason":"short reason"}]}',
+      `Skills: ${compactSkills.join(", ") || "none"}`,
+      `Genres: ${compactGenres.join(", ") || "none"}`,
+      `Return up to ${llmTargetCount} candidates.`,
+      "Return exactly:",
+      '{"ranking":[0,1,2]}',
+      "Also accepted:",
+      '{"recommendations":[{"idx":0,"score":90}]}',
       "Rules:",
-      "- Use only candidate ids.",
-      "- Keep reason under 100 chars.",
+      "- Use only candidate idx numbers.",
+      "- No prose before or after the JSON.",
+      "- Reasons are optional.",
       "- Sort best to worst.",
+      "- Prefer skill and genre fit, then freshness and score.",
       `Candidates: ${JSON.stringify(compactCandidates)}`,
     ].join("\n");
 
@@ -839,7 +1032,11 @@ export const rerankHomeFeedWithLocalLLM = async (
       module,
       systemPrompt,
       userPrompt,
-      HOME_FEED_TIMEOUT_MS,
+      {
+        timeoutMs: HOME_FEED_TIMEOUT_MS,
+        maxTokens: HOME_FEED_MAX_TOKENS,
+        temperature: 0.2,
+      },
     );
 
     if (!raw) {
@@ -853,6 +1050,7 @@ export const rerankHomeFeedWithLocalLLM = async (
 
     const parsed = parseHomeFeedLlmResult(raw);
     if (parsed.length === 0) {
+      console.warn("[HOME_FYP_LLM] Invalid raw output", raw.slice(0, 400));
       return {
         recommendations: [],
         aiPowered: false,
@@ -861,14 +1059,23 @@ export const rerankHomeFeedWithLocalLLM = async (
       };
     }
 
-    const byId = new Map(baseCandidates.map((item: any) => [item.id, item]));
     const reranked: any[] = [];
 
     for (const rec of parsed) {
-      const id = typeof rec?.id === "string" ? rec.id : "";
-      if (!id || !byId.has(id)) continue;
+      // Support both idx (new numeric) and id (legacy UUID) fields
+      const idx = rec?.idx != null ? Number(rec.idx) : -1;
+      let base: any = null;
 
-      const base = byId.get(id);
+      if (Number.isInteger(idx) && idx >= 0 && idx < llmCandidates.length) {
+        base = llmCandidates[idx];
+      } else {
+        // Fallback: try matching by id string for backwards compat
+        const id = typeof rec?.id === "string" ? rec.id : "";
+        if (id) {
+          base = llmCandidates.find((item: any) => item.id === id) || null;
+        }
+      }
+
       if (!base) continue;
 
       const parsedScore = Number(rec?.score);
@@ -911,12 +1118,27 @@ export const rerankHomeFeedWithLocalLLM = async (
       aiProvider: "On-Device LLM",
       message: "Realtime For You feed reranked by on-device LLM.",
     };
-  } catch {
+  } catch (error: unknown) {
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+    const isContextFull = /context is full/i.test(errorMessage);
+
+    console.warn("[HOME_FYP_LLM] Rerank failed", {
+      limit: safeLimit,
+      candidateCount: baseCandidates.length,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : String(error),
+    });
+
     return {
       recommendations: [],
       aiPowered: false,
       aiProvider: "On-Device CPU Ranker",
-      message: "On-device LLM timed out for Home FYP rerank.",
+      message: isContextFull
+        ? "On-device LLM prompt exceeded the local context window. Using CPU ranking for Home feed."
+        : "On-device LLM timed out for Home FYP rerank.",
     };
   }
 };

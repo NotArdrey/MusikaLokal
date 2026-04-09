@@ -2541,6 +2541,69 @@ export default function EditStudioScreen() {
     );
   };
 
+  const handleAutoFillTestData = () => {
+    const dateKey = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+
+    setStudioName((prev) => prev.trim() || "Test Studio Space (Edited)");
+    setDescription(
+      (prev) =>
+        prev.trim() ||
+        "Updated QA test studio profile used for booking flow regression checks.",
+    );
+    setAddress((prev) => prev.trim() || "San Juan, Metro Manila");
+    setLatitude((prev) => prev ?? 14.6019);
+    setLongitude((prev) => prev ?? 121.0355);
+
+    if (studioType === "Both" || studioType === "Rehearsal") {
+      setRehearsalRate((prev) => prev.trim() || "650");
+    }
+    if (studioType === "Both" || studioType === "Recording") {
+      setRecordingRate((prev) => prev.trim() || "1300");
+    }
+
+    setPax((prev) => prev.trim() || "10");
+    setAmenities((prev) =>
+      prev.length > 0 ? prev : ["Air Conditioning", "WiFi", "Parking"],
+    );
+    setSelectedImages((prev) =>
+      prev.length > 0
+        ? prev
+        : [
+          "https://images.unsplash.com/photo-1461783436728-0a9217714694?w=1200&h=900&fit=crop",
+        ],
+    );
+    setThumbnailIndex(0);
+    setSelectedInstruments((prev) =>
+      prev.length > 0 ? prev : INSTRUMENT_OPTIONS.slice(0, 3),
+    );
+    setAvailability((prev) => {
+      if (prev.some((day) => day.slots.length > 0)) return prev;
+      return prev.map((day) =>
+        day.day === "Saturday" || day.day === "Sunday"
+          ? { ...day, slots: [{ start: "10:00 AM", end: "08:00 PM" }] }
+          : day,
+      );
+    });
+    setSelectedDates((prev) =>
+      Object.keys(prev).length > 0
+        ? prev
+        : {
+          [dateKey]: {
+            selected: true,
+            slots: [{ start: "10:00 AM", end: "06:00 PM" }],
+          },
+        },
+    );
+
+    showAlert(
+      "success",
+      "Test Autofill Applied",
+      "Sample studio edit values were filled for testing.",
+    );
+  };
+
   const addAmenity = () => {
     if (newAmenity.trim()) {
       setAmenities([...amenities, newAmenity.trim()]);
@@ -3004,6 +3067,35 @@ export default function EditStudioScreen() {
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Studio" onBackPress={handleAttemptLeave} />
+
+        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+          <TouchableOpacity activeOpacity={1}
+            onPress={handleAutoFillTestData}
+            style={{
+              alignSelf: "flex-start",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
+              borderWidth: 1,
+              borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
+              borderRadius: 999,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+            }}
+          >
+            <Ionicons name="flask-outline" size={15} color={colors.primary} />
+            <Text
+              style={{
+                color: colors.primary,
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 12,
+              }}
+            >
+              Auto Fill Test Data
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <ScrollView
           showsVerticalScrollIndicator={false}

@@ -597,6 +597,69 @@ export default function AddStudioScreen() {
     else router.back();
   };
 
+  const handleAutoFillTestData = () => {
+    const dateKey = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+
+    setStudioName((prev) => prev.trim() || "Test Studio Space");
+    setDescription(
+      (prev) =>
+        prev.trim() ||
+        "QA test studio listing for booking and application workflow checks.",
+    );
+    setAddress((prev) => prev.trim() || "Pasig City, Metro Manila");
+    setLatitude((prev) => prev ?? 14.5764);
+    setLongitude((prev) => prev ?? 121.0851);
+
+    if (studioType === "Both" || studioType === "Rehearsal") {
+      setRehearsalRate((prev) => prev.trim() || "600");
+    }
+    if (studioType === "Both" || studioType === "Recording") {
+      setRecordingRate((prev) => prev.trim() || "1200");
+    }
+
+    setPax((prev) => prev.trim() || "8");
+    setAmenities((prev) =>
+      prev.length > 0 ? prev : ["Air Conditioning", "WiFi", "Parking"],
+    );
+    setImages((prev) =>
+      prev.length > 0
+        ? prev
+        : [
+          "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=1200&h=900&fit=crop",
+        ],
+    );
+    setThumbnailIndex(0);
+    setSelectedInstruments((prev) =>
+      prev.length > 0 ? prev : INSTRUMENT_OPTIONS.slice(0, 3),
+    );
+    setAvailability((prev) => {
+      if (prev.some((day) => day.slots.length > 0)) return prev;
+      return prev.map((day) =>
+        day.day === "Saturday" || day.day === "Sunday"
+          ? { ...day, slots: [{ start: "10:00 AM", end: "08:00 PM" }] }
+          : day,
+      );
+    });
+    setSelectedDates((prev) =>
+      Object.keys(prev).length > 0
+        ? prev
+        : {
+          [dateKey]: {
+            selected: true,
+            slots: [{ start: "10:00 AM", end: "06:00 PM" }],
+          },
+        },
+    );
+
+    showAlert(
+      "success",
+      "Test Autofill Applied",
+      "Sample studio values were filled for testing.",
+    );
+  };
+
   const toggleCalendarDate = (dateStr: string) => {
     setSelectedDates((prev) => {
       const next = { ...prev };
@@ -1630,6 +1693,35 @@ export default function AddStudioScreen() {
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="List Studio" />
+
+        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+          <TouchableOpacity activeOpacity={1}
+            onPress={handleAutoFillTestData}
+            style={{
+              alignSelf: "flex-start",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
+              borderWidth: 1,
+              borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
+              borderRadius: 999,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+            }}
+          >
+            <Ionicons name="flask-outline" size={15} color={colors.primary} />
+            <Text
+              style={{
+                color: colors.primary,
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 12,
+              }}
+            >
+              Auto Fill Test Data
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>

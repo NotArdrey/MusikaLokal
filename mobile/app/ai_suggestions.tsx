@@ -21,6 +21,7 @@ import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 import { generateOfflineSuggestionsWithLocalLLM } from '../src/services/offlineLlmEnhancer';
+import { getOfflineInstrumentSuggestions } from '../src/utils/offlineInstrumentRecommender';
 import {
     EXPERIENCE_OPTIONS,
     ExperienceLevel,
@@ -165,39 +166,119 @@ export default function AiSuggestionsScreen() {
         );
     }, []);
 
-    // Fetch on-device LLM suggestions (no local-ranking fallback)
+    // Fetch on-device suggestions, preferring local LLM with CPU ranker fallback.
     const fetchSuggestions = async () => {
+        const requestId = `ai-suggest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        const startedAt = Date.now();
+
+        console.log('[AI_SUGGESTIONS_FLOW] Request start', {
+            requestId,
+            selectedGenresCount: selectedGenres.length,
+            selectedGenresPreview: selectedGenres.slice(0, 4),
+            currentInstrumentsCount: currentInstruments.length,
+            currentInstrumentsPreview: currentInstruments.slice(0, 4),
+            userRolesCount: userRoles.length,
+            experienceLevel,
+            purpose,
+        });
+
         setLoading(true);
         setError(null);
         setSuggestionMessage(null);
 
+        const requestInput = {
+            genres: selectedGenres,
+            currentInstruments,
+            userRoles,
+            experienceLevel,
+            purpose,
+            limit: 10,
+        };
+
         try {
-            const generated = await generateOfflineSuggestionsWithLocalLLM({
-                genres: selectedGenres,
-                currentInstruments,
-                userRoles,
-                experienceLevel,
-                purpose,
-                limit: 10,
+            const generated = await generateOfflineSuggestionsWithLocalLLM(requestInput);
+
+            console.log('[AI_SUGGESTIONS_STATUS]', {
+                requestId,
+                aiPowered: generated.aiPowered,
+                provider: generated.aiProvider,
+                count: generated.suggestions.length,
+                message: generated.message || '',
+                elapsedMs: Date.now() - startedAt,
             });
 
-            if (generated.suggestions.length > 0 && generated.aiPowered) {
+            if (generated.suggestions.length > 0) {
+                console.log('[AI_SUGGESTIONS_FLOW] Service returned suggestions', {
+                    requestId,
+                    aiPowered: generated.aiPowered,
+                    suggestionsCount: generated.suggestions.length,
+                });
+
                 setSuggestions(generated.suggestions);
-                setIsAIPowered(true);
-                setAIProvider(generated.aiProvider);
-                setSuggestionMessage(generated.message);
+                setIsAIPowered(generated.aiPowered);
+                setAIProvider(
+                    generated.aiProvider ||
+                    (generated.aiPowered ? 'On-Device LLM' : 'On-Device Local Ranker')
+                );
+                setSuggestionMessage(generated.message || null);
+                setStep('results');
+                return;
+            }
+
+            const fallbackSuggestions = getOfflineInstrumentSuggestions(requestInput);
+            console.log('[AI_SUGGESTIONS_FLOW] Manual fallback computed', {
+                requestId,
+                fallbackCount: fallbackSuggestions.length,
+                generatedProvider: generated.aiProvider,
+                generatedMessage: generated.message || '',
+            });
+
+            if (fallbackSuggestions.length > 0) {
+                setSuggestions(fallbackSuggestions);
+                setIsAIPowered(false);
+                setAIProvider('On-Device Local Ranker');
+                setSuggestionMessage(
+                    generated.message ||
+                    'On-device LLM is not ready yet. Showing smart local suggestions.'
+                );
                 setStep('results');
             } else {
                 setSuggestions([]);
                 setIsAIPowered(false);
                 setAIProvider(generated.aiProvider || 'On-Device LLM');
-                setError(generated.message || 'Unable to generate LLM suggestions right now.');
+                setError(generated.message || 'Unable to generate suggestions right now.');
             }
         } catch (err: any) {
-            console.error('Error fetching suggestions:', err);
-            setError('Failed to generate on-device LLM suggestions. Please try again.');
-            setSuggestionMessage(null);
+            console.error('[AI_SUGGESTIONS_FLOW] Request failed', {
+                requestId,
+                elapsedMs: Date.now() - startedAt,
+                error: {
+                    name: err?.name,
+                    message: err?.message,
+                },
+            });
+
+            const fallbackSuggestions = getOfflineInstrumentSuggestions(requestInput);
+            console.log('[AI_SUGGESTIONS_FLOW] Error fallback computed', {
+                requestId,
+                fallbackCount: fallbackSuggestions.length,
+            });
+
+            if (fallbackSuggestions.length > 0) {
+                setSuggestions(fallbackSuggestions);
+                setIsAIPowered(false);
+                setAIProvider('On-Device Local Ranker');
+                setSuggestionMessage('On-device LLM is temporarily unavailable. Showing smart local suggestions.');
+                setStep('results');
+            } else {
+                setError('Failed to generate suggestions right now. Please try again.');
+                setSuggestionMessage(null);
+            }
         } finally {
+            console.log('[AI_SUGGESTIONS_FLOW] Request end', {
+                requestId,
+                elapsedMs: Date.now() - startedAt,
+            });
             setLoading(false);
         }
     };
