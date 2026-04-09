@@ -244,6 +244,11 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
             if (table === "gigs_with_stats") {
               query = query.eq("status", "open");
+              query = query.eq("permit_status", "approved");
+            }
+
+            if (table === "studios_with_stats") {
+              query = query.eq("permit_status", "approved");
             }
 
             if (

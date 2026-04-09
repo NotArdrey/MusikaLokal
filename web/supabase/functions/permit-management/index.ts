@@ -467,6 +467,55 @@ serve(async (req: Request) => {
       return jsonResponse({ items });
     }
 
+    if (action === "fetch_owner_details") {
+      const targetUserId = String(params.userId || "").trim();
+
+      if (!targetUserId) {
+        return jsonResponse({ error: "Missing userId" }, 400);
+      }
+
+      const { data, error } = await client
+        .from("profiles")
+        .select("*")
+        .eq("id", targetUserId)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      return jsonResponse({ item: data || null });
+    }
+
+    if (action === "fetch_listing_details") {
+      const entityType = parseEntityType(params.entityType);
+      const entityId = String(params.entityId || "").trim();
+
+      if (!entityType || !entityId) {
+        return jsonResponse({ error: "Missing required fields" }, 400);
+      }
+
+      const table = entityType === "studio" ? "studios" : "gigs";
+      const ownerField = entityType === "studio" ? "owner_id" : "organizer_id";
+      const ownerAlias = entityType === "studio" ? "owner" : "organizer";
+
+      const { data, error } = await client
+        .from(table)
+        .select(`*, ${ownerAlias}:profiles!${ownerField}(id, full_name, email, role, is_verified, created_at)`)
+        .eq("id", entityId)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) {
+        return jsonResponse({ error: "Listing not found" }, 404);
+      }
+
+      const owner = entityType === "studio" ? data.owner : data.organizer;
+
+      return jsonResponse({
+        item: data,
+        owner: owner || null,
+      });
+    }
+
     if (action === "review_permit") {
       const entityType = parseEntityType(params.entityType);
       const entityId = String(params.entityId || "").trim();
@@ -558,6 +607,39 @@ serve(async (req: Request) => {
           .insert(legacyAuditPayload);
 
         if (legacyAuditError) throw legacyAuditError;
+      }
+
+      const ownerId = String((currentItem as any)?.[ownerField] || "").trim();
+      if (ownerId) {
+        const isApproved = reviewAction === "approve";
+        const listingLabel = entityType === "studio" ? "studio" : "gig";
+        const notificationTitle = isApproved ? "Permit Approved" : "Permit Rejected";
+        const notificationMessage = isApproved
+          ? `Your ${listingLabel} "${currentItem.name}" is now approved and visible in Home.`
+          : `Your ${listingLabel} "${currentItem.name}" was rejected.${rejectionReason ? ` Reason: ${rejectionReason}` : " Update details and reapply to continue review."}`;
+
+        const { error: notificationError } = await client
+          .from("notifications")
+          .insert({
+            user_id: ownerId,
+            type: isApproved ? "success" : "warning",
+            title: notificationTitle,
+            message: notificationMessage,
+            read: false,
+            meta: {
+              event_type: "permit_review",
+              entity_type: entityType,
+              entity_id: entityId,
+              permit_status: nextStatus,
+              reviewed_by: userId,
+              reviewed_at: updatePayload.permit_reviewed_at,
+              rejection_reason: reviewAction === "reject" ? rejectionReason : null,
+            },
+          });
+
+        if (notificationError) {
+          console.error("permit-management notification insert error:", notificationError);
+        }
       }
 
       return jsonResponse({

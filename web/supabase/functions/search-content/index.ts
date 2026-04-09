@@ -46,6 +46,7 @@ serve(async (req: Request) => {
         // 2. Search Studios (Studio, Venue) - using view with computed stats
         if (type === 'All' || type === 'Studio' || type === 'Venue') {
             let q = supabaseClient.from('studios_with_stats').select('*')
+            q = q.eq('permit_status', 'approved')
             if (query) q = q.ilike('name', `%${query}%`)
             // Studios don't have genre typically, unless handled in description or amenities. 
             // If genre is specific (e.g. Rock), maybe skip studios or check description?

@@ -71,11 +71,15 @@ export default function HomePage() {
       // Fetch counts
       const [studiosCount, gigsCount, groupsCount, artistsCount] =
         await Promise.all([
-          supabase.from("studios").select("id", { count: "exact", head: true }),
+          supabase
+            .from("studios")
+            .select("id", { count: "exact", head: true })
+            .eq("permit_status", "approved"),
           supabase
             .from("gigs")
             .select("id", { count: "exact", head: true })
-            .eq("status", "open"),
+            .eq("status", "open")
+            .eq("permit_status", "approved"),
           supabase.from("groups").select("id", { count: "exact", head: true }),
           supabase
             .from("profiles")
@@ -97,12 +101,14 @@ export default function HomePage() {
           .select(
             "id, name, description, images, address, hourly_rate, average_rating, permit_status",
           )
+          .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
           .limit(4),
         supabase
           .from("gigs")
           .select("id, name, description, images, location, budget, event_date, permit_status")
           .eq("status", "open")
+          .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
           .limit(4),
         supabase

@@ -94,7 +94,7 @@ export default function MyVenueScreen() {
         try {
             const { data: baseGigs, error: baseError } = await supabase
                 .from('gigs')
-                .select('id, organizer_id, name, location, budget, description, event_date, status, created_at')
+                .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, updated_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                 .eq('organizer_id', userId)
                 .order('created_at', { ascending: false });
 
@@ -160,6 +160,7 @@ export default function MyVenueScreen() {
                 const reviewStats = reviewsByGigId[gig.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
+                const normalizedPermitStatus = String(gig.permit_status || 'pending_review').toLowerCase();
 
                 return {
                     ...gig,
@@ -167,6 +168,9 @@ export default function MyVenueScreen() {
                     images: imagesByGigId[gig.id] || [],
                     rating,
                     review_count: reviewCount,
+                    permit_status: normalizedPermitStatus,
+                    permit_rejection_reason: gig.permit_rejection_reason || null,
+                    permit_reviewed_at: gig.permit_reviewed_at || null,
                 };
             }));
         } catch (e) {
@@ -295,6 +299,41 @@ export default function MyVenueScreen() {
                                 }, isWebDesktop && styles.webSectionCard, {
                                     shadowColor: isWebDesktop ? '#0F172A' : colors.primary,
                                 }]}>
+                                    {(() => {
+                                        const normalizedPermitStatus = String(gig.permit_status || 'pending_review').toLowerCase();
+                                        const isRejected = normalizedPermitStatus === 'rejected';
+                                        const isApproved = normalizedPermitStatus === 'approved';
+                                        const isResubmitted = normalizedPermitStatus === 'resubmitted';
+
+                                        const permitStatusLabel =
+                                            isApproved
+                                                ? 'Approved'
+                                                : isRejected
+                                                    ? 'Rejected'
+                                                    : isResubmitted
+                                                        ? 'Resubmitted'
+                                                        : 'Pending Review';
+
+                                        const permitBadgeBackground =
+                                            isApproved
+                                                ? (isDark ? 'rgba(22,163,74,0.22)' : '#DCFCE7')
+                                                : isRejected
+                                                    ? (isDark ? 'rgba(220,38,38,0.22)' : '#FEE2E2')
+                                                    : isResubmitted
+                                                        ? (isDark ? 'rgba(37,99,235,0.22)' : '#DBEAFE')
+                                                        : (isDark ? 'rgba(245,158,11,0.22)' : '#FEF3C7');
+
+                                        const permitBadgeColor =
+                                            isApproved
+                                                ? '#16A34A'
+                                                : isRejected
+                                                    ? '#DC2626'
+                                                    : isResubmitted
+                                                        ? '#2563EB'
+                                                        : '#B45309';
+
+                                        return (
+                                            <>
                                     <View style={styles.imageWrapper}>
                                         <CachedImage
                                             uri={resolveGigImage(gig)}
@@ -324,6 +363,22 @@ export default function MyVenueScreen() {
                                             {gig.description}
                                         </Text>
 
+                                        <View style={[styles.permitStatusChip, { backgroundColor: permitBadgeBackground }]}>
+                                            <Text style={[styles.permitStatusChipText, { color: permitBadgeColor }]}>Permit: {permitStatusLabel}</Text>
+                                        </View>
+
+                                        {isRejected && !!gig.permit_rejection_reason && (
+                                            <Text style={styles.rejectionReasonText} numberOfLines={3}>
+                                                Rejection reason: {gig.permit_rejection_reason}
+                                            </Text>
+                                        )}
+
+                                        {(normalizedPermitStatus === 'pending' || normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
+                                            <Text style={[styles.permitHintText, { color: colors.textSecondary }]}>
+                                                Hidden from Home until admin permit approval is completed.
+                                            </Text>
+                                        )}
+
                                         <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                             <View style={styles.actionLeft}>
                                                 <TouchableOpacity activeOpacity={1}
@@ -334,12 +389,35 @@ export default function MyVenueScreen() {
                                                     <Text style={styles.manageBtnText}>Manage</Text>
                                                 </TouchableOpacity>
 
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="pencil-outline" size={20} color={colors.text} />
-                                                </TouchableOpacity>
+                                                {isRejected ? (
+                                                    <TouchableOpacity
+                                                        activeOpacity={1}
+                                                        onPress={() =>
+                                                            router.push({
+                                                                pathname: '/edit_gig',
+                                                                params: { id: gig.id, reapply: '1' },
+                                                            })
+                                                        }
+                                                        style={[
+                                                            styles.reapplyBtn,
+                                                            {
+                                                                borderColor: '#F97316',
+                                                                backgroundColor: isDark ? 'rgba(249,115,22,0.12)' : '#FFF7ED',
+                                                            },
+                                                        ]}
+                                                    >
+                                                        <Ionicons name="refresh-outline" size={16} color="#EA580C" />
+                                                        <Text style={styles.reapplyBtnText}>Edit & Reapply</Text>
+                                                    </TouchableOpacity>
+                                                ) : (
+                                                    <TouchableOpacity
+                                                        activeOpacity={1}
+                                                        onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
+                                                        style={[styles.editBtn, { borderColor: colors.border }]}
+                                                    >
+                                                        <Ionicons name="pencil-outline" size={20} color={colors.text} />
+                                                    </TouchableOpacity>
+                                                )}
                                             </View>
 
                                             <TouchableOpacity activeOpacity={1}
@@ -350,6 +428,9 @@ export default function MyVenueScreen() {
                                             </TouchableOpacity>
                                         </View>
                                     </View>
+                                            </>
+                                        );
+                                    })()}
                                 </View>
                             ))
                         )}
@@ -495,6 +576,30 @@ const styles = StyleSheet.create({
         fontSize: 13,
         lineHeight: 20,
     },
+    permitStatusChip: {
+        marginTop: 10,
+        alignSelf: 'flex-start',
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+    },
+    permitStatusChipText: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 11,
+    },
+    rejectionReasonText: {
+        marginTop: 8,
+        color: '#DC2626',
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
+        lineHeight: 17,
+    },
+    permitHintText: {
+        marginTop: 8,
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 12,
+        lineHeight: 17,
+    },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -523,6 +628,20 @@ const styles = StyleSheet.create({
         padding: 8,
         borderRadius: 12,
         borderWidth: 1,
+    },
+    reapplyBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: 12,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    reapplyBtnText: {
+        color: '#EA580C',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
     },
     deleteBtn: {
         padding: 8,

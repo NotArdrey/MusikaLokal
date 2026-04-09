@@ -112,11 +112,24 @@ interface PermitItem {
   entity_type: 'studio' | 'gig';
   permit_status: string;
   business_permit_url: string | null;
+  owner_id: string;
   owner_name: string;
   owner_email: string;
   created_at: string;
   permit_reviewed_at: string | null;
   permit_rejection_reason: string | null;
+}
+
+interface OwnerDetailsEntry {
+  profile: Record<string, unknown> | null;
+  ownerName: string;
+}
+
+interface StudioDetailsEntry {
+  listing: Record<string, unknown> | null;
+  owner: Record<string, unknown> | null;
+  listingName: string;
+  entityType: 'studio' | 'gig';
 }
 
 const permitStatuses: PermitFilter[] = ['all', 'pending_review', 'approved', 'rejected', 'resubmitted'];
@@ -163,6 +176,38 @@ const getErrorMessage = async (error: unknown, fallback: string) => {
   return baseMessage;
 };
 
+const formatDetailLabel = (rawKey: string) => {
+  const withSpaces = rawKey.replace(/_/g, ' ').trim();
+  if (!withSpaces) return 'Field';
+
+  return withSpaces
+    .split(' ')
+    .map((part) => {
+      if (!part) return part;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(' ');
+};
+
+const formatDetailValue = (value: unknown) => {
+  if (value === null || value === undefined) return '-';
+
+  if (typeof value === 'boolean') {
+    return value ? 'Yes' : 'No';
+  }
+
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  const text = String(value).trim();
+  return text || '-';
+};
+
 const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
@@ -206,6 +251,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
+  },
+  detailLabel: {
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
+    textTransform: 'uppercase',
+  },
+  detailRow: {
+    gap: 4,
+  },
+  detailsEmptyText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+  },
+  detailsRows: {
+    gap: 8,
+  },
+  detailsScroll: {
+    maxHeight: 460,
+  },
+  detailsScrollContent: {
+    gap: 10,
+    paddingBottom: 4,
+  },
+  detailsSection: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  detailsSectionTitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  detailValue: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
   },
   emptyText: {
     fontSize: 13,
@@ -269,6 +352,14 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 560,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    gap: 10,
+  },
+  modalCardLarge: {
+    width: '100%',
+    maxWidth: 760,
     borderRadius: 16,
     borderWidth: 1,
     padding: 16,
@@ -377,6 +468,10 @@ export default function AdminPermitsPage() {
   const [permitSearch, setPermitSearch] = useState('');
   const [permitFilter, setPermitFilter] = useState<(typeof permitStatuses)[number]>('all');
   const [entityFilter, setEntityFilter] = useState<(typeof entityTypes)[number]>('all');
+  const [ownerDetailsLoadingKey, setOwnerDetailsLoadingKey] = useState<string | null>(null);
+  const [studioDetailsLoadingKey, setStudioDetailsLoadingKey] = useState<string | null>(null);
+  const [ownerDetailsTarget, setOwnerDetailsTarget] = useState<OwnerDetailsEntry | null>(null);
+  const [studioDetailsTarget, setStudioDetailsTarget] = useState<StudioDetailsEntry | null>(null);
   const [reviewTarget, setReviewTarget] = useState<PermitItem | null>(null);
   const [reviewAction, setReviewAction] = useState<'approve' | 'reject' | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -463,6 +558,132 @@ export default function AdminPermitsPage() {
     setRejectReason('');
     setAdminNotes('');
   }, [reviewSubmitting]);
+
+  const closeOwnerDetailsModal = useCallback(() => {
+    setOwnerDetailsTarget(null);
+  }, []);
+
+  const closeStudioDetailsModal = useCallback(() => {
+    setStudioDetailsTarget(null);
+  }, []);
+
+  const openOwnerDetailsModal = useCallback(async (item: PermitItem, loadingKey?: string) => {
+    const ownerId = String(item.owner_id || '').trim();
+    if (!ownerId) {
+      showAlert('warning', 'Owner unavailable', 'This permit record has no owner reference.');
+      return;
+    }
+
+    const requestLoadingKey = loadingKey || `owner-${ownerId}`;
+    setOwnerDetailsLoadingKey(requestLoadingKey);
+
+    try {
+      const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+        body: {
+          action: 'fetch_owner_details',
+          userId: ownerId,
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+
+      const profile = data?.item && typeof data.item === 'object'
+        ? (data.item as Record<string, unknown>)
+        : {
+          id: ownerId,
+          full_name: item.owner_name || null,
+          email: item.owner_email || null,
+        };
+
+      setOwnerDetailsTarget({
+        profile,
+        ownerName: item.owner_name || 'Owner',
+      });
+    } catch (error) {
+      const message = await getErrorMessage(error, 'Unable to load owner details.');
+      showAlert('error', 'Failed to load owner details', message);
+      setOwnerDetailsTarget({
+        profile: {
+          id: ownerId,
+          full_name: item.owner_name || null,
+          email: item.owner_email || null,
+        },
+        ownerName: item.owner_name || 'Owner',
+      });
+    } finally {
+      setOwnerDetailsLoadingKey((prev) => (prev === requestLoadingKey ? null : prev));
+    }
+  }, [showAlert]);
+
+  const openStudioDetailsModal = useCallback(async (item: PermitItem, loadingKey?: string) => {
+    const requestLoadingKey = loadingKey || `studio-${item.id}`;
+    setStudioDetailsLoadingKey(requestLoadingKey);
+
+    const entityLabel = item.entity_type === 'gig' ? 'gig' : 'studio';
+
+    try {
+      const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+        body: {
+          action: 'fetch_listing_details',
+          entityType: item.entity_type,
+          entityId: item.id,
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
+
+      const listing = data?.item && typeof data.item === 'object'
+        ? (data.item as Record<string, unknown>)
+        : null;
+
+      const owner = data?.owner && typeof data.owner === 'object'
+        ? (data.owner as Record<string, unknown>)
+        : null;
+
+      setStudioDetailsTarget({
+        listing,
+        owner,
+        listingName: item.name || (item.entity_type === 'gig' ? 'Gig' : 'Studio'),
+        entityType: item.entity_type,
+      });
+    } catch (error) {
+      const message = await getErrorMessage(error, `Unable to load ${entityLabel} details.`);
+      showAlert('error', `Failed to load ${entityLabel} details`, message);
+    } finally {
+      setStudioDetailsLoadingKey((prev) => (prev === requestLoadingKey ? null : prev));
+    }
+  }, [showAlert]);
+
+  const renderDetailsSection = useCallback((
+    title: string,
+    rawData: Record<string, unknown> | null | undefined,
+    emptyMessage: string,
+  ) => {
+    const rows = rawData && typeof rawData === 'object'
+      ? Object.entries(rawData)
+      : [];
+
+    return (
+      <View style={[styles.detailsSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}> 
+        <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>{title}</Text>
+
+        {rows.length === 0 ? (
+          <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>{emptyMessage}</Text>
+        ) : (
+          <View style={styles.detailsRows}>
+            {rows.map(([key, value]) => (
+              <View key={`${title}-${key}`} style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{formatDetailLabel(key)}</Text>
+                <Text style={[styles.detailValue, { color: colors.text }]}>{formatDetailValue(value)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  }, [colors.border, colors.text, colors.textSecondary, isDark]);
 
   const submitReview = useCallback(async () => {
     if (!reviewTarget || !reviewAction) return;
@@ -641,6 +862,9 @@ export default function AdminPermitsPage() {
               {filteredPermits.map((item) => {
                 const status = String(item.permit_status || 'pending_review').replace(/_/g, ' ');
                 const canReview = ['pending', 'pending_review', 'resubmitted'].includes(item.permit_status);
+                const ownerLoadingKey = `permit-owner-${item.entity_type}-${item.id}`;
+                const studioLoadingKey = `permit-studio-${item.entity_type}-${item.id}`;
+                const listingActionLabel = item.entity_type === 'gig' ? 'View Gig' : 'View Studio';
                 return (
                   <View key={`${item.entity_type}-${item.id}`} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
                     <View style={styles.cardHeaderRow}>
@@ -658,6 +882,53 @@ export default function AdminPermitsPage() {
                     )}
 
                     <View style={styles.cardActionsRow}>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        disabled={!item.owner_id || ownerDetailsLoadingKey === ownerLoadingKey}
+                        onPress={() => {
+                          if (!item.owner_id) return;
+                          void openOwnerDetailsModal(item, ownerLoadingKey);
+                        }}
+                        style={[
+                          styles.smallActionButton,
+                          {
+                            borderColor: colors.border,
+                            opacity: item.owner_id ? 1 : 0.5,
+                          },
+                        ]}
+                      >
+                        {ownerDetailsLoadingKey === ownerLoadingKey ? (
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                          <>
+                            <Ionicons name="person-outline" size={14} color={colors.text} />
+                            <Text style={[styles.smallActionText, { color: colors.text }]}>View Owner</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        disabled={studioDetailsLoadingKey === studioLoadingKey}
+                        onPress={() => {
+                          void openStudioDetailsModal(item, studioLoadingKey);
+                        }}
+                        style={[styles.smallActionButton, { borderColor: colors.border }]}
+                      >
+                        {studioDetailsLoadingKey === studioLoadingKey ? (
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                          <>
+                            <Ionicons
+                              name={item.entity_type === 'gig' ? 'musical-notes-outline' : 'business-outline'}
+                              size={14}
+                              color={colors.text}
+                            />
+                            <Text style={[styles.smallActionText, { color: colors.text }]}>{listingActionLabel}</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
                       {!!item.business_permit_url && (
                         <TouchableOpacity
                           activeOpacity={1}
@@ -699,6 +970,61 @@ export default function AdminPermitsPage() {
           )}
         </View>
       </ScrollView>
+
+      <Modal visible={!!ownerDetailsTarget} transparent animationType="fade" onRequestClose={closeOwnerDetailsModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Owner Details</Text>
+            <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>{ownerDetailsTarget?.ownerName || 'Owner'}</Text>
+
+            <ScrollView style={styles.detailsScroll} contentContainerStyle={styles.detailsScrollContent}>
+              {renderDetailsSection('Profile', ownerDetailsTarget?.profile || null, 'Owner details are unavailable.')}
+            </ScrollView>
+
+            <View style={styles.modalActionsRow}>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={closeOwnerDetailsModal}
+                style={[styles.modalButton, { backgroundColor: isDark ? '#334155' : '#E5E7EB' }]}
+              >
+                <Text style={[styles.modalButtonText, { color: colors.text }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!studioDetailsTarget} transparent animationType="fade" onRequestClose={closeStudioDetailsModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              {(studioDetailsTarget?.entityType === 'gig' ? 'Gig' : 'Studio')} Details
+            </Text>
+            <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
+              {studioDetailsTarget?.listingName || (studioDetailsTarget?.entityType === 'gig' ? 'Gig' : 'Studio')}
+            </Text>
+
+            <ScrollView style={styles.detailsScroll} contentContainerStyle={styles.detailsScrollContent}>
+              {renderDetailsSection(
+                studioDetailsTarget?.entityType === 'gig' ? 'Gig' : 'Studio',
+                studioDetailsTarget?.listing || null,
+                `${studioDetailsTarget?.entityType === 'gig' ? 'Gig' : 'Studio'} details are unavailable.`,
+              )}
+              {renderDetailsSection('Owner', studioDetailsTarget?.owner || null, 'Owner details are unavailable.')}
+            </ScrollView>
+
+            <View style={styles.modalActionsRow}>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={closeStudioDetailsModal}
+                style={[styles.modalButton, { backgroundColor: isDark ? '#334155' : '#E5E7EB' }]}
+              >
+                <Text style={[styles.modalButtonText, { color: colors.text }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={!!reviewTarget && !!reviewAction} transparent animationType="fade" onRequestClose={closeReviewModal}>
         <KeyboardAvoidingView

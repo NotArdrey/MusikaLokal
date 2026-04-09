@@ -26,6 +26,8 @@ serve(async (req: Request) => {
         const { data: featuredGigs, error: gigsError } = await supabaseClient
             .from('gigs_with_stats')
             .select('*, organizers:profiles(full_name, avatar_url)')
+            .eq('status', 'open')
+            .eq('permit_status', 'approved')
             .order('created_at', { ascending: false })
             .limit(5)
 
@@ -33,6 +35,7 @@ serve(async (req: Request) => {
         const { data: featuredStudios, error: studiosError } = await supabaseClient
             .from('studios_with_stats')
             .select('*')
+            .eq('permit_status', 'approved')
             .order('rating', { ascending: false })
             .limit(5)
         

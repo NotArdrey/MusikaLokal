@@ -99,11 +99,17 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
                 // If first item is an object with 'id' and 'type', use directly
                 if (typeof history[0] === 'object' && history[0].id) {
                     // Normalize the data format for ListingCard
-                    const normalizedData = history.map((item: any) => ({
-                        ...item,
-                        image: item.image || item.images?.[0] || 'https://via.placeholder.com/300x200?text=Item',
-                        rating: item.rating || 0,
-                    }));
+                    const normalizedData = history
+                        .filter((item: any) => {
+                            const itemType = String(item?.type || '').toLowerCase();
+                            if (itemType !== 'studio' && itemType !== 'gig') return true;
+                            return String(item?.permit_status || '').toLowerCase() === 'approved';
+                        })
+                        .map((item: any) => ({
+                            ...item,
+                            image: item.image || item.images?.[0] || 'https://via.placeholder.com/300x200?text=Item',
+                            rating: item.rating || 0,
+                        }));
                     setData(normalizedData);
                     setLoading(false);
                     return;
@@ -114,9 +120,14 @@ const RecentlyViewedSheet = forwardRef<BottomSheetModal, RecentlyViewedSheetProp
 
                 // Fetch from projection-backed stats views (legacy-compatible shape)
                 const [studiosRes, groupsRes, gigsRes] = await Promise.all([
-                    supabase.from('studios_with_stats').select('*').in('id', recentIds),
+                    supabase.from('studios_with_stats').select('*').eq('permit_status', 'approved').in('id', recentIds),
                     supabase.from('groups_with_stats').select('*').in('id', recentIds),
-                    supabase.from('gigs_with_stats').select('*').in('id', recentIds)
+                    supabase
+                        .from('gigs_with_stats')
+                        .select('*')
+                        .eq('status', 'open')
+                        .eq('permit_status', 'approved')
+                        .in('id', recentIds)
                 ]);
 
                 const combined: any[] = [];

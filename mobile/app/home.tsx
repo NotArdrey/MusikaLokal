@@ -564,6 +564,11 @@ export default function HomeScreen() {
     const realtimeTables = [
       "gigs",
       "studios",
+      "studio_types",
+      "studio_amenities",
+      "studio_instruments",
+      "studio_settings",
+      "studio_operating_hours",
       "groups",
       "profiles",
       "gig_applications",
@@ -837,11 +842,12 @@ export default function HomeScreen() {
         });
       }
 
-      // Musicians and Guests can see studios and gigs, but owners cannot
-      if (!isOwner && !isGuest) {
+      // All signed-in users can see studios in Home.
+      if (!isGuest) {
         const { data: sData, error: sError } = await supabase
           .from("studios_with_stats")
           .select("*")
+          .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
           .limit(20);
         if (sError) debugLog("Error fetching studios:", sError);
@@ -889,10 +895,15 @@ export default function HomeScreen() {
             debugLog("Studios augmented with promotion flags");
           }
         }
+      }
+
+      // Gigs remain musician-facing content in Home.
+      if (!isOwner && !isGuest) {
         const { data: gigData, error: gigError } = await supabase
           .from("gigs_with_stats")
           .select("*")
           .eq("status", "open") // Only show open gigs to musicians
+          .eq("permit_status", "approved")
           .order("created_at", { ascending: false })
           .limit(20);
         if (gigError) debugLog("Error fetching gigs:", gigError);
@@ -1204,13 +1215,27 @@ export default function HomeScreen() {
       items = items.filter((i: any) => i.id !== item.id);
 
       // Add to front
-      items.unshift(item);
-
-      if (isGuest) {
-        items = items.filter(
-          (entry: any) => entry.type === "Group" || entry.type === "Artist",
-        );
+      const normalizedItem = { ...item };
+      const normalizedItemType = String(normalizedItem?.type || "").toLowerCase();
+      if (
+        (normalizedItemType === "studio" || normalizedItemType === "gig") &&
+        !normalizedItem.permit_status
+      ) {
+        normalizedItem.permit_status = "approved";
       }
+      items.unshift(normalizedItem);
+
+      items = items.filter((entry: any) => {
+        if (isGuest) {
+          return entry.type === "Group" || entry.type === "Artist";
+        }
+
+        const entryType = String(entry?.type || "").toLowerCase();
+        if (entryType === "studio" || entryType === "gig") {
+          return String(entry?.permit_status || "").toLowerCase() === "approved";
+        }
+        return true;
+      });
 
       // Keep only last 10
       items = items.slice(0, 10);
@@ -1240,13 +1265,19 @@ export default function HomeScreen() {
       );
       if (existingJson) {
         const items = JSON.parse(existingJson);
-        const guestFilteredItems = isGuest
-          ? items.filter(
-            (item: any) => item.type === "Group" || item.type === "Artist",
-          )
-          : items;
-        debugLog("Recently viewed items count:", guestFilteredItems.length);
-        setRecentlyViewed(guestFilteredItems.slice(0, 5)); // Show first 5
+        const visibleItems = items.filter((entry: any) => {
+          if (isGuest) {
+            return entry.type === "Group" || entry.type === "Artist";
+          }
+
+          const entryType = String(entry?.type || "").toLowerCase();
+          if (entryType === "studio" || entryType === "gig") {
+            return String(entry?.permit_status || "").toLowerCase() === "approved";
+          }
+          return true;
+        });
+        debugLog("Recently viewed items count:", visibleItems.length);
+        setRecentlyViewed(visibleItems.slice(0, 5)); // Show first 5
       } else {
         debugLog("No recently viewed items in storage");
         setRecentlyViewed([]);

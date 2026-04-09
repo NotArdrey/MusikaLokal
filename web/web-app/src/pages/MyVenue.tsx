@@ -3,7 +3,8 @@ import {
     IoAddCircleOutline,
     IoCalendarOutline,
     IoCashOutline,
-    IoChevronBack
+  IoChevronBack,
+  IoCreateOutline
 } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
 import ConfirmModal from "../components/Modal";
@@ -92,6 +93,12 @@ export default function MyVenuePage() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {gigs.map((g) => (
+              (() => {
+                const normalizedPermitStatus = String(g.permit_status || "pending_review").toLowerCase();
+                const isRejected = normalizedPermitStatus === "rejected";
+                const isPendingLike = ["pending", "pending_review", "resubmitted"].includes(normalizedPermitStatus);
+
+                return (
               <div
                 key={g.id}
                 className="cursor-pointer rounded-2xl border overflow-hidden transition hover:shadow-md"
@@ -137,6 +144,16 @@ export default function MyVenuePage() {
                       Permit: {(g.permit_status || "pending_review").replace("_", " ")}
                     </span>
                   </div>
+                  {isRejected && g.permit_rejection_reason && (
+                    <p className="mt-2 text-xs text-red-500 line-clamp-3">
+                      Rejection reason: {g.permit_rejection_reason}
+                    </p>
+                  )}
+                  {isPendingLike && (
+                    <p className="mt-2 text-xs" style={{ color: colors.textSecondary }}>
+                      Hidden from Home until admin permit approval is completed.
+                    </p>
+                  )}
                   <div
                     className="mt-2 flex items-center gap-3 text-xs"
                     style={{ color: colors.textSecondary }}
@@ -153,6 +170,17 @@ export default function MyVenuePage() {
                       </span>
                     )}
                   </div>
+                  <div className="mt-3 flex items-center gap-3">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(isRejected ? `/edit-gig?id=${g.id}&reapply=1` : `/edit-gig?id=${g.id}`);
+                      }}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-500 hover:underline"
+                    >
+                      <IoCreateOutline size={14} />
+                      {isRejected ? "Edit & Reapply" : "Edit Gig"}
+                    </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -162,8 +190,11 @@ export default function MyVenuePage() {
                   >
                     Delete
                   </button>
+                  </div>
                 </div>
               </div>
+                );
+              })()
             ))}
           </div>
         )}

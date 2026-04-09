@@ -366,7 +366,7 @@ serve(async (req: Request) => {
       if (userRole === "musician") {
         const { data: bookings, error: bookingError } = await supabaseClient
           .from("studio_bookings")
-          .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
+          .select("*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order))")
           .eq("user_id", userId)
           .order("booking_date", { ascending: false });
 
@@ -452,6 +452,13 @@ serve(async (req: Request) => {
             base_rate: b.base_rate,
             total_cost: b.final_price,
             modifiers_applied: b.modifiers_applied || {},
+            studio_type: b.studio?.studio_type || null,
+            session_type: b.session_type || null,
+            song_count:
+              b.song_count ||
+              b.modifiers_applied?.recording_session?.song_count ||
+              b.modifiers_applied?.song_count ||
+              null,
             notes: b.notes,
             reviewed_by_customer: b.reviewed_by_customer || false,
             reviewed_by_owner: b.reviewed_by_owner || false,
@@ -523,7 +530,7 @@ serve(async (req: Request) => {
           const { data: bookings, error: bookingError } = await supabaseClient
             .from("studio_bookings")
             .select(
-              "*, studio:studios(name, owner_id, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
+              "*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
             )
             .in("studio_id", studioIds)
             .order("booking_date", { ascending: false });
@@ -635,6 +642,13 @@ serve(async (req: Request) => {
               base_rate: b.base_rate,
               total_cost: b.final_price, // Use stored column
               modifiers_applied: b.modifiers_applied || {},
+              studio_type: b.studio?.studio_type || null,
+              session_type: b.session_type || null,
+              song_count:
+                b.song_count ||
+                b.modifiers_applied?.recording_session?.song_count ||
+                b.modifiers_applied?.song_count ||
+                null,
               studio_name: b.studio?.name,
               notes: b.notes,
               customer_name: customerName,
@@ -1001,6 +1015,7 @@ serve(async (req: Request) => {
         time_slots,
         notes,
         session_type, // "rehearsal" or "recording"
+        song_count,
       } = params;
 
       if (!user_id || user_id !== authUser.id) {
@@ -1008,6 +1023,27 @@ serve(async (req: Request) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 403,
         });
+      }
+
+      const normalizedSessionType =
+        String(session_type || "rehearsal").toLowerCase() === "recording"
+          ? "recording"
+          : "rehearsal";
+      const isRecordingSession = normalizedSessionType === "recording";
+      const requestedSongCount = Number.isFinite(Number(song_count))
+        ? Math.max(0, Math.floor(Number(song_count)))
+        : 0;
+
+      if (isRecordingSession && requestedSongCount <= 0) {
+        return new Response(
+          JSON.stringify({
+            error: "Recording sessions require a valid song count.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
       }
 
       // Support both old single-slot format and new multi-slot format
@@ -1331,10 +1367,10 @@ serve(async (req: Request) => {
 
       console.log("✅ All slots available");
 
-      // First, verify studio has a valid hourly rate
+      // First, verify studio has valid rates for the requested session type
       const { data: studioData, error: studioError } = await supabaseClient
         .from("studios")
-        .select("id, name, hourly_rate")
+        .select("id, name, hourly_rate, recording_rate")
         .eq("id", studio_id)
         .single();
 
@@ -1353,7 +1389,25 @@ serve(async (req: Request) => {
 
       console.log("📊 Studio data:", studioData);
 
-      if (!studioData.hourly_rate || studioData.hourly_rate <= 0) {
+      if (isRecordingSession) {
+        if (!studioData.recording_rate || studioData.recording_rate <= 0) {
+          console.error(
+            "❌ Studio has no valid recording rate:",
+            studioData.recording_rate,
+          );
+          return new Response(
+            JSON.stringify({
+              error:
+                "This studio does not have a valid recording rate configured. Please contact the studio owner.",
+              debug: { studio_id, recording_rate: studioData.recording_rate },
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 400,
+            },
+          );
+        }
+      } else if (!studioData.hourly_rate || studioData.hourly_rate <= 0) {
         console.error(
           "❌ Studio has no valid hourly rate:",
           studioData.hourly_rate,
@@ -1375,17 +1429,44 @@ serve(async (req: Request) => {
       console.log("💰 Calculating multi-slot booking price...");
       let pricingData: any = null;
 
-      const { data: pricing, error: pricingError } = await supabaseClient.rpc(
-        "calculate_multi_slot_price",
-        {
-          p_studio_id: studio_id,
-          p_booking_date: date,
-          p_time_slots: slots,
-          p_session_type: session_type || "rehearsal",
-        },
-      );
+      if (isRecordingSession) {
+        let totalHours = 0;
+        for (const slot of slots) {
+          totalHours += toHours(slot.start, slot.end);
+        }
 
-      if (pricingError) {
+        const recordingRate = Number(studioData.recording_rate || 0);
+        const recordingSubtotal = recordingRate * requestedSongCount;
+
+        pricingData = {
+          base_rate: recordingRate,
+          hours: totalHours,
+          total_hours: totalHours,
+          subtotal: recordingSubtotal,
+          modifiers: {
+            rate_model: "per_song",
+            song_count: requestedSongCount,
+            recording_session: {
+              rate_model: "per_song",
+              song_count: requestedSongCount,
+            },
+          },
+          final_price: recordingSubtotal,
+        };
+      }
+
+      const { data: pricing, error: pricingError } = isRecordingSession
+        ? { data: null, error: null }
+        : await supabaseClient.rpc(
+          "calculate_multi_slot_price",
+          {
+            p_studio_id: studio_id,
+            p_booking_date: date,
+            p_time_slots: slots,
+          },
+        );
+
+      if (!isRecordingSession && pricingError) {
         console.error("❌ Multi-slot pricing error:", pricingError);
         // Fallback to calculating each slot and summing
         if (
@@ -1405,7 +1486,6 @@ serve(async (req: Request) => {
                 p_booking_date: date,
                 p_start_time: slot.start,
                 p_end_time: slot.end,
-                p_session_type: session_type || "rehearsal",
               },
             );
 
@@ -1434,7 +1514,7 @@ serve(async (req: Request) => {
             },
           );
         }
-      } else if (pricing && pricing.length > 0) {
+      } else if (!isRecordingSession && pricing && pricing.length > 0) {
         pricingData = pricing[0];
       }
 
@@ -1452,15 +1532,75 @@ serve(async (req: Request) => {
           totalHours += (endMinutes - startMinutes) / 60;
         }
 
-        pricingData = {
-          base_rate: studioData.hourly_rate,
-          hours: totalHours,
-          total_hours: totalHours,
-          subtotal: studioData.hourly_rate * totalHours,
-          modifiers: {},
-          final_price: studioData.hourly_rate * totalHours,
-        };
+        if (isRecordingSession) {
+          const recordingRate = Number(studioData.recording_rate || 0);
+          pricingData = {
+            base_rate: recordingRate,
+            hours: totalHours,
+            total_hours: totalHours,
+            subtotal: recordingRate * requestedSongCount,
+            modifiers: {
+              rate_model: "per_song",
+              song_count: requestedSongCount,
+              recording_session: {
+                rate_model: "per_song",
+                song_count: requestedSongCount,
+              },
+            },
+            final_price: recordingRate * requestedSongCount,
+          };
+        } else {
+          pricingData = {
+            base_rate: studioData.hourly_rate,
+            hours: totalHours,
+            total_hours: totalHours,
+            subtotal: studioData.hourly_rate * totalHours,
+            modifiers: {},
+            final_price: studioData.hourly_rate * totalHours,
+          };
+        }
         console.log("📊 Manual pricing fallback:", pricingData);
+      }
+
+      // Apply active promotions server-side to keep saved booking totals aligned with listing pricing.
+      try {
+        const promoHoursInput = isRecordingSession
+          ? requestedSongCount
+          : Number(pricingData.total_hours || pricingData.hours || 0);
+        const promoBasePrice = Number(
+          pricingData.final_price || pricingData.subtotal || 0,
+        );
+
+        if (promoBasePrice > 0) {
+          const { data: promoResult, error: promoError } = await supabaseClient.rpc(
+            "apply_studio_promotion",
+            {
+              p_studio_id: studio_id,
+              p_booking_date: date,
+              p_session_type: normalizedSessionType,
+              p_base_price: promoBasePrice,
+              p_hours: promoHoursInput,
+            },
+          );
+
+          if (promoError) {
+            console.warn("⚠️ Promotion apply error, proceeding without promo:", promoError);
+          } else if (
+            promoResult &&
+            Number.isFinite(Number(promoResult.final_price_after_promo))
+          ) {
+            pricingData = {
+              ...pricingData,
+              final_price: Number(promoResult.final_price_after_promo),
+              modifiers: {
+                ...(pricingData.modifiers || {}),
+                promotion: promoResult,
+              },
+            };
+          }
+        }
+      } catch (promoCatchError) {
+        console.warn("⚠️ Promotion RPC unavailable, proceeding without promo:", promoCatchError);
       }
 
       console.log("✅ Pricing calculated:", pricingData);
@@ -1472,7 +1612,8 @@ serve(async (req: Request) => {
       const overallEnd = allEndTimes[allEndTimes.length - 1];
 
       // Validate pricing data before insert - use studio rate as fallback
-      const finalBaseRate = pricingData.base_rate || studioData.hourly_rate;
+      const finalBaseRate = pricingData.base_rate ||
+        (isRecordingSession ? studioData.recording_rate : studioData.hourly_rate);
       const finalHours = pricingData.total_hours || pricingData.hours;
 
       if (!finalBaseRate || finalBaseRate <= 0) {
@@ -1484,6 +1625,7 @@ serve(async (req: Request) => {
             debug: {
               pricingData,
               studio_id,
+              studio_recording_rate: studioData.recording_rate,
               studio_hourly_rate: studioData.hourly_rate,
             },
           }),
@@ -1512,6 +1654,8 @@ serve(async (req: Request) => {
         studio_id,
         user_id,
         date,
+        session_type: normalizedSessionType,
+        song_count: isRecordingSession ? requestedSongCount : null,
         overallStart,
         overallEnd,
         slots,
@@ -1521,6 +1665,23 @@ serve(async (req: Request) => {
         final_price: pricingData.final_price || finalBaseRate * finalHours,
       });
 
+      const finalModifiers = {
+        ...(pricingData.modifiers || {}),
+      };
+      finalModifiers.session_type = normalizedSessionType;
+
+      if (isRecordingSession) {
+        finalModifiers.rate_model = "per_song";
+        finalModifiers.song_count = requestedSongCount;
+        finalModifiers.recording_session = {
+          ...(typeof finalModifiers.recording_session === "object" && finalModifiers.recording_session
+            ? finalModifiers.recording_session
+            : {}),
+          rate_model: "per_song",
+          song_count: requestedSongCount,
+        };
+      }
+
       const bookingInsertPayload: Record<string, any> = {
         studio_id,
         user_id,
@@ -1529,11 +1690,11 @@ serve(async (req: Request) => {
         end_time: overallEnd,
         notes: notes || null,
         status: "pending",
-        session_type: session_type || "rehearsal",
+        session_type: normalizedSessionType,
         base_rate: finalBaseRate,
         hours: finalHours,
         subtotal: pricingData.subtotal || finalBaseRate * finalHours,
-        modifiers_applied: pricingData.modifiers || {},
+        modifiers_applied: finalModifiers,
         final_price: pricingData.final_price || finalBaseRate * finalHours,
       };
 
@@ -1762,12 +1923,13 @@ serve(async (req: Request) => {
           let notificationMessage = "";
           let notificationType = "info";
           let notificationImage: string | null = null;
+          let cancellationActorRole: "musician" | "studio_owner" | "unknown" | null = null;
 
           if (table === "studio_bookings") {
             // For Studio Bookings
             const { data: bookingInfo } = await supabaseClient
               .from("studio_bookings")
-              .select("user_id, studio:studios(name, images)")
+              .select("user_id, studio:studios(name, images, owner_id)")
               .eq("id", booking_id)
               .single();
 
@@ -1776,13 +1938,27 @@ serve(async (req: Request) => {
                 ? bookingInfo.studio.images[0] || null
                 : null;
 
+              const studioOwnerId = bookingInfo.studio?.owner_id || null;
+              const cancelledByMusician = authUser.id === bookingInfo.user_id;
+              const cancelledByOwner = Boolean(studioOwnerId && authUser.id === studioOwnerId);
+              const reasonSuffix = cancellation_reason
+                ? ` Reason: ${cancellation_reason}`
+                : "";
+
               if (new_status === "cancelled") {
-                targetUserId = bookingInfo.user_id;
-                notificationTitle = "Booking Declined";
-                notificationMessage = cancellation_reason
-                  ? `Your booking at ${bookingInfo.studio.name} has been declined/cancelled. Reason: ${cancellation_reason}`
-                  : `Your booking at ${bookingInfo.studio.name} has been declined/cancelled.`;
-                notificationType = "error";
+                if (cancelledByMusician && studioOwnerId) {
+                  targetUserId = studioOwnerId;
+                  notificationTitle = "Booking Cancelled";
+                  notificationMessage = `A musician cancelled their booking at ${bookingInfo.studio.name}.${reasonSuffix}`;
+                  notificationType = "warning";
+                  cancellationActorRole = "musician";
+                } else {
+                  targetUserId = bookingInfo.user_id;
+                  notificationTitle = "Booking Declined";
+                  notificationMessage = `Your booking at ${bookingInfo.studio.name} has been declined/cancelled.${reasonSuffix}`;
+                  notificationType = "error";
+                  cancellationActorRole = cancelledByOwner ? "studio_owner" : "unknown";
+                }
               } else if (new_status === "confirmed") {
                 targetUserId = bookingInfo.user_id;
                 notificationTitle = "Booking Confirmed!";
@@ -1848,6 +2024,9 @@ serve(async (req: Request) => {
                 source_table: table,
                 status: new_status,
                 event_type: notificationEventType,
+                cancellation_reason: cancellation_reason || null,
+                cancelled_by_user_id: new_status === "cancelled" ? authUser.id : null,
+                cancelled_by_role: cancellationActorRole,
               },
             });
             console.log(

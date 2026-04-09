@@ -278,6 +278,7 @@ const ListingDetailsSheet = forwardRef<
       startTime: Date;
       endTime: Date;
       timeSlots?: { start: string; end: string }[];
+      songCount?: number;
       pricing?: any;
     }[]
   >([]);
@@ -1887,6 +1888,24 @@ const ListingDetailsSheet = forwardRef<
         // No bookings - date is available for whole-day recording booking
         // Get the operating hours for this day
         const operatingSlot = daySchedule.slots[0]; // Use first slot as operating hours
+
+        const leadTimeHours = Number(group?.settings?.lead_time_hours || 0);
+        const minBookingTime = new Date();
+        minBookingTime.setHours(minBookingTime.getHours() + leadTimeHours);
+        const recordingStart = new Date(`${dateStr}T${operatingSlot.start}`);
+
+        if (!Number.isNaN(recordingStart.getTime()) && recordingStart < minBookingTime) {
+          setIsRecordingWholeDayAvailable(false);
+          setRecordingDaySlot(null);
+          setAvailableSlots([]);
+          debugLog("🎙️ Recording studio: blocked by lead-time requirement", {
+            dateStr,
+            operatingStart: operatingSlot.start,
+            leadTimeHours,
+          });
+          return [];
+        }
+
         setIsRecordingWholeDayAvailable(true);
         setRecordingDaySlot({ start: operatingSlot.start, end: operatingSlot.end });
         setAvailableSlots(["whole-day"]); // Special marker for whole-day booking
@@ -2282,6 +2301,7 @@ const ListingDetailsSheet = forwardRef<
       setShowPaymentOptionModal={setShowPaymentOptionModal}
       showPaymentOptionModal={showPaymentOptionModal}
       selectedSessionType={selectedSessionType}
+      promotions={group?.promotions || []}
       showAlert={showSheetAlert}
     />
   );

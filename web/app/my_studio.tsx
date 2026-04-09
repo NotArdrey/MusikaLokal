@@ -46,7 +46,7 @@ export default function MyStudioScreen() {
         try {
             const { data: baseStudios, error: baseError } = await supabase
                 .from('studios')
-                .select('id, owner_id, name, description, created_at')
+                .select('id, owner_id, name, description, created_at, updated_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                 .eq('owner_id', userId)
                 .order('created_at', { ascending: false });
 
@@ -99,12 +99,16 @@ export default function MyStudioScreen() {
                 const reviewStats = reviewsByStudioId[studio.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
+                const normalizedPermitStatus = String(studio.permit_status || 'pending_review').toLowerCase();
 
                 return {
                     ...studio,
                     images: imagesByStudioId[studio.id] || [],
                     rating,
                     review_count: reviewCount,
+                    permit_status: normalizedPermitStatus,
+                    permit_rejection_reason: studio.permit_rejection_reason || null,
+                    permit_reviewed_at: studio.permit_reviewed_at || null,
                 };
             }));
         } catch (e) {
@@ -253,6 +257,41 @@ export default function MyStudioScreen() {
                                     backgroundColor: colors.surface,
                                     shadowColor: colors.primary,
                                 }]}>
+                                        {(() => {
+                                            const normalizedPermitStatus = String(studio.permit_status || 'pending_review').toLowerCase();
+                                            const isRejected = normalizedPermitStatus === 'rejected';
+                                            const isApproved = normalizedPermitStatus === 'approved';
+                                            const isResubmitted = normalizedPermitStatus === 'resubmitted';
+
+                                            const permitStatusLabel =
+                                                isApproved
+                                                    ? 'Approved'
+                                                    : isRejected
+                                                        ? 'Rejected'
+                                                        : isResubmitted
+                                                            ? 'Resubmitted'
+                                                            : 'Pending Review';
+
+                                            const permitBadgeBackground =
+                                                isApproved
+                                                    ? (isDark ? 'rgba(22,163,74,0.22)' : '#DCFCE7')
+                                                    : isRejected
+                                                        ? (isDark ? 'rgba(220,38,38,0.22)' : '#FEE2E2')
+                                                        : isResubmitted
+                                                            ? (isDark ? 'rgba(37,99,235,0.22)' : '#DBEAFE')
+                                                            : (isDark ? 'rgba(245,158,11,0.22)' : '#FEF3C7');
+
+                                            const permitBadgeColor =
+                                                isApproved
+                                                    ? '#16A34A'
+                                                    : isRejected
+                                                        ? '#DC2626'
+                                                        : isResubmitted
+                                                            ? '#2563EB'
+                                                            : '#B45309';
+
+                                            return (
+                                                <>
                                     <View style={styles.imageWrapper}>
                                         <CachedImage
                                             uri={(studio.images && studio.images[0]) || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop'}
@@ -262,8 +301,8 @@ export default function MyStudioScreen() {
                                             quality={72}
                                             cacheVersion={studio.updated_at || studio.created_at || studio.id}
                                         />
-                                        <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                            <Text style={[styles.activeText, { color: colors.primary }]}>Active</Text>
+                                        <View style={[styles.activeBadge, { backgroundColor: permitBadgeBackground }]}>
+                                            <Text style={[styles.activeText, { color: permitBadgeColor }]}>{permitStatusLabel}</Text>
                                         </View>
                                     </View>
 
@@ -272,6 +311,18 @@ export default function MyStudioScreen() {
                                         <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
                                             {studio.description}
                                         </Text>
+
+                                        {isRejected && !!studio.permit_rejection_reason && (
+                                            <Text style={styles.rejectionReasonText} numberOfLines={3}>
+                                                Rejection reason: {studio.permit_rejection_reason}
+                                            </Text>
+                                        )}
+
+                                        {(normalizedPermitStatus === 'pending' || normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
+                                            <Text style={[styles.permitHintText, { color: colors.textSecondary }]}>
+                                                Hidden from Home until admin permit approval is completed.
+                                            </Text>
+                                        )}
 
                                         <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                             <View style={styles.actionLeft}>
@@ -283,12 +334,35 @@ export default function MyStudioScreen() {
                                                     <Text style={styles.manageBtnText}>Manage</Text>
                                                 </TouchableOpacity>
 
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="pencil-outline" size={20} color={colors.text} />
-                                                </TouchableOpacity>
+                                                {isRejected ? (
+                                                    <TouchableOpacity
+                                                        activeOpacity={1}
+                                                        onPress={() =>
+                                                            router.push({
+                                                                pathname: '/edit_studio',
+                                                                params: { id: studio.id, reapply: '1' },
+                                                            })
+                                                        }
+                                                        style={[
+                                                            styles.reapplyBtn,
+                                                            {
+                                                                borderColor: '#F97316',
+                                                                backgroundColor: isDark ? 'rgba(249,115,22,0.12)' : '#FFF7ED',
+                                                            },
+                                                        ]}
+                                                    >
+                                                        <Ionicons name="refresh-outline" size={16} color="#EA580C" />
+                                                        <Text style={styles.reapplyBtnText}>Edit & Reapply</Text>
+                                                    </TouchableOpacity>
+                                                ) : (
+                                                    <TouchableOpacity
+                                                        activeOpacity={1}
+                                                        onPress={() => router.push({ pathname: '/edit_studio', params: { id: studio.id } })}
+                                                        style={[styles.editBtn, { borderColor: colors.border }]}
+                                                    >
+                                                        <Ionicons name="pencil-outline" size={20} color={colors.text} />
+                                                    </TouchableOpacity>
+                                                )}
                                             </View>
 
                                             <TouchableOpacity activeOpacity={1}
@@ -299,6 +373,9 @@ export default function MyStudioScreen() {
                                             </TouchableOpacity>
                                         </View>
                                     </View>
+                                            </>
+                                        );
+                                    })()}
                                 </View>
                             ))
                         )}
@@ -398,6 +475,19 @@ const styles = StyleSheet.create({
         fontSize: 13,
         lineHeight: 20,
     },
+    rejectionReasonText: {
+        marginTop: 8,
+        color: '#DC2626',
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
+        lineHeight: 18,
+    },
+    permitHintText: {
+        marginTop: 8,
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 12,
+        lineHeight: 18,
+    },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -426,6 +516,20 @@ const styles = StyleSheet.create({
         padding: 8,
         borderRadius: 12,
         borderWidth: 1,
+    },
+    reapplyBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    reapplyBtnText: {
+        color: '#EA580C',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
     },
     deleteBtn: {
         padding: 8,

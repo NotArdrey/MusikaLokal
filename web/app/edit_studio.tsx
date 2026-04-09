@@ -114,6 +114,34 @@ const resolveStudioTypeRows = (value: unknown): ("Rehearsal" | "Recording")[] =>
   return singleType ? [singleType] : [];
 };
 
+const parsePositiveInteger = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
+const getAllowedPromotionTargets = (
+  type: "Rehearsal" | "Recording" | "Both",
+): Array<"rehearsal" | "recording" | "both"> => {
+  if (type === "Rehearsal") return ["rehearsal"];
+  if (type === "Recording") return ["recording"];
+  return ["both", "rehearsal", "recording"];
+};
+
+const normalizePromotionTarget = (
+  target: "rehearsal" | "recording" | "both",
+  type: "Rehearsal" | "Recording" | "Both",
+): "rehearsal" | "recording" | "both" => {
+  const allowedTargets = getAllowedPromotionTargets(type);
+  if (allowedTargets.includes(target)) return target;
+  return type === "Rehearsal"
+    ? "rehearsal"
+    : type === "Recording"
+      ? "recording"
+      : "both";
+};
+
 const inferStudioTypeFromRows = (
   rows: unknown[],
 ): "Rehearsal" | "Recording" | "Both" => {
@@ -148,6 +176,7 @@ export default function EditStudioScreen() {
   const [studioType, setStudioType] = useState<
     "Rehearsal" | "Recording" | "Both"
   >("Both");
+  const [maxRecordingSongsPerDay, setMaxRecordingSongsPerDay] = useState("");
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -305,6 +334,7 @@ export default function EditStudioScreen() {
     [date: string]: {
       selected: boolean;
       slots: { start: string; end: string }[];
+      maxRecordingSongsPerDay?: string;
     };
   }>({});
 
@@ -321,8 +351,17 @@ export default function EditStudioScreen() {
     [date: string]: {
       selected: boolean;
       slots: { start: string; end: string }[];
+      maxRecordingSongsPerDay?: string;
     };
   }>({});
+
+  const defaultPromotionAppliesTo =
+    studioType === "Rehearsal"
+      ? "rehearsal"
+      : studioType === "Recording"
+        ? "recording"
+        : "both";
+  const allowedPromotionTargets = getAllowedPromotionTargets(studioType);
 
   // Predefined instruments with images
   const INSTRUMENT_OPTIONS = [
@@ -454,6 +493,29 @@ export default function EditStudioScreen() {
   }, [id, authorized]);
 
   useEffect(() => {
+    if (studioType === "Rehearsal" && maxRecordingSongsPerDay) {
+      setMaxRecordingSongsPerDay("");
+    }
+
+    setPromotionForm((prev) => {
+      const nextAppliesTo = normalizePromotionTarget(prev.applies_to, studioType);
+      if (prev.applies_to === nextAppliesTo) return prev;
+      return { ...prev, applies_to: nextAppliesTo };
+    });
+
+    setPromotions((prev) => {
+      let changed = false;
+      const next = prev.map((promo) => {
+        const nextAppliesTo = normalizePromotionTarget(promo.applies_to, studioType);
+        if (nextAppliesTo === promo.applies_to) return promo;
+        changed = true;
+        return { ...promo, applies_to: nextAppliesTo };
+      });
+      return changed ? next : prev;
+    });
+  }, [studioType, maxRecordingSongsPerDay]);
+
+  useEffect(() => {
     const backSubscription = BackHandler.addEventListener(
       "hardwareBackPress",
       () => {
@@ -475,7 +537,7 @@ export default function EditStudioScreen() {
       is_permanent: true,
       start_date: "",
       end_date: "",
-      applies_to: "both",
+      applies_to: defaultPromotionAppliesTo,
     });
     setEditingPromotion(null);
   };
@@ -504,6 +566,8 @@ export default function EditStudioScreen() {
       return;
     }
 
+    const normalizedAppliesTo = normalizePromotionTarget(applies_to, studioType);
+
     const promoItem: PromotionItem = {
       id: editingPromotion?.id || Date.now().toString(),
       name: name.trim(),
@@ -513,7 +577,7 @@ export default function EditStudioScreen() {
       is_permanent,
       start_date: is_permanent ? "" : start_date,
       end_date: is_permanent ? "" : end_date,
-      applies_to,
+      applies_to: normalizedAppliesTo,
     };
 
     if (editingPromotion) {
@@ -535,7 +599,7 @@ export default function EditStudioScreen() {
       is_permanent: promo.is_permanent,
       start_date: promo.start_date,
       end_date: promo.end_date,
-      applies_to: promo.applies_to,
+      applies_to: normalizePromotionTarget(promo.applies_to, studioType),
     });
     setShowPromotionForm(true);
   };
@@ -624,7 +688,7 @@ export default function EditStudioScreen() {
         supabase
           .from('studio_settings')
           .select(
-            'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates',
+            'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates, max_recording_songs_per_day',
           )
           .eq('studio_id', studioId)
           .maybeSingle(),
@@ -749,6 +813,8 @@ export default function EditStudioScreen() {
         peak_season_dates: studioSettingsData?.peak_season_dates ?? [],
         off_peak_multiplier: studioSettingsData?.off_peak_multiplier ?? 1.0,
         off_peak_dates: studioSettingsData?.off_peak_dates ?? [],
+        max_recording_songs_per_day:
+          studioSettingsData?.max_recording_songs_per_day ?? null,
       } as any;
 
       console.log("✅ ===== DATA VALIDATION PASSED =====");
@@ -910,6 +976,13 @@ export default function EditStudioScreen() {
       const typeValue = data.type || "Both";
       console.log("🔧 Setting studioType to:", typeValue);
       setStudioType(typeValue);
+
+      const loadedMaxSongs = parsePositiveInteger(
+        data.max_recording_songs_per_day,
+      );
+      setMaxRecordingSongsPerDay(
+        loadedMaxSongs ? String(loadedMaxSongs) : "",
+      );
 
       const paxValue = data.pax?.toString() || "";
       console.log(
@@ -1125,10 +1198,14 @@ export default function EditStudioScreen() {
           [date: string]: {
             selected: boolean;
             slots: { start: string; end: string }[];
+            maxRecordingSongsPerDay?: string;
           };
         } = {};
         dateOverrides.forEach((override: any) => {
           if (override.override_date) {
+            const parsedOverrideCap = parsePositiveInteger(
+              override.max_recording_songs_per_day,
+            );
             calendarDates[override.override_date] = {
               selected: true,
               slots:
@@ -1140,6 +1217,9 @@ export default function EditStudioScreen() {
                     },
                   ]
                   : [],
+              maxRecordingSongsPerDay: parsedOverrideCap
+                ? String(parsedOverrideCap)
+                : "",
             };
           }
         });
@@ -1157,9 +1237,13 @@ export default function EditStudioScreen() {
           [date: string]: {
             selected: boolean;
             slots: { start: string; end: string }[];
+            maxRecordingSongsPerDay?: string;
           };
         } = {};
         data.calendar_availability.forEach((item: any) => {
+          const parsedFallbackCap = parsePositiveInteger(
+            item.max_recording_songs_per_day,
+          );
           if (item.date) {
             calendarDates[item.date] = {
               selected: true,
@@ -1167,6 +1251,9 @@ export default function EditStudioScreen() {
                 item.is_open === false
                   ? []
                   : item.slots || [{ start: "09:00 AM", end: "05:00 PM" }],
+              maxRecordingSongsPerDay: parsedFallbackCap
+                ? String(parsedFallbackCap)
+                : "",
             };
           }
         });
@@ -1416,6 +1503,18 @@ export default function EditStudioScreen() {
         );
         return false;
       }
+    }
+    if (
+      (studioType === "Recording" || studioType === "Both") &&
+      maxRecordingSongsPerDay.trim() &&
+      !parsePositiveInteger(maxRecordingSongsPerDay)
+    ) {
+      showAlert(
+        "error",
+        "Invalid Limit",
+        "Please enter a valid max songs per day value greater than 0.",
+      );
+      return false;
     }
     if (!validateScheduleConflicts()) {
       return false;
@@ -2175,6 +2274,9 @@ export default function EditStudioScreen() {
         .map(([date, data]) => ({
           date,
           is_open: data.slots.length > 0,
+          max_recording_songs_per_day: parsePositiveInteger(
+            data.maxRecordingSongsPerDay,
+          ),
           slots: data.slots.map((slot) => ({
             start: convertTo24Hour(slot.start),
             end: convertTo24Hour(slot.end),
@@ -2245,6 +2347,9 @@ export default function EditStudioScreen() {
           peak_season_dates: [],
           off_peak_multiplier: 1.0,
           off_peak_dates: [],
+          max_recording_songs_per_day: parsePositiveInteger(
+            maxRecordingSongsPerDay,
+          ),
         },
       };
 
@@ -2307,17 +2412,22 @@ export default function EditStudioScreen() {
         throw new Error(alertMessage);
       }
 
-      const shouldMarkResubmitted =
-        permitStatus === "rejected" &&
+      const shouldResetPermitReview =
         !!businessPermitUrl &&
         businessPermitUrl !== initialBusinessPermitUrl;
 
-      if (shouldMarkResubmitted) {
+      if (shouldResetPermitReview) {
+        const nextPermitStatus =
+          permitStatus === "rejected" ? "resubmitted" : "pending_review";
+
         const { error: permitStatusError } = await supabase
           .from("studios")
           .update({
-            permit_status: "resubmitted",
+            permit_status: nextPermitStatus,
             permit_rejection_reason: null,
+            permit_admin_notes: null,
+            permit_reviewed_by: null,
+            permit_reviewed_at: null,
           })
           .eq("id", studioId)
           .eq("owner_id", user.id);
@@ -2326,7 +2436,7 @@ export default function EditStudioScreen() {
           throw new Error(`Failed to update permit status: ${permitStatusError.message}`);
         }
 
-        setPermitStatus("resubmitted");
+        setPermitStatus(nextPermitStatus);
       }
 
       await supabase.from('studio_types').delete().eq('studio_id', studioId);
@@ -2404,6 +2514,8 @@ export default function EditStudioScreen() {
           peak_season_dates: payload.booking_settings.peak_season_dates || [],
           off_peak_multiplier: payload.booking_settings.off_peak_multiplier || 1.0,
           off_peak_dates: payload.booking_settings.off_peak_dates || [],
+          max_recording_songs_per_day:
+            parsePositiveInteger(payload.booking_settings.max_recording_songs_per_day),
         }, { onConflict: 'studio_id' });
 
       // Update promotions (delete-and-re-insert)
@@ -2474,7 +2586,9 @@ export default function EditStudioScreen() {
               is_open: hasSlots,
               open_time: hasSlots ? entry.slots[0].start : null,
               close_time: hasSlots ? entry.slots[0].end : null,
-              reason: hasSlots ? 'Custom schedule' : 'Closed override'
+              reason: hasSlots ? 'Custom schedule' : 'Closed override',
+              max_recording_songs_per_day:
+                parsePositiveInteger(entry.max_recording_songs_per_day),
             };
           });
 
@@ -3247,6 +3361,64 @@ export default function EditStudioScreen() {
                     /song
                   </Text>
                 </View>
+
+                <View style={{ marginTop: 10 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_500Medium",
+                      fontSize: 12,
+                      marginBottom: 6,
+                    }}
+                  >
+                    Max Songs Per Day (Optional)
+                  </Text>
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        paddingHorizontal: 16,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="musical-notes-outline"
+                      size={20}
+                      color="#EF4444"
+                      style={{ marginRight: 10 }}
+                    />
+                    <TextInput
+                      value={maxRecordingSongsPerDay}
+                      onChangeText={(text) =>
+                        setMaxRecordingSongsPerDay(text.replace(/[^0-9]/g, ""))
+                      }
+                      placeholder="e.g. 12"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="numeric"
+                      style={{
+                        flex: 1,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 15,
+                        paddingVertical: 14,
+                      }}
+                    />
+                  </View>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      fontSize: 11,
+                      marginTop: 6,
+                    }}
+                  >
+                    Applies to recording bookings unless a specific date override is set.
+                  </Text>
+                </View>
               </View>
             )}
           </View>
@@ -3610,7 +3782,7 @@ export default function EditStudioScreen() {
                   Applies To
                 </Text>
                 <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-                  {(["both", "rehearsal", "recording"] as const).map((at) => (
+                  {allowedPromotionTargets.map((at) => (
                     <TouchableOpacity
                       key={at}
                       activeOpacity={0.8}
@@ -4653,6 +4825,61 @@ export default function EditStudioScreen() {
                               )}
                             </View>
                           ))}
+
+                          {(studioType === "Recording" || studioType === "Both") && (
+                            <View style={{ marginTop: 12 }}>
+                              <Text
+                                style={{
+                                  color: colors.textSecondary,
+                                  fontSize: 11,
+                                  marginBottom: 4,
+                                  fontFamily: "Poppins_600SemiBold",
+                                }}
+                              >
+                                MAX SONGS / DAY (OPTIONAL)
+                              </Text>
+                              <View
+                                style={{
+                                  flexDirection: "row",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  backgroundColor: isDark ? "#1F2937" : "white",
+                                  borderWidth: 1,
+                                  borderColor: colors.border,
+                                  borderRadius: 10,
+                                  paddingHorizontal: 12,
+                                  paddingVertical: 6,
+                                }}
+                              >
+                                <Ionicons
+                                  name="musical-notes-outline"
+                                  size={16}
+                                  color={colors.primary}
+                                />
+                                <TextInput
+                                  value={data.maxRecordingSongsPerDay || ""}
+                                  onChangeText={(text) => {
+                                    const newDates = { ...selectedDates };
+                                    newDates[dateStr] = {
+                                      ...newDates[dateStr],
+                                      maxRecordingSongsPerDay: text.replace(/[^0-9]/g, ""),
+                                    };
+                                    setSelectedDates(newDates);
+                                  }}
+                                  placeholder="No limit"
+                                  placeholderTextColor={colors.textSecondary}
+                                  keyboardType="numeric"
+                                  style={{
+                                    flex: 1,
+                                    color: colors.text,
+                                    fontFamily: "Poppins_500Medium",
+                                    fontSize: 13,
+                                    paddingVertical: 4,
+                                  }}
+                                />
+                              </View>
+                            </View>
+                          )}
 
                           {/* Add Slot Button for Specific Date */}
                           {data.slots.length < 3 && (

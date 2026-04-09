@@ -140,6 +140,7 @@ export default function BookingsScreen() {
     Review: [],
     History: [],
   });
+  const [pendingPermitStudios, setPendingPermitStudios] = useState<any[]>([]);
 
   // Application data separated by status for musicians
   const [applicationData, setApplicationData] = useState<{
@@ -345,6 +346,28 @@ export default function BookingsScreen() {
     let isDisposed = false;
     let channel: any = null;
     let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let needsRefreshAfterFlight = false;
+
+    const runRealtimeRefresh = async () => {
+      if (isDisposed || !userId) return;
+
+      if (autoRefreshInFlightRef.current) {
+        needsRefreshAfterFlight = true;
+        return;
+      }
+
+      autoRefreshInFlightRef.current = true;
+      try {
+        await fetchBookings(userId);
+      } finally {
+        autoRefreshInFlightRef.current = false;
+
+        if (needsRefreshAfterFlight && !isDisposed) {
+          needsRefreshAfterFlight = false;
+          queueRealtimeRefresh();
+        }
+      }
+    };
 
     const queueRealtimeRefresh = () => {
       if (isDisposed || !userId) return;
@@ -353,15 +376,9 @@ export default function BookingsScreen() {
       realtimeRefreshTimer = setTimeout(async () => {
         realtimeRefreshTimer = null;
 
-        if (isDisposed || autoRefreshInFlightRef.current) return;
-
-        autoRefreshInFlightRef.current = true;
-        try {
-          await fetchBookings(userId);
-        } finally {
-          autoRefreshInFlightRef.current = false;
-        }
-      }, 700);
+        if (isDisposed) return;
+        await runRealtimeRefresh();
+      }, 350);
     };
 
     const setupRealtime = async () => {
@@ -415,6 +432,19 @@ export default function BookingsScreen() {
         );
 
       if (role === "studio-owner") {
+        liveChannel = liveChannel.on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "studios",
+            filter: `owner_id=eq.${userId}`,
+          },
+          () => {
+            queueRealtimeRefresh();
+          },
+        );
+
         const { data: ownerStudios } = await supabase
           .from("studios")
           .select("id")
@@ -437,6 +467,19 @@ export default function BookingsScreen() {
       }
 
       if (role === "venue-owner") {
+        liveChannel = liveChannel.on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "gigs",
+            filter: `organizer_id=eq.${userId}`,
+          },
+          () => {
+            queueRealtimeRefresh();
+          },
+        );
+
         const { data: ownerGigs } = await supabase
           .from("gigs")
           .select("id")
@@ -500,7 +543,7 @@ export default function BookingsScreen() {
           } finally {
             autoRefreshInFlightRef.current = false;
           }
-        }, 60 * 1000);
+        }, 30 * 1000);
       }
 
       return () => {
@@ -516,7 +559,7 @@ export default function BookingsScreen() {
   ) {
     let studioQuery = supabase
       .from("studio_bookings")
-      .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
+      .select("*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order))")
       .order("booking_date", { ascending: false });
 
     if (role === "musician") {
@@ -652,6 +695,13 @@ export default function BookingsScreen() {
         base_rate: b.base_rate,
         total_cost: b.final_price,
         modifiers_applied: b.modifiers_applied || {},
+        studio_type: b.studio?.studio_type || null,
+        session_type: b.session_type || null,
+        song_count:
+          b.song_count ||
+          b.modifiers_applied?.recording_session?.song_count ||
+          b.modifiers_applied?.song_count ||
+          null,
         notes: b.notes,
         reviewed_by_customer: b.reviewed_by_customer || false,
         reviewed_by_owner: b.reviewed_by_owner || false,
@@ -723,6 +773,32 @@ export default function BookingsScreen() {
         } else if (role !== "venue-owner") {
           venueTabInitializedRef.current = false;
         }
+      }
+
+      if (role === "studio-owner" || role === "venue-owner") {
+        const permitTable = role === "studio-owner" ? "studios" : "gigs";
+        const permitOwnerField = role === "studio-owner" ? "owner_id" : "organizer_id";
+
+        const { data: permitRows, error: permitError } = await supabase
+          .from(permitTable)
+          .select("id, name, permit_status, permit_reviewed_at, permit_rejection_reason, created_at")
+          .eq(permitOwnerField, targetUserId)
+          .in("permit_status", ["pending", "pending_review", "resubmitted", "rejected"])
+          .order("created_at", { ascending: false });
+
+        if (permitError) {
+          debugLog("Error fetching pending permit listings:", permitError);
+          setPendingPermitStudios([]);
+        } else {
+          setPendingPermitStudios(
+            (permitRows || []).map((row: any) => ({
+              ...row,
+              entity_type: role === "studio-owner" ? "studio" : "gig",
+            })),
+          );
+        }
+      } else {
+        setPendingPermitStudios([]);
       }
 
       const { data: bookings, error } = await supabase.functions.invoke(
@@ -839,6 +915,38 @@ export default function BookingsScreen() {
           new Date(a.created_at || a.raw_date).getTime(),
       );
 
+      const getPendingStudioBookingEndDate = (item: any) => {
+        if (item?.type_id !== "studio_booking") return null;
+        if (!item?.raw_date) return null;
+
+        const endTime = item?.end_time || item?.relocation_proposed_end_time;
+        if (typeof endTime === "string" && endTime.trim().length > 0) {
+          const parsedEnd = new Date(`${item.raw_date}T${endTime}`);
+          if (!Number.isNaN(parsedEnd.getTime())) return parsedEnd;
+        }
+
+        const fallbackEnd = new Date(`${item.raw_date}T23:59:59`);
+        return Number.isNaN(fallbackEnd.getTime()) ? null : fallbackEnd;
+      };
+
+      const nowMs = Date.now();
+      const expiredPendingStudioItems: any[] = [];
+      const activePendingItems = pendingItems.filter((item: any) => {
+        const endDate = getPendingStudioBookingEndDate(item);
+        const isExpired = !!endDate && endDate.getTime() < nowMs;
+
+        if (isExpired) {
+          expiredPendingStudioItems.push({
+            ...item,
+            status: "Expired",
+            action: "Details",
+          });
+          return false;
+        }
+
+        return true;
+      });
+
       // 2. Active Musicians (Confirmed Gig items from Upcoming & Ongoing)
       const rawUpcoming = attachLateReportMeta(effectiveBookings?.Upcoming || []);
       const rawOngoing = attachLateReportMeta(effectiveBookings?.Ongoing || []);
@@ -885,7 +993,7 @@ export default function BookingsScreen() {
         return ["completed", "fired", "declined", "rejected", "cancelled"].includes(status);
       });
 
-      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted, ...terminalGigApplications]
+      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted, ...terminalGigApplications, ...expiredPendingStudioItems]
         .filter(
           (item: any, index: number, arr: any[]) =>
             arr.findIndex((candidate: any) => candidate.id === item.id && candidate.type_id === item.type_id) === index,
@@ -930,7 +1038,7 @@ export default function BookingsScreen() {
       const processedData = {
         Applicants: applicants,
         ActiveMusicians: activeGigMusicians,
-        Pending: pendingItems,
+        Pending: activePendingItems,
         Upcoming: allUpcoming,
         Ongoing: allOngoing,
         Review: unreviewedItems,
@@ -2338,6 +2446,86 @@ export default function BookingsScreen() {
             isWebDesktop && styles.scrollContentWeb,
           ]}
         >
+          {!loading &&
+            ((userRole === "studio-owner" && activeTab === "Pending") ||
+              (userRole === "venue-owner" && activeTab === "Applicants")) &&
+            pendingPermitStudios.length > 0 && (
+              <View style={{ paddingHorizontal: scale(16), marginBottom: moderateScale(12), gap: moderateScale(8) }}>
+                {pendingPermitStudios.map((listing: any) => {
+                  const normalizedStatus = String(listing?.permit_status || "pending_review").toLowerCase();
+                  const isRejected = normalizedStatus === "rejected";
+                  const statusLabel = isRejected
+                    ? "Rejected - Action Needed"
+                    : normalizedStatus === "resubmitted"
+                      ? "Resubmitted - Awaiting Admin Review"
+                      : "Pending Admin Review";
+                  const statusColor = isRejected ? "#EF4444" : "#F59E0B";
+                  const listingType = listing?.entity_type === "gig" ? "gig" : "studio";
+                  const listingName = listing?.name || (listingType === "gig" ? "Gig" : "Studio");
+                  const rejectionReason = String(listing?.permit_rejection_reason || "").trim();
+
+                  return (
+                    <View
+                      key={`permit-${listingType}-${listing.id}`}
+                      style={{
+                        backgroundColor: pageCardBackground,
+                        borderColor: borderSoft,
+                        borderWidth: 1,
+                        borderRadius: moderateScale(14),
+                        padding: moderateScale(14),
+                      }}
+                    >
+                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: moderateScale(14) }}>
+                        {listingName}
+                      </Text>
+                      <Text style={{ color: statusColor, fontFamily: "Poppins_600SemiBold", fontSize: moderateScale(12), marginTop: moderateScale(4) }}>
+                        {statusLabel}
+                      </Text>
+                      {isRejected && rejectionReason.length > 0 && (
+                        <Text style={{ color: "#DC2626", fontFamily: "Poppins_500Medium", fontSize: moderateScale(12), marginTop: moderateScale(6) }}>
+                          Reason: {rejectionReason}
+                        </Text>
+                      )}
+                      <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: moderateScale(12), marginTop: moderateScale(6) }}>
+                        {isRejected
+                          ? `This ${listingType} remains hidden from Home. Update details and reapply to continue review.`
+                          : `This ${listingType} remains hidden from Home until permit approval is completed in Admin > Permits.`}
+                      </Text>
+                      {isRejected && (
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          onPress={() =>
+                            router.push({
+                              pathname: listingType === "gig" ? "/edit_gig" : "/edit_studio",
+                              params: { id: listing.id, reapply: "1" },
+                            } as any)
+                          }
+                          style={{
+                            marginTop: moderateScale(10),
+                            alignSelf: "flex-start",
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: moderateScale(6),
+                            borderWidth: 1,
+                            borderColor: "#F97316",
+                            backgroundColor: isDark ? "rgba(249,115,22,0.12)" : "#FFF7ED",
+                            borderRadius: moderateScale(10),
+                            paddingHorizontal: moderateScale(10),
+                            paddingVertical: moderateScale(7),
+                          }}
+                        >
+                          <Ionicons name="refresh-outline" size={moderateScale(14)} color="#EA580C" />
+                          <Text style={{ color: "#EA580C", fontFamily: "Poppins_600SemiBold", fontSize: moderateScale(11) }}>
+                            Edit & Reapply
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
           {loading ? (
             <View style={styles.centerContainer}>
               <Text
@@ -3763,11 +3951,42 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               )}
                             </View>
+
+                            <TouchableOpacity activeOpacity={1}
+                              onPress={() => {
+                                setSelectedItem(item);
+                                setModalMode("cancel");
+                                setCancellationReason("");
+                                setModalVisible(true);
+                              }}
+                              style={[
+                                styles.cancelButton,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(127, 29, 29, 0.2)"
+                                    : "#FEF2F2",
+                                  width: "100%",
+                                  alignItems: "center",
+                                  borderRadius: 100,
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.cancelButtonText,
+                                  isDark
+                                    ? { color: "#F87171" }
+                                    : { color: "#DC2626" },
+                                ]}
+                              >
+                                Cancel Booking
+                              </Text>
+                            </TouchableOpacity>
                           </View>
                         ) : activeTab === "Pending" &&
                           item.type_id === "studio_booking" &&
                           (userRole === "studio-owner" || userRole === "venue-owner") ? (
-                          // Studio Owner view for pending bookings - just show details (no confirmation needed)
+                          // Studio Owner view for pending bookings
                           <View
                             style={{
                               flexDirection: "row",
@@ -3796,6 +4015,41 @@ export default function BookingsScreen() {
                                 View Details
                               </Text>
                             </TouchableOpacity>
+
+                            {!item.isCancelled && (
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                onPress={() => {
+                                  setSelectedItem(item);
+                                  setModalMode("cancel");
+                                  setCancellationReason("");
+                                  setModalVisible(true);
+                                }}
+                                style={[
+                                  styles.cancelButton,
+                                  {
+                                    backgroundColor: isDark
+                                      ? "rgba(127, 29, 29, 0.2)"
+                                      : "#FEF2F2",
+                                    flex: 1,
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    borderRadius: 100,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.cancelButtonText,
+                                    isDark
+                                      ? { color: "#F87171" }
+                                      : { color: "#DC2626" },
+                                  ]}
+                                >
+                                  Cancel Booking
+                                </Text>
+                              </TouchableOpacity>
+                            )}
                           </View>
                         ) : activeTab === "Review" ? (
                           <TouchableOpacity activeOpacity={1}
