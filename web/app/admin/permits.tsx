@@ -705,6 +705,7 @@ export default function AdminPermitsPage() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalBackdrop}
         >
+
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {reviewAction === 'approve' ? 'Approve Permit' : 'Reject Permit'}
