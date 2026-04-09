@@ -50,6 +50,27 @@ export default function AiSuggestionsScreen() {
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const { width: winWidth } = useWindowDimensions();
     const isWebDesktop = Platform.OS === 'web' && winWidth >= 768;
+    const accentColor = isWebDesktop
+        ? (isDark ? '#22D3EE' : '#0369A1')
+        : colors.primary;
+    const pageBackground = isWebDesktop
+        ? (isDark ? '#0A1224' : '#E9EEF8')
+        : colors.background;
+    const pageCardBackground = isWebDesktop
+        ? (isDark ? '#0F172A' : '#FFFFFF')
+        : (isDark ? '#1F2937' : '#FFFFFF');
+    const surfaceBackground = isWebDesktop
+        ? (isDark ? '#13213A' : '#F4F7FE')
+        : (isDark ? '#374151' : '#F3F4F6');
+    const borderSoft = isWebDesktop
+        ? (isDark ? '#1E2C48' : '#D8E3F2')
+        : colors.border;
+    const textPrimary = isWebDesktop
+        ? (isDark ? '#E2E8F0' : '#0F172A')
+        : colors.text;
+    const textSecondary = isWebDesktop
+        ? (isDark ? '#94A3B8' : '#475569')
+        : colors.textSecondary;
 
     // State
     const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
@@ -218,41 +239,49 @@ export default function AiSuggestionsScreen() {
     const renderProfileSection = () => {
         if (loadingProfile) {
             return (
-                <View style={[styles.profileCard, { backgroundColor: isDark ? '#1F2937' : '#F0F9FF', borderColor: '#8B5CF6' }]}>
-                    <ActivityIndicator color="#8B5CF6" />
-                    <Text style={[styles.profileLoadingText, { color: colors.textSecondary }]}>Loading your profile...</Text>
+                <View style={[
+                    styles.profileCard,
+                    isWebDesktop && styles.webSectionCard,
+                    { backgroundColor: pageCardBackground, borderColor: borderSoft }
+                ]}>
+                    <ActivityIndicator color={accentColor} />
+                    <Text style={[styles.profileLoadingText, { color: textSecondary }]}>Loading your profile...</Text>
                 </View>
             );
         }
 
         return (
-            <View style={[styles.profileCard, { backgroundColor: isDark ? '#1F2937' : '#F0F9FF', borderColor: '#8B5CF6' }]}>
+            <View style={[
+                styles.profileCard,
+                isWebDesktop && styles.webSectionCard,
+                { backgroundColor: pageCardBackground, borderColor: borderSoft }
+            ]}>
                 <View style={styles.profileHeader}>
-                    <Ionicons name="person-circle" size={24} color="#8B5CF6" />
-                    <Text style={[styles.profileTitle, { color: colors.text }]}>
+                    <Ionicons name="person-circle" size={24} color={accentColor} />
+                    <Text style={[styles.profileTitle, { color: textPrimary }]}>
                         {userName ? `Welcome, ${userName.split(' ')[0]}` : 'Your Musical Identity'}
                     </Text>
                 </View>
 
                 {userRoles.length > 0 ? (
                     <>
-                        <Text style={[styles.profileSubtitle, { color: colors.textSecondary }]}>
-                            You're a <Text style={{ color: '#8B5CF6', fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
+                        <Text style={[styles.profileSubtitle, { color: textSecondary }]}>
+                            You're a <Text style={{ color: accentColor, fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
                         </Text>
-                        <Text style={[styles.profileHint, { color: colors.textSecondary }]}>
+                        <Text style={[styles.profileHint, { color: textSecondary }]}>
                             On-device LLM generates instruments that complement your role
                         </Text>
                     </>
                 ) : (
-                    <Text style={[styles.profileSubtitle, { color: colors.textSecondary }]}>
+                    <Text style={[styles.profileSubtitle, { color: textSecondary }]}>
                         Add roles in your profile to get personalized suggestions!
                     </Text>
                 )}
 
                 {/* Current Instruments/Skills selector */}
                 {userRoles.length > 0 && (
-                    <View style={styles.currentInstrumentsSection}>
-                        <Text style={[styles.currentInstrumentsLabel, { color: colors.text }]}>
+                    <View style={[styles.currentInstrumentsSection, { borderTopColor: accentColor + '35' }]}>
+                        <Text style={[styles.currentInstrumentsLabel, { color: textPrimary }]}>
                             Your current skills:
                         </Text>
                         <View style={styles.chipGrid}>
@@ -265,19 +294,19 @@ export default function AiSuggestionsScreen() {
                                         style={[
                                             styles.chip,
                                             {
-                                                backgroundColor: isSelected ? '#8B5CF6' : (isDark ? '#374151' : '#E5E7EB'),
-                                                borderColor: isSelected ? '#8B5CF6' : colors.border,
+                                                backgroundColor: isSelected ? accentColor : surfaceBackground,
+                                                borderColor: isSelected ? accentColor : borderSoft,
                                             }
                                         ]}
                                     >
                                         <Ionicons
                                             name={isSelected ? "checkmark-circle" : "ellipse-outline"}
                                             size={14}
-                                            color={isSelected ? '#FFFFFF' : colors.textSecondary}
+                                            color={isSelected ? '#FFFFFF' : textSecondary}
                                         />
                                         <Text style={[
                                             styles.chipText,
-                                            { color: isSelected ? '#FFFFFF' : colors.text, marginLeft: 4 }
+                                            { color: isSelected ? '#FFFFFF' : textPrimary, marginLeft: 4 }
                                         ]}>
                                             {role}
                                         </Text>
@@ -300,11 +329,16 @@ export default function AiSuggestionsScreen() {
 
     // Render genre chips
     const renderGenreChips = () => (
-        <View style={styles.genreContainer}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+        <View style={[
+            styles.genreContainer,
+            styles.sectionCard,
+            isWebDesktop && styles.webSectionCard,
+            { backgroundColor: pageCardBackground, borderColor: borderSoft }
+        ]}>
+            <Text style={[styles.sectionTitle, { color: textPrimary }]}>
                 What genres do you play?
             </Text>
-            <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+            <Text style={[styles.sectionSubtitle, { color: textSecondary }]}>
                 {userGenres.length > 0 ? 'Pre-selected from your profile. Tap to adjust.' : 'Select one or more genres'}
             </Text>
             
@@ -312,15 +346,15 @@ export default function AiSuggestionsScreen() {
             <View style={[
                 styles.genreSearchContainer,
                 {
-                    backgroundColor: isDark ? '#374151' : '#F3F4F6',
-                    borderColor: colors.border,
+                    backgroundColor: surfaceBackground,
+                    borderColor: borderSoft,
                 }
             ]}>
-                <Ionicons name="search" size={18} color={colors.textSecondary} />
+                <Ionicons name="search" size={18} color={textSecondary} />
                 <TextInput
-                    style={[styles.genreSearchInput, { color: colors.text }]}
+                    style={[styles.genreSearchInput, { color: textPrimary }]}
                     placeholder="Search genres..."
-                    placeholderTextColor={colors.textSecondary}
+                    placeholderTextColor={textSecondary}
                     value={genreSearch}
                     onChangeText={setGenreSearch}
                     autoCapitalize="none"
@@ -328,21 +362,21 @@ export default function AiSuggestionsScreen() {
                 />
                 {genreSearch.length > 0 && (
                     <TouchableOpacity activeOpacity={1} onPress={() => setGenreSearch('')}>
-                        <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                        <Ionicons name="close-circle" size={18} color={textSecondary} />
                     </TouchableOpacity>
                 )}
             </View>
 
             {/* Selected genres count */}
             {selectedGenres.length > 0 && (
-                <Text style={[styles.selectedCount, { color: colors.primary }]}>
+                <Text style={[styles.selectedCount, { color: accentColor }]}>
                     {selectedGenres.length} genre{selectedGenres.length !== 1 ? 's' : ''} selected
                 </Text>
             )}
 
             <View style={styles.chipGrid}>
                 {filteredGenres.length === 0 ? (
-                    <Text style={[styles.noResultsText, { color: colors.textSecondary }]}>
+                    <Text style={[styles.noResultsText, { color: textSecondary }]}>
                         No genres found for "{genreSearch}"
                     </Text>
                 ) : filteredGenres.map(genre => {
@@ -355,8 +389,8 @@ export default function AiSuggestionsScreen() {
                             style={[
                                 styles.chip,
                                 {
-                                    backgroundColor: isSelected ? colors.primary : (isDark ? '#374151' : '#F3F4F6'),
-                                    borderColor: isSelected ? colors.primary : colors.border,
+                                    backgroundColor: isSelected ? accentColor : surfaceBackground,
+                                    borderColor: isSelected ? accentColor : borderSoft,
                                 }
                             ]}
                         >
@@ -365,7 +399,7 @@ export default function AiSuggestionsScreen() {
                             )}
                             <Text style={[
                                 styles.chipText,
-                                { color: isSelected ? '#FFFFFF' : colors.text }
+                                { color: isSelected ? '#FFFFFF' : textPrimary }
                             ]}>
                                 {genre}
                             </Text>
@@ -378,11 +412,16 @@ export default function AiSuggestionsScreen() {
 
     // Render experience level selector
     const renderExperienceSelector = () => (
-        <View style={styles.selectorContainer}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+        <View style={[
+            styles.selectorContainer,
+            styles.sectionCard,
+            isWebDesktop && styles.webSectionCard,
+            { backgroundColor: pageCardBackground, borderColor: borderSoft }
+        ]}>
+            <Text style={[styles.sectionTitle, { color: textPrimary }]}>
                 Experience Level
             </Text>
-            <View style={styles.optionsRow}>
+            <View style={[styles.optionsRow, isWebDesktop && styles.optionsRowWeb]}>
                 {EXPERIENCE_OPTIONS.map(option => {
                     const isSelected = experienceLevel === option.value;
                     return (
@@ -392,18 +431,18 @@ export default function AiSuggestionsScreen() {
                             style={[
                                 styles.optionCard,
                                 {
-                                    backgroundColor: isSelected ? colors.primary + '20' : (isDark ? '#1F2937' : '#FFFFFF'),
-                                    borderColor: isSelected ? colors.primary : colors.border,
+                                    backgroundColor: isSelected ? accentColor + '22' : surfaceBackground,
+                                    borderColor: isSelected ? accentColor : borderSoft,
                                 }
                             ]}
                         >
                             <Text style={[
                                 styles.optionLabel,
-                                { color: isSelected ? colors.primary : colors.text }
+                                { color: isSelected ? accentColor : textPrimary }
                             ]}>
                                 {option.label}
                             </Text>
-                            <Text style={[styles.optionDescription, { color: colors.textSecondary }]}>
+                            <Text style={[styles.optionDescription, { color: textSecondary }]}>
                                 {option.description}
                             </Text>
                         </TouchableOpacity>
@@ -415,8 +454,13 @@ export default function AiSuggestionsScreen() {
 
     // Render purpose selector
     const renderPurposeSelector = () => (
-        <View style={styles.selectorContainer}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+        <View style={[
+            styles.selectorContainer,
+            styles.sectionCard,
+            isWebDesktop && styles.webSectionCard,
+            { backgroundColor: pageCardBackground, borderColor: borderSoft }
+        ]}>
+            <Text style={[styles.sectionTitle, { color: textPrimary }]}>
                 Primary Purpose
             </Text>
             <View style={styles.purposeGrid}>
@@ -428,20 +472,21 @@ export default function AiSuggestionsScreen() {
                             onPress={() => setPurpose(option.value)}
                             style={[
                                 styles.purposeCard,
+                                isWebDesktop && styles.purposeCardWeb,
                                 {
-                                    backgroundColor: isSelected ? colors.primary + '20' : (isDark ? '#1F2937' : '#FFFFFF'),
-                                    borderColor: isSelected ? colors.primary : colors.border,
+                                    backgroundColor: isSelected ? accentColor + '22' : surfaceBackground,
+                                    borderColor: isSelected ? accentColor : borderSoft,
                                 }
                             ]}
                         >
                             <Ionicons
                                 name={option.icon as any}
                                 size={24}
-                                color={isSelected ? colors.primary : colors.textSecondary}
+                                color={isSelected ? accentColor : textSecondary}
                             />
                             <Text style={[
                                 styles.purposeLabel,
-                                { color: isSelected ? colors.primary : colors.text }
+                                { color: isSelected ? accentColor : textPrimary }
                             ]}>
                                 {option.label}
                             </Text>
@@ -470,12 +515,12 @@ export default function AiSuggestionsScreen() {
             <View
                 key={suggestion.name}
                 style={[styles.suggestionCard, {
-                    backgroundColor: isDark ? '#1F2937' : '#FFFFFF',
-                    borderColor: colors.border,
+                    backgroundColor: pageCardBackground,
+                    borderColor: borderSoft,
                 }]}
             >
                 {/* Rank Badge */}
-                <View style={[styles.rankBadge, { backgroundColor: '#8B5CF6' }]}>
+                <View style={[styles.rankBadge, { backgroundColor: accentColor }]}>
                     <Text style={styles.rankText}>#{index + 1}</Text>
                 </View>
 
@@ -488,15 +533,15 @@ export default function AiSuggestionsScreen() {
                     />
                     <View style={styles.headerInfo}>
                         <View style={styles.nameRow}>
-                            <Text style={[styles.instrumentName, { color: colors.text }]}>
+                            <Text style={[styles.instrumentName, { color: textPrimary }]}>
                                 {suggestion.name}
                             </Text>
-                            <Ionicons name="sparkles" size={14} color="#8B5CF6" />
+                            <Ionicons name="sparkles" size={14} color={accentColor} />
                         </View>
 
                         {/* AI Headline */}
                         {suggestion.headline && (
-                            <Text style={[styles.headline, { color: '#8B5CF6' }]}>
+                            <Text style={[styles.headline, { color: accentColor }]}>
                                 "{suggestion.headline}"
                             </Text>
                         )}
@@ -509,12 +554,12 @@ export default function AiSuggestionsScreen() {
                                         styles.matchProgress,
                                         {
                                             width: `${matchPercentage}%`,
-                                            backgroundColor: matchPercentage >= 90 ? '#22C55E' : matchPercentage >= 75 ? '#8B5CF6' : '#F59E0B'
+                                            backgroundColor: matchPercentage >= 90 ? '#22C55E' : matchPercentage >= 75 ? accentColor : '#F59E0B'
                                         }
                                     ]}
                                 />
                             </View>
-                            <Text style={[styles.matchText, { color: matchPercentage >= 90 ? '#22C55E' : '#8B5CF6' }]}>
+                            <Text style={[styles.matchText, { color: matchPercentage >= 90 ? '#22C55E' : accentColor }]}>
                                 {matchPercentage}%
                             </Text>
                         </View>
@@ -523,37 +568,37 @@ export default function AiSuggestionsScreen() {
 
                 {/* Perfect For Tag */}
                 {suggestion.perfectFor && (
-                    <View style={[styles.perfectForBadge, { backgroundColor: '#8B5CF6' + '20' }]}>
-                        <Ionicons name="star" size={12} color="#8B5CF6" />
-                        <Text style={[styles.perfectForText, { color: '#8B5CF6' }]}>
+                    <View style={[styles.perfectForBadge, { backgroundColor: accentColor + '1F' }]}>
+                        <Ionicons name="star" size={12} color={accentColor} />
+                        <Text style={[styles.perfectForText, { color: accentColor }]}>
                             {suggestion.perfectFor}
                         </Text>
                     </View>
                 )}
 
                 {/* AI Explanation */}
-                <Text style={[styles.matchReason, { color: colors.text }]}>
+                <Text style={[styles.matchReason, { color: textPrimary }]}>
                     {suggestion.matchReason}
                 </Text>
 
                 {/* Learning Info Row */}
-                <View style={[styles.learningRow, { backgroundColor: isDark ? '#374151' : '#F3F4F6' }]}>
+                <View style={[styles.learningRow, { backgroundColor: surfaceBackground }]}>
                     <View style={styles.learningItem}>
                         <Ionicons
                             name={learningCurveIcons[suggestion.learningCurve as keyof typeof learningCurveIcons] as any || 'trending-up'}
                             size={16}
                             color={learningCurveColors[suggestion.learningCurve as keyof typeof learningCurveColors] || '#F59E0B'}
                         />
-                        <Text style={[styles.learningLabel, { color: colors.textSecondary }]}>Learning</Text>
+                        <Text style={[styles.learningLabel, { color: textSecondary }]}>Learning</Text>
                         <Text style={[styles.learningValue, { color: learningCurveColors[suggestion.learningCurve as keyof typeof learningCurveColors] || '#F59E0B' }]}>
                             {suggestion.learningCurve || 'moderate'}
                         </Text>
                     </View>
                     <View style={styles.learningDivider} />
                     <View style={styles.learningItem}>
-                        <Ionicons name="time-outline" size={16} color={colors.primary} />
-                        <Text style={[styles.learningLabel, { color: colors.textSecondary }]}>To basics</Text>
-                        <Text style={[styles.learningValue, { color: colors.primary }]}>
+                        <Ionicons name="time-outline" size={16} color={accentColor} />
+                        <Text style={[styles.learningLabel, { color: textSecondary }]}>To basics</Text>
+                        <Text style={[styles.learningValue, { color: accentColor }]}>
                             {suggestion.timeToBasics || '1-2 months'}
                         </Text>
                     </View>
@@ -561,9 +606,9 @@ export default function AiSuggestionsScreen() {
 
                 {/* Pro Tip */}
                 {suggestion.proTip && (
-                    <View style={[styles.proTipContainer, { backgroundColor: '#FEF3C7' }]}>
+                    <View style={[styles.proTipContainer, { backgroundColor: isDark ? '#1D2A44' : '#ECF4FF' }]}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                            <Ionicons name="bulb" size={16} color="#D97706" />
+                            <Ionicons name="bulb" size={16} color={isDark ? '#38BDF8' : '#0369A1'} />
                             <Text style={styles.proTipLabel}>Pro Tip</Text>
                         </View>
                         <Text style={styles.proTipText}>{suggestion.proTip}</Text>
@@ -573,10 +618,10 @@ export default function AiSuggestionsScreen() {
                 {/* Famous Players */}
                 {suggestion.famousPlayers && suggestion.famousPlayers.length > 0 && (
                     <View style={styles.famousPlayersContainer}>
-                        <Text style={[styles.famousPlayersLabel, { color: colors.textSecondary }]}>
+                        <Text style={[styles.famousPlayersLabel, { color: textSecondary }]}>
                             Inspired by:
                         </Text>
-                        <Text style={[styles.famousPlayersText, { color: colors.text }]}>
+                        <Text style={[styles.famousPlayersText, { color: textPrimary }]}>
                             {suggestion.famousPlayers.join(', ')}
                         </Text>
                     </View>
@@ -584,13 +629,13 @@ export default function AiSuggestionsScreen() {
 
                 {/* Tags */}
                 <View style={styles.tagsRow}>
-                    <View style={[styles.tag, { backgroundColor: colors.primary + '20' }]}>
-                        <Text style={[styles.tagText, { color: colors.primary }]}>
+                    <View style={[styles.tag, { backgroundColor: accentColor + '20' }]}>
+                        <Text style={[styles.tagText, { color: accentColor }]}>
                             {suggestion.category}
                         </Text>
                     </View>
-                    <View style={[styles.tag, { backgroundColor: isDark ? '#374151' : '#E5E7EB' }]}>
-                        <Text style={[styles.tagText, { color: colors.textSecondary }]}>
+                    <View style={[styles.tag, { backgroundColor: surfaceBackground }]}>
+                        <Text style={[styles.tagText, { color: textSecondary }]}>
                             {suggestion.difficulty}
                         </Text>
                     </View>
@@ -606,7 +651,7 @@ export default function AiSuggestionsScreen() {
             contentContainerStyle={[
                 styles.scrollContent,
                 { paddingBottom: 160 + insets.bottom },
-                isWebDesktop && { width: '100%', paddingHorizontal: 32 },
+                isWebDesktop && styles.scrollContentWeb,
             ]}
             showsVerticalScrollIndicator={false}
         >
@@ -624,7 +669,7 @@ export default function AiSuggestionsScreen() {
                 style={[
                     styles.primaryButton,
                     {
-                        backgroundColor: selectedGenres.length > 0 ? colors.primary : colors.border,
+                        backgroundColor: selectedGenres.length > 0 ? accentColor : borderSoft,
                         opacity: loading ? 0.7 : 1,
                     }
                 ]}
@@ -642,7 +687,7 @@ export default function AiSuggestionsScreen() {
             </TouchableOpacity>
 
             {selectedGenres.length === 0 && (
-                <Text style={[styles.helperText, { color: colors.textSecondary, textAlign: 'center' }]}>
+                <Text style={[styles.helperText, { color: textSecondary, textAlign: 'center' }]}>
                     Select at least one genre to get suggestions
                 </Text>
             )}
@@ -651,7 +696,7 @@ export default function AiSuggestionsScreen() {
 
     // Render results step
     const renderResultsStep = () => {
-        const badgeColor = isAIPowered ? '#8B5CF6' : '#2563EB';
+        const badgeColor = isAIPowered ? accentColor : '#0EA5E9';
 
         return (
             <ScrollView
@@ -659,7 +704,7 @@ export default function AiSuggestionsScreen() {
                 contentContainerStyle={[
                     styles.scrollContent,
                     { paddingBottom: 160 + insets.bottom },
-                    isWebDesktop && { width: '100%', paddingHorizontal: 32 },
+                    isWebDesktop && styles.scrollContentWeb,
                 ]}
                 showsVerticalScrollIndicator={false}
             >
@@ -668,23 +713,23 @@ export default function AiSuggestionsScreen() {
                     onPress={() => setStep('preferences')}
                     style={styles.backButton}
                 >
-                    <Ionicons name="arrow-back" size={20} color={colors.primary} />
-                    <Text style={[styles.backButtonText, { color: colors.primary }]}>
+                    <Ionicons name="arrow-back" size={20} color={accentColor} />
+                    <Text style={[styles.backButtonText, { color: accentColor }]}>
                         Change Preferences
                     </Text>
                 </TouchableOpacity>
 
                 {/* AI Header Card */}
-                <View style={[styles.aiHeaderCard, { backgroundColor: isDark ? '#1F2937' : '#FFFFFF', borderColor: '#8B5CF6' }]}>
-                    <View style={styles.aiHeaderIcon}>
-                        <Ionicons name="sparkles" size={32} color="#8B5CF6" />
+                <View style={[styles.aiHeaderCard, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}> 
+                    <View style={[styles.aiHeaderIcon, { backgroundColor: accentColor + '1F' }]}>
+                        <Ionicons name="sparkles" size={32} color={accentColor} />
                     </View>
-                    <Text style={[styles.aiHeaderTitle, { color: colors.text }]}>
+                    <Text style={[styles.aiHeaderTitle, { color: textPrimary }]}>
                         {userRoles.length > 0
                             ? `Perfect for a ${userRoles[0]}`
                             : 'Your Personalized Picks'}
                     </Text>
-                    <Text style={[styles.aiHeaderSubtitle, { color: colors.textSecondary }]}>
+                    <Text style={[styles.aiHeaderSubtitle, { color: textSecondary }]}>
                         {isAIPowered
                             ? `Powered by ${aiProvider || 'AI'} • Analyzed your profile`
                             : `Using ${aiProvider || 'On-Device LLM'} • Personalized from your profile`}
@@ -692,7 +737,7 @@ export default function AiSuggestionsScreen() {
 
                     {/* User Role Badge */}
                     {userRoles.length > 0 && (
-                        <View style={[styles.roleBadge, { backgroundColor: '#8B5CF6' }]}>
+                        <View style={[styles.roleBadge, { backgroundColor: accentColor }]}>
                             <Ionicons name="person" size={12} color="#FFFFFF" />
                             <Text style={styles.roleBadgeText}>{userRoles.join(' • ')}</Text>
                         </View>
@@ -701,29 +746,29 @@ export default function AiSuggestionsScreen() {
                     {/* Preferences Tags */}
                     <View style={styles.preferenceTags}>
                         {selectedGenres.slice(0, 3).map(genre => (
-                            <View key={genre} style={[styles.preferenceTag, { backgroundColor: '#8B5CF6' + '20' }]}>
-                                <Text style={[styles.preferenceTagText, { color: '#8B5CF6' }]}>{genre}</Text>
+                            <View key={genre} style={[styles.preferenceTag, { backgroundColor: accentColor + '20' }]}>
+                                <Text style={[styles.preferenceTagText, { color: accentColor }]}>{genre}</Text>
                             </View>
                         ))}
                         {selectedGenres.length > 3 && (
-                            <View style={[styles.preferenceTag, { backgroundColor: '#8B5CF6' + '20' }]}>
-                                <Text style={[styles.preferenceTagText, { color: '#8B5CF6' }]}>+{selectedGenres.length - 3} more</Text>
+                            <View style={[styles.preferenceTag, { backgroundColor: accentColor + '20' }]}>
+                                <Text style={[styles.preferenceTagText, { color: accentColor }]}>+{selectedGenres.length - 3} more</Text>
                             </View>
                         )}
                     </View>
                     <View style={styles.preferenceTags}>
-                        <View style={[styles.preferenceTag, { backgroundColor: colors.primary + '20' }]}>
-                            <Text style={[styles.preferenceTagText, { color: colors.primary }]}>{experienceLevel}</Text>
+                        <View style={[styles.preferenceTag, { backgroundColor: accentColor + '20' }]}>
+                            <Text style={[styles.preferenceTagText, { color: accentColor }]}>{experienceLevel}</Text>
                         </View>
-                        <View style={[styles.preferenceTag, { backgroundColor: colors.primary + '20' }]}>
-                            <Text style={[styles.preferenceTagText, { color: colors.primary }]}>{purpose}</Text>
+                        <View style={[styles.preferenceTag, { backgroundColor: accentColor + '20' }]}>
+                            <Text style={[styles.preferenceTagText, { color: accentColor }]}>{purpose}</Text>
                         </View>
                     </View>
                 </View>
 
                 {/* Results Count */}
                 <View style={styles.resultsCountRow}>
-                    <Text style={[styles.resultsHeader, { color: colors.text }]}>
+                    <Text style={[styles.resultsHeader, { color: textPrimary }]}>
                         {suggestions.length} Perfect Matches
                     </Text>
                     <View style={[styles.aiBadgeMini, { backgroundColor: badgeColor }]}>
@@ -731,15 +776,15 @@ export default function AiSuggestionsScreen() {
                         <Text style={styles.aiBadgeMiniText}>{isAIPowered ? 'AI' : 'SMART'}</Text>
                     </View>
                 </View>
-                <Text style={[styles.resultsSubtitle, { color: colors.textSecondary }]}>
+                <Text style={[styles.resultsSubtitle, { color: textSecondary }]}>
                     {userRoles.length > 0
                         ? `Instruments that complement your role as a ${userRoles[0]}`
                         : 'Curated just for you based on your musical profile'}
                 </Text>
 
                 {suggestionMessage && (
-                    <View style={[styles.fallbackInfoContainer, { backgroundColor: isDark ? '#1E3A8A20' : '#DBEAFE', borderColor: '#3B82F6' }]}>
-                        <Ionicons name="information-circle" size={16} color="#2563EB" />
+                    <View style={[styles.fallbackInfoContainer, { backgroundColor: isDark ? '#0F3A5A55' : '#E0F2FE', borderColor: accentColor }]}>
+                        <Ionicons name="information-circle" size={16} color={accentColor} />
                         <Text style={styles.fallbackInfoText}>{suggestionMessage}</Text>
                     </View>
                 )}
@@ -769,8 +814,8 @@ export default function AiSuggestionsScreen() {
     };
 
     return (
-        <View style={[styles.container, { backgroundColor: colors.background }]}>
-            <View style={[isWebDesktop && { width: '100%' }, { flex: 1 }]}>
+        <View style={[styles.container, { backgroundColor: pageBackground }]}>
+            <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
                 <Header title="AI Suggestions" />
 
                 {isGuest ? (
@@ -780,7 +825,7 @@ export default function AiSuggestionsScreen() {
 
                         {/* Error Message */}
                         {error && (
-                            <View style={[styles.errorContainer, { backgroundColor: '#FEE2E2' }]}>
+                            <View style={[styles.errorContainer, { backgroundColor: isDark ? '#3F1E2A' : '#FEE2E2' }]}>
                                 <Ionicons name="warning" size={20} color="#DC2626" />
                                 <Text style={styles.errorText}>{error}</Text>
                             </View>
@@ -801,11 +846,40 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
+    pageFrame: {
+        flex: 1,
+    },
+    pageFrameWeb: {
+        maxWidth: 1240,
+        width: '100%',
+        alignSelf: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+    },
     scrollView: {
         flex: 1,
     },
     scrollContent: {
         padding: 16,
+    },
+    scrollContentWeb: {
+        width: '100%',
+        maxWidth: 1120,
+        alignSelf: 'center',
+        paddingHorizontal: 12,
+        paddingTop: 12,
+    },
+    sectionCard: {
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+    },
+    webSectionCard: {
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.08,
+        shadowRadius: 18,
+        elevation: 3,
     },
     sectionTitle: {
         fontSize: 16,
@@ -873,6 +947,9 @@ const styles = StyleSheet.create({
         gap: 8,
         marginTop: 8,
     },
+    optionsRowWeb: {
+        gap: 12,
+    },
     optionCard: {
         flex: 1,
         padding: 12,
@@ -902,6 +979,10 @@ const styles = StyleSheet.create({
         borderWidth: 1.5,
         alignItems: 'center',
         gap: 8,
+    },
+    purposeCardWeb: {
+        width: '24%',
+        minWidth: 200,
     },
     purposeLabel: {
         fontSize: 12,
@@ -1028,7 +1109,7 @@ const styles = StyleSheet.create({
         width: 60,
         height: 60,
         borderRadius: 30,
-        backgroundColor: '#8B5CF6' + '20',
+        backgroundColor: '#0EA5E920',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 12,
@@ -1142,7 +1223,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 1,
-        shadowColor: '#8B5CF6',
+        shadowColor: '#0EA5E9',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.3,
         shadowRadius: 4,
@@ -1252,13 +1333,13 @@ const styles = StyleSheet.create({
     proTipLabel: {
         fontSize: 11,
         fontFamily: 'Poppins_600SemiBold',
-        color: '#92400E',
+        color: '#0C4A6E',
         marginBottom: 4,
     },
     proTipText: {
         fontSize: 12,
         fontFamily: 'Poppins_400Regular',
-        color: '#78350F',
+        color: '#0F172A',
         lineHeight: 18,
     },
     famousPlayersContainer: {

@@ -303,24 +303,9 @@ export default function LoginScreen() {
             );
           } else if (profile?.id_document_expiry && new Date(profile.id_document_expiry) < new Date()) {
             // Check for expired ID
-            await supabase.auth.signOut();
-
-            showAlert(
-              'warning',
-              'ID Document Expired',
-              'Your identification document has expired. Please update your verification documents to continue using the app.',
-              [
-                {
-                  text: 'Update Now',
-                  onPress: () => startVerification(user.id),
-                  style: 'default'
-                },
-                {
-                  text: 'Cancel',
-                  style: 'cancel'
-                }
-              ]
-            );
+            setLoginMessage({ type: 'error', text: 'ID expired. Please upload a new document to continue.' });
+            router.replace('/identity_verification' as any);
+            return;
           } else {
             // Verified & Profile Exists -> Allow Entry
             console.log('Verification passed. Redirecting to Home.');

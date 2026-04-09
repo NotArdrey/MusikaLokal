@@ -1,0 +1,72 @@
+PAGE: ai_suggestions
+ {mobile => web}/app/ai_suggestions.tsx | 344 ++++++---------------------------
+ 1 file changed, 62 insertions(+), 282 deletions(-)
+
+PAGE: bookings
+ {mobile => web}/app/bookings.tsx | 510 ++++++++-------------------------------
+ 1 file changed, 99 insertions(+), 411 deletions(-)
+
+PAGE: forget_password
+ {mobile => web}/app/forget_password.tsx | 291 +++++++++++++++++++++++++-------
+ 1 file changed, 226 insertions(+), 65 deletions(-)
+
+PAGE: home
+ {mobile => web}/app/home.tsx | 968 ++++++++++++++++++-------------------------
+ 1 file changed, 396 insertions(+), 572 deletions(-)
+
+PAGE: index
+ {mobile => web}/app/index.tsx | 235 +++++++++++++++++++++++++++++-------------
+ 1 file changed, 166 insertions(+), 69 deletions(-)
+
+PAGE: manage
+ {mobile => web}/app/manage.tsx | 2 ++
+ 1 file changed, 2 insertions(+)
+
+PAGE: manage_gig
+ {mobile => web}/app/manage_gig.tsx | 105 ++++++++-----------------------------
+ 1 file changed, 22 insertions(+), 83 deletions(-)
+
+PAGE: manage_group
+ {mobile => web}/app/manage_group.tsx | 219 +++++++++++++----------------------
+ 1 file changed, 78 insertions(+), 141 deletions(-)
+
+PAGE: manage_studio
+ {mobile => web}/app/manage_studio.tsx | 49 +++--------------------------------
+ 1 file changed, 4 insertions(+), 45 deletions(-)
+
+PAGE: my_group
+ {mobile => web}/app/my_group.tsx | 222 +++++++++++++++------------------------
+ 1 file changed, 86 insertions(+), 136 deletions(-)
+
+PAGE: my_studio
+ {mobile => web}/app/my_studio.tsx | 130 +++++++++++++++++++-------------------
+ 1 file changed, 66 insertions(+), 64 deletions(-)
+
+PAGE: my_venue
+ {mobile => web}/app/my_venue.tsx | 146 ++++++++++++++++++++-------------------
+ 1 file changed, 74 insertions(+), 72 deletions(-)
+
+PAGE: notifications
+ {mobile => web}/app/notifications.tsx | 106 +---------------------------------
+ 1 file changed, 3 insertions(+), 103 deletions(-)
+
+PAGE: payment-result
+ {mobile => web}/app/payment-result.tsx | 83 ++++++++--------------------------
+ 1 file changed, 19 insertions(+), 64 deletions(-)
+
+PAGE: profile
+ {mobile => web}/app/profile.tsx | 28 ++++++++++++++++------------
+ 1 file changed, 16 insertions(+), 12 deletions(-)
+
+PAGE: signup
+ {mobile => web}/app/signup.tsx | 175 ++++++++++++++++++++++++++---------------
+ 1 file changed, 113 insertions(+), 62 deletions(-)
+
+PAGE: submit_review
+ {mobile => web}/app/submit_review.tsx | 110 +++++++---------------------------
+ 1 file changed, 22 insertions(+), 88 deletions(-)
+
+PAGE: wallet
+ {mobile => web}/app/wallet.tsx | 172 +++++++----------------------------------
+ 1 file changed, 27 insertions(+), 145 deletions(-)
+

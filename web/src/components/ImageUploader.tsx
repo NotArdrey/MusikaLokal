@@ -1,12 +1,49 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import CustomAlert, { AlertType } from './CustomAlert';
 
 const debugLog = (..._args: unknown[]) => {};
+
+const sanitizeExtension = (rawExt?: string | null): string => {
+  const cleaned = (rawExt || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return cleaned || 'jpg';
+};
+
+const getExtensionFromName = (name: string): string => {
+  const cleanedName = name.split('?')[0];
+  const ext = cleanedName.includes('.') ? cleanedName.split('.').pop() : '';
+  return sanitizeExtension(ext);
+};
+
+const mimeFromExtension = (ext: string): string => {
+  const normalized = sanitizeExtension(ext);
+  const map: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    gif: 'image/gif',
+    bmp: 'image/bmp',
+    heic: 'image/heic',
+    heif: 'image/heif',
+  };
+  return map[normalized] || 'image/jpeg';
+};
+
+const resolveMimeType = (asset: ImagePicker.ImagePickerAsset, ext: string): string => {
+  const maybeMime = (asset as any)?.mimeType;
+  if (typeof maybeMime === 'string') {
+    const normalized = maybeMime.trim().toLowerCase();
+    if (/^image\/[a-z0-9.+-]+$/.test(normalized)) {
+      return normalized;
+    }
+  }
+  return mimeFromExtension(ext);
+};
 
 interface ImageUploaderProps {
   images: string[];
@@ -84,31 +121,44 @@ export default function ImageUploader({
 
       for (const asset of result.assets) {
         try {
-          const fileExt = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
+          const fallbackName = asset.uri.split('/').pop() || '';
+          const assetFileName =
+            typeof (asset as any)?.fileName === 'string' ? (asset as any).fileName : fallbackName;
+          const fileExt = getExtensionFromName(assetFileName || fallbackName || 'upload.jpg');
+          const contentType = resolveMimeType(asset, fileExt);
           const fileName = `${userId}/${folder}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
           debugLog(`📤 Uploading to: ${bucketName}/${fileName}`);
           debugLog(`📍 Source URI: ${asset.uri}`);
 
-          // For React Native, we need to use FormData or ArrayBuffer
-          const response = await fetch(asset.uri);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch image: ${response.statusText}`);
+          let uploadBody: ArrayBuffer | Blob;
+          let fileSize = 0;
+
+          const webFile = Platform.OS === 'web' ? (asset as any)?.file : null;
+          if (webFile instanceof Blob) {
+            uploadBody = webFile;
+            fileSize = webFile.size || 0;
+          } else {
+            const response = await fetch(asset.uri);
+            if (!response.ok) {
+              throw new Error(`Failed to fetch image: ${response.statusText}`);
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            uploadBody = arrayBuffer;
+            fileSize = arrayBuffer.byteLength;
           }
-          
-          const arrayBuffer = await response.arrayBuffer();
-          const fileSize = arrayBuffer.byteLength;
+
           debugLog(`📦 File size: ${(fileSize / 1024).toFixed(2)} KB`);
 
           if (fileSize === 0) {
             throw new Error('File is empty');
           }
 
-          // Upload using ArrayBuffer for better React Native compatibility
           const { data, error } = await supabase.storage
             .from(bucketName)
-            .upload(fileName, arrayBuffer, { 
-              contentType: `image/${fileExt}`, 
+            .upload(fileName, uploadBody, {
+              contentType,
               upsert: false 
             });
 

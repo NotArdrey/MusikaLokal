@@ -14,6 +14,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View,
     Platform,
 } from "react-native";
@@ -38,6 +39,30 @@ const ITEM_SIZE = Math.floor(
 
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
+  const { width: winWidth } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && winWidth >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : colors.surface;
+  const surfaceBackground = isWebDesktop
+    ? isDark
+      ? "#13213A"
+      : "#F4F7FE"
+    : isDark
+      ? "#1E293B"
+      : "#F3F4F6";
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? "#1E2C48"
+      : "#D8E3F2"
+    : colors.border;
   const { loading: authLoading, userId: currentUserId, isGuest } = useAuth();
   const params = useLocalSearchParams<{
     userId?: string;
@@ -548,7 +573,7 @@ export default function ProfileScreen() {
   if (loading) {
     return (
       <View
-        style={[styles.centerContainer, { backgroundColor: colors.background }]}
+        style={[styles.centerContainer, { backgroundColor: pageBackground }]}
       >
         <Text style={{ color: colors.textSecondary }}>Loading profile...</Text>
       </View>
@@ -557,8 +582,8 @@ export default function ProfileScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
         <Header
           title={isOwner ? "My Profile" : "User Profile"}
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
@@ -566,10 +591,17 @@ export default function ProfileScreen() {
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, isWebDesktop && styles.scrollContentWeb]}
         >
           {/* Profile Header */}
-          <View style={styles.headerProfile}>
+          <View
+            style={[
+              styles.headerProfile,
+              isWebDesktop && styles.headerProfileWeb,
+              isWebDesktop && styles.webSectionCard,
+              { backgroundColor: isWebDesktop ? pageCardBackground : "transparent", borderColor: borderSoft },
+            ]}
+          >
             <View style={styles.avatarWrapper}>
               <View
                 style={[
@@ -590,7 +622,6 @@ export default function ProfileScreen() {
 
               {isOwner && (
                 <TouchableOpacity activeOpacity={1}
-                  onPress={() => router.push("/edit_profile")}
                   style={[
                     styles.editIconBtn,
                     { backgroundColor: colors.primary },
@@ -640,7 +671,7 @@ export default function ProfileScreen() {
               <View
                 style={[
                   styles.gigVisibilityCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  { backgroundColor: pageCardBackground, borderColor: borderSoft },
                 ]}
               >
                 <View style={{ flex: 1, paddingRight: 12 }}>
@@ -716,7 +747,7 @@ export default function ProfileScreen() {
                 <View
                   style={[
                     styles.gigSearchWrap,
-                    { backgroundColor: isDark ? "#1E293B" : "#F9FAFB", borderColor: colors.border },
+                    { backgroundColor: surfaceBackground, borderColor: borderSoft },
                   ]}
                 >
                   <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
@@ -756,7 +787,7 @@ export default function ProfileScreen() {
                         onMoveShouldSetResponder={() => true}
                       >
                         {filteredGigTimeline[section.key].map((gig: any) => (
-                          <View key={gig.id} style={[styles.gigTimelineCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                          <View key={gig.id} style={[styles.gigTimelineCard, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}>
                             <View style={styles.gigCardTopRow}>
                               <Text style={[styles.gigCardTitle, { color: colors.text }]} numberOfLines={1}>{gig.name || "Untitled Gig"}</Text>
                               <View style={[styles.gigStatusBadge, { backgroundColor: `${section.color}20` }]}>
@@ -780,7 +811,7 @@ export default function ProfileScreen() {
                         ))}
                       </ScrollView>
                     ) : (
-                      <View style={[styles.gigTimelineEmpty, { borderColor: colors.border, backgroundColor: isDark ? "#1F2937" : "#F9FAFB" }]}>
+                      <View style={[styles.gigTimelineEmpty, { borderColor: borderSoft, backgroundColor: surfaceBackground }]}>
                         <Text style={[styles.gigTimelineEmptyText, { color: colors.textSecondary }]}>No {section.label.toLowerCase()} gigs found.</Text>
                       </View>
                     )}
@@ -802,13 +833,13 @@ export default function ProfileScreen() {
                 <TouchableOpacity activeOpacity={1}
                   key={item.label}
                   onPress={() => router.push(item.route as any)}
-                  style={[styles.menuItem, { backgroundColor: colors.surface }]}
+                  style={[styles.menuItem, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}
                 >
                   <View style={styles.menuLeft}>
                     <View
                       style={[
                         styles.iconBox,
-                        { backgroundColor: isDark ? "#1E293B" : "#F9FAFB" },
+                        { backgroundColor: surfaceBackground },
                       ]}
                     >
                       <Ionicons
@@ -834,13 +865,13 @@ export default function ProfileScreen() {
               <TouchableOpacity
                 activeOpacity={1}
                 onPress={() => router.push("/settings")}
-                style={[styles.menuItem, { backgroundColor: colors.surface }]}
+                style={[styles.menuItem, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}
               >
                 <View style={styles.menuLeft}>
                   <View
                     style={[
                       styles.iconBox,
-                      { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" },
+                      { backgroundColor: surfaceBackground },
                     ]}
                   >
                     <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
@@ -862,7 +893,7 @@ export default function ProfileScreen() {
             <View style={styles.menuContainer}>
               <TouchableOpacity activeOpacity={1}
                 onPress={openReportModal}
-                style={[styles.menuItem, { backgroundColor: colors.surface }]}
+                style={[styles.menuItem, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}
               >
                 <View style={styles.menuLeft}>
                   <View
@@ -1041,6 +1072,16 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   centerContainer: {
     flex: 1,
     alignItems: "center",
@@ -1049,11 +1090,32 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 220,
   },
+  scrollContentWeb: {
+    maxWidth: 1120,
+    alignSelf: "center",
+    width: "100%",
+    paddingTop: 12,
+  },
+  webSectionCard: {
+    borderWidth: 1,
+    borderRadius: 20,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
   headerProfile: {
     paddingHorizontal: 24,
     paddingTop: 8,
     paddingBottom: 24,
     alignItems: "center",
+  },
+  headerProfileWeb: {
+    marginHorizontal: 24,
+    paddingTop: 28,
+    paddingBottom: 24,
+    marginBottom: 16,
   },
   avatarWrapper: {
     position: "relative",
@@ -1258,6 +1320,7 @@ const styles = StyleSheet.create({
   },
   menuItem: {
     padding: 16,
+    borderWidth: 1,
     borderRadius: 16,
     flexDirection: "row",
     alignItems: "center",

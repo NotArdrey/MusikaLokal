@@ -1,6 +1,6 @@
 import { BlurView } from 'expo-blur';
 import React from 'react';
-import { ActivityIndicator, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal as RNModal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 
 type CustomModalProps = {
@@ -24,6 +24,8 @@ type CustomModalProps = {
   loading?: boolean;
   loadingMessage?: string;
 };
+
+const IS_WEB = Platform.OS === 'web';
 
 const CustomModal: React.FC<CustomModalProps> = ({
   visible,
@@ -117,7 +119,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
               {requireTermsAcceptance && (
                 <>
-                  <TouchableOpacity activeOpacity={1}
+                  <TouchableOpacity
                     onPress={() => setIsTermsAccepted((prev) => !prev)}
                     activeOpacity={1}
                     style={styles.termsRow}
@@ -151,7 +153,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   )}
 
                   {!onTermsPress && (
-                    <TouchableOpacity activeOpacity={1}
+                    <TouchableOpacity
                       onPress={() => setShowTermsContent(true)}
                       activeOpacity={1}
                       style={styles.termsLinkButton}
@@ -170,6 +172,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
                     styles.confirmButton,
                     {
                       backgroundColor: danger ? '#EF4444' : colors.primary,
+                      opacity: isConfirmDisabled ? 0.6 : 1,
                     }
                   ]}
                   disabled={isConfirmDisabled}
@@ -179,7 +182,13 @@ const CustomModal: React.FC<CustomModalProps> = ({
                 </TouchableOpacity>
 
                 <TouchableOpacity activeOpacity={1}
-                  style={styles.cancelButton}
+                  style={[
+                    styles.cancelButton,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: colors.background,
+                    },
+                  ]}
                   onPress={onClose}
                 >
                   <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>
@@ -240,49 +249,59 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: IS_WEB ? 16 : 0,
   },
   modalContainer: {
-    width: '80%', // w-4/5
-    borderRadius: 24, // rounded-3xl
-    padding: 24, // p-6
+    width: IS_WEB ? '92%' : '80%',
+    maxWidth: IS_WEB ? 460 : 560,
+    borderRadius: IS_WEB ? 18 : 24,
+    padding: IS_WEB ? 20 : 24,
     alignItems: 'center',
   },
   title: {
-    fontSize: 20, // text-xl
-    marginBottom: 12, // mb-3
+    fontSize: IS_WEB ? 18 : 20,
+    marginBottom: 10,
     textAlign: 'center',
     fontFamily: 'Poppins_600SemiBold',
   },
   message: {
-    fontSize: 14, // text-sm
+    fontSize: 14,
     textAlign: 'center',
-    marginBottom: 32, // mb-8
-    lineHeight: 24, // leading-6
+    marginBottom: IS_WEB ? 20 : 28,
+    lineHeight: IS_WEB ? 22 : 24,
     fontFamily: 'Poppins_400Regular',
   },
   buttonContainer: {
     width: '100%',
-    gap: 12, // gap-3
+    gap: 10,
+    flexDirection: IS_WEB ? 'row-reverse' : 'column',
   },
   confirmButton: {
     width: '100%',
-    borderRadius: 12, // rounded-xl
-    paddingVertical: 14, // py-3.5
+    flex: IS_WEB ? 1 : 0,
+    borderRadius: 10,
+    paddingVertical: 13,
+    minHeight: 46,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   confirmButtonText: {
     color: 'white',
-    fontSize: 14, // text-sm
+    fontSize: 14,
     fontFamily: 'Poppins_600SemiBold',
   },
   cancelButton: {
     width: '100%',
-    borderRadius: 12, // rounded-xl
-    paddingVertical: 14, // py-3.5
+    flex: IS_WEB ? 1 : 0,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 13,
+    minHeight: 46,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   cancelButtonText: {
-    fontSize: 14, // text-sm
+    fontSize: 14,
     fontFamily: 'Poppins_500Medium',
   },
   input: {
@@ -290,7 +309,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     padding: 12,
-    marginBottom: 24,
+    marginBottom: 18,
     minHeight: 80,
     textAlignVertical: 'top',
     fontFamily: 'Poppins_400Regular',
@@ -339,10 +358,11 @@ const styles = StyleSheet.create({
   },
   termsContainer: {
     width: '100%',
-    maxHeight: '82%',
+    maxWidth: IS_WEB ? 680 : undefined,
+    maxHeight: IS_WEB ? '78%' : '82%',
     borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: IS_WEB ? 20 : 16,
+    paddingVertical: IS_WEB ? 18 : 14,
   },
   termsHeader: {
     flexDirection: 'row',

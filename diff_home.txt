@@ -1,0 +1,1824 @@
+diff --git a/mobile/app/home.tsx b/web/app/home.tsx
+index ac19121..6abb8eb 100644
+--- a/mobile/app/home.tsx
++++ b/web/app/home.tsx
+@@ -2,46 +2,51 @@ import { Ionicons } from "@expo/vector-icons";
+ import AsyncStorage from "@react-native-async-storage/async-storage";
+ import { BlurView } from "expo-blur";
+ import { LinearGradient } from "expo-linear-gradient";
+ import React, { useCallback, useEffect, useMemo, useState } from "react";
+ import {
+-    ActivityIndicator,
+-    Dimensions,
+-    InteractionManager,
+-    RefreshControl,
+-    ScrollView,
+-    StatusBar,
+-    StyleSheet,
+-    Text,
+-    TouchableOpacity,
+-    View,
++  ActivityIndicator,
++  Dimensions,
++  InteractionManager,
++  Platform,
++  RefreshControl,
++  ScrollView,
++  StatusBar,
++  StyleSheet,
++  Switch,
++  Text,
++  TouchableOpacity,
++  View,
++  useWindowDimensions,
+ } from "react-native";
+ import { useSafeAreaInsets } from "react-native-safe-area-context";
+ import { supabase } from "../lib/supabase";
+ import CachedImage from "../src/components/CachedImage";
+ import CustomAlert from "../src/components/CustomAlert";
+ import Header from "../src/components/header";
++import ListingCard from "../src/components/ListingCard";
+ import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
+ import Navbar from "../src/components/navbar";
+ import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBanner";
+ import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
+ import SearchBottomSheet from "../src/components/SearchBottomSheet";
+ import { useTheme } from "../src/context/ThemeContext";
+ 
+ const { width, height } = Dimensions.get("window");
+ 
+ // Responsive scaling utilities - optimized for iPhone SE and smaller devices
++const scaleWidth = Math.min(width, 600); // Clamp width to prevent massive scaling on web
+ const scale = (size: number) => {
+-  const newSize = (width / 375) * size;
++  const newSize = (scaleWidth / 375) * size;
+   return Math.max(newSize, size * 0.85); // Minimum 85% of original size
+ };
+ const verticalScale = (size: number) => {
+   // Use more conservative scaling for height to prevent over-shrinking on small devices
+   const baseHeight = 812;
+   const ratio = height / baseHeight;
+-  // Clamp ratio between 0.8 and 1.2 to prevent extreme scaling
+-  const clampedRatio = Math.max(0.8, Math.min(1.2, ratio));
++  // Clamp ratio between 0.8 and 1.1 to prevent extreme scaling
++  const clampedRatio = Math.max(0.8, Math.min(1.1, ratio));
+   return size * clampedRatio;
+ };
+ const moderateScale = (size: number, factor = 0.3) => {
+   const scaled = scale(size);
+   return size + (scaled - size) * factor; // Reduced factor from 0.5 to 0.3 for less aggressive scaling
+@@ -50,126 +55,31 @@ const moderateScale = (size: number, factor = 0.3) => {
+ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+ import { useAuth } from "../src/context/AuthContext";
+ 
+ const debugLog = (..._args: unknown[]) => {};
+ 
+-const clampValue = (value: number, min = 0, max = 1) => {
+-  return Math.max(min, Math.min(max, value));
+-};
+-
+-const normalizeSignal = (value: unknown) => {
+-  if (typeof value !== "string") return "";
+-  return value
+-    .toLowerCase()
+-    .replace(/[^a-z0-9\s]/g, " ")
+-    .replace(/\s+/g, " ")
+-    .trim();
+-};
+-
+-const uniqueNormalizedSignals = (values: unknown[]) => {
+-  const seen = new Set<string>();
+-  const out: string[] = [];
+-
+-  for (const value of values) {
+-    const normalized = normalizeSignal(value);
+-    if (!normalized || seen.has(normalized)) continue;
+-    seen.add(normalized);
+-    out.push(normalized);
+-  }
+-
+-  return out;
+-};
+-
+-const scoreFreshness = (createdAt: unknown) => {
+-  if (typeof createdAt !== "string") return 0.35;
+-
+-  const created = new Date(createdAt).getTime();
+-  if (Number.isNaN(created)) return 0.35;
+-
+-  const ageDays = Math.max(0, (Date.now() - created) / (1000 * 60 * 60 * 24));
+-  if (ageDays <= 7) return 1;
+-  if (ageDays <= 30) return 0.8;
+-  if (ageDays <= 90) return 0.55;
+-  return 0.35;
+-};
+-
+-const buildOnDeviceReason = (
+-  skillMatches: string[],
+-  genreMatches: string[],
+-  itemType: string,
+-) => {
+-  if (skillMatches.length > 0 && genreMatches.length > 0) {
+-    return `Matches your ${skillMatches[0]} skills and ${genreMatches[0]} taste.`;
+-  }
+-  if (skillMatches.length > 0) {
+-    return `Recommended because of your ${skillMatches[0]} background.`;
+-  }
+-  if (genreMatches.length > 0) {
+-    return `Popular among ${genreMatches[0]} listeners and creators.`;
+-  }
+-  if (itemType === "Gig") {
+-    return "Trending opportunity with strong current engagement.";
+-  }
+-  return "Strong overall quality and relevance right now.";
+-};
+-
+-const rankForYouOnDevice = (
+-  candidates: any[],
+-  profileSignals: { skills: string[]; genres: string[] },
+-  limit: number,
+-) => {
+-  if (!Array.isArray(candidates) || candidates.length === 0) {
+-    return [];
++const ResponsiveList = ({ children, style, contentContainerStyle, snapToInterval, ...props }: any) => {
++  const { width } = useWindowDimensions();
++  if (Platform.OS === 'web' && width >= 768) {
++    return (
++      <View style={[{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }, style, contentContainerStyle]}>
++        {children}
++      </View>
++    );
+   }
+-
+-  const normalizedSkills = uniqueNormalizedSignals(profileSignals.skills);
+-  const normalizedGenres = uniqueNormalizedSignals(profileSignals.genres);
+-  const hasUserSignals = normalizedSkills.length > 0 || normalizedGenres.length > 0;
+-  const safeLimit = Math.max(1, Math.min(limit || 20, candidates.length));
+-
+-  const ranked = candidates
+-    .map((item: any) => {
+-      const searchableText = normalizeSignal(
+-        `${item.name || ""} ${item.genre || ""} ${item.location || ""} ${item.type || ""} ${item.group_type || ""}`,
+-      );
+-      const itemGenres = uniqueNormalizedSignals(
+-        typeof item.genre === "string" ? item.genre.split(",") : [],
+-      );
+-
+-      const skillMatches = normalizedSkills.filter((skill) => searchableText.includes(skill));
+-      const genreMatches = normalizedGenres.filter(
+-        (genre) => searchableText.includes(genre) || itemGenres.includes(genre),
+-      );
+-
+-      const skillScore = normalizedSkills.length > 0
+-        ? clampValue(skillMatches.length / Math.min(3, normalizedSkills.length))
+-        : 0;
+-      const genreScore = normalizedGenres.length > 0
+-        ? clampValue(genreMatches.length / Math.min(3, normalizedGenres.length))
+-        : 0;
+-      const popularityScore = clampValue(Number(item.rating || 0) / 5);
+-      const freshnessScore = scoreFreshness(item.created_at);
+-
+-      const blendedScore = hasUserSignals
+-        ? (skillScore * 0.4 + genreScore * 0.35 + popularityScore * 0.2 + freshnessScore * 0.05)
+-        : (popularityScore * 0.7 + freshnessScore * 0.3);
+-
+-      const aiScore = Math.round(clampValue(blendedScore) * 100);
+-
+-      return {
+-        ...item,
+-        similarity: aiScore / 100,
+-        aiReason: buildOnDeviceReason(skillMatches, genreMatches, item.type || "listing"),
+-      };
+-    })
+-    .sort((a, b) => {
+-      const similarityDelta = Number(b.similarity || 0) - Number(a.similarity || 0);
+-      if (similarityDelta !== 0) return similarityDelta;
+-      return Number(b.rating || 0) - Number(a.rating || 0);
+-    });
+-
+-  return ranked.slice(0, safeLimit);
++  return (
++    <ScrollView
++      horizontal
++      showsHorizontalScrollIndicator={false}
++      contentContainerStyle={contentContainerStyle}
++      decelerationRate="fast"
++      snapToInterval={snapToInterval}
++      {...props}
++    >
++      {children}
++    </ScrollView>
++  );
+ };
+ 
+ const getTypeBadgeColor = (type: string) => {
+   switch (type) {
+     case "Studio":
+@@ -242,10 +152,11 @@ const AutoCardImage = ({
+   );
+ };
+ 
+ export default function HomeScreen() {
+   const { colors, isDark } = useTheme();
++  const { width } = useWindowDimensions();
+   const { userRole, userId, isGuest } = useAuth();
+   const insets = useSafeAreaInsets();
+   const params = useLocalSearchParams<{ reopenListingId?: string }>();
+   const [loading, setLoading] = useState(true);
+   const [refreshing, setRefreshing] = useState(false);
+@@ -257,16 +168,13 @@ export default function HomeScreen() {
+   const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
+   const [userName, setUserName] = useState("Guest");
+   const [timeGreeting, setTimeGreeting] = useState("Hey");
+ 
+   // AI Recommendation Mode
+-  const aiModeEnabled = true;
+-  const showForYouAiCard = false;
++  const [aiModeEnabled, setAiModeEnabled] = useState(true);
+   const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
+   const [randomRecommendations, setRandomRecommendations] = useState<any[]>([]);
+-  const [aiFeedProvider, setAiFeedProvider] = useState("On-Device CPU Ranker");
+-  const [aiFeedMessage, setAiFeedMessage] = useState("");
+ 
+   // ... refs ...
+   const bottomSheetRef =
+     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
+   const searchSheetRef =
+@@ -391,27 +299,27 @@ export default function HomeScreen() {
+     presentModalWithRetry(recentlyViewedSheetRef as any);
+   }, [presentModalWithRetry]);
+ 
+   // Effect to update featured/discover when AI recommendations become available
+   useEffect(() => {
+-    if (aiRecommendations.length > 0) {
+-      debugLog("Switching to AI recommendations");
++    if (aiModeEnabled && aiRecommendations.length > 0) {
++      debugLog("???? Switching to AI recommendations");
+       setFeatured(aiRecommendations.slice(0, 10));
+       setDiscover(aiRecommendations.slice(10, 20));
+-    } else if (randomRecommendations.length > 0) {
+-      debugLog("Switching to random recommendations");
++    } else if (!aiModeEnabled && randomRecommendations.length > 0) {
++      debugLog("???? Switching to random recommendations");
+       setFeatured(randomRecommendations.slice(0, 10));
+       setDiscover(randomRecommendations.slice(10, 20));
+     }
+-  }, [aiRecommendations, randomRecommendations]);
++  }, [aiModeEnabled, aiRecommendations, randomRecommendations]);
+ 
+   useFocusEffect(
+     useCallback(() => {
+-      debugLog("useFocusEffect triggered, userRole:", userRole);
++      debugLog("??????? useFocusEffect triggered, userRole:", userRole);
+       // Fetch data silently on focus if data already exists
+       const isFirstLoad = featured.length === 0 && discover.length === 0;
+-      debugLog("isFirstLoad:", isFirstLoad);
++      debugLog("???? isFirstLoad:", isFirstLoad);
+       fetchHomeData(isFirstLoad);
+       fetchUserProfile();
+       fetchRecentlyViewed();
+       fetchUpcomingEvents(); // Fetch upcoming events for musicians
+       setTimeBasedGreeting();
+@@ -502,25 +410,14 @@ export default function HomeScreen() {
+     else setTimeGreeting("Good evening");
+   };
+ 
+   const [hasGroups, setHasGroups] = useState(false);
+ 
+-  const topItems = useMemo(() => {
+-    const combined = [...featured, ...discover];
+-    const dedupedCombined = combined.filter(
+-      (item, index, self) => index === self.findIndex((t) => t.id === item.id),
+-    );
+-
+-    if (dedupedCombined.length > 0) {
+-      return dedupedCombined.slice(0, 12);
+-    }
+-
+-    const dedupedRandom = randomRecommendations.filter(
+-      (item, index, self) => index === self.findIndex((t) => t.id === item.id),
+-    );
+-    return dedupedRandom.slice(0, 12);
+-  }, [featured, discover, randomRecommendations]);
++  const topItems = useMemo(
++    () => [...featured, ...discover].slice(0, 12),
++    [featured, discover],
++  );
+ 
+   const uniqueSmartFeedItems = useMemo(() => {
+     const allItems = [...featured, ...discover];
+     return allItems.filter(
+       (item, index, self) => index === self.findIndex((t) => t.id === item.id),
+@@ -574,22 +471,22 @@ export default function HomeScreen() {
+       debugLog("Error fetching user profile:", e);
+     }
+   };
+ 
+   const fetchHomeData = async (showLoading = true) => {
+-    debugLog("fetchHomeData called, showLoading:", showLoading);
++    debugLog("???? fetchHomeData called, showLoading:", showLoading);
+     if (showLoading) setLoading(true);
+     try {
+       // Fetch based on Role
+       // If Owner, ONLY fetch groups (musicians)
+       let groups: any[] = [];
+       let studios: any[] = [];
+       let gigs: any[] = [];
+       let soloArtists: any[] = [];
+ 
+       const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
+-      debugLog("User role:", userRole, "isOwner:", isOwner);
++      debugLog("???? User role:", userRole, "isOwner:", isOwner);
+ 
+       const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
+         const eventDate = gig?.event_date ? new Date(gig.event_date) : null;
+         const now = new Date();
+         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+@@ -617,29 +514,29 @@ export default function HomeScreen() {
+       const { data: gData, error: gError } = await supabase
+         .from("groups_with_stats")
+         .select("*")
+         .order("created_at", { ascending: false })
+         .limit(20);
+-      if (gError) debugLog("Error fetching groups:", gError);
++      if (gError) debugLog("??? Error fetching groups:", gError);
+       groups = gData || [];
+-      debugLog("Groups fetched:", groups.length);
++      debugLog("???? Groups fetched:", groups.length);
+ 
+       // Fetch Solo Artists (Musicians who haven't created a group, or just all musicians)
+       // We assume 'musician' role in profiles
+       const { data: pData, error: pError } = await supabase
+         .from("profiles")
+         .select(
+           "id, full_name, avatar_url, address, created_at, role, skills, genres, show_gig_statuses",
+         )
+         .eq("role", "musician")
+         .limit(20);
+-      if (pError) debugLog("Error fetching profiles:", pError);
++      if (pError) debugLog("??? Error fetching profiles:", pError);
+ 
+       // Filter out profiles that might be owners of the groups already fetched?
+       // For now, just show them as Solo Artists.
+       soloArtists = pData || [];
+-      debugLog("Solo artists fetched:", soloArtists.length);
++      debugLog("???? Solo artists fetched:", soloArtists.length);
+ 
+       const groupOwnerPreferenceMap = new Map<string, boolean>();
+       const groupOpenApplicationsMap = new Map<string, boolean>();
+       const groupGigCountsMap = new Map<string, { active: number; upcoming: number; done: number }>();
+       const soloGigCountsMap = new Map<string, { active: number; upcoming: number; done: number }>();
+@@ -668,11 +565,11 @@ export default function HomeScreen() {
+           .from("groups")
+           .select("id, open_group_applications")
+           .in("id", groupIds);
+ 
+         (groupVisibilityRows || []).forEach((row: any) => {
+-          groupOpenApplicationsMap.set(row.id, row.open_group_applications === true);
++          groupOpenApplicationsMap.set(row.id, row.open_group_applications !== false);
+         });
+       }
+ 
+       if (groupIds.length > 0) {
+         const { data: groupApplications } = await supabase
+@@ -731,11 +628,11 @@ export default function HomeScreen() {
+           .select("*")
+           .order("created_at", { ascending: false })
+           .limit(20);
+         if (sError) debugLog("Error fetching studios:", sError);
+         studios = sData || [];
+-        debugLog("Studios fetched:", studios.length);
++        debugLog("???? Studios fetched:", studios.length);
+ 
+         // Fetch date overrides to calculate has_special_dates for each studio
+         if (studios.length > 0) {
+           const studioIds = studios.map((s: any) => s.id);
+           const today = new Date().toISOString().split("T")[0];
+@@ -753,42 +650,28 @@ export default function HomeScreen() {
+             // Augment studios with has_special_dates flag
+             studios = studios.map((studio: any) => ({
+               ...studio,
+               has_special_dates: studioDateOverridesMap[studio.id] || false,
+             }));
+-            debugLog("Studios augmented with date overrides");
+-          }
+-
+-          // Fetch active promotions for studios
+-          const todayStr = new Date().toISOString().split("T")[0];
+-          const { data: studioPromos } = await supabase
+-            .from("studio_promotions")
+-            .select("studio_id")
+-            .in("studio_id", studioIds)
+-            .eq("is_active", true)
+-            .or(`is_permanent.eq.true,and(start_date.lte.${todayStr},end_date.gte.${todayStr})`);
+-
+-          if (studioPromos) {
+-            const promoStudioIds = new Set(studioPromos.map((p: any) => p.studio_id));
+-            studios = studios.map((studio: any) => ({
+-              ...studio,
+-              has_active_promotion: promoStudioIds.has(studio.id),
+-            }));
+-            debugLog("Studios augmented with promotion flags");
++            debugLog("???? Studios augmented with date overrides");
+           }
+         }
+         const { data: gigData, error: gigError } = await supabase
+           .from("gigs_with_stats")
+           .select("*")
+           .eq("status", "open") // Only show open gigs to musicians
+           .order("created_at", { ascending: false })
+           .limit(20);
+         if (gigError) debugLog("Error fetching gigs:", gigError);
+         gigs = gigData || [];
+-        debugLog(`Fetched ${gigs.length} open gigs for role: ${userRole}`);
++        debugLog(
++          `???? Fetched ${gigs.length} open gigs for role: ${userRole}`,
++        );
+       } else {
+-        debugLog(`Skipping gigs fetch - user is owner (role: ${userRole})`);
++        debugLog(
++          `???? Skipping gigs fetch - user is owner (role: ${userRole})`,
++        );
+       }
+ 
+       // Normalize
+       const normalize = (items: any[], type: string) =>
+         items.map((item) => ({
+@@ -852,16 +735,15 @@ export default function HomeScreen() {
+               : type === "Artist"
+                 ? item.show_gig_statuses !== false
+                 : true,
+           open_group_applications:
+             type === "Group"
+-              ? groupOpenApplicationsMap.get(item.id) ?? item.open_group_applications === true
++              ? groupOpenApplicationsMap.get(item.id) ?? item.open_group_applications !== false
+               : undefined,
+           // Seasonal pricing fields for studios
+           has_seasonal_pricing: item.has_seasonal_pricing || false,
+           has_special_dates: item.has_special_dates || false,
+-          has_active_promotion: item.has_active_promotion || false,
+           lead_time_hours: item.lead_time_hours || 24,
+           weekend_multiplier: item.weekend_multiplier || 1.0,
+           peak_season_multiplier: item.peak_season_multiplier || 1.0,
+           off_peak_multiplier: item.off_peak_multiplier || 1.0,
+         }));
+@@ -873,83 +755,108 @@ export default function HomeScreen() {
+ 
+       const allItemsList = isGuest
+         ? [...allGroups, ...allSoloArtists]
+         : [...allGroups, ...allSoloArtists, ...allStudios, ...allGigs];
+       debugLog(
+-        `Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Solo: ${allSoloArtists.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`,
++        `???? Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Solo: ${allSoloArtists.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`,
+       );
+ 
+       // === NEW ARRIVALS - Simple: Just sort by created_at and take top 10 ===
+       const sortedByDate = [...allItemsList].sort((a, b) => {
+         const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+         const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+         return dateB - dateA; // Newest first
+       });
+ 
+-      debugLog("Setting New Arrivals:", sortedByDate.length, "items available");
++      debugLog(
++        "???? Setting New Arrivals:",
++        sortedByDate.length,
++        "items available",
++      );
+       setNewArrivals(sortedByDate.slice(0, 10));
+ 
+       // === RANDOM RECOMMENDATIONS - Simple random shuffle ===
+       const shuffled = [...allItemsList].sort(() => Math.random() - 0.5);
+       setRandomRecommendations(shuffled.slice(0, 20));
+ 
+-      // === AI RECOMMENDATIONS - On-device CPU ranking (free, no paid AI API) ===
++      // === AI RECOMMENDATIONS - Fetch from RPC if user is logged in ===
+       if (userId) {
+         try {
+-          debugLog("Building on-device For You recommendations for user:", userId);
+-          const [skillsResult, genresResult] = await Promise.all([
+-            supabase.from("profile_skills").select("skill").eq("profile_id", userId),
+-            supabase.from("profile_genres").select("genre").eq("profile_id", userId),
+-          ]);
+-          const profileSignals = {
+-            skills: (skillsResult.data || [])
+-              .map((row: any) => row.skill)
+-              .filter((value: any) => typeof value === "string" && value.trim().length > 0),
+-            genres: (genresResult.data || [])
+-              .map((row: any) => row.genre)
+-              .filter((value: any) => typeof value === "string" && value.trim().length > 0),
+-          };
+-
+-          const localRankedItems = rankForYouOnDevice(
+-            allItemsList,
+-            profileSignals,
+-            20,
++          debugLog("???? Fetching AI recommendations for user:", userId);
++          const { data: aiData, error: aiError } = await supabase.rpc(
++            "get_ai_recommendations",
++            {
++              p_user_id: userId,
++              p_limit: 20,
++            },
+           );
+ 
+-          setAiRecommendations(localRankedItems);
+-          setAiFeedProvider("On-Device CPU Ranker");
+-
+-          const hasProfileSignals =
+-            profileSignals.skills.length > 0 || profileSignals.genres.length > 0;
+-
+-          if (localRankedItems.length === 0) {
+-            setAiFeedMessage("No listings available for ranking yet.");
+-          } else if (hasProfileSignals) {
+-            setAiFeedMessage("Personalized locally on your phone CPU. No paid AI API used.");
++          if (aiError) {
++            debugLog("?????? AI recommendations error:", aiError);
++            setAiRecommendations([]);
++          } else if (aiData && aiData.length > 0) {
++            // Normalize AI recommendations
++            const normalizedAi = aiData.map((item: any) => ({
++              id: item.id,
++              type: item.type,
++              name: item.name,
++              image: item.images?.[0] || null,
++              images: item.images || [],
++              rating: item.rating || 0,
++              review_count: item.review_count || 0,
++              rate:
++                item.rate?.toString() ||
++                item.hourly_rate?.toString() ||
++                item.budget?.toString(),
++              hourly_rate: item.hourly_rate?.toString(),
++              budget: item.budget?.toString(),
++              location: item.location || "",
++              genre: item.genre || "",
++              embedding: item.embedding,
++              created_at: item.created_at,
++              updated_at: item.updated_at,
++              owner_id: item.owner_id,
++              organizer_id: item.organizer_id,
++              similarity: item.similarity, // AI similarity score
++            }));
++            debugLog(
++              "???? AI recommendations loaded:",
++              normalizedAi.length,
++              "items",
++            );
++            debugLog(
++              "???? Top 3 AI matches:",
++              normalizedAi.slice(0, 3).map((i: any) => ({
++                name: i.name,
++                similarity: (i.similarity * 100).toFixed(1) + "%",
++              })),
++            );
++            setAiRecommendations(normalizedAi);
+           } else {
+-            setAiFeedMessage("Ranked locally on your phone CPU using popularity and freshness.");
++            debugLog(
++              "???? No AI recommendations - user has no interest vector yet",
++            );
++            setAiRecommendations([]);
+           }
+         } catch (aiErr) {
+-          debugLog("On-device ranking error, using general fallback:", aiErr);
++          debugLog("???? AI fetch error:", aiErr);
+           setAiRecommendations([]);
+-          setAiFeedProvider("On-Device CPU Ranker");
+-          setAiFeedMessage("Local personalization is temporarily unavailable. Showing general picks.");
+         }
+       } else {
+-        debugLog("No user logged in - skipping AI recommendations");
++        debugLog("???? No user logged in - skipping AI recommendations");
+         setAiRecommendations([]);
+-        setAiFeedProvider("On-Device CPU Ranker");
+-        setAiFeedMessage("");
+       }
+ 
+-      // Seed featured/discover with fallback random results while AI feed initializes.
++      // Set featured/discover - AI mode uses AI recommendations if available
++      // This will be toggled by the user with the switch
++      // For initial load, use AI if enabled and available
+       setFeatured(shuffled.slice(0, 10));
+       setDiscover(shuffled.slice(10, 20));
+ 
+-      debugLog("Home data loaded successfully");
++      debugLog("??? Home data loaded successfully");
+     } catch (e) {
+-      debugLog("Error fetching home feed:", e);
++      debugLog("??? Error fetching home feed:", e);
+     } finally {
+       setLoading(false);
+     }
+   };
+ 
+@@ -1019,16 +926,16 @@ export default function HomeScreen() {
+     });
+   };
+ 
+   const saveToRecentlyViewed = async (item: any) => {
+     try {
+-      debugLog("saveToRecentlyViewed called with:", item.name, item.type);
++      debugLog("???? saveToRecentlyViewed called with:", item.name, item.type);
+       const AsyncStorage =
+         require("@react-native-async-storage/async-storage").default;
+       const existingJson = await AsyncStorage.getItem("recently_viewed_items");
+       let items = existingJson ? JSON.parse(existingJson) : [];
+-      debugLog("Existing items count:", items.length);
++      debugLog("???? Existing items count:", items.length);
+ 
+       // Remove if already exists to avoid duplicates
+       items = items.filter((i: any) => i.id !== item.id);
+ 
+       // Add to front
+@@ -1045,15 +952,15 @@ export default function HomeScreen() {
+ 
+       await AsyncStorage.setItem(
+         "recently_viewed_items",
+         JSON.stringify(items),
+       );
+-      debugLog("Saved. New count:", items.length);
++      debugLog("???? Saved! New count:", items.length);
+ 
+       // Update state
+       setRecentlyViewed(items);
+-      debugLog("State updated with", items.length, "items");
++      debugLog("???? State updated with", items.length, "items");
+     } catch (e) {
+       debugLog("Error saving to recently viewed:", e);
+     }
+   };
+ 
+@@ -1061,24 +968,24 @@ export default function HomeScreen() {
+     try {
+       const AsyncStorage =
+         require("@react-native-async-storage/async-storage").default;
+       const existingJson = await AsyncStorage.getItem("recently_viewed_items");
+       debugLog(
+-        "Recently viewed from storage:",
++        "???? Recently viewed from storage:",
+         existingJson ? "Found" : "Empty",
+       );
+       if (existingJson) {
+         const items = JSON.parse(existingJson);
+         const guestFilteredItems = isGuest
+           ? items.filter(
+             (item: any) => item.type === "Group" || item.type === "Artist",
+           )
+           : items;
+-        debugLog("Recently viewed items count:", guestFilteredItems.length);
++        debugLog("???? Recently viewed items count:", guestFilteredItems.length);
+         setRecentlyViewed(guestFilteredItems.slice(0, 5)); // Show first 5
+       } else {
+-        debugLog("No recently viewed items in storage");
++        debugLog("???? No recently viewed items in storage");
+         setRecentlyViewed([]);
+       }
+     } catch (e) {
+       debugLog("Error fetching recently viewed:", e);
+     }
+@@ -1411,11 +1318,11 @@ export default function HomeScreen() {
+           (a.sortTimestamp || new Date(a.date).getTime()) -
+           (b.sortTimestamp || new Date(b.date).getTime()),
+       );
+ 
+       setUpcomingEvents(events.slice(0, 5)); // Show max 5 upcoming events
+-      debugLog(`Fetched ${events.length} upcoming events for musician`);
++      debugLog(`???? Fetched ${events.length} upcoming events for musician`);
+     } catch (e) {
+       debugLog("Error fetching upcoming events:", e);
+     }
+   };
+ 
+@@ -1436,11 +1343,11 @@ export default function HomeScreen() {
+     const searchSubPlaceholder = isOwner
+       ? "Genre ??? Availability"
+       : "Location ??? Rate";
+ 
+     return (
+-      <View style={styles.heroContainer}>
++      <View style={[styles.heroContainer, Platform.OS === 'web' && { height: 480, borderRadius: 24, overflow: 'hidden' }]}>
+         <CachedImage
+           uri={heroImage}
+           style={styles.heroImage}
+           width={1080}
+           height={640}
+@@ -1464,11 +1371,11 @@ export default function HomeScreen() {
+           <View>
+             <Text style={styles.heroGreeting}>Welcome, {userName}!</Text>
+           </View>
+ 
+           {/* Glassmorphism Search Pill */}
+-          <BlurView intensity={60} tint="light" style={styles.searchPill}>
++          <BlurView intensity={60} tint="light" style={[styles.searchPill, Platform.OS === 'web' && width >= 768 && { maxWidth: 640, alignSelf: 'flex-start' }]}>
+             <TouchableOpacity activeOpacity={1}
+               style={styles.searchTouch}
+               onPress={openSearchSheet}
+             >
+               <Ionicons
+@@ -1490,84 +1397,78 @@ export default function HomeScreen() {
+         </View>
+       </View>
+     );
+   };
+ 
+-  // 2. Top Picks Section - Same card design as New Arrivals
++  // 1.5 Web SaaS Split Hero
++  const renderWebHero = () => {
++    return (
++      <View style={{ flexDirection: 'row', backgroundColor: '#FAFAFA', borderRadius: 32, padding: 48, marginTop: 16, minHeight: 480, overflow: 'hidden', alignItems: 'center' }}>
++        {/* Left Content */}
++        <View style={{ flex: 1, paddingRight: 40, zIndex: 10 }}>
++          <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 52, color: colors.text, lineHeight: 60 }}>
++            Best SaaS tools to{'\n'}<Text style={{ color: colors.primary }}>manage your music</Text>
++          </Text>
++          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 18, color: '#6B7280', marginTop: 24, marginBottom: 40, maxWidth: 480 }}>
++            Leave traditional booking methods and start switching to MusikaLokal. One platform for all your career needs.
++          </Text>
++          
++          <TouchableOpacity activeOpacity={0.8} onPress={openSearchSheet} style={{ backgroundColor: colors.primary, paddingVertical: 18, paddingHorizontal: 36, borderRadius: 100, alignSelf: 'flex-start', shadowColor: colors.primary, shadowOffset: {width: 0, height: 10}, shadowOpacity: 0.3, shadowRadius: 20 }}>
++            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#FFF' }}>Start your next gig now</Text>
++          </TouchableOpacity>
++        </View>
++
++        {/* Right Floating Widgets (Mocking the SaaS UI) */}
++        <View style={{ flex: 1, position: 'relative', height: '100%', minHeight: 400 }}>
++           {/* Mock Data Card 1 */}
++           <View style={{ position: 'absolute', top: 0, right: 30, width: 220, backgroundColor: isDark ? '#374151' : '#FFF', borderRadius: 24, padding: 24, shadowColor: '#9CA3AF', shadowOffset: {width: 0, height: 20}, shadowOpacity: 0.15, shadowRadius: 40, elevation: 10 }}>
++              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Monthly Bookings</Text>
++              <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 40, color: colors.text, marginTop: 8 }}>124 <Text style={{ fontSize: 16, color: colors.primary, fontFamily: 'Poppins_600SemiBold' }}>+12%</Text></Text>
++              <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 48, marginTop: 24, gap: 6 }}>
++                 {[40, 60, 30, 80, 50].map((h, i) => <View key={i} style={{ flex: 1, height: `${h}%`, backgroundColor: i === 3 ? colors.primary : isDark ? '#4B5563' : '#F3F4F6', borderRadius: 6 }} />)}
++              </View>
++           </View>
++
++           {/* Mock Data Card 2 */}
++           <View style={{ position: 'absolute', bottom: 20, left: 10, width: 280, backgroundColor: isDark ? '#374151' : '#FFF', borderRadius: 24, padding: 24, shadowColor: '#9CA3AF', shadowOffset: {width: 0, height: 25}, shadowOpacity: 0.15, shadowRadius: 40, elevation: 10 }}>
++              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, textAlign: 'center' }}>Studio Traffic</Text>
++              <View style={{ width: 100, height: 100, borderRadius: 50, borderWidth: 20, borderColor: isDark ? '#4B5563' : '#111827', borderLeftColor: isDark ? '#1F2937' : '#F3F4F6', borderBottomColor: colors.primary, alignSelf: 'center', marginTop: 24 }} />
++              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', textAlign: 'center', marginTop: 24 }}>Keep your schedule updated to increase the number of interactions.</Text>
++           </View>
++        </View>
++      </View>
++    );
++  };
+   const renderHighlightsSection = () => {
+     if (topItems.length === 0) return null;
+ 
+-    // Helper to get price label - same logic as New Arrivals
+-    const getTopPickPrice = (item: any) => {
+-      if (item.type === "Group") return null;
+-
+-      if (item.type === "Studio") {
+-        const rehearsalRate =
+-          item.rehearsal_rate && item.rehearsal_rate !== "0"
+-            ? parseInt(item.rehearsal_rate)
+-            : 0;
+-        const recordingRate =
+-          item.recording_rate && item.recording_rate !== "0"
+-            ? parseInt(item.recording_rate)
+-            : 0;
+-        const isRecordingOnlyStudio = item.studio_type === "Recording";
+-        const isRehearsalOnlyStudio = item.studio_type === "Rehearsal";
+-        const hasRehearsalRate = rehearsalRate > 0 && !isRecordingOnlyStudio;
+-        const hasRecordingRate = recordingRate > 0 && !isRehearsalOnlyStudio;
+-
+-        if (hasRehearsalRate && hasRecordingRate) {
+-          return `???${rehearsalRate.toLocaleString()}/hr | ???${recordingRate.toLocaleString()}/song`;
+-        }
+-        if (hasRecordingRate) {
+-          return `???${recordingRate.toLocaleString()}/song`;
+-        }
+-        if (hasRehearsalRate) {
+-          return `???${rehearsalRate.toLocaleString()}/hr`;
+-        }
+-        if (item.hourly_rate && item.hourly_rate !== "0") {
+-          return `???${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+-        }
+-        return null;
+-      }
+-
+-      if (item.hourly_rate && item.hourly_rate !== "0") {
+-        return `???${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+-      }
+-      if (item.budget && item.budget !== "0") {
+-        return `???${parseInt(item.budget).toLocaleString()}`;
+-      }
+-      if (item.rate && item.rate !== "0") {
+-        return `???${parseInt(item.rate).toLocaleString()}`;
+-      }
+-      return null;
+-    };
+-
+     return (
+-      <View style={[styles.sectionContainer, { marginTop: 20 }]}>
++      <View style={{ marginTop: 24, paddingHorizontal: 24 }}>
+         {/* Header */}
+         <View
+           style={{
+             flexDirection: "row",
+             justifyContent: "space-between",
+             alignItems: "flex-end",
+-            paddingHorizontal: 24,
+             marginBottom: 16,
+           }}
+         >
+           <View>
+             <Text
+               style={[
+                 styles.sectionTitle,
+                 { color: colors.text, marginBottom: 0 },
+               ]}
+             >
+-              Top Picks
++              Top Picks {aiModeEnabled ? "????" : "????"}
+             </Text>
+             <Text
+               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+             >
+-              AI-powered recommendations
++              {aiModeEnabled
++                ? "AI-powered recommendations"
++                : "Random selection"}
+             </Text>
+           </View>
+           <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
+             <Text
+               style={{
+@@ -1579,162 +1480,123 @@ export default function HomeScreen() {
+               See all
+             </Text>
+           </TouchableOpacity>
+         </View>
+ 
+-        <ScrollView
+-          horizontal
+-          showsHorizontalScrollIndicator={false}
+-          contentContainerStyle={{
+-            paddingLeft: 24,
+-            paddingRight: 24,
+-            paddingVertical: 8,
+-          }}
+-          decelerationRate="fast"
+-          snapToInterval={280 + 16}
+-        >
+-          {topItems.map((item) => {
+-            const priceLabel = getTopPickPrice(item);
+-            return (
+-              <TouchableOpacity
+-                key={item.id}
+-                activeOpacity={1}
+-                onPress={() => handleCardPress(item)}
+-                style={[
+-                  styles.newArrivalCard,
+-                  { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+-                ]}
+-              >
+-                {/* Image Section */}
+-                <View style={styles.newArrivalImageContainer}>
+-                  {((item.images && item.images.length > 0) || item.image) ? (
+-                    <AutoCardImage
+-                      image={item.image}
+-                      images={item.images}
+-                      style={styles.newArrivalImage}
+-                      width={560}
+-                      height={280}
+-                      cacheVersion={item.updated_at || item.created_at || item.id}
+-                    />
+-                  ) : (
++        {/* Modern Masonry / Bento Grid Layout */}
++        {topItems.length >= 3 ? (
++          <View style={[styles.bentoGrid, Platform.OS === 'web' && { height: 480 }]}>
++            {/* Main Highlight (Large) */}
++            <TouchableOpacity
++              activeOpacity={1}
++              onPress={() => handleCardPress(topItems[0])}
++              style={styles.bentoTouchableLarge}
++            >
++              <View style={styles.bentoLarge}>
++                <AutoCardImage
++                  image={topItems[0].image}
++                  images={topItems[0].images}
++                  style={styles.bentoImage}
++                  width={720}
++                  height={560}
++                  cacheVersion={topItems[0].updated_at || topItems[0].created_at || topItems[0].id}
++                />
++                <LinearGradient
++                  colors={["transparent", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.8)"]}
++                  style={styles.bentoOverlay}
++                >
++                  <View style={styles.bentoContent}>
+                     <View
+                       style={[
+-                        styles.newArrivalImagePlaceholder,
+-                        { backgroundColor: colors.primary + "20" },
++                        styles.glassBadge,
++                        { alignSelf: "flex-start", marginBottom: 8 },
+                       ]}
+                     >
+-                      <Ionicons
+-                        name={
+-                          item.type === "Gig"
+-                            ? "musical-notes"
+-                            : item.type === "Studio"
+-                              ? "business"
+-                              : item.type === "Artist"
+-                                ? "person"
+-                                : "people"
+-                        }
+-                        size={32}
+-                        color={colors.primary}
+-                      />
++                      <Text style={styles.glassBadgeText}>
++                        {aiModeEnabled && topItems[0].similarity
++                          ? `???? ${(topItems[0].similarity * 100).toFixed(0)}% Match`
++                          : "???? Highly Rated"}
++                      </Text>
+                     </View>
+-                  )}
+-                  {/* Type Badge */}
+-                  <View
+-                    style={[
+-                      styles.newArrivalTypeBadge,
+-                      { backgroundColor: getTypeBadgeColor(item.type) },
+-                    ]}
+-                  >
+-                    <Text style={styles.newArrivalTypeBadgeText}>
+-                      {item.type}
++                    <Text style={styles.bentoTitleLarge} numberOfLines={2}>
++                      {topItems[0].name}
+                     </Text>
+-                  </View>
+-                  {/* AI Match Badge (top right) */}
+-                  {item.similarity && item.similarity > 0.1 && (
+                     <View
+-                      style={[
+-                        styles.newArrivalNewBadge,
+-                        { backgroundColor: "rgba(16,185,129,0.95)" },
+-                      ]}
++                      style={{
++                        flexDirection: "row",
++                        alignItems: "center",
++                        marginTop: 4,
++                      }}
+                     >
+-                      <Ionicons name="sparkles" size={10} color="#FFF" />
+-                      <Text
+-                        style={[
+-                          styles.newArrivalNewBadgeText,
+-                          { color: "#FFF" },
+-                        ]}
+-                      >
+-                        {Math.round(item.similarity * 100)}%
++                      <Ionicons
++                        name="location"
++                        size={14}
++                        color="rgba(255,255,255,0.8)"
++                      />
++                      <Text style={styles.bentoSubtitle} numberOfLines={1}>
++                        {topItems[0].location}
+                       </Text>
+                     </View>
+-                  )}
+-                </View>
+-
+-                {/* Details Section */}
+-                <View style={styles.newArrivalDetails}>
+-                  <Text
+-                    style={[styles.newArrivalName, { color: colors.text }]}
+-                    numberOfLines={1}
+-                  >
+-                    {item.name}
+-                  </Text>
+-
+-                  {/* Location/Genre */}
+-                  <View style={styles.newArrivalRow}>
+-                    <Ionicons
+-                      name="location-outline"
+-                      size={14}
+-                      color={colors.textSecondary}
+-                    />
+-                    <Text
+-                      style={[
+-                        styles.newArrivalText,
+-                        { color: colors.textSecondary },
+-                      ]}
+-                      numberOfLines={1}
+-                    >
+-                      {item.location || item.genre || "Location TBA"}
+-                    </Text>
+-                  </View>
+-
+-                  {/* Rating */}
+-                  <View style={styles.newArrivalRow}>
+-                    <Ionicons name="star" size={14} color="#FCD34D" />
+-                    <Text
+-                      style={[
+-                        styles.newArrivalText,
+-                        { color: colors.textSecondary },
+-                      ]}
+-                    >
+-                      {item.rating > 0
+-                        ? `${item.rating.toFixed(1)} (${item.review_count || 0})`
+-                        : "No ratings yet"}
+-                    </Text>
+                   </View>
++                </LinearGradient>
++              </View>
++            </TouchableOpacity>
+ 
+-                  {/* Price */}
+-                  {priceLabel && (
+-                    <Text
+-                      style={[styles.newArrivalPrice, { color: colors.primary }]}
++            {/* Side Column (2 Stacked) */}
++            <View style={styles.bentoColumn}>
++              {topItems.slice(1, 3).map((item, index) => (
++                <TouchableOpacity
++                  key={item.id}
++                  activeOpacity={1}
++                  onPress={() => handleCardPress(item)}
++                  style={styles.bentoTouchableSmall}
++                >
++                  <View style={styles.bentoSmall}>
++                    <AutoCardImage
++                      image={item.image}
++                      images={item.images}
++                      style={styles.bentoImage}
++                      width={480}
++                      height={280}
++                      cacheVersion={item.updated_at || item.created_at || item.id}
++                    />
++                    <LinearGradient
++                      colors={["transparent", "rgba(0,0,0,0.7)"]}
++                      style={styles.bentoOverlay}
+                     >
+-                      {priceLabel}
+-                    </Text>
+-                  )}
+-                  {/* Promo Badge */}
+-                  {item.type === "Studio" && item.has_active_promotion && (
+-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+-                      <Ionicons name="pricetag" size={10} color="#10B981" />
+-                      <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+-                        Promo available
++                      <Text style={styles.bentoTitleSmall} numberOfLines={1}>
++                        {item.name}
+                       </Text>
+-                    </View>
+-                  )}
+-                </View>
+-              </TouchableOpacity>
+-            );
+-          })}
+-        </ScrollView>
++                      <View
++                        style={{
++                          flexDirection: "row",
++                          alignItems: "center",
++                          gap: 4,
++                        }}
++                      >
++                        <Ionicons name="star" size={10} color="#FCD34D" />
++                        <Text style={styles.bentoRating}>
++                          {item.rating > 0 ? item.rating.toFixed(1) : "New"}
++                        </Text>
++                      </View>
++                    </LinearGradient>
++                  </View>
++                </TouchableOpacity>
++              ))}
++            </View>
++          </View>
++        ) : (
++          <ResponsiveList
++            contentContainerStyle={{ paddingRight: 16 }}
++          >
++            {topItems.map((item) => (
++              <View key={item.id} style={{ marginRight: 16, marginBottom: 16 }}>
++                {renderUnifiedCard(item)}
++              </View>
++            ))}
++          </ResponsiveList>
++        )}
+       </View>
+     );
+   };
+ 
+   // Handle invite action - opens the details sheet for booking/connecting
+@@ -1760,10 +1622,27 @@ export default function HomeScreen() {
+     openListingDetails(item.id);
+     // The ListingDetailsSheet will show the "Connect" tab for Groups
+     // allowing venue/studio owners to send booking requests
+   };
+ 
++  // Unified Card Renderer
++  const renderUnifiedCard = (item: any) => {
++    return (
++      <ListingCard
++        key={item.id}
++        item={item}
++        onPress={handleCardPress}
++        onInvite={handleInvite}
++        onChat={handleChat}
++        variant="horizontal"
++        hasGroups={hasGroups}
++        showGigSummary={false}
++        style={{ width: 280 }}
++      />
++    );
++  };
++
+   // 3. New Arrivals Section - Custom Cards
+   const renderNewArrivals = () => {
+     // Don't render if no items
+     if (newArrivals.length === 0) {
+       return null;
+@@ -1856,19 +1735,16 @@ export default function HomeScreen() {
+               See all
+             </Text>
+           </TouchableOpacity>
+         </View>
+ 
+-        <ScrollView
+-          horizontal
+-          showsHorizontalScrollIndicator={false}
++        <ResponsiveList
+           contentContainerStyle={{
+             paddingLeft: 24,
+             paddingRight: 24,
+             paddingVertical: 8,
+           }}
+-          decelerationRate="fast"
+           snapToInterval={280 + 16}
+         >
+           {newArrivals.map((item) => {
+             const priceLabel = getPriceLabel(item);
+             return (
+@@ -1876,10 +1752,11 @@ export default function HomeScreen() {
+                 key={item.id}
+                 activeOpacity={1}
+                 onPress={() => handleCardPress(item)}
+                 style={[
+                   styles.newArrivalCard,
++                  Platform.OS === 'web' && { flex: 1, minWidth: 280, maxWidth: 320, shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: {height: 4, width: 0} },
+                   { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                 ]}
+               >
+               {/* Image Section */}
+               <View style={styles.newArrivalImageContainer}>
+@@ -1980,24 +1857,15 @@ export default function HomeScreen() {
+                     style={[styles.newArrivalPrice, { color: colors.primary }]}
+                   >
+                     {priceLabel}
+                   </Text>
+                 )}
+-                {/* Promo Badge */}
+-                {item.type === "Studio" && item.has_active_promotion && (
+-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+-                    <Ionicons name="pricetag" size={10} color="#10B981" />
+-                    <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+-                      Promo available
+-                    </Text>
+-                  </View>
+-                )}
+               </View>
+               </TouchableOpacity>
+             );
+           })}
+-        </ScrollView>
++        </ResponsiveList>
+       </View>
+     );
+   };
+ 
+   // 3.5 Upcoming Events Section (for Musicians only)
+@@ -2042,19 +1910,16 @@ export default function HomeScreen() {
+               View all
+             </Text>
+           </TouchableOpacity>
+         </View>
+ 
+-        <ScrollView
+-          horizontal
+-          showsHorizontalScrollIndicator={false}
++        <ResponsiveList
+           contentContainerStyle={{
+             paddingLeft: 24,
+             paddingRight: 24,
+             paddingVertical: 8,
+           }}
+-          decelerationRate="fast"
+           snapToInterval={280 + 16}
+         >
+           {upcomingEvents.map((event, index) => (
+             <TouchableOpacity
+               key={`${event.type}-${event.id}`}
+@@ -2068,10 +1933,11 @@ export default function HomeScreen() {
+                   openListingDetails(event.studioId);
+                 }
+               }}
+               style={[
+                 styles.upcomingEventCard,
++                Platform.OS === 'web' && { flex: 1, minWidth: 280, maxWidth: 320 },
+                 { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+               ]}
+             >
+               {/* Event Image */}
+               <View style={styles.upcomingEventImageContainer}>
+@@ -2229,11 +2095,11 @@ export default function HomeScreen() {
+                   </View>
+                 </View>
+               </View>
+             </TouchableOpacity>
+           ))}
+-        </ScrollView>
++        </ResponsiveList>
+       </View>
+     );
+   };
+ 
+   // 4. For You - Smart Feed (Merged Featured + Discover with variety)
+@@ -2241,15 +2107,13 @@ export default function HomeScreen() {
+     const uniqueItems = uniqueSmartFeedItems;
+ 
+     if (uniqueItems.length === 0) {
+       return (
+         <View style={styles.sectionContainer}>
+-          <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+-              For You
+-            </Text>
+-          </View>
++          <Text style={[styles.sectionTitle, { color: Platform.OS === 'web' ? '#111827' : colors.text }]}>
++            For You
++          </Text>
+           <View
+             style={{
+               paddingHorizontal: 24,
+               paddingVertical: 40,
+               alignItems: "center",
+@@ -2277,11 +2141,11 @@ export default function HomeScreen() {
+       <View style={styles.sectionContainer}>
+         <View
+           style={{
+             flexDirection: "row",
+             justifyContent: "space-between",
+-            alignItems: "center",
++            alignItems: "flex-end",
+             paddingHorizontal: 24,
+             marginBottom: 16,
+           }}
+         >
+           <View>
+@@ -2289,16 +2153,18 @@ export default function HomeScreen() {
+               style={[
+                 styles.sectionTitle,
+                 { color: colors.text, marginBottom: 0 },
+               ]}
+             >
+-              For You
++              For You {aiModeEnabled ? "????" : "????"}
+             </Text>
+             <Text
+               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+             >
+-              TikTok-style feed tuned to your profile
++              {aiModeEnabled
++                ? "Personalized picks based on your interests"
++                : "Random suggestions for comparison"}
+             </Text>
+           </View>
+           <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
+             <Text
+               style={{
+@@ -2318,10 +2184,11 @@ export default function HomeScreen() {
+             <TouchableOpacity
+               activeOpacity={1}
+               onPress={() => handleCardPress(uniqueItems[0])}
+               style={[
+                 styles.featuredCard,
++                Platform.OS === 'web' && { height: 480 },
+                 {
+                   backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                   elevation: 8,
+                   shadowOpacity: 0.15,
+                 },
+@@ -2347,12 +2214,12 @@ export default function HomeScreen() {
+                   }}
+                 >
+                   <View style={styles.featuredBadge}>
+                     <Text style={styles.featuredBadgeText}>
+                       {aiModeEnabled && uniqueItems[0].similarity
+-                        ? `AI ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match`
+-                        : "Top Recommendation"}
++                        ? `???? ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match`
++                        : "??? Top Recommendation"}
+                     </Text>
+                   </View>
+                   <View
+                     style={[
+                       styles.glassBadge,
+@@ -2371,15 +2238,10 @@ export default function HomeScreen() {
+                     {uniqueItems[0].name}
+                   </Text>
+                   <Text style={styles.featuredLocation} numberOfLines={1}>
+                     {uniqueItems[0].location}
+                   </Text>
+-                  {uniqueItems[0].aiReason ? (
+-                    <Text style={styles.featuredReason} numberOfLines={2}>
+-                      {uniqueItems[0].aiReason}
+-                    </Text>
+-                  ) : null}
+                   <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                     {uniqueItems[0].hourly_rate && (
+                       <Text style={styles.featuredPrice}>
+                         ???{parseInt(uniqueItems[0].hourly_rate).toLocaleString()}
+                         /hr
+@@ -2390,41 +2252,34 @@ export default function HomeScreen() {
+                         <Text style={styles.tagText}>
+                           {uniqueItems[0].type}
+                         </Text>
+                       </View>
+                     )}
+-                    {uniqueItems[0].type === "Studio" && uniqueItems[0].has_active_promotion && (
+-                      <View style={[styles.tagBadge, { backgroundColor: "rgba(16,185,129,0.8)", borderColor: "rgba(16,185,129,0.9)" }]}>
+-                        <Text style={styles.tagText}>Promo</Text>
+-                      </View>
+-                    )}
+                   </View>
+                 </View>
+               </LinearGradient>
+             </TouchableOpacity>
+           </View>
+         )}
+ 
+         {/* Horizontal Scroll for Rest */}
+-        <ScrollView
+-          horizontal
+-          showsHorizontalScrollIndicator={false}
++        <ResponsiveList
+           contentContainerStyle={{
+             paddingLeft: 24,
+             paddingRight: 24,
+             paddingVertical: 16,
+           }} // Added paddingVertical for shadows
+-          decelerationRate="fast"
+           snapToInterval={280 + 16}
+         >
+           {uniqueItems.slice(1, 11).map((item, index) => (
+             <TouchableOpacity
+               key={item.id}
+               activeOpacity={1}
+               onPress={() => handleCardPress(item)}
+               style={[
+                 styles.forYouCard,
++                Platform.OS === 'web' && { flex: 1, minWidth: 280, maxWidth: 320 },
+                 { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+               ]}
+             >
+               {/* Image Section */}
+               <View style={styles.forYouImageContainer}>
+@@ -2513,29 +2368,10 @@ export default function HomeScreen() {
+                   >
+                     {item.location || item.genre || "Location TBA"}
+                   </Text>
+                 </View>
+ 
+-                {item.aiReason ? (
+-                  <View style={styles.forYouReasonRow}>
+-                    <Ionicons
+-                      name="sparkles-outline"
+-                      size={12}
+-                      color={colors.primary}
+-                    />
+-                    <Text
+-                      style={[
+-                        styles.forYouReasonText,
+-                        { color: colors.textSecondary },
+-                      ]}
+-                      numberOfLines={2}
+-                    >
+-                      {item.aiReason}
+-                    </Text>
+-                  </View>
+-                ) : null}
+-
+                 {/* Price - hide for Groups, handle Studio-specific pricing */}
+                 {item.type !== "Group" &&
+                   (() => {
+                     // Handle Studio pricing specifically
+                     if (item.type === "Studio") {
+@@ -2596,23 +2432,14 @@ export default function HomeScreen() {
+                         </Text>
+                       );
+                     }
+                     return null;
+                   })()}
+-                {/* Promo Badge */}
+-                {item.type === "Studio" && item.has_active_promotion && (
+-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+-                    <Ionicons name="pricetag" size={10} color="#10B981" />
+-                    <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+-                      Promo available
+-                    </Text>
+-                  </View>
+-                )}
+               </View>
+             </TouchableOpacity>
+           ))}
+-        </ScrollView>
++        </ResponsiveList>
+       </View>
+     );
+   };
+ 
+   // Helpers
+@@ -2631,21 +2458,24 @@ export default function HomeScreen() {
+     );
+   }
+ 
+   return (
+     <View style={[styles.container, { backgroundColor: colors.background }]}>
++      <View style={{ flex: 1, width: '100%' }}>
+       <StatusBar
+         barStyle="light-content"
+         translucent
+         backgroundColor="transparent"
+       />
+ 
+-      <View
+-        style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
+-      >
+-        <Header title="MusikaLokal" transparent={!isScrolled} />
+-      </View>
++      {!(Platform.OS === 'web' && width >= 768) && (
++        <View
++          style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
++        >
++          <Header title="MusikaLokal" transparent={!isScrolled} />
++        </View>
++      )}
+ 
+       <ScrollView
+         showsVerticalScrollIndicator={false}
+         contentContainerStyle={{ paddingBottom: 180 }}
+         bounces={true}
+@@ -2661,34 +2491,48 @@ export default function HomeScreen() {
+             tintColor={colors.primary}
+             progressViewOffset={insets.top + 60} // Push refresh spinner below header
+           />
+         }
+       >
+-        {renderHero()}
++        <View style={{ width: '100%', flex: 1 }}>
++        {Platform.OS === 'web' && width >= 768 ? renderWebHero() : renderHero()}
+ 
+-        <View style={{ paddingHorizontal: 24, marginTop: 8 }}>
++        <View style={{ paddingHorizontal: 24, marginTop: 16 }}>
+           <ProfileCompletionBanner />
+         </View>
+ 
+         {/* AI Recommendation Comparison Toggle */}
+-        {showForYouAiCard && userId && (
+         <View
+-          style={{
++          style={[{
+             marginHorizontal: 24,
+             marginTop: 20,
+             marginBottom: 8,
+             padding: 16,
+             borderRadius: 20,
+             backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+             borderWidth: 1,
+-            borderColor: colors.primary,
+-          }}
++            borderColor: aiModeEnabled
++              ? colors.primary
++              : isDark
++                ? "#374151"
++                : "#E5E7EB",
++          }, Platform.OS === 'web' && width >= 768 && { 
++            alignSelf: 'center', marginHorizontal: 24, maxWidth: 640, width: '100%',
++            backgroundColor: '#FFFFFF', 
++            borderColor: 'transparent',
++            shadowColor: '#7C3AED', 
++            shadowOffset: {width: 0, height: 10}, 
++            shadowOpacity: 0.1, 
++            shadowRadius: 20, 
++            elevation: 8 
++          }]}
+         >
+           <View
+             style={{
+               flexDirection: "row",
+               alignItems: "center",
++              justifyContent: "space-between",
+             }}
+           >
+             <View style={{ flex: 1 }}>
+               <View
+                 style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+@@ -2696,17 +2540,21 @@ export default function HomeScreen() {
+                 <View
+                   style={{
+                     width: 32,
+                     height: 32,
+                     borderRadius: 16,
+-                    backgroundColor: colors.primary,
++                    backgroundColor: aiModeEnabled
++                      ? colors.primary
++                      : isDark
++                        ? "#374151"
++                        : "#D1D5DB",
+                     alignItems: "center",
+                     justifyContent: "center",
+                   }}
+                 >
+                   <Ionicons
+-                    name="sparkles"
++                    name={aiModeEnabled ? "sparkles" : "shuffle"}
+                     size={18}
+                     color="#FFF"
+                   />
+                 </View>
+                 <View>
+@@ -2715,56 +2563,50 @@ export default function HomeScreen() {
+                       fontFamily: "Poppins_600SemiBold",
+                       fontSize: 14,
+                       color: colors.text,
+                     }}
+                   >
+-                    For You AI
++                    {aiModeEnabled ? "???? AI Recommendations" : "???? Random Mode"}
+                   </Text>
+                   <Text
+                     style={{
+                       fontFamily: "Poppins_400Regular",
+                       fontSize: 11,
+                       color: colors.textSecondary,
+                       marginTop: -2,
+                     }}
+                   >
+-                    {`Engine: ${aiFeedProvider}${aiRecommendations.length > 0 ? ` ??? ${aiRecommendations.length} picks` : ""}`}
++                    {aiModeEnabled
++                      ? `Personalized based on your interests${aiRecommendations.length > 0 ? ` ??? ${aiRecommendations.length} matches` : ""}`
++                      : "Showing random listings for comparison"}
+                   </Text>
+                 </View>
+               </View>
+             </View>
+-          </View>
+-
+-          {aiFeedMessage ? (
+-            <View
+-              style={{
+-                marginTop: 10,
+-                flexDirection: "row",
+-                alignItems: "center",
+-                gap: 6,
++            <Switch
++              value={aiModeEnabled}
++              onValueChange={(value) => {
++                setAiModeEnabled(value);
++                // Update featured/discover based on mode
++                if (value && aiRecommendations.length > 0) {
++                  setFeatured(aiRecommendations.slice(0, 10));
++                  setDiscover(aiRecommendations.slice(10, 20));
++                } else {
++                  setFeatured(randomRecommendations.slice(0, 10));
++                  setDiscover(randomRecommendations.slice(10, 20));
++                }
+               }}
+-            >
+-              <Ionicons
+-                name="information-circle-outline"
+-                size={14}
+-                color={colors.textSecondary}
+-              />
+-              <Text
+-                style={{
+-                  flex: 1,
+-                  fontFamily: "Poppins_400Regular",
+-                  fontSize: 11,
+-                  color: colors.textSecondary,
+-                }}
+-              >
+-                {aiFeedMessage}
+-              </Text>
+-            </View>
+-          ) : null}
++              trackColor={{
++                false: isDark ? "#374151" : "#D1D5DB",
++                true: colors.primary + "60",
++              }}
++              thumbColor={aiModeEnabled ? colors.primary : "#9CA3AF"}
++            />
++          </View>
+ 
+           {/* AI Similarity Preview */}
+-          {aiRecommendations.length > 0 && (
++          {aiModeEnabled && aiRecommendations.length > 0 && (
+             <View
+               style={{
+                 marginTop: 12,
+                 paddingTop: 12,
+                 borderTopWidth: 1,
+@@ -2780,12 +2622,12 @@ export default function HomeScreen() {
+                   textTransform: "uppercase",
+                   letterSpacing: 0.5,
+                 }}
+               >
+                 {hasAiSimilarityMatches
+-                  ? "Top Matches This Session"
+-                  : "Fresh recommendations for your profile"}
++                  ? "Top Matches by AI Similarity"
++                  : "???? Sorted by Popularity (No embeddings yet)"}
+               </Text>
+               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                 {aiPreviewItems.map((item) => (
+                   <View
+                     key={item.id}
+@@ -2861,17 +2703,16 @@ export default function HomeScreen() {
+                   fontSize: 11,
+                   color: colors.textSecondary,
+                   flex: 1,
+                 }}
+               >
+-                Add skills and genres in your profile, then browse listings to
+-                improve your For You feed quality.
++                Start favoriting listings to build your interest profile. AI
++                will learn your preferences!
+               </Text>
+             </View>
+           )}
+         </View>
+-        )}
+ 
+         {renderHighlightsSection()}
+ 
+         {renderUpcomingEvents()}
+ 
+@@ -2904,29 +2745,27 @@ export default function HomeScreen() {
+                     >
+                       See all
+                     </Text>
+                   </TouchableOpacity>
+                 </View>
+-                <ScrollView
+-                  horizontal
+-                  showsHorizontalScrollIndicator={false}
++                <ResponsiveList
+                   contentContainerStyle={{
+                     paddingLeft: 24,
+                     paddingRight: 24,
+                     paddingVertical: 8,
+                   }}
+-                  decelerationRate="fast"
+                   snapToInterval={240 + 16}
+                 >
+                   {recentlyViewed.map((item) => (
+                     <TouchableOpacity
+                       key={item.id}
+                       activeOpacity={1}
+                       onPress={() => handleCardPress(item)}
+                       style={[
+                         styles.recentlyViewedCard,
+-                        { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
++                        Platform.OS === 'web' && { flex: 1, minWidth: 240, maxWidth: 320, shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: {height: 4, width: 0} },
++                        { backgroundColor: Platform.OS === 'web' ? '#FFFFFF' : isDark ? "#1F2937" : "#FFFFFF" },
+                       ]}
+                     >
+                       {/* Image Section */}
+                       <View style={styles.recentlyViewedImageContainer}>
+                         {((item.images && item.images.length > 0) || item.image) ? (
+@@ -3020,13 +2859,14 @@ export default function HomeScreen() {
+                           />
+                         </View>
+                       </View>
+                     </TouchableOpacity>
+                   ))}
+-                </ScrollView>
++                </ResponsiveList>
+               </View>
+             )}
++        </View>
+       </ScrollView>
+ 
+       <Navbar />
+ 
+       <ListingDetailsSheet
+@@ -3063,10 +2903,11 @@ export default function HomeScreen() {
+         title={alertConfig.title}
+         message={alertConfig.message}
+         buttons={alertConfig.buttons}
+         onClose={() => setAlertVisible(false)}
+       />
++      </View>
+     </View>
+   );
+ }
+ 
+ const styles = StyleSheet.create({
+@@ -3095,27 +2936,27 @@ const styles = StyleSheet.create({
+     ...StyleSheet.absoluteFillObject,
+     backgroundColor: "rgba(0,0,0,0.3)", // Base darken
+   },
+   heroContent: {
+     position: "absolute",
+-    bottom: height < 700 ? 12 : 24,
++    bottom: height < 700 ? 16 : 40,
+     left: 24, // Standardized alignment
+     right: 24, // Standardized alignment
+     zIndex: 10,
+   },
+   heroGreeting: {
+     fontFamily: "Poppins_600SemiBold",
+-    fontSize: height < 700 ? moderateScale(24) : moderateScale(32),
++    fontSize: Platform.OS === 'web' ? 48 : height < 700 ? moderateScale(24) : moderateScale(32),
+     color: "#FFF",
+     textShadowColor: "rgba(0, 0, 0, 0.5)",
+     textShadowOffset: { width: 0, height: 2 },
+     textShadowRadius: 6,
+     marginBottom: height < 700 ? moderateScale(2) : moderateScale(4),
+   },
+   heroSubtitle: {
+     fontFamily: "Poppins_400Regular",
+-    fontSize: height < 700 ? moderateScale(12) : moderateScale(14),
++    fontSize: Platform.OS === 'web' ? 18 : height < 700 ? moderateScale(12) : moderateScale(14),
+     color: "rgba(255,255,255,0.95)",
+     textShadowColor: "rgba(0, 0, 0, 0.5)",
+     textShadowOffset: { width: 0, height: 1 },
+     textShadowRadius: 4,
+     marginBottom: height < 700 ? moderateScale(12) : moderateScale(20),
+@@ -3159,10 +3000,11 @@ const styles = StyleSheet.create({
+   },
+   sectionTitle: {
+     fontFamily: "Poppins_600SemiBold",
+     fontSize: moderateScale(20),
+     marginLeft: 0, // Removed double margin
++    textAlign: Platform.OS === 'web' ? 'center' : 'auto',
+   },
+   sectionSubtitle: {
+     fontFamily: "Poppins_400Regular",
+     fontSize: moderateScale(13),
+     marginLeft: 0,
+@@ -3171,11 +3013,11 @@ const styles = StyleSheet.create({
+ 
+   // Bento Grid Styles
+   bentoGrid: {
+     flexDirection: "row",
+     gap: 12,
+-    height: 280, // Fixed height for the bento block
++    height: Platform.OS === 'web' ? 420 : 280, // Fixed height for the bento block
+   },
+   bentoTouchableLarge: {
+     flex: 1.5,
+     borderRadius: 24,
+     // Shadow
+@@ -3326,16 +3168,10 @@ const styles = StyleSheet.create({
+   featuredLocation: {
+     color: "rgba(255,255,255,0.9)",
+     fontFamily: "Poppins_500Medium",
+     fontSize: moderateScale(14),
+   },
+-  featuredReason: {
+-    color: "rgba(255,255,255,0.92)",
+-    fontFamily: "Poppins_400Regular",
+-    fontSize: moderateScale(12),
+-    marginTop: 4,
+-  },
+   featuredPrice: {
+     color: "#FFF",
+     fontFamily: "Poppins_600SemiBold",
+     fontSize: 14,
+   },
+@@ -3655,27 +3491,15 @@ const styles = StyleSheet.create({
+     flexDirection: "row",
+     alignItems: "center",
+     gap: 5,
+     marginBottom: 4,
+   },
+-  forYouReasonRow: {
+-    flexDirection: "row",
+-    alignItems: "flex-start",
+-    gap: 4,
+-    marginBottom: 6,
+-  },
+   forYouText: {
+     fontFamily: "Poppins_400Regular",
+     fontSize: 12,
+     flex: 1,
+   },
+-  forYouReasonText: {
+-    fontFamily: "Poppins_400Regular",
+-    fontSize: 11,
+-    flex: 1,
+-    lineHeight: 16,
+-  },
+   forYouPrice: {
+     fontFamily: "Poppins_700Bold",
+     fontSize: 15,
+     marginTop: 6,
+   },

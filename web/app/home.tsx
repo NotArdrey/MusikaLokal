@@ -274,6 +274,29 @@ const AutoCardImage = ({
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
   const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && width >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const webCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : isDark
+      ? "#1F2937"
+      : "#FFFFFF";
+  const webTextColor = isWebDesktop
+    ? isDark
+      ? "#E2E8F0"
+      : "#0F172A"
+    : colors.text;
+  const webTextSecondary = isWebDesktop
+    ? isDark
+      ? "#94A3B8"
+      : "#475569"
+    : colors.textSecondary;
   const { userRole, userId, isGuest } = useAuth();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
@@ -1515,7 +1538,7 @@ export default function HomeScreen() {
           </View>
 
           {/* Glassmorphism Search Pill */}
-          <BlurView intensity={60} tint="light" style={[styles.searchPill, Platform.OS === 'web' && width >= 768 && { maxWidth: 640, alignSelf: 'flex-start' }]}>
+          <BlurView intensity={60} tint="light" style={[styles.searchPill, isWebDesktop && { maxWidth: 640, alignSelf: 'flex-start' }]}>
             <TouchableOpacity activeOpacity={1}
               style={styles.searchTouch}
               onPress={openSearchSheet}
@@ -1543,41 +1566,110 @@ export default function HomeScreen() {
 
   // 1.5 Web SaaS Split Hero
   const renderWebHero = () => {
+    const heroHeadingColor = isDark ? "#F8FAFC" : "#0F172A";
+    const heroBodyColor = isDark ? "#CBD5E1" : "#334155";
+    const heroPanelColor = isDark ? "rgba(15, 23, 42, 0.76)" : "rgba(255, 255, 255, 0.86)";
+    const heroShadowColor = isDark ? "#020617" : "#64748B";
+
     return (
-      <View style={{ flexDirection: 'row', backgroundColor: '#FAFAFA', borderRadius: 32, padding: 48, marginTop: 16, minHeight: 480, overflow: 'hidden', alignItems: 'center' }}>
-        {/* Left Content */}
-        <View style={{ flex: 1, paddingRight: 40, zIndex: 10 }}>
-          <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 52, color: colors.text, lineHeight: 60 }}>
-            Best SaaS tools to{'\n'}<Text style={{ color: colors.primary }}>manage your music</Text>
-          </Text>
-          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 18, color: '#6B7280', marginTop: 24, marginBottom: 40, maxWidth: 480 }}>
-            Leave traditional booking methods and start switching to MusikaLokal. One platform for all your career needs.
-          </Text>
-          
-          <TouchableOpacity activeOpacity={0.8} onPress={openSearchSheet} style={{ backgroundColor: colors.primary, paddingVertical: 18, paddingHorizontal: 36, borderRadius: 100, alignSelf: 'flex-start', shadowColor: colors.primary, shadowOffset: {width: 0, height: 10}, shadowOpacity: 0.3, shadowRadius: 20 }}>
-            <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 16, color: '#FFF' }}>Start your next gig now</Text>
-          </TouchableOpacity>
-        </View>
+      <LinearGradient
+        colors={
+          isDark
+            ? ["#0F172A", "#111827", "#1E293B"]
+            : ["#FFFFFF", "#EEF2FF", "#E0F2FE"]
+        }
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.webHeroShell}
+      >
+        <View style={styles.webHeroGlowOne} />
+        <View style={styles.webHeroGlowTwo} />
 
-        {/* Right Floating Widgets (Mocking the SaaS UI) */}
-        <View style={{ flex: 1, position: 'relative', height: '100%', minHeight: 400 }}>
-           {/* Mock Data Card 1 */}
-           <View style={{ position: 'absolute', top: 0, right: 30, width: 220, backgroundColor: isDark ? '#374151' : '#FFF', borderRadius: 24, padding: 24, shadowColor: '#9CA3AF', shadowOffset: {width: 0, height: 20}, shadowOpacity: 0.15, shadowRadius: 40, elevation: 10 }}>
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text }}>Monthly Bookings</Text>
-              <Text style={{ fontFamily: 'Poppins_700Bold', fontSize: 40, color: colors.text, marginTop: 8 }}>124 <Text style={{ fontSize: 16, color: colors.primary, fontFamily: 'Poppins_600SemiBold' }}>+12%</Text></Text>
-              <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 48, marginTop: 24, gap: 6 }}>
-                 {[40, 60, 30, 80, 50].map((h, i) => <View key={i} style={{ flex: 1, height: `${h}%`, backgroundColor: i === 3 ? colors.primary : isDark ? '#4B5563' : '#F3F4F6', borderRadius: 6 }} />)}
+        <View style={styles.webHeroGrid}>
+          <View style={styles.webHeroCopy}>
+            <Text style={[styles.webHeroTitle, { color: heroHeadingColor }]}>
+              Move faster with tools{"\n"}
+              <Text style={{ color: isDark ? "#2DD4BF" : "#0F766E" }}>
+                built for local music
+              </Text>
+            </Text>
+            <Text style={[styles.webHeroDescription, { color: heroBodyColor }]}>
+              Book gigs, discover spaces, and connect with artists in one streamlined workflow. Designed for daily operations, not spreadsheets.
+            </Text>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={openSearchSheet}
+              style={[
+                styles.webHeroButton,
+                {
+                  backgroundColor: colors.primary,
+                  shadowColor: colors.primary,
+                },
+              ]}
+            >
+              <Text style={styles.webHeroButtonText}>Start your next gig now</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.webHeroWidgets}>
+            <View
+              style={[
+                styles.webHeroWidgetTop,
+                {
+                  backgroundColor: heroPanelColor,
+                  shadowColor: heroShadowColor,
+                },
+              ]}
+            >
+              <Text style={[styles.webHeroWidgetLabel, { color: webTextSecondary }]}>Monthly Bookings</Text>
+              <Text style={[styles.webHeroWidgetValue, { color: webTextColor }]}>124 <Text style={styles.webHeroWidgetDelta}>+12%</Text></Text>
+              <View style={styles.webHeroBarsRow}>
+                {[38, 56, 32, 82, 46].map((h, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.webHeroBar,
+                      {
+                        height: `${h}%`,
+                        backgroundColor: i === 3 ? colors.primary : isDark ? "#334155" : "#CFD8EA",
+                      },
+                    ]}
+                  />
+                ))}
               </View>
-           </View>
+            </View>
 
-           {/* Mock Data Card 2 */}
-           <View style={{ position: 'absolute', bottom: 20, left: 10, width: 280, backgroundColor: isDark ? '#374151' : '#FFF', borderRadius: 24, padding: 24, shadowColor: '#9CA3AF', shadowOffset: {width: 0, height: 25}, shadowOpacity: 0.15, shadowRadius: 40, elevation: 10 }}>
-              <Text style={{ fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: colors.text, textAlign: 'center' }}>Studio Traffic</Text>
-              <View style={{ width: 100, height: 100, borderRadius: 50, borderWidth: 20, borderColor: isDark ? '#4B5563' : '#111827', borderLeftColor: isDark ? '#1F2937' : '#F3F4F6', borderBottomColor: colors.primary, alignSelf: 'center', marginTop: 24 }} />
-              <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 12, color: '#6B7280', textAlign: 'center', marginTop: 24 }}>Keep your schedule updated to increase the number of interactions.</Text>
-           </View>
+            <View
+              style={[
+                styles.webHeroWidgetBottom,
+                {
+                  backgroundColor: heroPanelColor,
+                  shadowColor: heroShadowColor,
+                },
+              ]}
+            >
+              <Text style={[styles.webHeroWidgetLabel, { color: webTextColor, textAlign: "center" }]}>Studio Traffic</Text>
+              <View style={styles.webHeroRingWrap}>
+                <View
+                  style={[
+                    styles.webHeroRing,
+                    {
+                      borderColor: isDark ? "#334155" : "#CBD5E1",
+                      borderBottomColor: colors.primary,
+                      borderRightColor: isDark ? "#1E293B" : "#E2E8F0",
+                    },
+                  ]}
+                />
+                <View style={styles.webHeroRingCut} />
+              </View>
+              <Text style={[styles.webHeroWidgetHint, { color: webTextSecondary }]}>
+                Keep your schedule updated to increase the number of interactions.
+              </Text>
+            </View>
+          </View>
         </View>
-      </View>
+      </LinearGradient>
     );
   };
   const renderHighlightsSection = () => {
@@ -1896,8 +1988,8 @@ export default function HomeScreen() {
                 onPress={() => handleCardPress(item)}
                 style={[
                   styles.newArrivalCard,
-                  Platform.OS === 'web' && { flex: 1, minWidth: 280, maxWidth: 320, shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: {height: 4, width: 0} },
-                  { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                  isWebDesktop && { flex: 1, minWidth: 280, maxWidth: 320, shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { height: 6, width: 0 } },
+                  { backgroundColor: webCardBackground },
                 ]}
               >
               {/* Image Section */}
@@ -2077,8 +2169,8 @@ export default function HomeScreen() {
               }}
               style={[
                 styles.upcomingEventCard,
-                Platform.OS === 'web' && { flex: 1, minWidth: 280, maxWidth: 320 },
-                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                isWebDesktop && { flex: 1, minWidth: 280, maxWidth: 320 },
+                { backgroundColor: webCardBackground },
               ]}
             >
               {/* Event Image */}
@@ -2251,7 +2343,7 @@ export default function HomeScreen() {
     if (uniqueItems.length === 0) {
       return (
         <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { color: Platform.OS === 'web' ? '#111827' : colors.text }]}>
+          <Text style={[styles.sectionTitle, { color: webTextColor }]}>
             For You
           </Text>
           <View
@@ -2328,9 +2420,9 @@ export default function HomeScreen() {
               onPress={() => handleCardPress(uniqueItems[0])}
               style={[
                 styles.featuredCard,
-                Platform.OS === 'web' && { height: 480 },
+                isWebDesktop && { height: 480 },
                 {
-                  backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                  backgroundColor: webCardBackground,
                   elevation: 8,
                   shadowOpacity: 0.15,
                 },
@@ -2419,8 +2511,8 @@ export default function HomeScreen() {
               onPress={() => handleCardPress(item)}
               style={[
                 styles.forYouCard,
-                Platform.OS === 'web' && { flex: 1, minWidth: 280, maxWidth: 320 },
-                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                isWebDesktop && { flex: 1, minWidth: 280, maxWidth: 320 },
+                { backgroundColor: webCardBackground },
               ]}
             >
               {/* Image Section */}
@@ -2592,7 +2684,7 @@ export default function HomeScreen() {
       <View
         style={[
           styles.loadingContainer,
-          { backgroundColor: colors.background },
+          { backgroundColor: pageBackground },
         ]}
       >
         <ActivityIndicator size="large" color={colors.primary} />
@@ -2601,15 +2693,15 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={{ flex: 1, width: '100%' }}>
+    <View style={[styles.container, { backgroundColor: pageBackground }]}> 
+      <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
       <StatusBar
         barStyle="light-content"
         translucent
         backgroundColor="transparent"
       />
 
-      {!(Platform.OS === 'web' && width >= 768) && (
+      {!isWebDesktop && (
         <View
           style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
         >
@@ -2619,7 +2711,10 @@ export default function HomeScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 180 }}
+        contentContainerStyle={[
+          styles.homeScrollContent,
+          isWebDesktop && styles.homeScrollContentWeb,
+        ]}
         bounces={true}
         onScroll={(e) => {
           const contentOffsetY = e.nativeEvent.contentOffset.y;
@@ -2635,10 +2730,15 @@ export default function HomeScreen() {
           />
         }
       >
-        <View style={{ width: '100%', flex: 1 }}>
-        {Platform.OS === 'web' && width >= 768 ? renderWebHero() : renderHero()}
+        <View style={[styles.homeContent, isWebDesktop && styles.homeContentWeb]}>
+        {isWebDesktop ? renderWebHero() : renderHero()}
 
-        <View style={{ paddingHorizontal: 24, marginTop: 16 }}>
+        <View
+          style={[
+            { paddingHorizontal: 24, marginTop: 16 },
+            isWebDesktop && styles.profileBannerWrapWeb,
+          ]}
+        >
           <ProfileCompletionBanner />
         </View>
 
@@ -2657,15 +2757,18 @@ export default function HomeScreen() {
               : isDark
                 ? "#374151"
                 : "#E5E7EB",
-          }, Platform.OS === 'web' && width >= 768 && { 
-            alignSelf: 'center', marginHorizontal: 24, maxWidth: 640, width: '100%',
-            backgroundColor: '#FFFFFF', 
-            borderColor: 'transparent',
-            shadowColor: '#7C3AED', 
-            shadowOffset: {width: 0, height: 10}, 
-            shadowOpacity: 0.1, 
-            shadowRadius: 20, 
-            elevation: 8 
+          }, isWebDesktop && {
+            alignSelf: 'center',
+            marginHorizontal: 24,
+            maxWidth: 760,
+            width: '100%',
+            backgroundColor: webCardBackground,
+            borderColor: isDark ? '#1E293B' : '#D9E2F1',
+            shadowColor: '#0F172A',
+            shadowOffset: { width: 0, height: 12 },
+            shadowOpacity: 0.12,
+            shadowRadius: 24,
+            elevation: 8,
           }]}
         >
           <View
@@ -2704,7 +2807,7 @@ export default function HomeScreen() {
                     style={{
                       fontFamily: "Poppins_600SemiBold",
                       fontSize: 14,
-                      color: colors.text,
+                      color: webTextColor,
                     }}
                   >
                     {aiModeEnabled ? "🤖 AI Recommendations" : "🎲 Random Mode"}
@@ -2713,7 +2816,7 @@ export default function HomeScreen() {
                     style={{
                       fontFamily: "Poppins_400Regular",
                       fontSize: 11,
-                      color: colors.textSecondary,
+                      color: webTextSecondary,
                       marginTop: -2,
                     }}
                   >
@@ -2752,14 +2855,14 @@ export default function HomeScreen() {
                 marginTop: 12,
                 paddingTop: 12,
                 borderTopWidth: 1,
-                borderTopColor: isDark ? "#374151" : "#E5E7EB",
+                  borderTopColor: isDark ? "#334155" : "#DBE3F0",
               }}
             >
               <Text
                 style={{
                   fontFamily: "Poppins_500Medium",
                   fontSize: 11,
-                  color: colors.textSecondary,
+                    color: webTextSecondary,
                   marginBottom: 8,
                   textTransform: "uppercase",
                   letterSpacing: 0.5,
@@ -2776,7 +2879,7 @@ export default function HomeScreen() {
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
-                      backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                      backgroundColor: isDark ? "#334155" : "#E8EEF8",
                       paddingHorizontal: 10,
                       paddingVertical: 5,
                       borderRadius: 12,
@@ -2787,7 +2890,7 @@ export default function HomeScreen() {
                       style={{
                         fontFamily: "Poppins_500Medium",
                         fontSize: 11,
-                        color: colors.text,
+                        color: webTextColor,
                       }}
                       numberOfLines={1}
                     >
@@ -2828,7 +2931,7 @@ export default function HomeScreen() {
                 marginTop: 12,
                 paddingTop: 12,
                 borderTopWidth: 1,
-                borderTopColor: isDark ? "#374151" : "#E5E7EB",
+                borderTopColor: isDark ? "#334155" : "#DBE3F0",
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 8,
@@ -2843,7 +2946,7 @@ export default function HomeScreen() {
                 style={{
                   fontFamily: "Poppins_400Regular",
                   fontSize: 11,
-                  color: colors.textSecondary,
+                  color: webTextSecondary,
                   flex: 1,
                 }}
               >
@@ -2858,7 +2961,7 @@ export default function HomeScreen() {
                 marginTop: 12,
                 paddingTop: 12,
                 borderTopWidth: 1,
-                borderTopColor: isDark ? "#374151" : "#E5E7EB",
+                borderTopColor: isDark ? "#334155" : "#DBE3F0",
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 8,
@@ -2873,7 +2976,7 @@ export default function HomeScreen() {
                 style={{
                   fontFamily: "Poppins_400Regular",
                   fontSize: 11,
-                  color: colors.textSecondary,
+                  color: webTextSecondary,
                   flex: 1,
                 }}
               >
@@ -2885,11 +2988,11 @@ export default function HomeScreen() {
 
         {renderHighlightsSection()}
 
+        {renderSmartFeed()}
+
         {renderUpcomingEvents()}
 
         {renderNewArrivals()}
-
-        {renderSmartFeed()}
 
         {/* Recently Viewed Section - Custom Cards */}
         {recentlyViewed.length > 0 && (
@@ -2903,7 +3006,7 @@ export default function HomeScreen() {
                     marginBottom: 12,
                   }}
                 >
-                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  <Text style={[styles.sectionTitle, { color: webTextColor }]}>
                     Recently Viewed
                   </Text>
                   <TouchableOpacity activeOpacity={1} onPress={openRecentlyViewedSheet}>
@@ -2933,8 +3036,8 @@ export default function HomeScreen() {
                       onPress={() => handleCardPress(item)}
                       style={[
                         styles.recentlyViewedCard,
-                        Platform.OS === 'web' && { flex: 1, minWidth: 240, maxWidth: 320, shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: {height: 4, width: 0} },
-                        { backgroundColor: Platform.OS === 'web' ? '#FFFFFF' : isDark ? "#1F2937" : "#FFFFFF" },
+                        isWebDesktop && { flex: 1, minWidth: 240, maxWidth: 320, shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { height: 6, width: 0 } },
+                        { backgroundColor: webCardBackground },
                       ]}
                     >
                       {/* Image Section */}
@@ -3085,6 +3188,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  homeScrollContent: {
+    paddingBottom: 180,
+  },
+  homeScrollContentWeb: {
+    paddingBottom: 220,
+  },
+  homeContent: {
+    width: "100%",
+    flex: 1,
+  },
+  homeContentWeb: {
+    maxWidth: 1240,
+    alignSelf: "center",
+  },
+  profileBannerWrapWeb: {
+    marginTop: 18,
+    paddingHorizontal: 0,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
@@ -3164,6 +3293,158 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(12),
   },
 
+  // Web Hero
+  webHeroShell: {
+    marginTop: 12,
+    borderRadius: 32,
+    minHeight: 500,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.22)",
+    position: "relative",
+  },
+  webHeroGlowOne: {
+    position: "absolute",
+    top: -70,
+    left: -30,
+    width: 220,
+    height: 220,
+    borderRadius: 999,
+    backgroundColor: "rgba(45, 212, 191, 0.18)",
+  },
+  webHeroGlowTwo: {
+    position: "absolute",
+    bottom: -110,
+    right: -60,
+    width: 300,
+    height: 300,
+    borderRadius: 999,
+    backgroundColor: "rgba(56, 189, 248, 0.16)",
+  },
+  webHeroGrid: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 500,
+    paddingHorizontal: 44,
+    paddingVertical: 36,
+  },
+  webHeroCopy: {
+    flex: 1,
+    paddingRight: 40,
+    zIndex: 2,
+  },
+  webHeroTitle: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 50,
+    lineHeight: 60,
+    letterSpacing: -0.6,
+  },
+  webHeroDescription: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 17,
+    marginTop: 22,
+    marginBottom: 34,
+    maxWidth: 520,
+    lineHeight: 28,
+  },
+  webHeroButton: {
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 999,
+    alignSelf: "flex-start",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.3,
+    shadowRadius: 24,
+    elevation: 7,
+  },
+  webHeroButtonText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+    color: "#FFF",
+  },
+  webHeroWidgets: {
+    flex: 1,
+    position: "relative",
+    minHeight: 390,
+  },
+  webHeroWidgetTop: {
+    position: "absolute",
+    top: 6,
+    right: 28,
+    width: 228,
+    borderRadius: 24,
+    padding: 22,
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.18,
+    shadowRadius: 26,
+    elevation: 8,
+  },
+  webHeroWidgetBottom: {
+    position: "absolute",
+    bottom: 0,
+    left: 10,
+    width: 290,
+    borderRadius: 24,
+    padding: 22,
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.18,
+    shadowRadius: 28,
+    elevation: 8,
+  },
+  webHeroWidgetLabel: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
+  webHeroWidgetValue: {
+    fontFamily: "Poppins_700Bold",
+    fontSize: 38,
+    marginTop: 8,
+  },
+  webHeroWidgetDelta: {
+    fontSize: 15,
+    color: "#14B8A6",
+    fontFamily: "Poppins_600SemiBold",
+  },
+  webHeroBarsRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    height: 52,
+    marginTop: 20,
+    gap: 6,
+  },
+  webHeroBar: {
+    flex: 1,
+    borderRadius: 6,
+  },
+  webHeroRingWrap: {
+    width: 112,
+    height: 112,
+    alignSelf: "center",
+    marginTop: 20,
+    marginBottom: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  webHeroRing: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    borderWidth: 18,
+  },
+  webHeroRingCut: {
+    position: "absolute",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
+  },
+  webHeroWidgetHint: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+
   // Section Commons
   sectionContainer: {
     marginTop: 32,
@@ -3173,7 +3454,7 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     fontSize: moderateScale(20),
     marginLeft: 0, // Removed double margin
-    textAlign: Platform.OS === 'web' ? 'center' : 'auto',
+    textAlign: "left",
   },
   sectionSubtitle: {
     fontFamily: "Poppins_400Regular",

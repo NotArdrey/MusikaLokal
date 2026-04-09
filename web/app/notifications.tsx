@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Image,
@@ -17,6 +17,9 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useTheme } from '../src/context/ThemeContext';
 
+
+const DEFAULT_NOTIFICATION_IMAGE = 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop';
+const KNOWN_IMAGE_BUCKETS = ['avatars', 'profile-images', 'group-images', 'studio-images', 'gig-images', 'documents'];
 
 export default function NotificationsScreen() {
     const { colors, isDark } = useTheme();
@@ -80,6 +83,98 @@ export default function NotificationsScreen() {
             fetchNotifications();
         }, [fetchNotifications])
     );
+
+    // Realtime subscription for live notification updates
+    useEffect(() => {
+        let isActive = true;
+        let activeChannel: ReturnType<typeof supabase.channel> | null = null;
+
+        const setupRealtime = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user || !isActive) return;
+
+            activeChannel = supabase
+                .channel(`screen-notifications:${user.id}`)
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+                    () => fetchNotifications()
+                )
+                .subscribe();
+        };
+
+        setupRealtime();
+
+        return () => {
+            isActive = false;
+            if (activeChannel) {
+                supabase.removeChannel(activeChannel);
+            }
+        };
+    }, [fetchNotifications]);
+
+    const resolveNotificationImage = useCallback((item: any) => {
+        const rawCandidates = [
+            item?.image,
+            item?.meta?.image,
+            item?.meta?.avatar_url,
+            item?.meta?.studio_image,
+            item?.meta?.gig_image,
+            item?.meta?.group_image,
+        ];
+
+        const candidates: string[] = [];
+
+        for (const raw of rawCandidates) {
+            if (!raw) continue;
+
+            if (Array.isArray(raw)) {
+                candidates.push(...raw.filter((entry) => typeof entry === 'string'));
+                continue;
+            }
+
+            if (typeof raw !== 'string') continue;
+            const trimmed = raw.trim();
+            if (!trimmed) continue;
+
+            if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (Array.isArray(parsed)) {
+                        candidates.push(...parsed.filter((entry) => typeof entry === 'string'));
+                        continue;
+                    }
+                } catch (_) {
+                    // keep original candidate
+                }
+            }
+
+            candidates.push(trimmed);
+        }
+
+        for (const candidate of candidates) {
+            if (/^(https?:\/\/|data:|file:\/\/)/i.test(candidate)) {
+                return candidate;
+            }
+
+            const normalized = candidate.replace(/^\/+/, '');
+            const directParts = normalized.split('/');
+
+            if (directParts.length > 1) {
+                const directBucket = directParts[0];
+                const directPath = directParts.slice(1).join('/');
+                const { data } = supabase.storage.from(directBucket).getPublicUrl(directPath);
+                if (data?.publicUrl) return data.publicUrl;
+            }
+
+            for (const bucket of KNOWN_IMAGE_BUCKETS) {
+                const { data } = supabase.storage.from(bucket).getPublicUrl(normalized);
+                if (data?.publicUrl) return data.publicUrl;
+            }
+        }
+
+        return DEFAULT_NOTIFICATION_IMAGE;
+    }, []);
 
     const onRefresh = React.useCallback(() => {
         setRefreshing(true);
@@ -333,9 +428,16 @@ export default function NotificationsScreen() {
     const NotificationItem = ({ item }: { item: any }) => {
         const isTransfer = isLeadershipTransfer(item);
         const isRead = item.read;
+        const resolvedImage = useMemo(() => resolveNotificationImage(item), [item, resolveNotificationImage]);
+        const [imageFailed, setImageFailed] = useState(false);
+
+        useEffect(() => {
+            setImageFailed(false);
+        }, [resolvedImage]);
+
 
         return (
-            <TouchableOpacity activeOpacity={1}
+            <TouchableOpacity
                 style={[
                     styles.notificationItem,
                     {
@@ -352,9 +454,10 @@ export default function NotificationsScreen() {
                     <View style={styles.leftContent}>
                         <View style={[styles.avatarContainer, { borderColor: colors.border }]}>
                             <Image
-                                source={{ uri: item.image || 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=100&h=100&fit=crop' }}
+                                source={{ uri: imageFailed ? DEFAULT_NOTIFICATION_IMAGE : resolvedImage }}
                                 style={styles.avatarImage}
                                 resizeMode="cover"
+                                onError={() => setImageFailed(true)}
                             />
                             {/* Icon Badge */}
                             <View style={[styles.iconBadge, {

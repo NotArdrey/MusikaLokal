@@ -1,0 +1,368 @@
+diff --git a/mobile/app/manage_group.tsx b/web/app/manage_group.tsx
+index ecd2b7c..0daf8eb 100644
+--- a/mobile/app/manage_group.tsx
++++ b/web/app/manage_group.tsx
+@@ -38,11 +38,10 @@ export default function GroupDetailsScreen() {
+   const [modalButtonText, setModalButtonText] = useState("");
+   const [modalAction, setModalAction] = useState<(() => Promise<void>) | null>(null);
+   const [authorized, setAuthorized] = useState(false);
+   const [checkingAuth, setCheckingAuth] = useState(true);
+   const [showGigStatuses, setShowGigStatuses] = useState(true);
+-  const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
+   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
+   const [openGroupApplications, setOpenGroupApplications] = useState(true);
+   const [updatingGroupApplications, setUpdatingGroupApplications] = useState(false);
+ 
+   const [group, setGroup] = useState<any>(null);
+@@ -70,20 +69,10 @@ export default function GroupDetailsScreen() {
+   ) => {
+     setAlertConfig({ type, title, message, buttons });
+     setAlertVisible(true);
+   };
+ 
+-  const isMissingRelationError = (error: any, relationName: string) => {
+-    const message = String(error?.message || "").toLowerCase();
+-    return error?.code === "42P01" && message.includes(relationName.toLowerCase());
+-  };
+-
+-  const isMissingShowGigStatusesColumnError = (error: any) => {
+-    const message = String(error?.message || "").toLowerCase();
+-    return error?.code === "42703" && message.includes("show_gig_statuses");
+-  };
+-
+   const handleNavigateToGroup = async () => {
+     try {
+       await openNavigationDirections({
+         latitude: group?.latitude,
+         longitude: group?.longitude,
+@@ -108,13 +97,13 @@ export default function GroupDetailsScreen() {
+     if (!authorized || !currentUserId || !id) return;
+     fetchData(currentUserId);
+   }, [authorized, currentUserId, id]);
+ 
+   useEffect(() => {
+-    if (!authorized || !currentUserId || !supportsGigVisibilityPreference) return;
++    if (!authorized || !currentUserId) return;
+     fetchVisibilityPreference(currentUserId);
+-  }, [authorized, currentUserId, supportsGigVisibilityPreference]);
++  }, [authorized, currentUserId]);
+ 
+   const fetchVisibilityPreference = async (userId: string) => {
+     try {
+       const { data, error } = await supabase
+         .from("profiles")
+@@ -123,30 +112,14 @@ export default function GroupDetailsScreen() {
+         .single();
+ 
+       if (error) throw error;
+       setShowGigStatuses(data?.show_gig_statuses !== false);
+     } catch (e) {
+-      if (isMissingShowGigStatusesColumnError(e)) {
+-        setSupportsGigVisibilityPreference(false);
+-        setShowGigStatuses(true);
+-        return;
+-      }
+       console.log("[manage_group] Failed to fetch visibility preference:", e);
+     }
+   };
+ 
+-  const fetchApplicationsFallback = async (groupId: string) => {
+-    const { data, error } = await supabase
+-      .from("gig_applications")
+-      .select("id, status, created_at, gig_id, gig:gigs(name, location, budget)")
+-      .eq("group_id", groupId)
+-      .order("created_at", { ascending: false });
+-
+-    if (error) throw error;
+-    return data || [];
+-  };
+-
+   const checkAuthorization = async () => {
+     try {
+       const {
+         data: { user },
+       } = await supabase.auth.getUser();
+@@ -202,13 +175,10 @@ export default function GroupDetailsScreen() {
+         .select('*')
+         .eq('id', groupId)
+         .eq('owner_id', userId)
+         .single();
+ 
+-      let legacyMembers: any[] = [];
+-      let legacyImages: string[] = [];
+-
+       const { data: legacyGroup, error: legacyGroupError } = await supabase
+         .from('groups_legacy_projection')
+         .select('members, images')
+         .eq('id', groupId)
+         .single();
+@@ -226,52 +196,11 @@ export default function GroupDetailsScreen() {
+         // if (groupError.message?.includes("non-2xx")) {
+         //   console.log('[manage_group] Full error object:', JSON.stringify(groupError));
+         // }
+         throw groupError;
+       }
+-
+-      if (!legacyGroupError && legacyGroup) {
+-        legacyMembers = Array.isArray(legacyGroup.members) ? legacyGroup.members : [];
+-        legacyImages = Array.isArray(legacyGroup.images) ? legacyGroup.images : [];
+-      } else if (legacyGroupError && isMissingRelationError(legacyGroupError, 'groups_legacy_projection')) {
+-        const [{ data: rosterRows, error: rosterError }, { data: fallbackMediaRows, error: fallbackMediaError }] = await Promise.all([
+-          supabase
+-            .from('group_roster_members')
+-            .select('user_id, member_name, member_role, instrument, avatar_url, sort_order, raw_member')
+-            .eq('group_id', groupId)
+-            .order('sort_order', { ascending: true })
+-            .order('created_at', { ascending: true }),
+-          supabase
+-            .from('group_media')
+-            .select('media_url, sort_order, created_at')
+-            .eq('group_id', groupId)
+-            .eq('media_type', 'image')
+-            .order('sort_order', { ascending: true })
+-            .order('created_at', { ascending: true }),
+-        ]);
+-
+-        if (!rosterError) {
+-          legacyMembers = (rosterRows || []).map((row: any) => {
+-            if (row?.raw_member && typeof row.raw_member === 'object') {
+-              return row.raw_member;
+-            }
+-            return {
+-              name: row?.member_name || 'Unknown',
+-              role: row?.member_role || undefined,
+-              user_id: row?.user_id || undefined,
+-              avatar_url: row?.avatar_url || undefined,
+-              instrument: row?.instrument || '',
+-            };
+-          });
+-        }
+-
+-        if (!fallbackMediaError) {
+-          legacyImages = (fallbackMediaRows || [])
+-            .map((row: any) => row.media_url)
+-            .filter((url: any) => typeof url === 'string' && url.trim().length > 0);
+-        }
+-      } else if (legacyGroupError) {
++      if (legacyGroupError) {
+         throw legacyGroupError;
+       }
+ 
+       if (groupMediaError) {
+         console.log('[manage_group] Failed to fetch group_media, using legacy images fallback:', groupMediaError);
+@@ -281,15 +210,15 @@ export default function GroupDetailsScreen() {
+         .map((row: any) => row.media_url)
+         .filter((url: any) => typeof url === 'string' && url.trim().length > 0);
+ 
+       setGroup({
+         ...groupData,
+-        members: legacyMembers,
++        members: legacyGroup?.members || [],
+         images:
+           mediaImages.length > 0
+             ? mediaImages
+-            : legacyImages,
++            : (Array.isArray(legacyGroup?.images) ? legacyGroup.images : []),
+       });
+       setOpenGroupApplications(groupData?.open_group_applications !== false);
+ 
+       try {
+         const { data: memberRows, error: memberError } = await supabase
+@@ -324,17 +253,40 @@ export default function GroupDetailsScreen() {
+       } catch (memberErr) {
+         console.log("[manage_group] Exception fetching group_members:", memberErr);
+         setGroupMembers([]);
+       }
+ 
+-      // Fetch Group Applications (Sent) directly to avoid edge-function drift.
++      // Fetch Group Applications (Sent)
+       try {
+-        const apps = await fetchApplicationsFallback(groupId);
+-        setApplications(apps);
++        const { data: { session } } = await supabase.auth.getSession();
++        if (!session) throw new Error("No active session");
++
++        const { data: appData, error: appError } =
++          await supabase.functions.invoke("gig-applications", {
++            body: {
++              action: "fetch_group_applications",
++              groupId: groupId,
++              userId,
++            },
++            headers: {
++              Authorization: `Bearer ${session.access_token}`,
++            },
++          });
++
++        console.log('[manage_group] Debug appData:', JSON.stringify(appData, null, 2));
++
++        if (appError) {
++          console.log('[manage_group] Failed to fetch applications:', appError);
++        } else {
++          if (appData && !Array.isArray(appData) && appData.error) {
++            console.log('[manage_group] Edge Function returned error:', appData);
++          } else {
++            setApplications(appData || []);
++          }
++        }
+       } catch (appErr) {
+-        console.log('[manage_group] Failed to fetch applications:', appErr);
+-        setApplications([]);
++        console.log('[manage_group] Exception fetching applications:', appErr);
+       }
+ 
+       // Direct query to reviews table
+       try {
+         const { data: reviewData, error: reviewError } = await supabase
+@@ -378,35 +330,27 @@ export default function GroupDetailsScreen() {
+         const {
+           data: { user },
+         } = await supabase.auth.getUser();
+         if (!user) return;
+ 
+-        const { data: appRow, error: appFetchError } = await supabase
+-          .from("gig_applications")
+-          .select("id, group_id, group:groups!group_id(owner_id)")
+-          .eq("id", app.id)
+-          .maybeSingle();
+-
+-        if (appFetchError) throw appFetchError;
+-        if (!appRow) throw new Error("Application not found.");
+-        const appGroup = Array.isArray(appRow.group) ? appRow.group[0] : appRow.group;
+-        if (appGroup?.owner_id !== user.id) {
+-          throw new Error("You are not authorized to update this application.");
+-        }
+-
+-        const { data, error } = await supabase
+-          .from("gig_applications")
+-          .update({
+-            leader_approval_status: decision,
+-            leader_reviewed_at: new Date().toISOString(),
+-          })
+-          .eq("id", app.id)
+-          .eq("group_id", appRow.group_id)
+-          .select("id, leader_approval_status, leader_reviewed_at")
+-          .single();
++        const { data: { session } } = await supabase.auth.getSession();
++        if (!session) return;
++
++        const { data, error } = await supabase.functions.invoke("gig-applications", {
++          body: {
++            action: "update_leader_approval",
++            applicationId: app.id,
++            decision,
++            userId: user.id,
++          },
++          headers: {
++            Authorization: `Bearer ${session.access_token}`,
++          },
++        });
+ 
+         if (error) throw error;
++        if (data?.error) throw new Error(data.error);
+ 
+         setApplications((prev) =>
+           prev.map((a) => (a.id === app.id ? { ...a, ...data } : a)),
+         );
+         setModalVisible(false);
+@@ -416,11 +360,11 @@ export default function GroupDetailsScreen() {
+     });
+     setModalVisible(true);
+   };
+ 
+   const handleToggleGigVisibility = async (value: boolean) => {
+-    if (!currentUserId || updatingGigVisibility || !supportsGigVisibilityPreference) return;
++    if (!currentUserId || updatingGigVisibility) return;
+ 
+     const previous = showGigStatuses;
+     setShowGigStatuses(value);
+     setUpdatingGigVisibility(true);
+ 
+@@ -438,15 +382,10 @@ export default function GroupDetailsScreen() {
+         value
+           ? "Your Active, Upcoming, and Done gigs are now visible to users."
+           : "Your Active, Upcoming, and Done gigs are now hidden from users.",
+       );
+     } catch (e: any) {
+-      if (isMissingShowGigStatusesColumnError(e)) {
+-        setSupportsGigVisibilityPreference(false);
+-        setShowGigStatuses(true);
+-        return;
+-      }
+       setShowGigStatuses(previous);
+       showAlert(
+         "error",
+         "Update Failed",
+         e?.message || "Could not update gig visibility.",
+@@ -660,42 +599,40 @@ export default function GroupDetailsScreen() {
+                   >
+                     {group?.description || "No description available."}
+                   </Text>
+                 </View>
+ 
+-                {supportsGigVisibilityPreference && (
+-                  <View
+-                    style={[
+-                      styles.visibilityCard,
+-                      {
+-                        backgroundColor: colors.surface,
+-                        borderColor: colors.border,
+-                      },
+-                    ]}
+-                  >
+-                    <View style={styles.visibilityTextWrap}>
+-                      <Text style={[styles.visibilityTitle, { color: colors.text }]}>
+-                        Show gig status publicly
+-                      </Text>
+-                      <Text
+-                        style={[
+-                          styles.visibilitySubtitle,
+-                          { color: colors.textSecondary },
+-                        ]}
+-                      >
+-                        Controls Active, Upcoming, and Done badges on your group and musician cards.
+-                      </Text>
+-                    </View>
+-                    <Switch
+-                      value={showGigStatuses}
+-                      onValueChange={handleToggleGigVisibility}
+-                      disabled={updatingGigVisibility}
+-                      trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: colors.primary + "66" }}
+-                      thumbColor={showGigStatuses ? colors.primary : "#9CA3AF"}
+-                    />
++                <View
++                  style={[
++                    styles.visibilityCard,
++                    {
++                      backgroundColor: colors.surface,
++                      borderColor: colors.border,
++                    },
++                  ]}
++                >
++                  <View style={styles.visibilityTextWrap}>
++                    <Text style={[styles.visibilityTitle, { color: colors.text }]}>
++                      Show gig status publicly
++                    </Text>
++                    <Text
++                      style={[
++                        styles.visibilitySubtitle,
++                        { color: colors.textSecondary },
++                      ]}
++                    >
++                      Controls Active, Upcoming, and Done badges on your group and musician cards.
++                    </Text>
+                   </View>
+-                )}
++                  <Switch
++                    value={showGigStatuses}
++                    onValueChange={handleToggleGigVisibility}
++                    disabled={updatingGigVisibility}
++                    trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: colors.primary + "66" }}
++                    thumbColor={showGigStatuses ? colors.primary : "#9CA3AF"}
++                  />
++                </View>
+ 
+                 <View
+                   style={[
+                     styles.visibilityCard,
+                     {

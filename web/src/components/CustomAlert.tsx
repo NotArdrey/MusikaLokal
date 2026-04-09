@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import React from "react";
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../context/ThemeContext";
 
 export type AlertType = "error" | "success" | "warning" | "info";
@@ -20,6 +20,8 @@ interface CustomAlertProps {
   buttons?: AlertButton[];
   onClose: () => void;
 }
+
+const IS_WEB = Platform.OS === "web";
 
 const alertConfig = {
   error: {
@@ -116,7 +118,7 @@ export default function CustomAlert({
               },
             ]}
           >
-            <Ionicons name={config.icon} size={40} color={config.color} />
+            <Ionicons name={config.icon} size={IS_WEB ? 34 : 38} color={config.color} />
           </View>
 
           {/* Title */}
@@ -139,9 +141,7 @@ export default function CustomAlert({
                     styles.button,
                     { backgroundColor: btnStyle.backgroundColor },
                     buttons.length > 1 && { flex: 1 },
-                    index > 0 && { marginLeft: 12 },
                   ]}
-                  activeOpacity={1}
                 >
                   <Text
                     style={[styles.buttonText, { color: btnStyle.textColor }]}
@@ -163,58 +163,61 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: IS_WEB ? 16 : 24,
+    paddingVertical: 20,
   },
   container: {
-    width: '100%',
-    maxWidth: 340,
-    borderRadius: 24,
-    padding: 28,
+    width: IS_WEB ? '92%' : '100%',
+    maxWidth: IS_WEB ? 380 : 340,
+    borderRadius: IS_WEB ? 18 : 24,
+    padding: IS_WEB ? 22 : 26,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 20,
-    elevation: 15,
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 12,
   },
   iconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: IS_WEB ? 68 : 74,
+    height: IS_WEB ? 68 : 74,
+    borderRadius: 999,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
-    borderWidth: 3,
+    marginBottom: 16,
+    borderWidth: 2,
   },
   title: {
-    fontSize: 20,
+    fontSize: IS_WEB ? 18 : 20,
     fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
     fontFamily: 'Poppins_700Bold',
   },
   message: {
     fontSize: 14,
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
+    lineHeight: IS_WEB ? 21 : 22,
+    marginBottom: IS_WEB ? 20 : 24,
     fontFamily: 'Poppins_400Regular',
   },
   buttonContainer: {
     flexDirection: 'row',
     width: '100%',
     justifyContent: 'center',
+    gap: 10,
   },
   button: {
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 100,
+    minWidth: IS_WEB ? 110 : 100,
+    minHeight: 44,
   },
   buttonText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     fontFamily: 'Poppins_600SemiBold',
     textAlign: 'center',

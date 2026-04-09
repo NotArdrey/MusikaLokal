@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
@@ -11,8 +11,56 @@ import Navbar from '../src/components/navbar';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
+const DEFAULT_GIG_IMAGE = 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop';
+
+const looksLikeDisplayImage = (uri: string) => {
+    if (!uri) return false;
+
+    const trimmed = uri.trim();
+    const lowered = trimmed.toLowerCase();
+    if (!lowered) return false;
+
+    if (lowered.startsWith('data:image/')) return true;
+
+    if (
+        lowered.includes('/documents/') ||
+        lowered.includes('/contracts/') ||
+        lowered.includes('business_permit') ||
+        lowered.includes('application/pdf')
+    ) {
+        return false;
+    }
+
+    if (/\.(jpg|jpeg|png|webp|gif|bmp|svg)(\?|$)/i.test(trimmed)) return true;
+    if (lowered.includes('/image') || lowered.includes('/images/')) return true;
+    return lowered.startsWith('http');
+};
+
+const resolveGigImage = (gig: any) => {
+    const imageList = Array.isArray(gig?.images) ? gig.images.filter((item: any) => typeof item === 'string') : [];
+    const best = imageList.find((img: string) => looksLikeDisplayImage(img));
+    return best || imageList[0] || DEFAULT_GIG_IMAGE;
+};
+
 export default function MyVenueScreen() {
     const { colors, isDark } = useTheme();
+    const { width } = useWindowDimensions();
+    const isWebDesktop = Platform.OS === 'web' && width >= 768;
+    const pageBackground = isWebDesktop
+        ? isDark
+            ? '#0A1224'
+            : '#E9EEF8'
+        : colors.background;
+    const pageCardBackground = isWebDesktop
+        ? isDark
+            ? '#0F172A'
+            : '#FFFFFF'
+        : colors.surface;
+    const borderSoft = isWebDesktop
+        ? isDark
+            ? '#1E2C48'
+            : '#D8E3F2'
+        : colors.border;
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
@@ -222,13 +270,13 @@ export default function MyVenueScreen() {
 
     return (
         <>
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
+            <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+                <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
                     <Header title="My Venue" />
 
                     <ScrollView
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={styles.scrollContent}
+                        contentContainerStyle={[styles.scrollContent, isWebDesktop && styles.scrollContentWeb]}
                         style={styles.flex1}
                         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     >
@@ -242,17 +290,20 @@ export default function MyVenueScreen() {
                         ) : (
                             gigs.map((gig) => (
                                 <View key={gig.id} style={[styles.cardContainer, {
-                                    backgroundColor: colors.surface,
-                                    shadowColor: colors.primary,
+                                    backgroundColor: pageCardBackground,
+                                    borderColor: borderSoft,
+                                }, isWebDesktop && styles.webSectionCard, {
+                                    shadowColor: isWebDesktop ? '#0F172A' : colors.primary,
                                 }]}>
                                     <View style={styles.imageWrapper}>
                                         <CachedImage
-                                            uri={(gig.images && gig.images[0]) || 'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800&fit=crop'}
+                                            uri={resolveGigImage(gig)}
                                             style={styles.cardImage}
                                             width={800}
                                             height={384}
                                             quality={72}
                                             cacheVersion={gig.updated_at || gig.created_at || gig.id}
+                                            contentFit="cover"
                                         />
                                         <View style={[styles.statusBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
                                             <Text style={[styles.statusText, { color: colors.primary }]}>{gig.status || 'Active'}</Text>
@@ -339,10 +390,27 @@ const styles = StyleSheet.create({
     flex1: {
         flex: 1,
     },
+    pageFrame: {
+        flex: 1,
+        width: '100%',
+    },
+    pageFrameWeb: {
+        maxWidth: 1240,
+        width: '100%',
+        alignSelf: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+    },
     scrollContent: {
         paddingHorizontal: 24,
         paddingBottom: 180,
         paddingTop: 16,
+    },
+    scrollContentWeb: {
+        maxWidth: 1120,
+        width: '100%',
+        alignSelf: 'center',
+        paddingTop: 12,
     },
     loadingText: {
         textAlign: 'center',
@@ -361,14 +429,23 @@ const styles = StyleSheet.create({
     cardContainer: {
         marginBottom: 24,
         borderRadius: 24,
+        borderWidth: 1,
         overflow: 'hidden',
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.1,
         shadowRadius: 16,
     },
+    webSectionCard: {
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        elevation: 3,
+    },
     imageWrapper: {
-        height: 192,
+        height: 224,
         position: 'relative',
+        overflow: 'hidden',
+        backgroundColor: '#0F172A',
     },
     cardImage: {
         width: '100%',

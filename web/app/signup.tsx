@@ -6,9 +6,10 @@ import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions, ImageBackground, Image } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
+import AuthMusicHero from '../src/components/AuthMusicHero';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import { useTheme } from '../src/context/ThemeContext';
 
@@ -1029,26 +1030,14 @@ export default function SignupScreen() {
             <>
                 <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
                     <ScrollView contentContainerStyle={isWebDesktop ? styles.webScrollContent : styles.scrollContent}>
-                        <ImageBackground
-                            source={isWebDesktop ? { uri: 'https://images.unsplash.com/photo-1540039155732-68473638c4b0?q=80&w=2070&auto=format&fit=crop' } : undefined}
-                            style={isWebDesktop ? { flex: 1, width: '100%' } : {}}
-                            imageStyle={isWebDesktop ? {} : { display: 'none' }}
-                        >
-                        <View style={isWebDesktop ? [styles.webContainer, { backgroundColor: 'transparent' }] : styles.contentContainer}>
+                        <View style={isWebDesktop ? styles.webContainer : styles.contentContainer}>
                             {/* Left Side Branding (Web Desktop Only) */}
                             {isWebDesktop && (
-                                <View style={[styles.webLeftPanel, { backgroundColor: 'rgba(0,0,0,0.4)' }]}>
-                                    <View style={styles.webHeroOverlay}>
-                                        <View style={[styles.logoWrapper, styles.shadow, { marginBottom: 32 }]}>
-                                            <Image
-                                                source={require('../assets/images/Musika-lokal-logo.png')}
-                                                style={styles.logoImage}
-                                                resizeMode="contain"
-                                            />
-                                        </View>
-                                        <Text style={styles.webHeroTitle}>Join{'\n'}MusikaLokal.</Text>
-                                        <Text style={styles.webHeroSubtitle}>Your journey into the local music scene starts here.</Text>
-                                    </View>
+                                <View style={styles.webLeftPanel}>
+                                    <AuthMusicHero
+                                        title={`Join\nMusikaLokal.`}
+                                        subtitle="Your journey into the local music scene starts here."
+                                    />
                                 </View>
                             )}
 
@@ -1059,8 +1048,7 @@ export default function SignupScreen() {
                                 </View>
                             </View>
                         </View>
-                    </ImageBackground>
-                </ScrollView>
+                    </ScrollView>
                 </KeyboardAvoidingView>
                 <CustomAlert
                     visible={alertVisible}
@@ -1078,27 +1066,15 @@ export default function SignupScreen() {
         <>
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
                 <ScrollView contentContainerStyle={isWebDesktop ? styles.webScrollContent : styles.scrollContent}>
-                    <ImageBackground
-                        source={isWebDesktop ? { uri: 'https://images.unsplash.com/photo-1540039155732-68473638c4b0?q=80&w=2070&auto=format&fit=crop' } : undefined}
-                        style={isWebDesktop ? { flex: 1, width: '100%' } : {}}
-                        imageStyle={isWebDesktop ? {} : { display: 'none' }}
-                    >
-                    <View style={isWebDesktop ? [styles.webContainer, { backgroundColor: 'transparent' }] : styles.contentContainer}>
+                    <View style={isWebDesktop ? styles.webContainer : styles.contentContainer}>
                         
                         {/* Left Side Branding (Web Desktop Only) */}
                         {isWebDesktop && (
-                            <View style={[styles.webLeftPanel, { backgroundColor: 'rgba(0,0,0,0.4)' }]}>
-                                <View style={styles.webHeroOverlay}>
-                                    <View style={[styles.logoWrapper, styles.shadow, { marginBottom: 32 }]}>
-                                        <Image
-                                            source={require('../assets/images/Musika-lokal-logo.png')}
-                                            style={styles.logoImage}
-                                            resizeMode="contain"
-                                        />
-                                    </View>
-                                    <Text style={styles.webHeroTitle}>Join{'\n'}MusikaLokal.</Text>
-                                    <Text style={styles.webHeroSubtitle}>Your journey into the local music scene starts here.</Text>
-                                </View>
+                            <View style={styles.webLeftPanel}>
+                                <AuthMusicHero
+                                    title={`Join\nMusikaLokal.`}
+                                    subtitle="Your journey into the local music scene starts here."
+                                />
                             </View>
                         )}
 
@@ -1119,8 +1095,7 @@ export default function SignupScreen() {
                             </View>
                         </View>
                     </View>
-                </ImageBackground>
-            </ScrollView>
+                </ScrollView>
             </KeyboardAvoidingView>
             <CustomAlert
                 visible={alertVisible}
@@ -1145,8 +1120,8 @@ const styles = StyleSheet.create({
     webHeroOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', padding: 64, justifyContent: 'center' },
     webHeroTitle: { color: 'white', fontSize: 48, fontFamily: 'Poppins_700Bold', lineHeight: 56, marginBottom: 16 },
     webHeroSubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 18, fontFamily: 'Poppins_400Regular', maxWidth: 400, lineHeight: 28 },
-    webRightPanel: { flex: 1, maxWidth: 800, justifyContent: 'center', alignItems: 'center', marginHorizontal: 'auto', width: '100%', paddingVertical: 64 },
-    webFormWrapper: { width: '100%', maxWidth: 500, paddingHorizontal: 32 },
+    webRightPanel: { flex: 1, maxWidth: 800, justifyContent: 'center', alignItems: 'center', padding: 64 },
+    webFormWrapper: { width: '100%', maxWidth: 500 },
     logoWrapper: { width: 64, height: 64, borderRadius: 16, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center' },
     logoImage: { width: 40, height: 40 },
     shadow: {

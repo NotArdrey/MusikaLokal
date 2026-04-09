@@ -86,8 +86,24 @@ export default function BookingsScreen() {
   const bookingDetailsRef =
     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
   const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === "web" && width >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? "#0A1224"
+      : "#E9EEF8"
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? "#0F172A"
+      : "#FFFFFF"
+    : colors.card;
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? "#1E2C48"
+      : "#D8E3F2"
+    : colors.border;
   const [modalMode, setModalMode] = useState<
-    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm"
+    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm" | "report_access"
   >("confirm");
 
   // Renew Contract State
@@ -139,6 +155,7 @@ export default function BookingsScreen() {
   const [userRole, setUserRole] = useState<string>("");
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
+  const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -199,6 +216,7 @@ export default function BookingsScreen() {
 
   useEffect(() => {
     setLocallyReportedLateBookings({});
+    setLocallyReportedAccessIssueBookings({});
   }, [userId]);
 
   // Track if user went to payment page (to auto-refresh on return)
@@ -858,7 +876,20 @@ export default function BookingsScreen() {
 
         return false;
       });
-      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted];
+      const normalizeStatus = (status?: string | null) =>
+        String(status || "").trim().toLowerCase();
+
+      const terminalGigApplications = rawReview.filter((item: any) => {
+        if (item.type_id !== "gig_application") return false;
+        const status = normalizeStatus(item.status);
+        return ["completed", "fired", "declined", "rejected", "cancelled"].includes(status);
+      });
+
+      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted, ...terminalGigApplications]
+        .filter(
+          (item: any, index: number, arr: any[]) =>
+            arr.findIndex((candidate: any) => candidate.id === item.id && candidate.type_id === item.type_id) === index,
+        );
       // Sort history by date (most recent first)
       historyItems.sort(
         (a: any, b: any) =>
@@ -918,19 +949,24 @@ export default function BookingsScreen() {
           ...(effectiveBookings?.Review || []).filter((item: any) => item.type_id === "gig_application"),
         ].filter((item: any) => !item.leader_approval_required);
 
-        // Separate by status
+        // Separate by status (use normalizeStatus for case-insensitive matching)
         const appliedApps = allGigApps.filter(
-          (app: any) => app.status === "Applied" || app.status === "Pending" || app.status === "pending"
+          (app: any) => {
+            const status = normalizeStatus(app.status);
+            return status === "applied" || status === "pending";
+          },
         );
         const acceptedApps = allGigApps.filter(
-          (app: any) => app.status === "Accepted" || app.status === "Happening Now"
+          (app: any) => {
+            const status = normalizeStatus(app.status);
+            return status === "accepted" || status === "happening now" || status === "confirmed";
+          },
         );
         const completedApps = allGigApps.filter(
-          (app: any) =>
-            app.status === "Completed" ||
-            app.status === "Declined" ||
-            app.status === "Rejected" ||
-            app.status === "Fired"
+          (app: any) => {
+            const status = normalizeStatus(app.status);
+            return ["completed", "declined", "rejected", "fired", "cancelled"].includes(status);
+          },
         );
 
         // Sort by date (most recent first for applied, closest first for accepted)
@@ -1027,7 +1063,26 @@ export default function BookingsScreen() {
 
       debugLog("📥 handleStatusUpdate response:", { data, error });
 
-      if (error) throw error;
+      if (error) {
+        const errorContext = (error as any)?.context;
+        let contextBody: any = null;
+
+        try {
+          contextBody = errorContext?.json ? await errorContext.json() : null;
+        } catch {
+          contextBody = null;
+        }
+
+        const contextMessage =
+          (contextBody && typeof contextBody === "object" && (contextBody.error || contextBody.message)) ||
+          null;
+
+        if (contextMessage && typeof contextMessage === "string") {
+          throw new Error(contextMessage);
+        }
+
+        throw error;
+      }
 
       if (
         typeId === "studio_booking" &&
@@ -1055,6 +1110,83 @@ export default function BookingsScreen() {
         (e as any)?.message ||
         (typeof e === "string" ? e : "Failed to update booking status.");
       showAlert("error", "Error", errorMessage);
+      return false;
+    }
+  }
+
+  async function handleReportAccessIssue(
+    item: any,
+    reason: string,
+  ): Promise<boolean> {
+    if (!item?.id) {
+      showAlert("error", "Error", "Booking not found.");
+      return false;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-bookings", {
+        body: {
+          action: "create_incident",
+          booking_id: item.id,
+          issue_type: "cannot_access_studio",
+          notes: reason,
+          userId,
+        },
+      });
+
+      if (error) {
+        const errorContext = (error as any)?.context;
+        let contextBody: any = null;
+
+        try {
+          contextBody = errorContext?.json ? await errorContext.json() : null;
+        } catch {
+          contextBody = null;
+        }
+
+        const contextMessage =
+          (contextBody &&
+            typeof contextBody === "object" &&
+            (contextBody.error || contextBody.message)) ||
+          null;
+
+        if (contextMessage && typeof contextMessage === "string") {
+          throw new Error(contextMessage);
+        }
+
+        throw error;
+      }
+
+      if (data?.incident?.booking_id) {
+        setLocallyReportedAccessIssueBookings((prev) => ({
+          ...prev,
+          [data.incident.booking_id]: true,
+        }));
+      } else {
+        setLocallyReportedAccessIssueBookings((prev) => ({
+          ...prev,
+          [item.id]: true,
+        }));
+      }
+
+      if (userId) fetchBookings(userId);
+      setModalVisible(false);
+      setCancellationReason("");
+
+      showAlert(
+        "success",
+        "Report submitted",
+        "Your report was sent. The studio owner has been notified and the booking issue is now under review.",
+      );
+      return true;
+    } catch (e) {
+      debugLog("Error reporting access issue:", e);
+      const errorMessage =
+        (e as any)?.message ||
+        (typeof e === "string"
+          ? e
+          : "We could not submit your report. Please try again.");
+      showAlert("error", "Unable to submit report", errorMessage);
       return false;
     }
   }
@@ -1130,6 +1262,25 @@ export default function BookingsScreen() {
     if (hasLateReportAlready(item)) return false;
 
     return isWithinLateReportWindow(item);
+  };
+
+  const hasAccessIssueAlready = (item: any) => {
+    if (item?.type_id !== "studio_booking") return false;
+
+    return (
+      Boolean(item?.has_open_incident) ||
+      Boolean(locallyReportedAccessIssueBookings[item?.id])
+    );
+  };
+
+  const shouldShowAccessIssueReportButton = (item: any) => {
+    if (activeTab !== "Ongoing") return false;
+    if (item?.type_id !== "studio_booking") return false;
+    if (userRole !== "musician") return false;
+    if (item?.isCancelled) return false;
+    if (hasAccessIssueAlready(item)) return false;
+
+    return true;
   };
 
   const shouldShowMessageForItem = (item: any) => {
@@ -2133,8 +2284,8 @@ export default function BookingsScreen() {
 
   if (isGuest) {
     return (
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}> 
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
         <Header title="My Activity" />
         <GuestSignInGate message="Sign in to view your bookings and activity." />
         <Navbar />
@@ -2145,12 +2296,21 @@ export default function BookingsScreen() {
 
   return (
     <>
-      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
+      <View style={[styles.flex1, { backgroundColor: pageBackground }]}> 
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
         <Header title={userRole === "venue-owner" ? "Manage Applications" : "My Activity"} />
 
         {/* Tab Navigation */}
-        <View style={[styles.tabContainer, width >= 768 && { width: '100%' }]}>
+        <View
+          style={[
+            styles.tabContainer,
+            width >= 768 && { width: '100%' },
+            isWebDesktop && [
+              styles.webSectionCard,
+              { backgroundColor: pageCardBackground, borderColor: borderSoft },
+            ],
+          ]}
+        >
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -2175,6 +2335,7 @@ export default function BookingsScreen() {
           contentContainerStyle={[
             styles.scrollContent,
             width >= 768 && { width: '100%' },
+            isWebDesktop && styles.scrollContentWeb,
           ]}
         >
           {loading ? (
@@ -2230,10 +2391,11 @@ export default function BookingsScreen() {
                     key={item.id}
                     style={[
                       styles.cardContainer,
+                      isWebDesktop && styles.cardContainerWeb,
                       width >= 768 && { width: '48%', flexGrow: 1, marginBottom: 0 },
                       {
-                        backgroundColor: colors.card,
-                        borderColor: colors.border,
+                        backgroundColor: pageCardBackground,
+                        borderColor: borderSoft,
                       },
                     ]}
                   >
@@ -3689,6 +3851,38 @@ export default function BookingsScreen() {
                                 </TouchableOpacity>
                               )}
 
+                            {shouldShowAccessIssueReportButton(item) && (
+                              <TouchableOpacity activeOpacity={1}
+                                onPress={() => {
+                                  setSelectedItem(item);
+                                  setModalMode("report_access");
+                                  setCancellationReason("");
+                                  setModalVisible(true);
+                                }}
+                                style={[
+                                  styles.outlineButton,
+                                  {
+                                    borderColor: "#EF4444",
+                                    backgroundColor: isDark
+                                      ? "rgba(239, 68, 68, 0.12)"
+                                      : "#FEF2F2",
+                                    width: "100%",
+                                    alignItems: "center",
+                                    borderRadius: 100,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.outlineButtonText,
+                                    { color: "#DC2626" },
+                                  ]}
+                                >
+                                  Report Access Issue
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+
                             {/* Pay Balance / Clear Balance (F2F) Buttons */}
                             {activeTab === "Upcoming" &&
                               item.type_id === "studio_booking" &&
@@ -3886,13 +4080,15 @@ export default function BookingsScreen() {
                     ? "Renew Contract"
                     : modalMode === "clear_balance"
                       ? "Clear Remaining Balance"
-                      : modalMode === "late_confirm"
+                  : modalMode === "late_confirm"
                         ? "Confirm Late Report"
                       : modalMode === "late"
                         ? "Report Late"
-                        : selectedItem?.type_id === "gig_application"
-                          ? "Withdraw from Gig"
-                          : "Cancel Booking"
+                        : modalMode === "report_access"
+                          ? "Report Access Issue"
+                          : selectedItem?.type_id === "gig_application"
+                            ? "Withdraw from Gig"
+                            : "Cancel Booking"
         }
         message={
           modalMode === "confirm"
@@ -3919,7 +4115,9 @@ export default function BookingsScreen() {
                         ? `Send this late-arrival reason to the studio owner?\n\n${cancellationReason.trim()}`
                       : modalMode === "late"
                         ? "Please provide your reason for being late."
-                        : (() => {
+                        : modalMode === "report_access"
+                          ? "Describe the access issue. Your report will be sent to the studio owner and the booking will be flagged for review."
+                          : (() => {
                           // Cancel mode
                           if (selectedItem?.type_id === "gig_application") {
                             // For gig applications
@@ -3991,7 +4189,9 @@ export default function BookingsScreen() {
                           ? "Send Report"
                         : modalMode === "late"
                           ? "Submit"
-                          : "Yes, Cancel Booking"
+                          : modalMode === "report_access"
+                            ? "Submit Report"
+                            : "Yes, Cancel Booking"
         }
         showInput={
           modalMode !== "confirm" &&
@@ -4000,7 +4200,7 @@ export default function BookingsScreen() {
           modalMode !== "late_confirm" &&
           modalMode !== "clear_balance" &&
           !(modalMode === "decline" && selectedItem?.leader_approval_required)
-        } // Show input for cancel AND decline AND fire
+        } // Show input for cancel AND decline AND fire AND late AND report_access
         danger={
           modalMode === "fire" ||
           modalMode === "decline" ||
@@ -4013,7 +4213,8 @@ export default function BookingsScreen() {
             (modalMode === "cancel" ||
               modalMode === "decline" ||
               modalMode === "fire" ||
-              modalMode === "late") &&
+              modalMode === "late" ||
+              modalMode === "report_access") &&
             !(modalMode === "decline" && selectedItem?.leader_approval_required) &&
             !cancellationReason.trim()
           ) {
@@ -4061,6 +4262,11 @@ export default function BookingsScreen() {
 
             if (modalMode === "late") {
               setModalMode("late_confirm");
+              return;
+            }
+
+            if (modalMode === "report_access") {
+              await handleReportAccessIssue(selectedItem, cancellationReason);
               return;
             }
 
@@ -4349,9 +4555,31 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: "100%",
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   tabContainer: {
     paddingTop: moderateScale(16),
     paddingBottom: moderateScale(8),
+  },
+  webSectionCard: {
+    borderRadius: moderateScale(18),
+    borderWidth: 1,
+    paddingVertical: moderateScale(12),
+    marginTop: moderateScale(8),
+    marginBottom: moderateScale(8),
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 3,
   },
   tabScrollContent: {
     paddingHorizontal: scale(24),
@@ -4375,6 +4603,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(24),
     paddingTop: moderateScale(16),
   },
+  scrollContentWeb: {
+    maxWidth: 1160,
+    alignSelf: "center",
+    paddingHorizontal: 12,
+    paddingTop: moderateScale(18),
+  },
   centerContainer: {
     alignItems: "center",
     justifyContent: "center",
@@ -4397,6 +4631,7 @@ const styles = StyleSheet.create({
   cardContainer: {
     marginBottom: SCREEN_HEIGHT < 700 ? moderateScale(12) : moderateScale(16),
     borderRadius: moderateScale(16),
+    borderWidth: 1,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
     // Tighter, crisp native mobile shadow
@@ -4404,6 +4639,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 6,
+    elevation: 3,
+  },
+  cardContainerWeb: {
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.09,
+    shadowRadius: 16,
     elevation: 3,
   },
   cardImage: {

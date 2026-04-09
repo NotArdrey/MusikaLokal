@@ -1,0 +1,985 @@
+diff --git a/mobile/app/bookings.tsx b/web/app/bookings.tsx
+index d0c5915..ecdbe2f 100644
+--- a/mobile/app/bookings.tsx
++++ b/web/app/bookings.tsx
+@@ -14,10 +14,11 @@ import {
+     StyleSheet,
+     Text,
+     TouchableOpacity,
+     useWindowDimensions,
+     View,
++    Platform,
+ } from "react-native";
+ import { supabase } from "../lib/supabase";
+ import BookingDetailsSheet from "../src/components/BookingDetailsSheet";
+ import CachedImage from "../src/components/CachedImage";
+ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
+@@ -32,18 +33,19 @@ import { createBookingCheckout } from "../src/services/paymongo";
+ const debugLog = (..._args: unknown[]) => { };
+ 
+ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+ 
+ // Responsive scaling utilities - optimized for iPhone SE and smaller devices
++const scaleWidth = Math.min(SCREEN_WIDTH, 600); // Clamp width for web
+ const scale = (size: number) => {
+-  const newSize = (SCREEN_WIDTH / 375) * size;
++  const newSize = (scaleWidth / 375) * size;
+   return Math.max(newSize, size * 0.85); // Minimum 85% of original size
+ };
+ const verticalScale = (size: number) => {
+   const baseHeight = 812;
+   const ratio = SCREEN_HEIGHT / baseHeight;
+-  const clampedRatio = Math.max(0.8, Math.min(1.2, ratio));
++  const clampedRatio = Math.max(0.8, Math.min(1.1, ratio));
+   return size * clampedRatio;
+ };
+ const moderateScale = (size: number, factor = 0.3) => {
+   const scaled = scale(size);
+   return size + (scaled - size) * factor;
+@@ -83,11 +85,11 @@ export default function BookingsScreen() {
+   const [cancellationReason, setCancellationReason] = useState("");
+   const bookingDetailsRef =
+     React.useRef<import("@gorhom/bottom-sheet").BottomSheetModal>(null);
+   const { width } = useWindowDimensions();
+   const [modalMode, setModalMode] = useState<
+-    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm" | "report_access"
++    "confirm" | "cancel" | "decline" | "fire" | "complete" | "renew" | "clear_balance" | "late" | "late_confirm"
+   >("confirm");
+ 
+   // Renew Contract State
+   const [showRenewModal, setShowRenewModal] = useState(false);
+   const [renewGigId, setRenewGigId] = useState<string | null>(null);
+@@ -135,11 +137,10 @@ export default function BookingsScreen() {
+   });
+   const [loading, setLoading] = useState(false);
+   const [userRole, setUserRole] = useState<string>("");
+   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
+   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
+-  const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
+   const [alertVisible, setAlertVisible] = useState(false);
+   const [alertConfig, setAlertConfig] = useState<{
+     type: AlertType;
+     title: string;
+     message: string;
+@@ -196,11 +197,10 @@ export default function BookingsScreen() {
+     };
+   }, []);
+ 
+   useEffect(() => {
+     setLocallyReportedLateBookings({});
+-    setLocallyReportedAccessIssueBookings({});
+   }, [userId]);
+ 
+   // Track if user went to payment page (to auto-refresh on return)
+   const paymentInProgressRef = useRef(false);
+   const pendingPaymentBookingId = useRef<string | null>(null);
+@@ -794,13 +794,10 @@ export default function BookingsScreen() {
+             latest_late_report_reason: lateReportMeta?.latestReason || null,
+             latest_late_report_at: lateReportMeta?.latestCreatedAt || null,
+           };
+         });
+ 
+-      const normalizeStatus = (status?: string | null) =>
+-        String(status || "").trim().toLowerCase();
+-
+       // Separate Items Logic
+ 
+       // 1. Applicants (Pending Gig items)
+       const rawPending = attachLateReportMeta(effectiveBookings?.Pending || []);
+       const pendingGigApplications = rawPending.filter(
+@@ -859,21 +856,11 @@ export default function BookingsScreen() {
+           return item.reviewed_by_customer === true;
+         }
+ 
+         return false;
+       });
+-      const terminalGigApplications = rawReview.filter((item: any) => {
+-        if (item.type_id !== "gig_application") return false;
+-        const status = normalizeStatus(item.status);
+-        return ["completed", "fired", "declined", "rejected", "cancelled"].includes(status);
+-      });
+-
+-      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted, ...terminalGigApplications]
+-        .filter(
+-          (item: any, index: number, arr: any[]) =>
+-            arr.findIndex((candidate: any) => candidate.id === item.id && candidate.type_id === item.type_id) === index,
+-        );
++      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted];
+       // Sort history by date (most recent first)
+       historyItems.sort(
+         (a: any, b: any) =>
+           new Date(b.raw_date || b.date).getTime() -
+           new Date(a.raw_date || a.date).getTime(),
+@@ -931,26 +918,21 @@ export default function BookingsScreen() {
+           ...(effectiveBookings?.Review || []).filter((item: any) => item.type_id === "gig_application"),
+         ].filter((item: any) => !item.leader_approval_required);
+ 
+         // Separate by status
+         const appliedApps = allGigApps.filter(
+-          (app: any) => {
+-            const status = normalizeStatus(app.status);
+-            return status === "applied" || status === "pending";
+-          },
++          (app: any) => app.status === "Applied" || app.status === "Pending" || app.status === "pending"
+         );
+         const acceptedApps = allGigApps.filter(
+-          (app: any) => {
+-            const status = normalizeStatus(app.status);
+-            return status === "accepted" || status === "happening now" || status === "confirmed";
+-          },
++          (app: any) => app.status === "Accepted" || app.status === "Happening Now"
+         );
+         const completedApps = allGigApps.filter(
+-          (app: any) => {
+-            const status = normalizeStatus(app.status);
+-            return ["completed", "declined", "rejected", "fired", "cancelled"].includes(status);
+-          },
++          (app: any) =>
++            app.status === "Completed" ||
++            app.status === "Declined" ||
++            app.status === "Rejected" ||
++            app.status === "Fired"
+         );
+ 
+         // Sort by date (most recent first for applied, closest first for accepted)
+         appliedApps.sort(
+           (a: any, b: any) =>
+@@ -1043,43 +1025,11 @@ export default function BookingsScreen() {
+         error = invokeResult.error;
+       }
+ 
+       debugLog("???? handleStatusUpdate response:", { data, error });
+ 
+-      if (error) {
+-        const errorContext = (error as any)?.context;
+-        let contextBody: any = null;
+-
+-        try {
+-          contextBody = errorContext?.json ? await errorContext.json() : null;
+-        } catch {
+-          contextBody = null;
+-        }
+-
+-        console.log("[Bookings][handleStatusUpdate][Edge Function error]", {
+-          bookingId,
+-          newStatus,
+-          typeId,
+-          errorMessage: (error as any)?.message,
+-          errorStatus: (error as any)?.status,
+-          errorCode: (error as any)?.code,
+-          errorDetails: (error as any)?.details,
+-          contextStatus: errorContext?.status,
+-          contextStatusText: errorContext?.statusText,
+-          contextBody,
+-        });
+-
+-        const contextMessage =
+-          (contextBody && typeof contextBody === "object" && (contextBody.error || contextBody.message)) ||
+-          null;
+-
+-        if (contextMessage && typeof contextMessage === "string") {
+-          throw new Error(contextMessage);
+-        }
+-
+-        throw error;
+-      }
++      if (error) throw error;
+ 
+       if (
+         typeId === "studio_booking" &&
+         attendanceStatuses.includes(newStatus) &&
+         data &&
+@@ -1107,87 +1057,10 @@ export default function BookingsScreen() {
+       showAlert("error", "Error", errorMessage);
+       return false;
+     }
+   }
+ 
+-  async function handleReportAccessIssue(
+-    item: any,
+-    reason: string,
+-  ): Promise<boolean> {
+-    if (!item?.id) {
+-      showAlert("error", "Error", "Booking not found.");
+-      return false;
+-    }
+-
+-    try {
+-      const { data, error } = await supabase.functions.invoke("manage-bookings", {
+-        body: {
+-          action: "create_incident",
+-          booking_id: item.id,
+-          issue_type: "cannot_access_studio",
+-          notes: reason,
+-          userId,
+-        },
+-      });
+-
+-      if (error) {
+-        const errorContext = (error as any)?.context;
+-        let contextBody: any = null;
+-
+-        try {
+-          contextBody = errorContext?.json ? await errorContext.json() : null;
+-        } catch {
+-          contextBody = null;
+-        }
+-
+-        const contextMessage =
+-          (contextBody &&
+-            typeof contextBody === "object" &&
+-            (contextBody.error || contextBody.message)) ||
+-          null;
+-
+-        if (contextMessage && typeof contextMessage === "string") {
+-          throw new Error(contextMessage);
+-        }
+-
+-        throw error;
+-      }
+-
+-      if (data?.incident?.booking_id) {
+-        setLocallyReportedAccessIssueBookings((prev) => ({
+-          ...prev,
+-          [data.incident.booking_id]: true,
+-        }));
+-      } else {
+-        setLocallyReportedAccessIssueBookings((prev) => ({
+-          ...prev,
+-          [item.id]: true,
+-        }));
+-      }
+-
+-      if (userId) fetchBookings(userId);
+-      setModalVisible(false);
+-      setCancellationReason("");
+-
+-      showAlert(
+-        "success",
+-        "Report submitted",
+-        "Your report was sent. The studio owner has been notified and the booking issue is now under review.",
+-      );
+-      return true;
+-    } catch (e) {
+-      debugLog("Error reporting access issue:", e);
+-      const errorMessage =
+-        (e as any)?.message ||
+-        (typeof e === "string"
+-          ? e
+-          : "We could not submit your report. Please try again.");
+-      showAlert("error", "Unable to submit report", errorMessage);
+-      return false;
+-    }
+-  }
+-
+   const handleDetailsPress = (item: any) => {
+     setSelectedItem(item);
+     bookingDetailsRef.current?.present();
+   };
+ 
+@@ -1234,19 +1107,10 @@ export default function BookingsScreen() {
+     if (item?.type_id !== "studio_booking") return false;
+ 
+     return Boolean(item?.has_late_report) || Boolean(locallyReportedLateBookings[item?.id]);
+   };
+ 
+-  const hasAccessIssueAlready = (item: any) => {
+-    if (item?.type_id !== "studio_booking") return false;
+-
+-    return (
+-      Boolean(item?.has_open_incident) ||
+-      Boolean(locallyReportedAccessIssueBookings[item?.id])
+-    );
+-  };
+-
+   const isWithinLateReportWindow = (item: any) => {
+     if (item?.type_id !== "studio_booking") return false;
+     if (!item?.raw_date || !item?.start_time) return false;
+ 
+     const bookingStart = new Date(`${item.raw_date}T${item.start_time}`);
+@@ -1266,20 +1130,10 @@ export default function BookingsScreen() {
+     if (hasLateReportAlready(item)) return false;
+ 
+     return isWithinLateReportWindow(item);
+   };
+ 
+-  const shouldShowAccessIssueReportButton = (item: any) => {
+-    if (activeTab !== "Ongoing") return false;
+-    if (item?.type_id !== "studio_booking") return false;
+-    if (userRole !== "musician") return false;
+-    if (item?.isCancelled) return false;
+-    if (hasAccessIssueAlready(item)) return false;
+-
+-    return true;
+-  };
+-
+   const shouldShowMessageForItem = (item: any) => {
+     if (isReviewOrCompletedContext) return false;
+ 
+     if (item.type_id === "studio_booking") {
+       return userRole === "musician"
+@@ -1623,45 +1477,32 @@ export default function BookingsScreen() {
+           ? "organizer"
+           : "applicant";
+ 
+     // For studio owners reviewing musicians, target the user
+     // For musicians reviewing studios, target the studio
+-    const gigBaseName = typeof item.name === "string" ? item.name.split(" - ")[0] : "Gig";
+-
+     const params: any = {
+       bookingId: item.id,
+       bookingType: item.type_id,
++      entityName: item.name,
+       reviewerRole,
+-      // Keep venue owners on Manage Applications > Completed after review submit.
+-      returnTab: userRole === "venue-owner" ? "Review" : activeTab,
+     };
+ 
+     if (item.type_id === "studio_booking") {
+       if (isOwner) {
+         // Owner reviews the musician (user)
+         params.targetUserId = item.user_id;
+-        params.entityName = item.customer_name || "Musician";
+       } else {
+         // Musician reviews the studio
+         params.studioId = item.studio_id;
+-        params.entityName = item.name || "Studio";
+       }
+     } else if (item.type_id === "gig_application") {
+       if (isOrganizer) {
+-        // Venue owner reviews the actual performer target:
+-        // group/duo applications -> review group, solo applications -> review user.
+-        if (item.group_id) {
+-          params.groupId = item.group_id;
+-          params.entityName = item.performer || item.customer_name || "Group";
+-        } else {
+-          params.targetUserId = item.applicant_id;
+-          params.entityName = item.customer_name || item.performer || "Musician";
+-        }
++        // Venue owner reviews the applicant
++        params.targetUserId = item.applicant_id;
+       } else {
+         // Musician reviews the gig
+         params.gigId = item.gig_id;
+-        params.entityName = gigBaseName;
+       }
+     }
+ 
+     router.push({
+       pathname: "/submit_review",
+@@ -2225,36 +2066,10 @@ export default function BookingsScreen() {
+         )}
+       </TouchableOpacity>
+     );
+   };
+ 
+-  const inferApplicationKind = (item: any): "solo" | "duo" | "group" => {
+-    const candidates = [
+-      item?.performer,
+-      item?.type,
+-      item?.application_type,
+-      item?.slot_type,
+-      item?.category,
+-    ]
+-      .filter(Boolean)
+-      .join(" ")
+-      .toLowerCase();
+-
+-    if (candidates.includes("duo")) return "duo";
+-    if (candidates.includes("group") || candidates.includes("band")) return "group";
+-    if (candidates.includes("solo") || candidates.includes("individual")) return "solo";
+-    if (item?.group_id) return "group";
+-    return "solo";
+-  };
+-
+-  const getApplicationDisplayLabel = (item: any): string => {
+-    const kind = inferApplicationKind(item);
+-    if (kind === "duo") return "Duo";
+-    if (kind === "group") return "Group";
+-    return "Solo Artist";
+-  };
+-
+   const renderTab = (tab: Tab) => {
+     // Hide Applicants tab if not venue owner AND empty
+     if (
+       tab === "Applicants" &&
+       userRole !== "venue-owner" &&
+@@ -2317,24 +2132,27 @@ export default function BookingsScreen() {
+   };
+ 
+   if (isGuest) {
+     return (
+       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
++        <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
+         <Header title="My Activity" />
+         <GuestSignInGate message="Sign in to view your bookings and activity." />
+         <Navbar />
++        </View>
+       </View>
+     );
+   }
+ 
+   return (
+     <>
+       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
++        <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
+         <Header title={userRole === "venue-owner" ? "Manage Applications" : "My Activity"} />
+ 
+         {/* Tab Navigation */}
+-        <View style={styles.tabContainer}>
++        <View style={[styles.tabContainer, width >= 768 && { width: '100%' }]}>
+           <ScrollView
+             horizontal
+             showsHorizontalScrollIndicator={false}
+             contentContainerStyle={styles.tabScrollContent}
+           >
+@@ -2352,11 +2170,14 @@ export default function BookingsScreen() {
+           </ScrollView>
+         </View>
+ 
+         <ScrollView
+           showsVerticalScrollIndicator={false}
+-          contentContainerStyle={styles.scrollContent}
++          contentContainerStyle={[
++            styles.scrollContent,
++            width >= 768 && { width: '100%' },
++          ]}
+         >
+           {loading ? (
+             <View style={styles.centerContainer}>
+               <Text
+                 style={[styles.loadingText, { color: colors.textSecondary }]}
+@@ -2391,28 +2212,27 @@ export default function BookingsScreen() {
+                   When musicians apply to your gigs, they'll appear here
+                 </Text>
+               )}
+             </View>
+           ) : (
+-            currentItems.map((item: any) => {
+-              // ==========================================
++            <View style={[width >= 768 && { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 16 }]}>
++              {currentItems.map((item: any) => {
++                // ==========================================
+               // 1. GIG APPLICATION CARD (Recruitment View)
+               // ==========================================
+               if (item.type_id === "gig_application") {
+                 // Determine if this is the musician's own application view
+                 const isMusicianView = userRole === "musician";
+                 const isLeaderConfirmation = !!item.leader_approval_required;
+                 const gigName = item.name ? item.name.split(" - ")[0] : "Gig";
+-                const applicationLabel = getApplicationDisplayLabel(item);
+-                const applicationIcon = applicationLabel === "Solo Artist" ? "person-outline" : "people-outline";
+-                const applicationTypeBadge = `${applicationLabel} Application`;
+ 
+                 return (
+                   <View
+                     key={item.id}
+                     style={[
+                       styles.cardContainer,
++                      width >= 768 && { width: '48%', flexGrow: 1, marginBottom: 0 },
+                       {
+                         backgroundColor: colors.card,
+                         borderColor: colors.border,
+                       },
+                     ]}
+@@ -2433,11 +2253,11 @@ export default function BookingsScreen() {
+                         quality={72}
+                         cacheVersion={item.updated_at || item.created_at || item.id}
+                       />
+                       <View style={styles.typeBadge}>
+                         <Text style={styles.typeBadgeText}>
+-                          {applicationTypeBadge}
++                          {item.type || "Application"}
+                         </Text>
+                       </View>
+                       <View
+                         style={[
+                           styles.typeBadge,
+@@ -2483,21 +2303,23 @@ export default function BookingsScreen() {
+ 
+                           <View style={{ marginTop: 8, gap: 4 }}>
+                             {/* Role / Context */}
+                             <View style={styles.cardDetailRow}>
+                               <Ionicons
+-                                name={isMusicianView ? (applicationIcon as any) : (applicationIcon as any)}
++                                name={isMusicianView ? "person-outline" : item.group_id ? "people-outline" : "mic-outline"}
+                                 size={14}
+                                 color={colors.primary}
+                               />
+                               <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
+                                 {isMusicianView
+                                   ? isLeaderConfirmation
+                                     ? `Member submission by ${item.customer_name || "Group Member"}`
+-                                    : `Applied as ${applicationLabel}`
+-                                  : applicationLabel !== "Solo Artist"
+-                                    ? `${applicationLabel} applied for ${gigName}`
++                                    : item.performer
++                                      ? `Applied as ${item.performer}`
++                                      : "Applied as Solo Artist"
++                                  : item.group_id
++                                    ? `Applied for ${gigName}`
+                                     : `Applied for ${gigName}`}
+                               </Text>
+                             </View>
+ 
+                             {/* Location */}
+@@ -2958,12 +2780,16 @@ export default function BookingsScreen() {
+                                     ? "rgba(239, 68, 68, 0.2)"
+                                     : "#FEF2F2",
+                                   padding: 10,
+                                   borderRadius: 100,
+                                   alignItems: "center",
++                                  flexDirection: "row",
++                                  justifyContent: "center",
++                                  gap: 6,
+                                 }}
+                               >
++                                <Ionicons name="flame" size={16} color="#EF4444" />
+                                 <Text
+                                   style={{
+                                     color: "#EF4444",
+                                     fontFamily: "Poppins_700Bold",
+                                     fontSize: 12,
+@@ -2973,45 +2799,30 @@ export default function BookingsScreen() {
+                                 </Text>
+                               </TouchableOpacity>
+ 
+                               <TouchableOpacity activeOpacity={1}
+                                 onPress={() => {
+-                                  console.log("[Bookings][Active Musicians][COMPLETE pressed]", {
+-                                    timestamp: new Date().toISOString(),
+-                                    activeTab,
+-                                    userRole,
+-                                    modalModeBeforeOpen: modalMode,
+-                                    booking: {
+-                                      id: item?.id,
+-                                      type_id: item?.type_id,
+-                                      status: item?.status,
+-                                      booking_status: item?.booking_status,
+-                                      applicant_name: item?.applicant_name,
+-                                      user_id: item?.user_id,
+-                                      applicant_id: item?.applicant_id,
+-                                      organizer_id: item?.organizer_id,
+-                                      gig_id: item?.gig_id,
+-                                      title: item?.title,
+-                                      gig_title: item?.gig_title,
+-                                      venue_name: item?.venue_name,
+-                                      raw_date: item?.raw_date,
+-                                      start_time: item?.start_time,
+-                                      end_time: item?.end_time,
+-                                    },
+-                                  });
+                                   setSelectedItem(item);
+                                   setModalMode("complete");
+                                   setModalVisible(true);
+                                 }}
+                                 style={{
+                                   flex: 1,
+                                   backgroundColor: "#10B981",
+                                   padding: 10,
+                                   borderRadius: 100,
+                                   alignItems: "center",
++                                  flexDirection: "row",
++                                  justifyContent: "center",
++                                  gap: 6,
+                                 }}
+                               >
++                                <Ionicons
++                                  name="checkmark-circle"
++                                  size={16}
++                                  color="white"
++                                />
+                                 <Text
+                                   style={{
+                                     color: "white",
+                                     fontFamily: "Poppins_700Bold",
+                                     fontSize: 12,
+@@ -3022,41 +2833,39 @@ export default function BookingsScreen() {
+                               </TouchableOpacity>
+                             </View>
+                           ) : activeTab === "Review" ? (
+                             // Review Tab: Leave Review + Renew Contract for venue owners
+                             <View style={{ flexDirection: "row", gap: 8, flex: 1 }}>
+-                              {!(userRole === "venue-owner" && item.type_id === "gig_application") && (
+-                                <TouchableOpacity activeOpacity={1}
+-                                  onPress={() => handleLeaveReview(item)}
++                              <TouchableOpacity activeOpacity={1}
++                                onPress={() => handleLeaveReview(item)}
++                                style={{
++                                  flex: 1,
++                                  borderColor: colors.primary,
++                                  borderWidth: 1,
++                                  padding: 10,
++                                  borderRadius: 100,
++                                  alignItems: "center",
++                                  flexDirection: "row",
++                                  justifyContent: "center",
++                                  gap: 6,
++                                }}
++                              >
++                                <Ionicons
++                                  name="star-outline"
++                                  size={16}
++                                  color={colors.primary}
++                                />
++                                <Text
+                                   style={{
+-                                    flex: 1,
+-                                    borderColor: colors.primary,
+-                                    borderWidth: 1,
+-                                    padding: 10,
+-                                    borderRadius: 100,
+-                                    alignItems: "center",
+-                                    flexDirection: "row",
+-                                    justifyContent: "center",
+-                                    gap: 6,
++                                    color: colors.primary,
++                                    fontFamily: "Poppins_500Medium",
++                                    fontSize: 12,
+                                   }}
+                                 >
+-                                  <Ionicons
+-                                    name="star-outline"
+-                                    size={16}
+-                                    color={colors.primary}
+-                                  />
+-                                  <Text
+-                                    style={{
+-                                      color: colors.primary,
+-                                      fontFamily: "Poppins_500Medium",
+-                                      fontSize: 12,
+-                                    }}
+-                                  >
+-                                    Leave Review
+-                                  </Text>
+-                                </TouchableOpacity>
+-                              )}
++                                  Leave Review
++                                </Text>
++                              </TouchableOpacity>
+ 
+                               {userRole === "venue-owner" && (
+                                 <TouchableOpacity activeOpacity={1}
+                                   onPress={() => handleRenewContract(item)}
+                                   style={{
+@@ -3124,10 +2933,11 @@ export default function BookingsScreen() {
+               return (
+                 <View
+                   key={item.id}
+                   style={[
+                     styles.cardContainer,
++                    width >= 768 && { width: '48%', flexGrow: 1, marginBottom: 0 },
+                     {
+                       backgroundColor: colors.card,
+                       borderColor: colors.border,
+                     },
+                   ]}
+@@ -3824,45 +3634,26 @@ export default function BookingsScreen() {
+                                 View Details
+                               </Text>
+                             </TouchableOpacity>
+                           </View>
+                         ) : activeTab === "Review" ? (
+-                          userRole === "venue-owner" && item.type_id === "gig_application" ? (
+-                            <TouchableOpacity activeOpacity={1}
+-                              onPress={() => handleDetailsPress(item)}
+-                              style={[
+-                                styles.outlineButton,
+-                                { borderColor: colors.border },
+-                              ]}
+-                            >
+-                              <Text
+-                                style={[
+-                                  styles.outlineButtonText,
+-                                  { color: colors.textSecondary },
+-                                ]}
+-                              >
+-                                View Details
+-                              </Text>
+-                            </TouchableOpacity>
+-                          ) : (
+-                            <TouchableOpacity activeOpacity={1}
+-                              onPress={() => handleLeaveReview(item)}
++                          <TouchableOpacity activeOpacity={1}
++                            onPress={() => handleLeaveReview(item)}
++                            style={[
++                              styles.outlineButton,
++                              { borderColor: colors.primary },
++                            ]}
++                          >
++                            <Text
+                               style={[
+-                                styles.outlineButton,
+-                                { borderColor: colors.primary },
++                                styles.outlineButtonText,
++                                { color: colors.primary },
+                               ]}
+                             >
+-                              <Text
+-                                style={[
+-                                  styles.outlineButtonText,
+-                                  { color: colors.primary },
+-                                ]}
+-                              >
+-                                Leave Review
+-                              </Text>
+-                            </TouchableOpacity>
+-                          )
++                              Leave Review
++                            </Text>
++                          </TouchableOpacity>
+                         ) : (
+                           // Default / Upcoming Buttons
+                           <View
+                             style={{ width: "100%", gap: moderateScale(8) }}
+                           >
+@@ -3896,73 +3687,10 @@ export default function BookingsScreen() {
+                                     Report Late
+                                   </Text>
+                                 </TouchableOpacity>
+                               )}
+ 
+-                            {shouldShowAccessIssueReportButton(item) && (
+-                              <TouchableOpacity activeOpacity={1}
+-                                onPress={() => {
+-                                  setSelectedItem(item);
+-                                  setModalMode("report_access");
+-                                  setCancellationReason("");
+-                                  setModalVisible(true);
+-                                }}
+-                                style={[
+-                                  styles.outlineButton,
+-                                  {
+-                                    borderColor: "#EF4444",
+-                                    backgroundColor: isDark
+-                                      ? "rgba(239, 68, 68, 0.14)"
+-                                      : "#FEF2F2",
+-                                    width: "100%",
+-                                    alignItems: "center",
+-                                    borderRadius: 100,
+-                                  },
+-                                ]}
+-                              >
+-                                <Text
+-                                  style={[
+-                                    styles.outlineButtonText,
+-                                    {
+-                                      color: isDark ? "#FCA5A5" : "#B91C1C",
+-                                    },
+-                                  ]}
+-                                >
+-                                  Report Access Issue
+-                                </Text>
+-                              </TouchableOpacity>
+-                            )}
+-
+-                            {activeTab === "Ongoing" &&
+-                              item.type_id === "studio_booking" &&
+-                              userRole === "musician" &&
+-                              hasAccessIssueAlready(item) && (
+-                                <View
+-                                  style={[
+-                                    styles.outlineButton,
+-                                    {
+-                                      borderColor: colors.border,
+-                                      backgroundColor: isDark
+-                                        ? "rgba(148, 163, 184, 0.14)"
+-                                        : "#F8FAFC",
+-                                      width: "100%",
+-                                      alignItems: "center",
+-                                      borderRadius: 100,
+-                                    },
+-                                  ]}
+-                                >
+-                                  <Text
+-                                    style={[
+-                                      styles.outlineButtonText,
+-                                      { color: colors.textSecondary },
+-                                    ]}
+-                                  >
+-                                    Access Issue Reported
+-                                  </Text>
+-                                </View>
+-                              )}
+-
+                             {/* Pay Balance / Clear Balance (F2F) Buttons */}
+                             {activeTab === "Upcoming" &&
+                               item.type_id === "studio_booking" &&
+                               item.payment_type === "downpayment" &&
+                               item.remaining_balance > 0 &&
+@@ -4121,17 +3849,19 @@ export default function BookingsScreen() {
+                       </View>
+                     </View>
+                   </View>
+                 </View>
+               );
+-            })
++            })}
++            </View>
+           )}
+         </ScrollView>
+ 
+         <View style={styles.navbarPosition}>
+           <Navbar />
+         </View>
++        </View>
+       </View>
+ 
+       <Modal
+         visible={modalVisible}
+         onClose={() => setModalVisible(false)}
+@@ -4154,12 +3884,10 @@ export default function BookingsScreen() {
+                   ? "Complete Contract"
+                   : modalMode === "renew"
+                     ? "Renew Contract"
+                     : modalMode === "clear_balance"
+                       ? "Clear Remaining Balance"
+-                      : modalMode === "report_access"
+-                        ? "Report Access Issue"
+                       : modalMode === "late_confirm"
+                         ? "Confirm Late Report"
+                       : modalMode === "late"
+                         ? "Report Late"
+                         : selectedItem?.type_id === "gig_application"
+@@ -4180,17 +3908,15 @@ export default function BookingsScreen() {
+                   : "Are you sure you want to decline this application? The musician will be notified and cannot re-apply to this gig."
+                 : "Are you sure you want to decline this booking? The user will be notified."
+               : modalMode === "fire"
+                 ? "Are you sure you want to fire this musician? This will cancel their upcoming gigs with you."
+                 : modalMode === "complete"
+-                    ? "Confirm efficient completion of this gig?"
++                  ? "Confirm efficient completion of this gig? You will be redirected to review the musician."
+                   : modalMode === "renew"
+                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
+                     : modalMode === "clear_balance"
+                       ? `Mark ???${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
+-                      : modalMode === "report_access"
+-                        ? "Please describe the issue so we can notify the studio owner and review this booking case."
+                       : modalMode === "late_confirm"
+                         ? `Send this late-arrival reason to the studio owner?\n\n${cancellationReason.trim()}`
+                       : modalMode === "late"
+                         ? "Please provide your reason for being late."
+                         : (() => {
+@@ -4254,17 +3980,15 @@ export default function BookingsScreen() {
+                   : "Decline Application"
+                 : "Decline Booking"
+               : modalMode === "fire"
+                 ? "Fire Musician"
+                 : modalMode === "complete"
+-                  ? "Complete"
++                  ? "Complete & Review"
+                   : modalMode === "renew"
+                     ? "Send Renewal Offer"
+                     : modalMode === "clear_balance"
+                         ? `Mark ???${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
+-                        : modalMode === "report_access"
+-                          ? "Submit Report"
+                         : modalMode === "late_confirm"
+                           ? "Send Report"
+                         : modalMode === "late"
+                           ? "Submit"
+                           : "Yes, Cancel Booking"
+@@ -4287,12 +4011,11 @@ export default function BookingsScreen() {
+           // Validation for modes that require input
+           if (
+             (modalMode === "cancel" ||
+               modalMode === "decline" ||
+               modalMode === "fire" ||
+-              modalMode === "late" ||
+-              modalMode === "report_access") &&
++              modalMode === "late") &&
+             !(modalMode === "decline" && selectedItem?.leader_approval_required) &&
+             !cancellationReason.trim()
+           ) {
+             showAlert("warning", "Required", "Please provide a reason.");
+             return;
+@@ -4339,18 +4062,10 @@ export default function BookingsScreen() {
+             if (modalMode === "late") {
+               setModalMode("late_confirm");
+               return;
+             }
+ 
+-            if (modalMode === "report_access") {
+-              await handleReportAccessIssue(
+-                selectedItem,
+-                cancellationReason.trim(),
+-              );
+-              return;
+-            }
+-
+             let status = "cancelled"; // Default for studio bookings
+             if (modalMode === "confirm") {
+               status =
+                 selectedItem.type_id === "gig_application"
+                   ? "accepted"
+@@ -4370,38 +4085,10 @@ export default function BookingsScreen() {
+               status = "completed";
+             } else if (modalMode === "late_confirm") {
+               status = "late";
+             }
+ 
+-            if (modalMode === "complete") {
+-              console.log("[Bookings][Complete Review Modal][CONFIRM pressed]", {
+-                timestamp: new Date().toISOString(),
+-                activeTab,
+-                userRole,
+-                modalMode,
+-                computedStatus: status,
+-                cancellationReason,
+-                selectedItem: {
+-                  id: selectedItem?.id,
+-                  type_id: selectedItem?.type_id,
+-                  status: selectedItem?.status,
+-                  booking_status: selectedItem?.booking_status,
+-                  applicant_name: selectedItem?.applicant_name,
+-                  user_id: selectedItem?.user_id,
+-                  applicant_id: selectedItem?.applicant_id,
+-                  organizer_id: selectedItem?.organizer_id,
+-                  gig_id: selectedItem?.gig_id,
+-                  title: selectedItem?.title,
+-                  gig_title: selectedItem?.gig_title,
+-                  venue_name: selectedItem?.venue_name,
+-                  raw_date: selectedItem?.raw_date,
+-                  start_time: selectedItem?.start_time,
+-                  end_time: selectedItem?.end_time,
+-                },
+-              });
+-            }
+-
+             debugLog("???? Modal onConfirm - Final status:", status);
+             debugLog(
+               "???? Modal onConfirm - Calling handleStatusUpdate with:",
+               {
+                 id: selectedItem.id,
+@@ -4429,14 +4116,16 @@ export default function BookingsScreen() {
+                 "Late report sent",
+                 "Studio owner has been notified.",
+               );
+             }
+ 
+-            // Keep completion/termination as status updates only.
+-            // Users can submit reviews manually from the Review tab.
+-            if (didUpdate && (modalMode === "fire" || modalMode === "complete")) {
++            // If FIRING or COMPLETED, redirect to review
++            if (modalMode === "fire" || modalMode === "complete") {
++              // Give a small delay or just switch
+               setActiveTab("Review");
++              // Open review flow for this item
++              handleLeaveReview(selectedItem);
+             }
+           }
+         }}
+       />
+ 
+@@ -4452,11 +4141,10 @@ export default function BookingsScreen() {
+       <BookingDetailsSheet
+         ref={bookingDetailsRef}
+         booking={selectedItem}
+         onConfirm={handleConfirmBooking}
+         onCancel={handleCancelBooking}
+-        onLeaveReview={handleLeaveReview}
+       />
+ 
+       {/* Payment Option Modal */}
+       <RNModal
+         visible={showPaymentOptionModal}

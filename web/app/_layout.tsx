@@ -61,6 +61,7 @@ function RootContent() {
     subscriptionChecked,
     identityRequired,
     identityChecked,
+    userRole,
   } =
     useAuth();
   const segments = useSegments();
@@ -238,9 +239,11 @@ function RootContent() {
   const isAuthScreen = authScreens.includes(currentScreen);
   const { width } = useWindowDimensions();
   const showSidebar = Platform.OS === 'web' && width >= 768 && !isAuthScreen;
+  const isAdminContext = userRole === 'admin' || segmentStrings.includes('admin');
+  const useSidebarLayout = showSidebar && isAdminContext;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, flexDirection: showSidebar ? 'row' : 'column' }}>
+    <View style={{ flex: 1, backgroundColor: colors.background, flexDirection: useSidebarLayout ? 'row' : 'column' }}>
       {showSidebar && <SidebarNav />}
       <View style={{ flex: 1, overflow: 'hidden' }}>
         <View style={{ flex: 1, width: '100%' }}>

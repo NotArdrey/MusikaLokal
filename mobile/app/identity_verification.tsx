@@ -93,6 +93,32 @@ export default function IdentityVerificationScreen() {
     setAlertVisible(true);
   }, []);
 
+  const refreshStatusAndRedirectIfVerified = useCallback(async () => {
+    if (!userId || !session || isGuest) {
+      return false;
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('is_verified, verification_status, id_document_expiry, id_verified_at, didit_session_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    const latestProfile = (data as IdentityProfile | null) || null;
+    setProfile(latestProfile);
+    await checkIdentityStatus();
+
+    const isVerifiedAndValid = latestProfile?.is_verified === true && !isDateExpired(latestProfile?.id_document_expiry || null);
+    if (isVerifiedAndValid) {
+      router.replace('/home');
+      return true;
+    }
+
+    return false;
+  }, [userId, session, isGuest, checkIdentityStatus]);
+
   const fetchIdentityStatus = useCallback(async () => {
     if (!userId || !session || isGuest) {
       setProfile(null);
@@ -186,12 +212,20 @@ export default function IdentityVerificationScreen() {
   const handleVerificationSuccess = () => {
     setShowVerificationModal(false);
     setVerificationUrl('');
-    showAlert(
-      'success',
-      'Verification Submitted',
-      'Your verification was submitted successfully. Status will update automatically once processing is complete.',
-    );
-    void fetchIdentityStatus();
+
+    void refreshStatusAndRedirectIfVerified()
+      .then((redirected) => {
+        if (redirected) return;
+        showAlert(
+          'success',
+          'Verification Submitted',
+          'Your verification was submitted successfully. Status will update automatically once processing is complete.',
+        );
+        void fetchIdentityStatus();
+      })
+      .catch((e: any) => {
+        showAlert('error', 'Unable to Refresh Status', e?.message || 'Could not refresh your verification status.');
+      });
   };
 
   const handleVerificationClose = () => {

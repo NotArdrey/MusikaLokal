@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
@@ -9,7 +9,34 @@ import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function ManageScreen() {
-    const { colors } = useTheme();
+    const { colors, isDark } = useTheme();
+    const { width } = useWindowDimensions();
+    const isWebDesktop = Platform.OS === 'web' && width >= 768;
+    const pageBackground = isWebDesktop
+        ? isDark
+            ? '#0A1224'
+            : '#E9EEF8'
+        : colors.background;
+    const pageCardBackground = isWebDesktop
+        ? isDark
+            ? '#0F172A'
+            : '#FFFFFF'
+        : colors.card;
+    const borderSoft = isWebDesktop
+        ? isDark
+            ? '#1E2C48'
+            : '#D8E3F2'
+        : colors.border;
+    const textPrimary = isWebDesktop
+        ? isDark
+            ? '#E2E8F0'
+            : '#0F172A'
+        : colors.text;
+    const textSecondary = isWebDesktop
+        ? isDark
+            ? '#94A3B8'
+            : '#475569'
+        : colors.textSecondary;
     const { session, loading: authLoading, userId, userRole, isGuest } = useAuth();
     const isAuthenticated = !!session;
     const [loading, setLoading] = useState(true);
@@ -94,9 +121,9 @@ export default function ManageScreen() {
 
     if (loading) {
         return (
-            <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
+            <View style={[styles.centerContainer, { backgroundColor: pageBackground }]}>
                 <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={{ marginTop: 20, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
+                <Text style={{ marginTop: 20, color: textSecondary, fontFamily: 'Poppins_400Regular' }}>
                     Loading your dashboard...
                 </Text>
             </View>
@@ -105,36 +132,50 @@ export default function ManageScreen() {
 
     if (isGuest) {
         return (
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <Header title="Manage" />
-                <GuestSignInGate message="Sign in to access your management dashboard." />
-                <Navbar />
+            <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+                <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+                    <Header title="Manage" />
+                    <GuestSignInGate message="Sign in to access your management dashboard." />
+                    <Navbar />
+                </View>
             </View>
         );
     }
 
     return (
-        <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-            <Header title="Manage" />
+        <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+            <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+                <Header title="Manage" />
 
-            <ScrollView contentContainerStyle={styles.scrollContent}>
-                <View style={styles.dashboardContainer}>
-                    <Text style={[styles.title, { color: colors.text }]}>
-                        Management Dashboard
-                    </Text>
-                    <Text style={[styles.description, { color: colors.textSecondary }]}>
-                        It seems we couldn't automatically direct you to your specific dashboard.
-                        Please ensure your account has the correct role assigned or contact support for assistance.
-                    </Text>
-
-
-                    {(userRole || fetchedRole) && (
-                        <Text style={[styles.roleText, { color: colors.textSecondary }]}>
-                            Detected Role: {userRole || fetchedRole}
+                <ScrollView contentContainerStyle={[styles.scrollContent, isWebDesktop && styles.scrollContentWeb]}>
+                    <View
+                        style={[
+                            styles.dashboardContainer,
+                            styles.dashboardCard,
+                            isWebDesktop && styles.webSectionCard,
+                            {
+                                backgroundColor: pageCardBackground,
+                                borderColor: borderSoft,
+                            },
+                        ]}
+                    >
+                        <Text style={[styles.title, { color: textPrimary }]}>
+                            Management Dashboard
                         </Text>
-                    )}
-                </View>
-            </ScrollView>
+                        <Text style={[styles.description, { color: textSecondary }]}>
+                            It seems we couldn't automatically direct you to your specific dashboard.
+                            Please ensure your account has the correct role assigned or contact support for assistance.
+                        </Text>
+
+
+                        {(userRole || fetchedRole) && (
+                            <Text style={[styles.roleText, { color: textSecondary }]}>
+                                Detected Role: {userRole || fetchedRole}
+                            </Text>
+                        )}
+                    </View>
+                </ScrollView>
+            </View>
             <Navbar />
         </View>
     );
@@ -149,13 +190,40 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    pageFrame: {
+        flex: 1,
+        width: '100%',
+    },
+    pageFrameWeb: {
+        maxWidth: 1240,
+        alignSelf: 'center',
+        paddingTop: 12,
+        paddingHorizontal: 20,
+    },
     scrollContent: {
         paddingBottom: 180,
     },
+    scrollContentWeb: {
+        maxWidth: 1120,
+        width: '100%',
+        alignSelf: 'center',
+        paddingTop: 12,
+    },
     dashboardContainer: {
-        flex: 1,
         paddingHorizontal: 24,
         paddingTop: 32,
+    },
+    dashboardCard: {
+        borderRadius: 20,
+        borderWidth: 1,
+        padding: 28,
+    },
+    webSectionCard: {
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        elevation: 3,
     },
     title: {
         fontFamily: 'Poppins_600SemiBold',
@@ -164,10 +232,11 @@ const styles = StyleSheet.create({
     },
     description: {
         fontFamily: 'Poppins_400Regular',
+        lineHeight: 22,
         marginBottom: 32,
     },
     roleText: {
-        marginTop: 40,
+        marginTop: 20,
         fontFamily: 'Poppins_400Regular',
         textAlign: 'center',
     },

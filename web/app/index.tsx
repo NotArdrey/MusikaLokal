@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions, ImageBackground } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
+import AuthMusicHero from '../src/components/AuthMusicHero';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import VerificationModal from '../src/components/VerificationModal';
 import { useAuth } from '../src/context/AuthContext';
@@ -310,24 +311,9 @@ export default function LoginScreen() {
             );
           } else if (profile?.id_document_expiry && new Date(profile.id_document_expiry) < new Date()) {
             // Check for expired ID
-            await supabase.auth.signOut();
-
-            showAlert(
-              'warning',
-              'ID Document Expired',
-              'Your identification document has expired. Please update your verification documents to continue using the app.',
-              [
-                {
-                  text: 'Update Now',
-                  onPress: () => startVerification(user.id),
-                  style: 'default'
-                },
-                {
-                  text: 'Cancel',
-                  style: 'cancel'
-                }
-              ]
-            );
+            setLoginMessage({ type: 'error', text: 'ID expired. Please upload a new document to continue.' });
+            router.replace('/identity_verification' as any);
+            return;
           } else {
             // Verified & Profile Exists -> Allow Entry
             const postLoginRoute = resolvePostLoginRoute(
@@ -404,26 +390,14 @@ export default function LoginScreen() {
       style={[styles.flex1, themeStyles.container]}
     >
       <ScrollView contentContainerStyle={isWebDesktop ? styles.webScrollContent : styles.scrollContent}>
-        <ImageBackground 
-            source={isWebDesktop ? { uri: 'https://images.unsplash.com/photo-1540039155732-68473638c4b0?q=80&w=2070&auto=format&fit=crop' } : undefined} 
-            style={isWebDesktop ? {flex: 1, width: '100%'} : {}}
-            imageStyle={isWebDesktop ? {} : {display: 'none'}}
-        >
-          <View style={isWebDesktop ? [styles.webContainer, { backgroundColor: 'transparent' }] : styles.contentContainer}>
+          <View style={isWebDesktop ? styles.webContainer : styles.contentContainer}>
             {/* Left Side Branding (Web Desktop Only) */}
             {isWebDesktop && (
-              <View style={[styles.webLeftPanel, { backgroundColor: 'rgba(0,0,0,0.4)' }]}>
-                <View style={styles.webHeroOverlay}>
-                  <View style={[styles.logoWrapper, styles.shadow, { marginBottom: 32 }]}>
-                    <Image
-                      source={require('../assets/images/Musika-lokal-logo.png')}
-                      style={styles.logoImage}
-                      resizeMode="contain"
-                    />
-                  </View>
-                  <Text style={styles.webHeroTitle}>Welcome back{'\n'}to MusikaLokal.</Text>
-                  <Text style={styles.webHeroSubtitle}>Discover, connect, and collaborate with the local music scene.</Text>
-                </View>
+              <View style={styles.webLeftPanel}>
+                <AuthMusicHero
+                  title={`Welcome back\nto MusikaLokal.`}
+                  subtitle="Discover, connect, and collaborate with the local music scene."
+                />
               </View>
             )}
 
@@ -565,12 +539,11 @@ export default function LoginScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+              </View>
+            </View>
           </View>
         </View>
-      </View>
-    </View>
-  </ImageBackground>
-</ScrollView>
+      </ScrollView>
 
       <VerificationModal
         visible={showVerification}

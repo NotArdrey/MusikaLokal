@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
@@ -55,9 +55,41 @@ interface Subscription {
   plan?: SubscriptionPlan;
 }
 
+interface WithdrawalErrorPayload {
+  error?: string;
+  error_code?: string;
+  next_steps?: string[];
+  suggestion?: string;
+}
+
+
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isWebDesktop = Platform.OS === 'web' && width >= 768;
+  const pageBackground = isWebDesktop
+    ? isDark
+      ? '#0A1224'
+      : '#E9EEF8'
+    : colors.background;
+  const pageCardBackground = isWebDesktop
+    ? isDark
+      ? '#0F172A'
+      : '#FFFFFF'
+    : colors.card;
+  const surfaceBackground = isWebDesktop
+    ? isDark
+      ? '#13213A'
+      : '#F4F7FE'
+    : colors.surface;
+  const borderSoft = isWebDesktop
+    ? isDark
+      ? '#1E2C48'
+      : '#D8E3F2'
+    : colors.border;
+  const walletCardBackground = isWebDesktop ? pageCardBackground : colors.card;
+  const walletSurfaceBackground = isWebDesktop ? surfaceBackground : colors.surface;
   const params = useLocalSearchParams<{ refresh?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
   const [modalVisible, setModalVisible] = useState(false);
@@ -132,6 +164,98 @@ export default function WalletScreen() {
 
   const Alert = { alert: showAlertNative };
 
+  const parseFunctionErrorPayload = async (error: any): Promise<WithdrawalErrorPayload | null> => {
+    const context = error?.context;
+    if (!context) return null;
+
+    if (typeof context?.json === 'function') {
+      try {
+        const payload = await context.json();
+        if (payload && typeof payload === 'object') {
+          return payload as WithdrawalErrorPayload;
+        }
+      } catch {
+        // Ignore JSON parsing errors and continue with fallback handling.
+      }
+    }
+
+    if (typeof context === 'object') {
+      return context as WithdrawalErrorPayload;
+    }
+
+    return null;
+  };
+
+  const isMerchantNotReadyError = (message?: string, errorCode?: string) => {
+    const normalizedMessage = String(message || '').toLowerCase();
+    const normalizedCode = String(errorCode || '').toLowerCase();
+
+    return (
+      normalizedCode === 'merchant_not_ready' ||
+      normalizedMessage.includes("don't have permission to perform this operation") ||
+      normalizedMessage.includes('do not have permission to perform this operation') ||
+      (
+        normalizedMessage.includes('permission') &&
+        (
+          normalizedMessage.includes('disbursement') ||
+          normalizedMessage.includes('payout') ||
+          normalizedMessage.includes('cashout')
+        )
+      )
+    );
+  };
+
+  const formatMerchantOnboardingMessage = (nextSteps?: string[]) => {
+    const steps = Array.isArray(nextSteps) && nextSteps.length > 0
+      ? nextSteps
+      : [
+        'Complete your PayMongo merchant onboarding (KYC and business verification).',
+        'Request and enable disbursements or payouts on that merchant account.',
+        'Use the matching secret key for the same mode and account.',
+        'Retry with a small withdrawal amount.',
+      ];
+
+    return [
+      'Real cashout is currently unavailable for this account.',
+      'You can still test the flow in test mode.',
+      '',
+      'What to do next:',
+      ...steps.map((step, index) => `${index + 1}. ${step}`),
+    ].join('\n');
+  };
+
+  const showMerchantNotReadyAlert = (nextSteps?: string[]) => {
+    const buttons = hasRefundEligiblePayments
+      ? [
+        { text: 'Use Refund Method', onPress: () => setWithdrawalMethod('refund') },
+        { text: 'OK', style: 'cancel' as const },
+      ]
+      : [{ text: 'OK' }];
+
+    Alert.alert(
+      'Cashout Unavailable',
+      formatMerchantOnboardingMessage(nextSteps),
+      buttons,
+    );
+  };
+
+  const handleWithdrawalError = async (
+    fallbackTitle: string,
+    rawError: any,
+    payload?: WithdrawalErrorPayload | null,
+  ) => {
+    const parsedPayload = payload || await parseFunctionErrorPayload(rawError);
+    const errorMessage = parsedPayload?.error || rawError?.message || 'Failed to process withdrawal';
+
+    if (isMerchantNotReadyError(errorMessage, parsedPayload?.error_code)) {
+      showMerchantNotReadyAlert(parsedPayload?.next_steps);
+      return;
+    }
+
+    Alert.alert(fallbackTitle, errorMessage);
+  };
+
+
   const fetchWallet = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -198,26 +322,33 @@ export default function WalletScreen() {
 
       // 4. Get Subscription Plans (for studio/venue owners)
       if (profile?.role === 'studio-owner' || profile?.role === 'venue-owner') {
-        const { data: plan } = await supabase
+        const { data: plans, error: plansError } = await supabase
           .from('subscription_plans')
           .select('*')
           .eq('is_active', true)
-          .single();
+          .order('price', { ascending: true });
 
-        if (plan) {
-          setSubscriptionPlans([plan]);
+        if (plansError) throw plansError;
+
+        if (plans) {
+          setSubscriptionPlans(plans);
         }
 
-        // 5. Get User's Active Subscription
-        const { data: sub } = await supabase
+        // 5. Get User's latest subscription record
+        const { data: sub, error: subError } = await supabase
           .from('subscriptions')
           .select('*, plan:subscription_plans(*)')
           .eq('user_id', user.id)
-          .single();
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-        if (sub) {
-          setSubscription(sub);
-        }
+        if (subError) throw subError;
+
+        setSubscription(sub || null);
+      } else {
+        setSubscriptionPlans([]);
+        setSubscription(null);
       }
 
       // 6. Fetch Payout Methods
@@ -434,10 +565,13 @@ export default function WalletScreen() {
           }
         });
 
-        if (error) throw error;
+        if (error) {
+          await handleWithdrawalError('Withdrawal Failed', error);
+          return;
+        }
 
         if (data?.error) {
-          Alert.alert('Withdrawal Failed', data.error);
+          await handleWithdrawalError('Withdrawal Failed', null, data as WithdrawalErrorPayload);
           return;
         }
 
@@ -453,7 +587,7 @@ export default function WalletScreen() {
           }]
         );
       } catch (e: any) {
-        Alert.alert('Error', e?.message || 'Failed to process withdrawal');
+        await handleWithdrawalError('Error', e);
       } finally {
         setWithdrawing(false);
       }
@@ -477,16 +611,23 @@ export default function WalletScreen() {
         }
       });
 
-      if (error) throw error;
-
-      if (data?.error) {
-        Alert.alert('Withdrawal Failed', data.error);
+      if (error) {
+        await handleWithdrawalError('Withdrawal Failed', error);
         return;
       }
 
+      if (data?.error) {
+        await handleWithdrawalError('Withdrawal Failed', null, data as WithdrawalErrorPayload);
+        return;
+      }
+
+      const isMockCashout = Boolean((data as any)?.mock_cashout);
+
       Alert.alert(
-        'Withdrawal Submitted! ✓',
-        data?.message || 'Your payout will be processed within 1-3 business days.',
+        isMockCashout ? 'Mock Cashout Success (Test Mode)' : 'Withdrawal Submitted! ✓',
+        data?.message || (isMockCashout
+          ? 'Mock cashout recorded. No real money was transferred.'
+          : 'Your payout will be processed within 1-3 business days.'),
         [{
           text: 'OK', onPress: () => {
             setWithdrawModalVisible(false);
@@ -496,7 +637,7 @@ export default function WalletScreen() {
         }]
       );
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to process withdrawal');
+      await handleWithdrawalError('Error', e);
     } finally {
       setWithdrawing(false);
     }
@@ -680,18 +821,21 @@ export default function WalletScreen() {
         }
       });
 
-      if (paymentError) {
-        Alert.alert('Error', 'Failed to create subscription. Please try again.');
+      if (paymentError || !paymentData?.success) {
+        Alert.alert('Error', paymentData?.error || paymentError?.message || 'Failed to create subscription. Please try again.');
         return;
       }
 
-      if (paymentData?.checkout_url) {
-        const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
-        if (canOpen) {
-          await Linking.openURL(paymentData.checkout_url);
-        } else {
-          Alert.alert('Error', 'Unable to open payment page.');
-        }
+      if (!paymentData?.checkout_url) {
+        Alert.alert('Error', 'No checkout URL returned. Please try again.');
+        return;
+      }
+
+      const canOpen = await Linking.canOpenURL(paymentData.checkout_url);
+      if (canOpen) {
+        await Linking.openURL(paymentData.checkout_url);
+      } else {
+        Alert.alert('Error', 'Unable to open payment page.');
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'Failed to initiate subscription.');
@@ -750,12 +894,13 @@ export default function WalletScreen() {
 
   return (
     <>
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Header title="Wallet & Subscription" />
+      <View style={[styles.container, { backgroundColor: pageBackground }]}>
+        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+          <Header title="Wallet & Subscription" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, isWebDesktop && styles.scrollContentWeb]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
 
@@ -764,6 +909,7 @@ export default function WalletScreen() {
             <View
               style={[
                 styles.balanceCard,
+                isWebDesktop && styles.webSectionCard,
                 { backgroundColor: colors.primary }
               ]}
             >
@@ -793,7 +939,7 @@ export default function WalletScreen() {
                 onPress={openWithdrawModal}
                 style={[
                   styles.actionButton,
-                  { backgroundColor: colors.surface, borderColor: colors.border }
+                  { backgroundColor: walletSurfaceBackground, borderColor: borderSoft }
                 ]}
               >
                 <Ionicons name="arrow-down-circle-outline" size={20} color={colors.primary} />
@@ -802,7 +948,7 @@ export default function WalletScreen() {
               <TouchableOpacity activeOpacity={1}
                 style={[
                   styles.actionButton,
-                  { backgroundColor: colors.surface, borderColor: colors.border }
+                  { backgroundColor: walletSurfaceBackground, borderColor: borderSoft }
                 ]}
               >
                 <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
@@ -814,7 +960,7 @@ export default function WalletScreen() {
           {/* Unpaid Balances Section */}
           {unpaidBookings.length > 0 && (
             <View style={styles.cardWrapper}>
-              <View style={[styles.unpaidSection, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
+              <View style={[styles.unpaidSection, isWebDesktop && styles.webSectionCard, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
                 <View style={styles.unpaidHeader}>
                   <View style={styles.unpaidHeaderLeft}>
                     <Ionicons name="warning" size={24} color="#DC2626" />
@@ -881,7 +1027,7 @@ export default function WalletScreen() {
             <View style={styles.cardWrapper}>
               {subscription ? (
                 // Active Subscription Display
-                <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={[styles.subscriptionCard, isWebDesktop && styles.webSectionCard, { backgroundColor: walletCardBackground, borderColor: borderSoft }]}>
                   <View style={styles.subscriptionHeader}>
                     <View>
                       <Text style={[styles.subscriptionTitle, { color: colors.text }]}>{subscription.plan?.name || 'Subscription'} Plan</Text>
@@ -928,9 +1074,9 @@ export default function WalletScreen() {
                 </View>
               ) : (
                 // No Subscription - Show Subscribe CTA
-                <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={[styles.subscriptionCard, isWebDesktop && styles.webSectionCard, { backgroundColor: walletCardBackground, borderColor: borderSoft }]}>
                   <View style={styles.noSubContainer}>
-                    <View style={[styles.noSubIcon, { backgroundColor: isDark ? colors.primaryLight : '#EEF2FF' }]}>
+                    <View style={[styles.noSubIcon, { backgroundColor: isDark ? colors.primaryLight : '#E7EEFD' }]}>
                       <Ionicons name="diamond-outline" size={32} color={colors.primary} />
                     </View>
                     <Text style={[styles.noSubTitle, { color: colors.text }]}>Unlock Premium Features</Text>
@@ -954,13 +1100,13 @@ export default function WalletScreen() {
           {pendingWithdrawals.length > 0 && (
             <View style={styles.historySection}>
               <Text style={[styles.historyTitle, { color: colors.text }]}>Pending Withdrawals</Text>
-              <View style={[styles.historyContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={[styles.historyContainer, isWebDesktop && styles.webSectionCard, { backgroundColor: walletCardBackground, borderColor: borderSoft }]}>
                 {pendingWithdrawals.map((withdrawal, index, arr) => (
                   <View
                     key={withdrawal.id}
                     style={[
                       styles.withdrawalItem,
-                      { borderBottomWidth: index === arr.length - 1 ? 0 : 1, borderBottomColor: colors.border }
+                      { borderBottomWidth: index === arr.length - 1 ? 0 : 1, borderBottomColor: borderSoft }
                     ]}
                   >
                     <View style={styles.withdrawalLeft}>
@@ -1003,7 +1149,7 @@ export default function WalletScreen() {
           <View style={styles.historySection}>
             <Text style={[styles.historyTitle, { color: colors.text }]}>Transaction History</Text>
 
-            <View style={[styles.historyContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.historyContainer, isWebDesktop && styles.webSectionCard, { backgroundColor: walletCardBackground, borderColor: borderSoft }]}>
               {loading ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
                   <ActivityIndicator size="small" color={colors.primary} />
@@ -1018,7 +1164,7 @@ export default function WalletScreen() {
                     key={tx.id}
                     style={[
                       styles.transactionItem,
-                      { borderBottomWidth: index === transactions.length - 1 ? 0 : 1, borderBottomColor: colors.border }
+                      { borderBottomWidth: index === transactions.length - 1 ? 0 : 1, borderBottomColor: borderSoft }
                     ]}
                   >
                     <View style={styles.transactionLeft}>
@@ -1053,6 +1199,7 @@ export default function WalletScreen() {
         </ScrollView>
         <View style={styles.navbarContainer}>
           <Navbar />
+        </View>
         </View>
       </View>
 
@@ -1618,8 +1765,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  pageFrame: {
+    flex: 1,
+    width: '100%',
+  },
+  pageFrameWeb: {
+    maxWidth: 1240,
+    alignSelf: 'center',
+    width: '100%',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
   scrollContent: {
     paddingBottom: 100,
+  },
+  scrollContentWeb: {
+    maxWidth: 1120,
+    width: '100%',
+    alignSelf: 'center',
+    paddingTop: 12,
+  },
+  webSectionCard: {
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
   },
   cardWrapper: {
     paddingHorizontal: 24,
