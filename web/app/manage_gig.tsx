@@ -564,7 +564,7 @@ export default function GigDetailsScreen() {
                           marginBottom: 6,
                         }}
                       >
-                        Equipments
+                        Provided equipments
                       </Text>
                       <View
                         style={{
@@ -597,7 +597,7 @@ export default function GigDetailsScreen() {
                           )
                         ) : (
                           <Text style={{ color: colors.textSecondary }}>
-                            No specific equipments
+                            No provided equipments
                           </Text>
                         )}
                       </View>

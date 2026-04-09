@@ -86,6 +86,39 @@ const formatTimeInput = (text: string): string => {
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
 
+const GENRES = [
+  "Rock",
+  "Pop",
+  "Jazz",
+  "Blues",
+  "Hip Hop",
+  "R&B",
+  "Country",
+  "Electronic",
+  "Classical",
+  "Reggae",
+  "Metal",
+  "Punk",
+  "Folk",
+  "Soul",
+  "Funk",
+  "Disco",
+  "Indie",
+  "Alternative",
+  "Latin",
+  "World Music",
+  "Gospel",
+  "EDM",
+  "House",
+  "Techno",
+  "Dubstep",
+  "Acoustic",
+  "Instrumental",
+  "Ambient",
+  "Lo-Fi",
+  "OPM",
+];
+
 type EventSchedule = {
   date: string;
   start_time: string;
@@ -164,6 +197,7 @@ export default function AddGigScreen() {
   // Requirements state
   const [requiredGenres, setRequiredGenres] = useState<string[]>([]);
   const [newGenre, setNewGenre] = useState("");
+  const [genreSearch, setGenreSearch] = useState("");
   const [requiredInstruments, setRequiredInstruments] = useState<string[]>([]);
   const [newInstrument, setNewInstrument] = useState("");
   const [experienceLevel, setExperienceLevel] = useState("");
@@ -206,7 +240,7 @@ export default function AddGigScreen() {
   // Form Steps Configuration
   const steps = [
     { id: 1, title: "Gig Details", icon: "information-circle" },
-    { id: 2, title: "Needs", icon: "list" },
+    { id: 2, title: "Amenities", icon: "list" },
     { id: 3, title: "Review", icon: "checkmark-circle" },
   ];
 
@@ -1935,89 +1969,67 @@ export default function AddGigScreen() {
             </View>
           )}
 
-          {step === 2 && (
+          {step === 1 && (
             <View>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                Needs
+              <Text style={[styles.sectionTitle, { color: colors.text }]}> 
+                Gig Information
               </Text>
 
-              {/* Genre Requirements */}
+              {/* Genre Requirements (searchable chips) */}
               <View style={styles.inputContainer}>
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
                   Genres
                 </Text>
-                <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
-                  <View
-                    style={[
-                      styles.inputWrapper,
-                      styles.flex1,
-                      {
-                        backgroundColor: colors.inputBackground,
-                        borderColor: isDark ? "#374151" : "#E5E7EB",
-                      },
-                    ]}
-                  >
-                    <TextInput
-                      value={newGenre}
-                      onChangeText={setNewGenre}
-                      placeholder="Add genre (e.g., Rock, Jazz)..."
-                      placeholderTextColor={colors.textSecondary}
-                      style={[styles.textInput, { color: colors.text }]}
-                      onSubmitEditing={() => {
-                        if (newGenre.trim()) {
-                          setRequiredGenres([
-                            ...requiredGenres,
-                            newGenre.trim(),
-                          ]);
-                          setNewGenre("");
-                        }
-                      }}
-                    />
-                  </View>
-                  <TouchableOpacity activeOpacity={1}
-                    onPress={() => {
-                      if (newGenre.trim()) {
-                        setRequiredGenres([...requiredGenres, newGenre.trim()]);
-                        setNewGenre("");
-                      }
-                    }}
-                    style={[styles.addBtn, { backgroundColor: colors.primary }]}
-                  >
-                    <Ionicons name="add" size={24} color="#fff" />
-                  </TouchableOpacity>
-                </View>
+                {/* Selected chips */}
                 {requiredGenres.length > 0 && (
-                  <View style={styles.chipContainer}>
-                    {requiredGenres.map((genre, index) => (
-                      <View
-                        key={index}
+                  <View style={styles.selectedChips}>
+                    {requiredGenres.map((genre) => (
+                      <TouchableOpacity activeOpacity={1}
+                        key={genre}
+                        onPress={() => setRequiredGenres(requiredGenres.filter((g) => g !== genre))}
                         style={[
-                          styles.chip,
-                          { backgroundColor: isDark ? "#1F2937" : "#F3F4F6" },
+                          styles.chipCompact,
+                          {
+                            borderColor: colors.primary,
+                            backgroundColor: isDark ? "rgba(124, 58, 237, 0.3)" : "#EEF2FF",
+                          },
                         ]}
                       >
-                        <Text style={[styles.chipText, { color: colors.text }]}>
+                        <Text style={[styles.chipTextCompact, { color: isDark ? "#A78BFA" : colors.primary }]}>
                           {genre}
                         </Text>
-                        <TouchableOpacity activeOpacity={1}
-                          onPress={() =>
-                            setRequiredGenres(
-                              requiredGenres.filter((_, i) => i !== index),
-                            )
-                          }
-                        >
-                          <Ionicons
-                            name="close-circle"
-                            size={16}
-                            color={colors.textSecondary}
-                          />
-                        </TouchableOpacity>
-                      </View>
+                        <Ionicons name="close-circle" size={14} color={isDark ? "#A78BFA" : colors.primary} style={{ marginLeft: 4 }} />
+                      </TouchableOpacity>
                     ))}
                   </View>
                 )}
+
+                <TextInput
+                  style={[styles.searchInput, { backgroundColor: colors.inputBackground, borderColor: colors.border, color: colors.text }]}
+                  value={genreSearch}
+                  onChangeText={setGenreSearch}
+                  placeholder="Search genres..."
+                  placeholderTextColor={colors.textSecondary}
+                />
+
+                <View style={styles.chipsCompact}>
+                  {GENRES.filter((g) => !requiredGenres.includes(g) && g.toLowerCase().includes(genreSearch.toLowerCase()))
+                    .slice(0, genreSearch ? 20 : 8)
+                    .map((g) => (
+                      <TouchableOpacity activeOpacity={1}
+                        key={g}
+                        onPress={() => setRequiredGenres([...requiredGenres, g])}
+                        style={[styles.chipCompact, { borderColor: colors.border, backgroundColor: "transparent" }]}
+                      >
+                        <Text style={[styles.chipTextCompact, { color: colors.textSecondary }]}>{g}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  {!genreSearch && GENRES.filter((g) => !requiredGenres.includes(g)).length > 8 && (
+                    <Text style={[styles.moreText, { color: colors.textSecondary }]}>Search for more...</Text>
+                  )}
+                </View>
               </View>
 
               {/* Equipment Requirements */}
@@ -2025,7 +2037,7 @@ export default function AddGigScreen() {
                 <Text
                   style={[styles.inputLabel, { color: colors.textSecondary }]}
                 >
-                  Equipments
+                  Provided equipments
                 </Text>
                 <View style={[styles.addMemberRow, { marginBottom: 8 }]}>
                   <View
@@ -2939,7 +2951,7 @@ export default function AddGigScreen() {
                         ]}
                       />
                       <View>
-                        <Text style={styles.reviewLabel}>Needs</Text>
+                        <Text style={styles.reviewLabel}>Amenities</Text>
                         {requiredGenres.length > 0 && (
                           <View style={{ marginBottom: 8 }}>
                             <Text
@@ -2963,7 +2975,7 @@ export default function AddGigScreen() {
                                 { color: colors.textSecondary },
                               ]}
                             >
-                              Equipments:
+                              Provided equipments:
                             </Text>
                             <Text style={{ color: colors.text }}>
                               {requiredInstruments.join(", ")}
@@ -3411,6 +3423,47 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
   },
+  selectedChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  chipsCompact: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  chipCompact: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  chipTextCompact: {
+    fontSize: 12,
+    fontFamily: "Poppins_500Medium",
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: IS_WEB ? 14 : 16,
+    fontSize: 14,
+    fontFamily: "Poppins_400Regular",
+    textAlign: "left",
+    textAlignVertical: "center",
+    marginTop: 8,
+  },
+  moreText: {
+    fontSize: 12,
+    fontFamily: "Poppins_400Regular",
+    fontStyle: "italic",
+    marginTop: 4,
+  },
   chip: {
     flexDirection: "row",
     alignItems: "center",
@@ -3691,3 +3744,4 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
   },
 });
+

@@ -205,11 +205,13 @@ export default function AiSuggestionsScreen() {
                 limit: 10,
             });
 
-            if (generated.suggestions.length > 0 && generated.aiPowered) {
+            if (generated.suggestions.length > 0) {
                 setSuggestions(generated.suggestions);
-                setIsAIPowered(true);
+                setIsAIPowered(Boolean(generated.aiPowered));
                 setAIProvider(generated.aiProvider || 'On-Device LLM');
-                setSuggestionMessage(generated.message);
+                // Do not treat local fallback as an error. Only show an informational message
+                // when the suggestions were produced by an AI model.
+                setSuggestionMessage(generated.aiPowered ? generated.message : null);
                 setStep('results');
             } else {
                 setSuggestions([]);
