@@ -52,14 +52,6 @@ const ListingHeroSection = ({
       </TouchableOpacity>
 
       <View style={styles.rightActions}>
-        <TouchableOpacity activeOpacity={0.7} onPress={onShare} style={styles.roundBtn}>
-          <Ionicons
-            name="share-outline"
-            size={22}
-            color="#000"
-            style={actionIconStyle}
-          />
-        </TouchableOpacity>
         {showReportButton && onReport ? (
           <TouchableOpacity activeOpacity={1} onPress={onReport} style={styles.roundBtn}>
             <Ionicons
@@ -70,6 +62,14 @@ const ListingHeroSection = ({
             />
           </TouchableOpacity>
         ) : null}
+        <TouchableOpacity activeOpacity={0.7} onPress={onShare} style={styles.roundBtn}>
+          <Ionicons
+            name="share-outline"
+            size={22}
+            color="#000"
+            style={actionIconStyle}
+          />
+        </TouchableOpacity>
         <TouchableOpacity activeOpacity={1} onPress={onToggleFavorite} style={styles.roundBtn}>
           <Ionicons
             name={isFavorited ? "heart" : "heart-outline"}

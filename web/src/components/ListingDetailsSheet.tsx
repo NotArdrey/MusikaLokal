@@ -1961,8 +1961,12 @@ const ListingDetailsSheet = forwardRef<
     selectedSessionType,
   ]);
 
-  const listingOwnerId = group?.owner_id || group?.organizer_id || group?.id;
-  const showReportButton = !!group && !!userId && listingOwnerId !== userId;
+  const normalizedListingType = String(group?.type || "").toLowerCase();
+  const listingOwnerId = normalizedListingType === "artist"
+    ? group?.id || null
+    : group?.owner_id || group?.organizer_id || null;
+  const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
+  const showReportButton = !!group && !isOwnListing;
 
   const renderTabs = () => (
     <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>

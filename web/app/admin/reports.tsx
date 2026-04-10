@@ -1,6 +1,6 @@
 
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,6 +19,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from './_cache';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -92,6 +93,8 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
 
 type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
 
+type ReportsSection = 'reports_list' | 'booking_incidents';
+
 type ReportStatus = 'pending' | 'resolved' | 'dismissed';
 
 type ReportFilter = 'all' | ReportStatus;
@@ -119,6 +122,11 @@ const adminTabRoutes: Record<Tab, string> = {
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
+};
+
+const resolveReportsSection = (value?: string | string[]): ReportsSection => {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  return rawValue === 'booking_incidents' ? 'booking_incidents' : 'reports_list';
 };
 
 interface ReportEntry {
@@ -184,6 +192,10 @@ interface UserDetailsEntry {
   profile: Record<string, unknown> | null;
 }
 
+interface UserDetailsReturnState {
+  reportDetails: ReportDetailsEntry;
+}
+
 interface UserDetailsRequestTarget {
   id: string;
   full_name?: string | null;
@@ -207,6 +219,8 @@ const incidentStatuses: BookingIncidentFilter[] = [
 ];
 
 const REPORTS_PAGE_SIZE = 50;
+const REPORTS_CACHE_TTL_MS = 30_000;
+const INCIDENTS_CACHE_TTL_MS = 30_000;
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return '-';
@@ -303,6 +317,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'stretch',
     gap: 8,
   },
   cardMeta: {
@@ -358,6 +373,25 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: 'Poppins_400Regular',
   },
+  desktopContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  desktopLayout: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 16,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 48,
+  },
+  desktopScrollContent: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    gap: 16,
+  },
   emptyText: {
     fontSize: 13,
     fontFamily: 'Poppins_400Regular',
@@ -375,9 +409,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
     textTransform: 'capitalize',
   },
+  filterGroup: {
+    gap: 8,
+  },
+  filterLabel: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
   filterRow: {
     gap: 8,
     paddingVertical: 2,
+  },
+  filterRowWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
   },
   flex1: {
     flex: 1,
@@ -503,6 +551,51 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Poppins_600SemiBold',
   },
+  sidebarCard: {
+    width: 248,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    gap: 8,
+  },
+  sidebarNavButton: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  sidebarNavButtonMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
+  sidebarNavButtonText: {
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  sidebarSubmenu: {
+    gap: 8,
+    paddingLeft: 12,
+    paddingTop: 2,
+  },
+  sidebarSubmenuButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sidebarSubmenuButtonText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_500Medium',
+  },
   smallActionButton: {
     borderWidth: 1,
     borderRadius: 8,
@@ -510,21 +603,36 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+    minWidth: 132,
+    flexGrow: 1,
+    flexBasis: 0,
     gap: 4,
   },
   smallActionButtonFilled: {
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+    minWidth: 132,
+    flexGrow: 1,
+    flexBasis: 0,
   },
   smallActionText: {
     fontSize: 12,
     fontFamily: 'Poppins_500Medium',
+    flexShrink: 1,
+    textAlign: 'center',
   },
   smallActionTextFilled: {
     color: '#FFFFFF',
     fontSize: 12,
     fontFamily: 'Poppins_600SemiBold',
+    flexShrink: 1,
+    textAlign: 'center',
   },
   tabButton: {
     flexDirection: 'row',
@@ -547,7 +655,7 @@ const styles = StyleSheet.create({
   },
 });
 
-const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
+const tabItems: { key: Tab; label: string; icon: string }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'stats-chart-outline' },
   { key: 'permits', label: 'Permits', icon: 'document-text-outline' },
   { key: 'users', label: 'Users', icon: 'people-outline' },
@@ -559,6 +667,7 @@ export default function AdminReportsPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
+  const { section } = useLocalSearchParams<{ section?: string | string[] }>();
 
   const [initializingReports, setInitializingReports] = useState(false);
   const [reportSearch, setReportSearch] = useState('');
@@ -577,6 +686,7 @@ export default function AdminReportsPage() {
   const [userDetailsLoadingKey, setUserDetailsLoadingKey] = useState<string | null>(null);
 
   const [userDetailsTarget, setUserDetailsTarget] = useState<UserDetailsEntry | null>(null);
+  const [userDetailsReturnState, setUserDetailsReturnState] = useState<UserDetailsReturnState | null>(null);
   const [reportDetailsTarget, setReportDetailsTarget] = useState<ReportDetailsEntry | null>(null);
   const [reportModerationTarget, setReportModerationTarget] = useState<ReportEntry | null>(null);
   const [reportModerationStatus, setReportModerationStatus] = useState<ReportStatus>('resolved');
@@ -601,11 +711,37 @@ export default function AdminReportsPage() {
     message: '',
   });
 
-  const showInlineTabNav = !(Platform.OS === 'web' && width >= 768);
+  const showSidebarLayout = Platform.OS === 'web' && width >= 768;
+  const showInlineTabNav = !showSidebarLayout;
+  const activeReportsSection = useMemo(() => resolveReportsSection(section), [section]);
   const hasInitializedRef = useRef(false);
 
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message });
+  }, []);
+
+  const reportsCacheKey = useMemo(
+    () => getAdminPageCacheKey('reports', {
+      reportFilter,
+      reportEscalationFilter,
+      reportsOffset,
+    }),
+    [reportFilter, reportEscalationFilter, reportsOffset],
+  );
+
+  const incidentsCacheKey = useMemo(
+    () => getAdminPageCacheKey('booking-incidents', { incidentFilter }),
+    [incidentFilter],
+  );
+
+  const updateReportFilter = useCallback((nextFilter: ReportFilter) => {
+    setReportsOffset(0);
+    setReportFilter(nextFilter);
+  }, []);
+
+  const updateReportEscalationFilter = useCallback((nextFilter: (typeof reportEscalationFilters)[number]) => {
+    setReportsOffset(0);
+    setReportEscalationFilter(nextFilter);
   }, []);
 
   const handleTabChange = useCallback((nextTab: Tab) => {
@@ -638,12 +774,11 @@ export default function AdminReportsPage() {
     return data;
   }, []);
 
-  useEffect(() => {
-    setReportsOffset(0);
-  }, [reportFilter, reportEscalationFilter]);
+  const fetchReports = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setReportsLoading(true);
+    }
 
-  const fetchReports = useCallback(async () => {
-    setReportsLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke<any>('admin-reports-management', {
         body: {
@@ -681,19 +816,31 @@ export default function AdminReportsPage() {
       }));
 
       setReports(normalizedItems);
-      setReportsHasMore(Boolean(data?.hasMore));
+      const hasMore = Boolean(data?.hasMore);
+      setReportsHasMore(hasMore);
+      writeAdminPageCache(reportsCacheKey, {
+        items: normalizedItems,
+        hasMore,
+      });
     } catch (error) {
-      const message = await getErrorMessage(error, 'Unable to fetch reports.');
-      showAlert('error', 'Failed to load reports', message);
-      setReports([]);
-      setReportsHasMore(false);
+      if (!options?.silent) {
+        const message = await getErrorMessage(error, 'Unable to fetch reports.');
+        showAlert('error', 'Failed to load reports', message);
+        setReports([]);
+        setReportsHasMore(false);
+      }
     } finally {
-      setReportsLoading(false);
+      if (!options?.silent) {
+        setReportsLoading(false);
+      }
     }
-  }, [reportFilter, reportEscalationFilter, reportsOffset, showAlert]);
+  }, [reportFilter, reportEscalationFilter, reportsOffset, reportsCacheKey, showAlert]);
 
-  const fetchIncidents = useCallback(async () => {
-    setIncidentsLoading(true);
+  const fetchIncidents = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setIncidentsLoading(true);
+    }
+
     try {
       const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
         body: {
@@ -705,17 +852,54 @@ export default function AdminReportsPage() {
 
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));
-      setIncidents(Array.isArray(data?.items) ? data.items : []);
+      const nextIncidents = Array.isArray(data?.items) ? data.items : [];
+      setIncidents(nextIncidents);
+      writeAdminPageCache(incidentsCacheKey, nextIncidents);
     } catch (error) {
-      const message = await getErrorMessage(error, 'Unable to fetch incidents.');
-      showAlert('error', 'Failed to load incidents', message);
-      setIncidents([]);
+      if (!options?.silent) {
+        const message = await getErrorMessage(error, 'Unable to fetch incidents.');
+        showAlert('error', 'Failed to load incidents', message);
+        setIncidents([]);
+      }
     } finally {
-      setIncidentsLoading(false);
+      if (!options?.silent) {
+        setIncidentsLoading(false);
+      }
     }
-  }, [incidentFilter, showAlert]);
+  }, [incidentFilter, incidentsCacheKey, showAlert]);
 
   const isAccessReady = !loading && roleResolved && !!session && !isGuest && isAdmin;
+
+  useEffect(() => {
+    if (!isAccessReady || !hasInitializedRef.current) return;
+
+    const cachedReports = readAdminPageCache<{ items: ReportEntry[]; hasMore: boolean }>(
+      reportsCacheKey,
+      REPORTS_CACHE_TTL_MS,
+    );
+
+    if (cachedReports) {
+      setReports(cachedReports.items);
+      setReportsHasMore(Boolean(cachedReports.hasMore));
+    }
+
+    void fetchReports({ silent: Boolean(cachedReports) });
+  }, [isAccessReady, reportsCacheKey, fetchReports]);
+
+  useEffect(() => {
+    if (!isAccessReady || !hasInitializedRef.current) return;
+
+    const cachedIncidents = readAdminPageCache<BookingIncidentEntry[]>(
+      incidentsCacheKey,
+      INCIDENTS_CACHE_TTL_MS,
+    );
+
+    if (cachedIncidents) {
+      setIncidents(cachedIncidents);
+    }
+
+    void fetchIncidents({ silent: Boolean(cachedIncidents) });
+  }, [isAccessReady, incidentsCacheKey, fetchIncidents]);
 
   useEffect(() => {
     if (!isAccessReady) {
@@ -729,11 +913,37 @@ export default function AdminReportsPage() {
     }
 
     let isMounted = true;
-    setInitializingReports(true);
+    const cachedReports = readAdminPageCache<{ items: ReportEntry[]; hasMore: boolean }>(
+      reportsCacheKey,
+      REPORTS_CACHE_TTL_MS,
+    );
+    const cachedIncidents = readAdminPageCache<BookingIncidentEntry[]>(
+      incidentsCacheKey,
+      INCIDENTS_CACHE_TTL_MS,
+    );
+
+    if (cachedReports) {
+      setReports(cachedReports.items);
+      setReportsHasMore(Boolean(cachedReports.hasMore));
+    }
+
+    if (cachedIncidents) {
+      setIncidents(cachedIncidents);
+    }
+
+    if (cachedReports || cachedIncidents) {
+      setInitializingReports(false);
+      hasInitializedRef.current = true;
+    } else {
+      setInitializingReports(true);
+    }
 
     void (async () => {
       try {
-        await Promise.all([fetchReports(), fetchIncidents()]);
+        await Promise.all([
+          fetchReports({ silent: Boolean(cachedReports) }),
+          fetchIncidents({ silent: Boolean(cachedIncidents) }),
+        ]);
       } finally {
         if (isMounted) {
           setInitializingReports(false);
@@ -745,17 +955,7 @@ export default function AdminReportsPage() {
     return () => {
       isMounted = false;
     };
-  }, [isAccessReady, fetchReports, fetchIncidents]);
-
-  useEffect(() => {
-    if (!isAccessReady || !hasInitializedRef.current) return;
-    void fetchReports();
-  }, [isAccessReady, fetchReports]);
-
-  useEffect(() => {
-    if (!isAccessReady || !hasInitializedRef.current) return;
-    void fetchIncidents();
-  }, [isAccessReady, fetchIncidents]);
+  }, [isAccessReady, reportsCacheKey, incidentsCacheKey, fetchReports, fetchIncidents]);
 
   const moderateReport = useCallback(
     async ({
@@ -789,6 +989,7 @@ export default function AdminReportsPage() {
 
         const moderationLabel = moderationAction.replace(/_/g, ' ');
         const statusLabel = nextStatus.replace(/_/g, ' ');
+        invalidateAdminPageCache();
         showAlert('success', 'Report updated', `Status set to ${statusLabel}. Action: ${moderationLabel}.`);
         await fetchReports();
         return true;
@@ -868,6 +1069,7 @@ export default function AdminReportsPage() {
 
   const openReportDetailsModal = useCallback(async (reportId: string) => {
     setReportViewLoadingId(reportId);
+    setUserDetailsReturnState(null);
     try {
       let data: any = null;
 
@@ -953,6 +1155,7 @@ export default function AdminReportsPage() {
   }, [showAlert, invokeManageBookingsAction, reports]);
 
   const closeReportDetailsModal = useCallback(() => {
+    setUserDetailsReturnState(null);
     setReportDetailsTarget(null);
   }, []);
 
@@ -972,6 +1175,7 @@ export default function AdminReportsPage() {
         if (error) throw error;
         if (data?.error) throw new Error(String(data.error));
 
+        invalidateAdminPageCache();
         showAlert('success', 'Incident updated', `Incident marked as ${resolution.replace(/_/g, ' ')}.`);
         await fetchIncidents();
         return true;
@@ -1098,8 +1302,22 @@ export default function AdminReportsPage() {
 
   const closeUserDetailsModal = useCallback(() => {
     setUserDetailsTarget(null);
-  }, []);
+    if (userDetailsReturnState?.reportDetails) {
+      setReportDetailsTarget(userDetailsReturnState.reportDetails);
+    }
+    setUserDetailsReturnState(null);
+  }, [userDetailsReturnState]);
 
+  const openUserDetailsFromReportDetails = useCallback((targetUser: UserDetailsRequestTarget, loadingKey: string) => {
+    if (!reportDetailsTarget) return;
+
+    setUserDetailsReturnState({ reportDetails: reportDetailsTarget });
+    setReportDetailsTarget(null);
+    void openUserDetailsModal(targetUser, loadingKey);
+  }, [openUserDetailsModal, reportDetailsTarget]);
+
+  const reportDetailsTargetType = String(reportDetailsTarget?.target?.type || '').trim().toLowerCase();
+  const reportDetailsTargetRecord = reportDetailsTarget?.target?.record || null;
   const reportDetailsReporterId = String(
     reportDetailsTarget?.reporter_profile?.id ||
     reportDetailsTarget?.report?.['reporter_id'] ||
@@ -1108,11 +1326,48 @@ export default function AdminReportsPage() {
 
   const reportDetailsOwnerId = String(
     reportDetailsTarget?.target?.owner_profile?.id ||
+    reportDetailsTargetRecord?.['owner_id'] ||
+    reportDetailsTargetRecord?.['organizer_id'] ||
+    reportDetailsTargetRecord?.['user_id'] ||
     ((reportDetailsTarget?.target?.type === 'profile' || reportDetailsTarget?.target?.type === 'user')
       ? reportDetailsTarget?.target?.id
       : '') ||
     '',
   ).trim();
+
+  const reportDetailsOwnerFullName = String(
+    reportDetailsTarget?.target?.owner_profile?.full_name ||
+    reportDetailsTargetRecord?.['full_name'] ||
+    '',
+  ).trim();
+
+  const reportDetailsOwnerEmail = String(
+    reportDetailsTarget?.target?.owner_profile?.email ||
+    reportDetailsTargetRecord?.['email'] ||
+    '',
+  ).trim();
+
+  const reportDetailsLinkedAccountTitle =
+    reportDetailsTargetType === 'group'
+      ? 'Group Owner'
+      : reportDetailsTargetType === 'gig'
+        ? 'Organizer'
+        : reportDetailsTargetType === 'studio' || reportDetailsTargetType === 'venue'
+          ? 'Owner'
+          : reportDetailsTargetType === 'profile' || reportDetailsTargetType === 'user'
+            ? 'Reported Account'
+            : 'Linked Account';
+
+  const reportDetailsLinkedAccountButtonLabel =
+    reportDetailsTargetType === 'group'
+      ? 'View Group Owner'
+      : reportDetailsTargetType === 'gig'
+        ? 'View Organizer'
+        : reportDetailsTargetType === 'studio' || reportDetailsTargetType === 'venue'
+          ? 'View Owner'
+          : reportDetailsTargetType === 'profile' || reportDetailsTargetType === 'user'
+            ? 'View Reported Account'
+            : 'View Linked Account';
 
   const reportDetailsReporterLoadingKey = 'report-details-reporter';
   const reportDetailsOwnerLoadingKey = 'report-details-owner';
@@ -1178,6 +1433,371 @@ export default function AdminReportsPage() {
     );
   }, [colors.border, colors.inputBackground, colors.text, colors.textSecondary]);
 
+  const renderReportsManagementSection = () => (
+    <View style={styles.sectionGap}>
+      <Text style={[styles.sectionHeading, { color: colors.text }]}>User Reports</Text>
+
+      <TextInput
+        value={reportSearch}
+        onChangeText={setReportSearch}
+        placeholder="Search reports"
+        placeholderTextColor={colors.textSecondary}
+        style={[
+          styles.searchInput,
+          {
+            color: colors.text,
+            backgroundColor: colors.inputBackground,
+            borderColor: colors.inputBorder,
+          },
+        ]}
+      />
+
+      <View style={styles.filterGroup}>
+        <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Report Status</Text>
+        <View style={[styles.filterRow, styles.filterRowWrap]}>
+          {reportStatuses.map((status) => {
+            const active = reportFilter === status;
+            return (
+              <TouchableOpacity
+                key={status}
+                activeOpacity={1}
+                onPress={() => updateReportFilter(status)}
+                style={[
+                  styles.filterChip,
+                  {
+                    backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                    borderColor: active ? colors.primary : colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                  {status}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      <View style={styles.filterGroup}>
+        <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Escalation</Text>
+        <View style={[styles.filterRow, styles.filterRowWrap]}>
+          {reportEscalationFilters.map((escalation) => {
+            const active = reportEscalationFilter === escalation;
+            return (
+              <TouchableOpacity
+                key={escalation}
+                activeOpacity={1}
+                onPress={() => updateReportEscalationFilter(escalation)}
+                style={[
+                  styles.filterChip,
+                  {
+                    backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                    borderColor: active ? colors.primary : colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                  {escalation.replace(/_/g, ' ')}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      {reportsLoading ? (
+        <View style={styles.inlineLoader}>
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      ) : filteredReports.length === 0 ? (
+        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No reports found.</Text>
+      ) : (
+        <View style={styles.sectionGap}>
+          {filteredReports.map((report) => {
+            return (
+              <View key={report.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{report.reason}</Text>
+                {report.details ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{report.details}</Text>
+                ) : null}
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {report.status}</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation: {String(report.escalation_status || 'none').replace(/_/g, ' ')}</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {report.reporter_name || 'Unknown'} ({report.reporter_email || 'no email'})</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Target: {report.target_type} ({report.target_id})</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(report.created_at)}</Text>
+                {report.reviewed_at ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reviewed: {formatDateTime(report.reviewed_at)} {report.reviewer_name ? `by ${report.reviewer_name}` : ''}</Text>
+                ) : null}
+                {report.moderation_action && report.moderation_action !== 'none' ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Action: {report.moderation_action.replace(/_/g, ' ')}</Text>
+                ) : null}
+                {report.moderation_notes ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Notes: {report.moderation_notes}</Text>
+                ) : null}
+                {report.escalation_reason ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation reason: {report.escalation_reason}</Text>
+                ) : null}
+
+                <View style={styles.cardActionsRow}>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    disabled={reportViewLoadingId === report.id}
+                    onPress={() => void openReportDetailsModal(report.id)}
+                    style={[styles.smallActionButton, { borderColor: colors.border }]}
+                  >
+                    {reportViewLoadingId === report.id ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <>
+                        <Ionicons name="eye-outline" size={14} color={colors.text} />
+                        <Text style={[styles.smallActionText, { color: colors.text }]}>View</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    disabled={reportActionLoadingId === report.id}
+                    onPress={() => openReportModerationModal(report)}
+                    style={[styles.smallActionButton, { borderColor: colors.border, opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
+                  >
+                    <Ionicons name="construct-outline" size={14} color={colors.text} />
+                    <Text style={[styles.smallActionText, { color: colors.text }]}>Moderate</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.cardActionsRow}>
+                  {report.status === 'pending' ? (
+                    <>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        disabled={reportActionLoadingId === report.id}
+                        onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'resolved' })}
+                        style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
+                      >
+                        <Text style={styles.smallActionTextFilled}>Resolve</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        disabled={reportActionLoadingId === report.id}
+                        onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'dismissed' })}
+                        style={[styles.smallActionButtonFilled, { backgroundColor: '#64748B', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
+                      >
+                        <Text style={styles.smallActionTextFilled}>Dismiss</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        disabled={reportActionLoadingId === report.id}
+                        onPress={() => openReportModerationModal(report, 'pending', 'manual_review')}
+                        style={[styles.smallActionButtonFilled, { backgroundColor: '#DC2626', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
+                      >
+                        <Text style={styles.smallActionTextFilled}>Escalate</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      disabled={reportActionLoadingId === report.id}
+                      onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'pending' })}
+                      style={[styles.smallActionButtonFilled, { backgroundColor: '#0EA5E9', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
+                    >
+                      <Text style={styles.smallActionTextFilled}>Reopen</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      <View style={styles.reportsPagerRow}>
+        <TouchableOpacity
+          activeOpacity={1}
+          disabled={reportsLoading || reportsOffset <= 0}
+          onPress={() => setReportsOffset((prev) => Math.max(0, prev - REPORTS_PAGE_SIZE))}
+          style={[
+            styles.reportsPagerButton,
+            {
+              borderColor: colors.border,
+              backgroundColor: isDark ? '#0A1A32' : '#F8FAFC',
+              opacity: reportsOffset <= 0 ? 0.45 : 1,
+            },
+          ]}
+        >
+          <Ionicons name="chevron-back-outline" size={16} color={colors.textSecondary} />
+          <Text style={[styles.reportsPagerButtonText, { color: colors.textSecondary }]}>Prev</Text>
+        </TouchableOpacity>
+
+        <Text style={[styles.reportsPagerLabel, { color: colors.textSecondary }]}>Page {Math.floor(reportsOffset / REPORTS_PAGE_SIZE) + 1}</Text>
+
+        <TouchableOpacity
+          activeOpacity={1}
+          disabled={reportsLoading || !reportsHasMore}
+          onPress={() => setReportsOffset((prev) => prev + REPORTS_PAGE_SIZE)}
+          style={[
+            styles.reportsPagerButton,
+            {
+              borderColor: colors.border,
+              backgroundColor: isDark ? '#0A1A32' : '#F8FAFC',
+              opacity: reportsHasMore ? 1 : 0.45,
+            },
+          ]}
+        >
+          <Text style={[styles.reportsPagerButtonText, { color: colors.textSecondary }]}>Next</Text>
+          <Ionicons name="chevron-forward-outline" size={16} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const renderIncidentQueueSection = () => (
+    <View style={styles.sectionGap}>
+      <Text style={[styles.sectionHeading, { color: colors.text }]}>Booking Incident Queue</Text>
+
+      <View style={styles.filterGroup}>
+        <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Incident Status</Text>
+        <View style={[styles.filterRow, styles.filterRowWrap]}>
+          {incidentStatuses.map((status) => {
+            const active = incidentFilter === status;
+            return (
+              <TouchableOpacity
+                key={status}
+                activeOpacity={1}
+                onPress={() => setIncidentFilter(status)}
+                style={[
+                  styles.filterChip,
+                  {
+                    backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                    borderColor: active ? colors.primary : colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                  {status.replace(/_/g, ' ')}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      {incidentsLoading ? (
+        <View style={styles.inlineLoader}>
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      ) : incidents.length === 0 ? (
+        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No incidents found.</Text>
+      ) : (
+        <View style={styles.sectionGap}>
+          {incidents.map((incident) => {
+            const reporterId = String(incident.reporter_user_id || '').trim();
+            const counterpartyId = String(incident.counterparty_user_id || '').trim();
+            const incidentReporterLoadingKey = `incident-card-${incident.id}-reporter`;
+            const incidentCounterpartyLoadingKey = `incident-card-${incident.id}-counterparty`;
+
+            return (
+              <View key={incident.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{String(incident.issue_type || 'issue').replace(/_/g, ' ')}</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {String(incident.status || '').replace(/_/g, ' ')}</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Studio: {incident.studio_name || 'Unknown studio'}</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Booking: {incident.booking_date || '-'} {incident.booking_start_time ? String(incident.booking_start_time).slice(0, 5) : ''}</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {incident.reporter_name} ({incident.reporter_email || 'no email'})</Text>
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Counterparty: {incident.counterparty_name} ({incident.counterparty_email || 'no email'})</Text>
+                {incident.reporter_notes ? <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter note: {incident.reporter_notes}</Text> : null}
+                {incident.counterparty_notes ? <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Counterparty note: {incident.counterparty_notes}</Text> : null}
+                {incident.resolution ? <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Resolution: {incident.resolution}</Text> : null}
+                <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(incident.created_at)}</Text>
+                {incident.response_deadline_at ? (
+                  <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Deadline: {formatDateTime(incident.response_deadline_at)}</Text>
+                ) : null}
+
+                <View style={styles.cardActionsRow}>
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    disabled={!reporterId || userDetailsLoadingKey === incidentReporterLoadingKey}
+                    onPress={() => {
+                      if (!reporterId) return;
+                      void openUserDetailsModal({
+                        id: reporterId,
+                        full_name: incident.reporter_name,
+                        email: incident.reporter_email,
+                      }, incidentReporterLoadingKey);
+                    }}
+                    style={[styles.smallActionButton, { borderColor: colors.border, opacity: reporterId ? 1 : 0.5 }]}
+                  >
+                    {userDetailsLoadingKey === incidentReporterLoadingKey ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <>
+                        <Ionicons name="person-outline" size={14} color={colors.text} />
+                        <Text style={[styles.smallActionText, { color: colors.text }]}>View Reporter</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    disabled={!counterpartyId || userDetailsLoadingKey === incidentCounterpartyLoadingKey}
+                    onPress={() => {
+                      if (!counterpartyId) return;
+                      void openUserDetailsModal({
+                        id: counterpartyId,
+                        full_name: incident.counterparty_name,
+                        email: incident.counterparty_email,
+                      }, incidentCounterpartyLoadingKey);
+                    }}
+                    style={[styles.smallActionButton, { borderColor: colors.border, opacity: counterpartyId ? 1 : 0.5 }]}
+                  >
+                    {userDetailsLoadingKey === incidentCounterpartyLoadingKey ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <>
+                        <Ionicons name="people-outline" size={14} color={colors.text} />
+                        <Text style={[styles.smallActionText, { color: colors.text }]}>View Counterparty</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {incidentActionable(String(incident.status || '')) && (
+                  <View style={styles.cardActionsRow}>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      disabled={incidentActionLoadingId === incident.id}
+                      onPress={() => openIncidentResolutionModal(incident, 'resolved_no_refund')}
+                      style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: incidentActionLoadingId === incident.id ? 0.6 : 1 }]}
+                    >
+                      <Text style={styles.smallActionTextFilled}>Resolve No Refund</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      disabled={incidentActionLoadingId === incident.id}
+                      onPress={() => openIncidentResolutionModal(incident, 'resolved_refund')}
+                      style={[styles.smallActionButtonFilled, { backgroundColor: '#D97706', opacity: incidentActionLoadingId === incident.id ? 0.6 : 1 }]}
+                    >
+                      <Text style={styles.smallActionTextFilled}>Resolve Refund</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={1}
+                      disabled={incidentActionLoadingId === incident.id}
+                      onPress={() => openIncidentResolutionModal(incident, 'dismissed')}
+                      style={[styles.smallActionButtonFilled, { backgroundColor: '#64748B', opacity: incidentActionLoadingId === incident.id ? 0.6 : 1 }]}
+                    >
+                      <Text style={styles.smallActionTextFilled}>Dismiss</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+
   if (loading || !roleResolved || initializingReports) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
@@ -1231,379 +1851,16 @@ export default function AdminReportsPage() {
           </ScrollView>
         )}
 
-        <View style={styles.sectionGap}>
-          <TextInput
-            value={reportSearch}
-            onChangeText={setReportSearch}
-            placeholder="Search reports"
-            placeholderTextColor={colors.textSecondary}
-            style={[
-              styles.searchInput,
-              {
-                color: colors.text,
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.inputBorder,
-              },
-            ]}
-          />
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {reportStatuses.map((status) => {
-              const active = reportFilter === status;
-              return (
-                <TouchableOpacity
-                  key={status}
-                  activeOpacity={1}
-                  onPress={() => setReportFilter(status)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {status}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {reportEscalationFilters.map((escalation) => {
-              const active = reportEscalationFilter === escalation;
-              return (
-                <TouchableOpacity
-                  key={escalation}
-                  activeOpacity={1}
-                  onPress={() => setReportEscalationFilter(escalation)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {escalation.replace(/_/g, ' ')}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          <View style={styles.reportsPagerRow}>
-            <TouchableOpacity
-              activeOpacity={1}
-              disabled={reportsLoading || reportsOffset <= 0}
-              onPress={() => setReportsOffset((prev) => Math.max(0, prev - REPORTS_PAGE_SIZE))}
-              style={[
-                styles.reportsPagerButton,
-                {
-                  borderColor: colors.border,
-                  backgroundColor: isDark ? '#0A1A32' : '#F8FAFC',
-                  opacity: reportsOffset <= 0 ? 0.45 : 1,
-                },
-              ]}
-            >
-              <Ionicons name="chevron-back-outline" size={16} color={colors.textSecondary} />
-              <Text style={[styles.reportsPagerButtonText, { color: colors.textSecondary }]}>Prev</Text>
-            </TouchableOpacity>
-
-            <Text style={[styles.reportsPagerLabel, { color: colors.textSecondary }]}>Page {Math.floor(reportsOffset / REPORTS_PAGE_SIZE) + 1}</Text>
-
-            <TouchableOpacity
-              activeOpacity={1}
-              disabled={reportsLoading || !reportsHasMore}
-              onPress={() => setReportsOffset((prev) => prev + REPORTS_PAGE_SIZE)}
-              style={[
-                styles.reportsPagerButton,
-                {
-                  borderColor: colors.border,
-                  backgroundColor: isDark ? '#0A1A32' : '#F8FAFC',
-                  opacity: reportsHasMore ? 1 : 0.45,
-                },
-              ]}
-            >
-              <Text style={[styles.reportsPagerButtonText, { color: colors.textSecondary }]}>Next</Text>
-              <Ionicons name="chevron-forward-outline" size={16} color={colors.textSecondary} />
-            </TouchableOpacity>
+        {showSidebarLayout ? (
+          activeReportsSection === 'booking_incidents'
+            ? renderIncidentQueueSection()
+            : renderReportsManagementSection()
+        ) : (
+          <View style={styles.sectionGap}>
+            {renderReportsManagementSection()}
+            {renderIncidentQueueSection()}
           </View>
-
-          {reportsLoading ? (
-            <View style={styles.inlineLoader}>
-              <ActivityIndicator size="small" color={colors.primary} />
-            </View>
-          ) : filteredReports.length === 0 ? (
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No reports found.</Text>
-          ) : (
-            <View style={styles.sectionGap}>
-              {filteredReports.map((report) => {
-                const reporterId = String(report.reporter_id || '').trim();
-                const reportReporterLoadingKey = `report-card-${report.id}-reporter`;
-
-                return (
-                  <View key={report.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>{report.reason}</Text>
-                    {report.details ? (
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>{report.details}</Text>
-                    ) : null}
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {report.status}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation: {String(report.escalation_status || 'none').replace(/_/g, ' ')}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {report.reporter_name || 'Unknown'} ({report.reporter_email || 'no email'})</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Target: {report.target_type} ({report.target_id})</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(report.created_at)}</Text>
-                    {report.reviewed_at ? (
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reviewed: {formatDateTime(report.reviewed_at)} {report.reviewer_name ? `by ${report.reviewer_name}` : ''}</Text>
-                    ) : null}
-                    {report.moderation_action && report.moderation_action !== 'none' ? (
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Action: {report.moderation_action.replace(/_/g, ' ')}</Text>
-                    ) : null}
-                    {report.moderation_notes ? (
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Notes: {report.moderation_notes}</Text>
-                    ) : null}
-                    {report.escalation_reason ? (
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Escalation reason: {report.escalation_reason}</Text>
-                    ) : null}
-
-                    <View style={styles.cardActionsRow}>
-                      <TouchableOpacity
-                        activeOpacity={1}
-                        disabled={reportViewLoadingId === report.id}
-                        onPress={() => void openReportDetailsModal(report.id)}
-                        style={[styles.smallActionButton, { borderColor: colors.border }]}
-                      >
-                        {reportViewLoadingId === report.id ? (
-                          <ActivityIndicator size="small" color={colors.primary} />
-                        ) : (
-                          <>
-                            <Ionicons name="eye-outline" size={14} color={colors.text} />
-                            <Text style={[styles.smallActionText, { color: colors.text }]}>View</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        activeOpacity={1}
-                        disabled={!reporterId || userDetailsLoadingKey === reportReporterLoadingKey}
-                        onPress={() => {
-                          if (!reporterId) return;
-                          void openUserDetailsModal({
-                            id: reporterId,
-                            full_name: report.reporter_name,
-                            email: report.reporter_email,
-                          }, reportReporterLoadingKey);
-                        }}
-                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: reporterId ? 1 : 0.5 }]}
-                      >
-                        {userDetailsLoadingKey === reportReporterLoadingKey ? (
-                          <ActivityIndicator size="small" color={colors.primary} />
-                        ) : (
-                          <>
-                            <Ionicons name="person-outline" size={14} color={colors.text} />
-                            <Text style={[styles.smallActionText, { color: colors.text }]}>View Reporter</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        activeOpacity={1}
-                        disabled={reportActionLoadingId === report.id}
-                        onPress={() => openReportModerationModal(report)}
-                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                      >
-                        <Ionicons name="construct-outline" size={14} color={colors.text} />
-                        <Text style={[styles.smallActionText, { color: colors.text }]}>Moderate</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={styles.cardActionsRow}>
-                      {report.status === 'pending' ? (
-                        <>
-                          <TouchableOpacity
-                            activeOpacity={1}
-                            disabled={reportActionLoadingId === report.id}
-                            onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'resolved' })}
-                            style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                          >
-                            <Text style={styles.smallActionTextFilled}>Resolve</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            activeOpacity={1}
-                            disabled={reportActionLoadingId === report.id}
-                            onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'dismissed' })}
-                            style={[styles.smallActionButtonFilled, { backgroundColor: '#64748B', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                          >
-                            <Text style={styles.smallActionTextFilled}>Dismiss</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            activeOpacity={1}
-                            disabled={reportActionLoadingId === report.id}
-                            onPress={() => openReportModerationModal(report, 'pending', 'manual_review')}
-                            style={[styles.smallActionButtonFilled, { backgroundColor: '#DC2626', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                          >
-                            <Text style={styles.smallActionTextFilled}>Escalate</Text>
-                          </TouchableOpacity>
-                        </>
-                      ) : (
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          disabled={reportActionLoadingId === report.id}
-                          onPress={() => void moderateReport({ reportId: report.id, nextStatus: 'pending' })}
-                          style={[styles.smallActionButtonFilled, { backgroundColor: '#0EA5E9', opacity: reportActionLoadingId === report.id ? 0.6 : 1 }]}
-                        >
-                          <Text style={styles.smallActionTextFilled}>Reopen</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-
-          <Text style={[styles.sectionHeading, { color: colors.text }]}>Booking Incident Queue</Text>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {incidentStatuses.map((status) => {
-              const active = incidentFilter === status;
-              return (
-                <TouchableOpacity
-                  key={status}
-                  activeOpacity={1}
-                  onPress={() => setIncidentFilter(status)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {status.replace(/_/g, ' ')}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          {incidentsLoading ? (
-            <View style={styles.inlineLoader}>
-              <ActivityIndicator size="small" color={colors.primary} />
-            </View>
-          ) : incidents.length === 0 ? (
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No incidents found.</Text>
-          ) : (
-            <View style={styles.sectionGap}>
-              {incidents.map((incident) => {
-                const reporterId = String(incident.reporter_user_id || '').trim();
-                const counterpartyId = String(incident.counterparty_user_id || '').trim();
-                const incidentReporterLoadingKey = `incident-card-${incident.id}-reporter`;
-                const incidentCounterpartyLoadingKey = `incident-card-${incident.id}-counterparty`;
-
-                return (
-                  <View key={incident.id} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
-                    <Text style={[styles.cardTitle, { color: colors.text }]}>{String(incident.issue_type || 'issue').replace(/_/g, ' ')}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Status: {String(incident.status || '').replace(/_/g, ' ')}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Studio: {incident.studio_name || 'Unknown studio'}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Booking: {incident.booking_date || '-'} {incident.booking_start_time ? String(incident.booking_start_time).slice(0, 5) : ''}</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter: {incident.reporter_name} ({incident.reporter_email || 'no email'})</Text>
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Counterparty: {incident.counterparty_name} ({incident.counterparty_email || 'no email'})</Text>
-                    {incident.reporter_notes ? <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Reporter note: {incident.reporter_notes}</Text> : null}
-                    {incident.counterparty_notes ? <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Counterparty note: {incident.counterparty_notes}</Text> : null}
-                    {incident.resolution ? <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Resolution: {incident.resolution}</Text> : null}
-                    <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Created: {formatDateTime(incident.created_at)}</Text>
-                    {incident.response_deadline_at ? (
-                      <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>Deadline: {formatDateTime(incident.response_deadline_at)}</Text>
-                    ) : null}
-
-                    <View style={styles.cardActionsRow}>
-                      <TouchableOpacity
-                        activeOpacity={1}
-                        disabled={!reporterId || userDetailsLoadingKey === incidentReporterLoadingKey}
-                        onPress={() => {
-                          if (!reporterId) return;
-                          void openUserDetailsModal({
-                            id: reporterId,
-                            full_name: incident.reporter_name,
-                            email: incident.reporter_email,
-                          }, incidentReporterLoadingKey);
-                        }}
-                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: reporterId ? 1 : 0.5 }]}
-                      >
-                        {userDetailsLoadingKey === incidentReporterLoadingKey ? (
-                          <ActivityIndicator size="small" color={colors.primary} />
-                        ) : (
-                          <>
-                            <Ionicons name="person-outline" size={14} color={colors.text} />
-                            <Text style={[styles.smallActionText, { color: colors.text }]}>View Reporter</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        activeOpacity={1}
-                        disabled={!counterpartyId || userDetailsLoadingKey === incidentCounterpartyLoadingKey}
-                        onPress={() => {
-                          if (!counterpartyId) return;
-                          void openUserDetailsModal({
-                            id: counterpartyId,
-                            full_name: incident.counterparty_name,
-                            email: incident.counterparty_email,
-                          }, incidentCounterpartyLoadingKey);
-                        }}
-                        style={[styles.smallActionButton, { borderColor: colors.border, opacity: counterpartyId ? 1 : 0.5 }]}
-                      >
-                        {userDetailsLoadingKey === incidentCounterpartyLoadingKey ? (
-                          <ActivityIndicator size="small" color={colors.primary} />
-                        ) : (
-                          <>
-                            <Ionicons name="people-outline" size={14} color={colors.text} />
-                            <Text style={[styles.smallActionText, { color: colors.text }]}>View Counterparty</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-
-                    {incidentActionable(String(incident.status || '')) && (
-                      <View style={styles.cardActionsRow}>
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          disabled={incidentActionLoadingId === incident.id}
-                          onPress={() => openIncidentResolutionModal(incident, 'resolved_no_refund')}
-                          style={[styles.smallActionButtonFilled, { backgroundColor: '#16A34A', opacity: incidentActionLoadingId === incident.id ? 0.6 : 1 }]}
-                        >
-                          <Text style={styles.smallActionTextFilled}>Resolve No Refund</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          disabled={incidentActionLoadingId === incident.id}
-                          onPress={() => openIncidentResolutionModal(incident, 'resolved_refund')}
-                          style={[styles.smallActionButtonFilled, { backgroundColor: '#D97706', opacity: incidentActionLoadingId === incident.id ? 0.6 : 1 }]}
-                        >
-                          <Text style={styles.smallActionTextFilled}>Resolve Refund</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          disabled={incidentActionLoadingId === incident.id}
-                          onPress={() => openIncidentResolutionModal(incident, 'dismissed')}
-                          style={[styles.smallActionButtonFilled, { backgroundColor: '#64748B', opacity: incidentActionLoadingId === incident.id ? 0.6 : 1 }]}
-                        >
-                          <Text style={styles.smallActionTextFilled}>Dismiss</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
+        )}
       </ScrollView>
 
       <Modal visible={!!userDetailsTarget} transparent animationType="fade" onRequestClose={closeUserDetailsModal}>
@@ -1687,9 +1944,9 @@ export default function AdminReportsPage() {
               )}
 
               {renderDetailsSection(
-                'Target Owner / Organizer',
+                reportDetailsLinkedAccountTitle,
                 reportDetailsTarget?.target?.owner_profile || null,
-                'Target owner or organizer details are unavailable.',
+                `${reportDetailsLinkedAccountTitle} details are unavailable.`,
               )}
             </ScrollView>
 
@@ -1711,9 +1968,7 @@ export default function AdminReportsPage() {
                     '',
                   );
 
-                  closeReportDetailsModal();
-
-                  void openUserDetailsModal({
+                  openUserDetailsFromReportDetails({
                     id: reportDetailsReporterId,
                     full_name: reporterFullName,
                     email: reporterEmail,
@@ -1736,33 +1991,35 @@ export default function AdminReportsPage() {
 
               <TouchableOpacity
                 activeOpacity={1}
-                disabled={!reportDetailsOwnerId || userDetailsLoadingKey === reportDetailsOwnerLoadingKey}
+                disabled={userDetailsLoadingKey === reportDetailsOwnerLoadingKey}
                 onPress={() => {
-                  if (!reportDetailsOwnerId) return;
+                  if (!reportDetailsOwnerId) {
+                    showAlert(
+                      'warning',
+                      'Linked account unavailable',
+                      `This report does not have a linked ${reportDetailsLinkedAccountTitle.toLowerCase()} record to open.`,
+                    );
+                    return;
+                  }
 
-                  const ownerFullName = String(reportDetailsTarget?.target?.owner_profile?.full_name || '');
-                  const ownerEmail = String(reportDetailsTarget?.target?.owner_profile?.email || '');
-
-                  closeReportDetailsModal();
-
-                  void openUserDetailsModal({
+                  openUserDetailsFromReportDetails({
                     id: reportDetailsOwnerId,
-                    full_name: ownerFullName,
-                    email: ownerEmail,
+                    full_name: reportDetailsOwnerFullName,
+                    email: reportDetailsOwnerEmail,
                   }, reportDetailsOwnerLoadingKey);
                 }}
                 style={[
                   styles.modalButton,
                   {
                     backgroundColor: isDark ? '#065F46' : '#D1FAE5',
-                    opacity: reportDetailsOwnerId ? 1 : 0.5,
+                    opacity: userDetailsLoadingKey === reportDetailsOwnerLoadingKey ? 0.7 : 1,
                   },
                 ]}
               >
                 {userDetailsLoadingKey === reportDetailsOwnerLoadingKey ? (
                   <ActivityIndicator size="small" color={isDark ? '#FFFFFF' : '#065F46'} />
                 ) : (
-                  <Text style={[styles.modalButtonText, { color: isDark ? '#FFFFFF' : '#065F46' }]}>View Target Owner</Text>
+                  <Text style={[styles.modalButtonText, { color: isDark ? '#FFFFFF' : '#065F46' }]}>{reportDetailsLinkedAccountButtonLabel}</Text>
                 )}
               </TouchableOpacity>
 

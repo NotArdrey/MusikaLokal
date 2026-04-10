@@ -28,6 +28,7 @@ import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import { useTheme } from "../src/context/ThemeContext";
 import { rerankHomeFeedWithLocalLLM } from "../src/services/offlineLlmEnhancer";
 import { startBackgroundPreparation, isModelPreparing, onModelReady } from "../src/services/musikaLlmAdapter";
+import { getScreenCacheKey, readScreenCache, writeScreenCache } from "../src/utils/screenCache";
 
 const { width, height } = Dimensions.get("window");
 
@@ -169,7 +170,7 @@ const rankForYouOnDevice = (
       return Number(b.rating || 0) - Number(a.rating || 0);
     });
 
-  return ranked.slice(0, safeLimit);
+  return takeItemsWithTypeVariety(ranked, safeLimit);
 };
 
 const getTypeBadgeColor = (type: string) => {
@@ -185,6 +186,102 @@ const getTypeBadgeColor = (type: string) => {
     default:
       return "#7C3AED";
   }
+};
+
+const takeItemsWithTypeVariety = (items: any[], limit: number) => {
+  if (!Array.isArray(items) || limit <= 0) {
+    return [];
+  }
+
+  const buckets = new Map<string, any[]>();
+
+  items.forEach((item) => {
+    const typeKey = String(item?.type || "Unknown");
+    const existingBucket = buckets.get(typeKey);
+    if (existingBucket) {
+      existingBucket.push(item);
+      return;
+    }
+
+    buckets.set(typeKey, [item]);
+  });
+
+  const orderedTypes = Array.from(buckets.keys());
+  const output: any[] = [];
+
+  while (output.length < limit) {
+    let addedItem = false;
+
+    for (const typeKey of orderedTypes) {
+      const bucket = buckets.get(typeKey);
+      if (!bucket || bucket.length === 0) {
+        continue;
+      }
+
+      output.push(bucket.shift());
+      addedItem = true;
+
+      if (output.length >= limit) {
+        break;
+      }
+    }
+
+    if (!addedItem) {
+      break;
+    }
+  }
+
+  return output;
+};
+
+const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) => {
+  const valueMap = new Map<string, string[]>();
+
+  (rows || []).forEach((row: any) => {
+    const profileId = row?.profile_id;
+    const rawValue = row?.[valueKey];
+    if (typeof profileId !== "string" || typeof rawValue !== "string") {
+      return;
+    }
+
+    const nextValue = rawValue.trim();
+    if (!nextValue) {
+      return;
+    }
+
+    const existingValues = valueMap.get(profileId);
+    if (existingValues) {
+      existingValues.push(nextValue);
+      return;
+    }
+
+    valueMap.set(profileId, [nextValue]);
+  });
+
+  return valueMap;
+};
+
+const HOME_CACHE_TTL_MS = 60_000;
+const HOME_FOCUS_REFRESH_COOLDOWN_MS = 20_000;
+const HOME_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
+const VIEWED_NEW_ARRIVALS_STORAGE_KEY = "viewed_new_arrivals";
+const RECENTLY_VIEWED_STORAGE_KEY = "recently_viewed_items";
+
+type HomeFeedCachePayload = {
+  fetchedAt: number;
+  featured: any[];
+  discover: any[];
+  newArrivals: any[];
+  randomRecommendations: any[];
+  aiRecommendations: any[];
+  aiFeedProvider: string;
+  aiFeedMessage: string;
+};
+
+type HomeProfileCachePayload = {
+  fetchedAt: number;
+  userName: string;
+  hasGroups: boolean;
 };
 
 const AutoCardImage = ({
@@ -255,7 +352,6 @@ export default function HomeScreen() {
   const [discover, setDiscover] = useState<any[]>([]);
   const [newArrivals, setNewArrivals] = useState<any[]>([]); // New Arrivals State
   const [viewedNewArrivals, setViewedNewArrivals] = useState<Set<string>>(new Set());
-  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]); // Upcoming Events State (for musicians)
   const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
   const [userName, setUserName] = useState("Guest");
   const [timeGreeting, setTimeGreeting] = useState("Hey");
@@ -325,8 +421,12 @@ export default function HomeScreen() {
   const homeRealtimeRefreshTimerRef =
     React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeDataFetchInFlightRef = React.useRef(false);
+  const hasHydratedHomeCacheRef = React.useRef(false);
   const homeLlmRequestIdRef = React.useRef(0);
   const homeLlmRerankInFlightRef = React.useRef(false);
+  const lastHomeRefreshAtRef = React.useRef(0);
+  const lastProfileRefreshAtRef = React.useRef(0);
+  const viewedNewArrivalsLoadedRef = React.useRef(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
   );
@@ -345,6 +445,52 @@ export default function HomeScreen() {
 
   // Scroll State for Sticky Header
   const [isScrolled, setIsScrolled] = useState(false);
+
+  const homeCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-feed", {
+      userId: userId || "guest",
+      userRole: userRole || "guest",
+      isGuest,
+    }),
+    [userId, userRole, isGuest],
+  );
+
+  const homeProfileCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-profile", {
+      userId: userId || "guest",
+      isGuest,
+    }),
+    [userId, isGuest],
+  );
+
+  const applyHomeFeedSnapshot = useCallback((snapshot: HomeFeedCachePayload) => {
+    setFeatured(Array.isArray(snapshot.featured) ? snapshot.featured : []);
+    setDiscover(Array.isArray(snapshot.discover) ? snapshot.discover : []);
+    setNewArrivals(Array.isArray(snapshot.newArrivals) ? snapshot.newArrivals : []);
+    setRandomRecommendations(Array.isArray(snapshot.randomRecommendations) ? snapshot.randomRecommendations : []);
+    setAiRecommendations(Array.isArray(snapshot.aiRecommendations) ? snapshot.aiRecommendations : []);
+    setAiFeedProvider(snapshot.aiFeedProvider || "On-Device LLM (Required)");
+    setAiFeedMessage(snapshot.aiFeedMessage || "");
+    lastHomeRefreshAtRef.current = snapshot.fetchedAt || Date.now();
+    hasHydratedHomeCacheRef.current = true;
+  }, []);
+
+  const loadViewedNewArrivals = useCallback(async () => {
+    if (viewedNewArrivalsLoadedRef.current) {
+      return;
+    }
+
+    try {
+      const json = await AsyncStorage.getItem(VIEWED_NEW_ARRIVALS_STORAGE_KEY);
+      if (json) {
+        setViewedNewArrivals(new Set(JSON.parse(json)));
+      }
+    } catch {
+      // Ignore local storage read failures.
+    } finally {
+      viewedNewArrivalsLoadedRef.current = true;
+    }
+  }, []);
 
   const presentModalWithRetry = useCallback((modalRef: { current: any }) => {
     let attempts = 0;
@@ -448,12 +594,14 @@ export default function HomeScreen() {
   useEffect(() => {
     if (aiRecommendations.length > 0) {
       debugLog("Switching to AI recommendations");
-      setFeatured(aiRecommendations.slice(0, 10));
-      setDiscover(aiRecommendations.slice(10, 20));
+      const diversifiedAiItems = takeItemsWithTypeVariety(aiRecommendations, 20);
+      setFeatured(diversifiedAiItems.slice(0, 10));
+      setDiscover(diversifiedAiItems.slice(10, 20));
     } else if (randomRecommendations.length > 0) {
       debugLog("Switching to random recommendations");
-      setFeatured(randomRecommendations.slice(0, 10));
-      setDiscover(randomRecommendations.slice(10, 20));
+      const diversifiedRandomItems = takeItemsWithTypeVariety(randomRecommendations, 20);
+      setFeatured(diversifiedRandomItems.slice(0, 10));
+      setDiscover(diversifiedRandomItems.slice(10, 20));
     }
   }, [aiRecommendations, randomRecommendations]);
 
@@ -489,13 +637,84 @@ export default function HomeScreen() {
     startBackgroundPreparation();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    hasHydratedHomeCacheRef.current = false;
+    lastHomeRefreshAtRef.current = 0;
+    lastProfileRefreshAtRef.current = 0;
+
+    void (async () => {
+      const [cachedHomeFeed, cachedProfile] = await Promise.all([
+        readScreenCache<HomeFeedCachePayload>(homeCacheKey, HOME_CACHE_TTL_MS),
+        readScreenCache<HomeProfileCachePayload>(homeProfileCacheKey, HOME_PROFILE_CACHE_TTL_MS),
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      if (cachedHomeFeed) {
+        applyHomeFeedSnapshot(cachedHomeFeed);
+        setLoading(false);
+      }
+
+      if (cachedProfile) {
+        setUserName(cachedProfile.userName || "Guest");
+        setHasGroups(Boolean(cachedProfile.hasGroups));
+        lastProfileRefreshAtRef.current = cachedProfile.fetchedAt || Date.now();
+      } else if (isGuest) {
+        setUserName("Guest");
+        setHasGroups(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [applyHomeFeedSnapshot, homeCacheKey, homeProfileCacheKey, isGuest]);
+
+  useEffect(() => {
+    if (
+      featured.length === 0 &&
+      discover.length === 0 &&
+      newArrivals.length === 0 &&
+      randomRecommendations.length === 0 &&
+      aiRecommendations.length === 0
+    ) {
+      return;
+    }
+
+    const payload: HomeFeedCachePayload = {
+      fetchedAt: lastHomeRefreshAtRef.current || Date.now(),
+      featured,
+      discover,
+      newArrivals,
+      randomRecommendations,
+      aiRecommendations,
+      aiFeedProvider,
+      aiFeedMessage,
+    };
+
+    void writeScreenCache(homeCacheKey, payload);
+  }, [
+    aiFeedMessage,
+    aiFeedProvider,
+    aiRecommendations,
+    discover,
+    featured,
+    homeCacheKey,
+    newArrivals,
+    randomRecommendations,
+  ]);
+
   // Re-fetch home feed AI recommendations once the on-device LLM becomes ready.
-  const fetchHomeDataRef = React.useRef<((showLoading?: boolean) => Promise<void>) | null>(null);
+  const fetchHomeDataRef = React.useRef<((showLoading?: boolean, options?: { bypassCooldown?: boolean }) => Promise<void>) | null>(null);
   useEffect(() => {
     return onModelReady(() => {
       setIsOnDeviceLlmReady(true);
       if (!homeDataFetchInFlightRef.current) {
-        fetchHomeDataRef.current?.(false);
+        fetchHomeDataRef.current?.(false, { bypassCooldown: true });
       }
     });
   }, []);
@@ -503,19 +722,35 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       debugLog("useFocusEffect triggered, userRole:", userRole);
-      // Fetch data silently on focus if data already exists
-      const isFirstLoad = featured.length === 0 && discover.length === 0;
+      const isFirstLoad =
+        featured.length === 0 &&
+        discover.length === 0 &&
+        !hasHydratedHomeCacheRef.current;
       debugLog("isFirstLoad:", isFirstLoad);
-      fetchHomeData(isFirstLoad);
-      fetchUserProfile();
-      fetchRecentlyViewed();
-      fetchUpcomingEvents(); // Fetch upcoming events for musicians
-      setTimeBasedGreeting();
 
-      // Load which New Arrivals have already been viewed
-      void AsyncStorage.getItem('viewed_new_arrivals').then(json => {
-        if (json) setViewedNewArrivals(new Set(JSON.parse(json)));
-      }).catch(() => { });
+      const shouldRefreshHome =
+        isFirstLoad ||
+        Date.now() - lastHomeRefreshAtRef.current >= HOME_FOCUS_REFRESH_COOLDOWN_MS;
+      const shouldRefreshProfile =
+        Boolean(userId) && (
+          lastProfileRefreshAtRef.current === 0 ||
+          Date.now() - lastProfileRefreshAtRef.current >= HOME_PROFILE_CACHE_TTL_MS
+        );
+
+      if (shouldRefreshHome) {
+        void fetchHomeData(isFirstLoad, { bypassCooldown: isFirstLoad });
+      }
+
+      if (shouldRefreshProfile) {
+        void fetchUserProfile();
+      } else if (isGuest) {
+        setUserName("Guest");
+        setHasGroups(false);
+      }
+
+      void fetchRecentlyViewed();
+      void loadViewedNewArrivals();
+      setTimeBasedGreeting();
 
       const reopenListingId = Array.isArray(params.reopenListingId)
         ? params.reopenListingId[0]
@@ -542,7 +777,7 @@ export default function HomeScreen() {
       };
 
       void restorePendingReopen();
-    }, [userRole, userId, isGuest, params.reopenListingId]),
+    }, [discover.length, featured.length, isGuest, loadViewedNewArrivals, params.reopenListingId, userId, userRole]),
   );
 
   // Handler for realtime updates - defined before useEffect that uses it
@@ -553,7 +788,7 @@ export default function HomeScreen() {
     homeRealtimeRefreshTimerRef.current = setTimeout(() => {
       homeRealtimeRefreshTimerRef.current = null;
       // Silent refresh to keep UI stable during realtime bursts.
-      fetchHomeData(false);
+      void fetchHomeData(false, { bypassCooldown: true });
     }, 450);
   }, [userRole, userId]);
 
@@ -604,10 +839,9 @@ export default function HomeScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([
-      fetchHomeData(false),
-      fetchUserProfile(),
+      fetchHomeData(false, { bypassCooldown: true }),
+      fetchUserProfile({ force: true }),
       fetchRecentlyViewed(),
-      fetchUpcomingEvents(),
     ]);
     setRefreshing(false);
   }, [userRole, userId, isGuest]);
@@ -628,13 +862,13 @@ export default function HomeScreen() {
     );
 
     if (dedupedCombined.length > 0) {
-      return dedupedCombined.slice(0, 12);
+      return takeItemsWithTypeVariety(dedupedCombined, 12);
     }
 
     const dedupedRandom = randomRecommendations.filter(
       (item, index, self) => index === self.findIndex((t) => t.id === item.id),
     );
-    return dedupedRandom.slice(0, 12);
+    return takeItemsWithTypeVariety(dedupedRandom, 12);
   }, [featured, discover, randomRecommendations]);
 
   const uniqueSmartFeedItems = useMemo(() => {
@@ -654,7 +888,15 @@ export default function HomeScreen() {
     [aiRecommendations],
   );
 
-  const fetchUserProfile = async () => {
+  const fetchUserProfile = async (options?: { force?: boolean }) => {
+    if (
+      !options?.force &&
+      lastProfileRefreshAtRef.current > 0 &&
+      Date.now() - lastProfileRefreshAtRef.current < HOME_PROFILE_CACHE_TTL_MS
+    ) {
+      return;
+    }
+
     try {
       let user;
       if (userId) {
@@ -668,32 +910,60 @@ export default function HomeScreen() {
         user = authUser;
       }
 
-      if (!user) return;
+      if (!user) {
+        setUserName("Guest");
+        setHasGroups(false);
+        return;
+      }
 
-      // Fetch Profile Name
-      const { data } = await supabase
+      const profileNameResponse = await supabase
         .from("profiles")
         .select("full_name")
         .eq("id", user.id)
         .single();
 
-      if (data?.full_name) {
-        setUserName(data.full_name.split(" ")[0]);
-      }
-
-      // Fetch Group Status (for UI warnings)
-      const { count } = await supabase
+      const groupCountResponse = await supabase
         .from("groups")
         .select("id", { count: "exact", head: true })
         .eq("owner_id", user.id);
-      setHasGroups(count ? count > 0 : false);
+
+      const nextUserName = profileNameResponse.data?.full_name
+        ? profileNameResponse.data.full_name.split(" ")[0]
+        : "Guest";
+      const nextHasGroups = groupCountResponse.count ? groupCountResponse.count > 0 : false;
+
+      setUserName(nextUserName);
+      setHasGroups(nextHasGroups);
+      lastProfileRefreshAtRef.current = Date.now();
+
+      await writeScreenCache<HomeProfileCachePayload>(homeProfileCacheKey, {
+        fetchedAt: lastProfileRefreshAtRef.current,
+        userName: nextUserName,
+        hasGroups: nextHasGroups,
+      });
     } catch (e) {
       debugLog("Error fetching user profile:", e);
     }
   };
 
-  const fetchHomeData = async (showLoading = true) => {
+  const fetchHomeData = async (
+    showLoading = true,
+    options?: { bypassCooldown?: boolean },
+  ) => {
     debugLog("fetchHomeData called, showLoading:", showLoading);
+    if (homeDataFetchInFlightRef.current) {
+      return;
+    }
+
+    if (
+      !showLoading &&
+      !options?.bypassCooldown &&
+      lastHomeRefreshAtRef.current > 0 &&
+      Date.now() - lastHomeRefreshAtRef.current < HOME_FOCUS_REFRESH_COOLDOWN_MS
+    ) {
+      return;
+    }
+
     homeDataFetchInFlightRef.current = true;
     if (showLoading) setLoading(true);
     try {
@@ -746,15 +1016,41 @@ export default function HomeScreen() {
       const { data: pData, error: pError } = await supabase
         .from("profiles")
         .select(
-          "id, full_name, avatar_url, address, created_at, role, skills, genres, show_gig_statuses",
+          "id, full_name, avatar_url, address, created_at, role, show_gig_statuses",
         )
         .eq("role", "musician")
+        .order("created_at", { ascending: false })
         .limit(20);
       if (pError) debugLog("Error fetching profiles:", pError);
 
-      // Filter out profiles that might be owners of the groups already fetched?
-      // For now, just show them as Solo Artists.
-      soloArtists = pData || [];
+      const profileIds = (pData || [])
+        .map((artist: any) => artist?.id)
+        .filter((value: any): value is string => typeof value === "string" && value.length > 0);
+
+      let profileGenresById = new Map<string, string[]>();
+      let profileSkillsById = new Map<string, string[]>();
+
+      if (profileIds.length > 0) {
+        const [{ data: profileGenreRows }, { data: profileSkillRows }] = await Promise.all([
+          supabase
+            .from("profile_genres")
+            .select("profile_id, genre")
+            .in("profile_id", profileIds),
+          supabase
+            .from("profile_skills")
+            .select("profile_id, skill")
+            .in("profile_id", profileIds),
+        ]);
+
+        profileGenresById = collectProfileValues(profileGenreRows, "genre");
+        profileSkillsById = collectProfileValues(profileSkillRows, "skill");
+      }
+
+      soloArtists = (pData || []).map((artist: any) => ({
+        ...artist,
+        genres: profileGenresById.get(artist.id) || [],
+        skills: profileSkillsById.get(artist.id) || [],
+      }));
       debugLog("Solo artists fetched:", soloArtists.length);
 
       const groupOwnerPreferenceMap = new Map<string, boolean>();
@@ -1010,11 +1306,12 @@ export default function HomeScreen() {
       });
 
       debugLog("Setting New Arrivals:", sortedByDate.length, "items available");
-      setNewArrivals(sortedByDate.slice(0, 10));
+      setNewArrivals(takeItemsWithTypeVariety(sortedByDate, 10));
 
       // === RANDOM RECOMMENDATIONS - Simple random shuffle ===
       const shuffled = [...allItemsList].sort(() => Math.random() - 0.5);
-      setRandomRecommendations(shuffled.slice(0, 20));
+      const diversifiedRandomItems = takeItemsWithTypeVariety(shuffled, 20);
+      setRandomRecommendations(diversifiedRandomItems);
 
       // === AI RECOMMENDATIONS - Prefer on-device LLM, fallback to on-device CPU ranking ===
       if (userId) {
@@ -1123,8 +1420,10 @@ export default function HomeScreen() {
       }
 
       // Seed featured/discover with fallback random results while AI feed initializes.
-      setFeatured(shuffled.slice(0, 10));
-      setDiscover(shuffled.slice(10, 20));
+      setFeatured(diversifiedRandomItems.slice(0, 10));
+      setDiscover(diversifiedRandomItems.slice(10, 20));
+      lastHomeRefreshAtRef.current = Date.now();
+      hasHydratedHomeCacheRef.current = true;
 
       debugLog("Home data loaded successfully");
     } catch (e) {
@@ -1151,7 +1450,7 @@ export default function HomeScreen() {
       setViewedNewArrivals(prev => {
         const next = new Set(prev);
         next.add(item.id);
-        AsyncStorage.setItem('viewed_new_arrivals', JSON.stringify([...next])).catch(() => { });
+        AsyncStorage.setItem(VIEWED_NEW_ARRIVALS_STORAGE_KEY, JSON.stringify([...next])).catch(() => { });
         return next;
       });
     }
@@ -1205,9 +1504,7 @@ export default function HomeScreen() {
   const saveToRecentlyViewed = async (item: any) => {
     try {
       debugLog("saveToRecentlyViewed called with:", item.name, item.type);
-      const AsyncStorage =
-        require("@react-native-async-storage/async-storage").default;
-      const existingJson = await AsyncStorage.getItem("recently_viewed_items");
+      const existingJson = await AsyncStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY);
       let items = existingJson ? JSON.parse(existingJson) : [];
       debugLog("Existing items count:", items.length);
 
@@ -1240,10 +1537,7 @@ export default function HomeScreen() {
       // Keep only last 10
       items = items.slice(0, 10);
 
-      await AsyncStorage.setItem(
-        "recently_viewed_items",
-        JSON.stringify(items),
-      );
+      await AsyncStorage.setItem(RECENTLY_VIEWED_STORAGE_KEY, JSON.stringify(items));
       debugLog("Saved. New count:", items.length);
 
       // Update state
@@ -1256,9 +1550,7 @@ export default function HomeScreen() {
 
   const fetchRecentlyViewed = async () => {
     try {
-      const AsyncStorage =
-        require("@react-native-async-storage/async-storage").default;
-      const existingJson = await AsyncStorage.getItem("recently_viewed_items");
+      const existingJson = await AsyncStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY);
       debugLog(
         "Recently viewed from storage:",
         existingJson ? "Found" : "Empty",
@@ -1336,290 +1628,6 @@ export default function HomeScreen() {
     }
 
     return null;
-  };
-
-  const formatTimeForDisplay = (timeValue: string | null | undefined) => {
-    const parts = extractTimeParts(timeValue);
-    if (!parts) return null;
-
-    const period = parts.hours >= 12 ? "PM" : "AM";
-    const h12 = parts.hours % 12 || 12;
-    const paddedMinutes = String(parts.minutes).padStart(2, "0");
-    return `${h12}:${paddedMinutes} ${period}`;
-  };
-
-  const getEventDateTime = (
-    dateValue: string | Date | null | undefined,
-    endTimeValue?: string | null,
-    startTimeValue?: string | null,
-  ) => {
-    const baseDate = parseLocalDate(dateValue);
-    if (!baseDate) return null;
-
-    const combined = new Date(baseDate);
-    const timeParts =
-      extractTimeParts(endTimeValue || undefined) ||
-      extractTimeParts(startTimeValue || undefined);
-
-    if (timeParts) {
-      combined.setHours(timeParts.hours, timeParts.minutes, 0, 0);
-    } else {
-      combined.setHours(23, 59, 59, 999);
-    }
-
-    return combined;
-  };
-
-  // Fetch Upcoming Events for Musicians (accepted gigs & confirmed studio bookings)
-  const fetchUpcomingEvents = async () => {
-    // Only fetch for musicians
-    if (userRole !== "musician" || !userId) {
-      setUpcomingEvents([]);
-      return;
-    }
-
-    try {
-      const now = new Date();
-      const events: any[] = [];
-
-      // 1. Fetch accepted gig applications
-      const { data: gigApps, error: gigError } = await supabase
-        .from("gig_applications")
-        .select("id, gig_id, status")
-        .eq("applicant_id", userId)
-        .eq("status", "accepted");
-
-      if (gigError) {
-        debugLog("Error fetching gig applications:", gigError);
-      } else if (gigApps) {
-        const gigIds = Array.from(
-          new Set(
-            gigApps
-              .map((app: any) => app.gig_id)
-              .filter((id: any) => typeof id === "string" && id.length > 0),
-          ),
-        );
-
-        let gigById: Record<string, any> = {};
-        if (gigIds.length > 0) {
-          const { data: baseGigs, error: baseGigsError } = await supabase
-            .from("gigs")
-            .select("id, name, event_date, location, budget")
-            .in("id", gigIds);
-
-          const { data: legacyGigs, error: legacyGigsError } = await supabase
-            .from("gigs_legacy_projection")
-            .select("id, images, requirements")
-            .in("id", gigIds);
-
-          if (baseGigsError) {
-            debugLog("Error fetching base gigs for upcoming events:", baseGigsError);
-          }
-          if (legacyGigsError) {
-            debugLog(
-              "Error fetching gig legacy projection for upcoming events:",
-              legacyGigsError,
-            );
-          }
-
-          const baseGigMap = new Map(
-            (baseGigs || []).map((gig: any) => [gig.id, gig]),
-          );
-          const legacyGigMap = new Map(
-            (legacyGigs || []).map((gig: any) => [gig.id, gig]),
-          );
-
-          gigIds.forEach((id: string) => {
-            const baseGig = baseGigMap.get(id);
-            if (!baseGig) return;
-
-            const legacyGig = legacyGigMap.get(id) || {};
-            gigById[id] = {
-              ...baseGig,
-              images: Array.isArray(legacyGig.images) ? legacyGig.images : [],
-              requirements: legacyGig.requirements || {},
-            };
-          });
-        }
-
-        gigApps.forEach((app: any) => {
-          const gig = app.gig_id ? gigById[app.gig_id] : null;
-          if (!gig?.event_date) return;
-
-          const eventDate = parseLocalDate(gig.event_date);
-          const eventDateTime = getEventDateTime(
-            gig.event_date,
-            gig.requirements?.event_end_time,
-            gig.requirements?.event_start_time,
-          );
-          if (!eventDate || !eventDateTime) return;
-
-          if (eventDateTime >= now) {
-            const formattedStartTime = formatTimeForDisplay(
-              gig.requirements?.event_start_time,
-            );
-            const formattedEndTime = formatTimeForDisplay(
-              gig.requirements?.event_end_time,
-            );
-
-            events.push({
-              id: app.id,
-              type: "Gig",
-              name: gig.name,
-              date: gig.event_date,
-              sortTimestamp: eventDateTime.getTime(),
-              formattedDate: eventDate.toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              }),
-              time:
-                formattedStartTime && formattedEndTime
-                  ? `${formattedStartTime} - ${formattedEndTime}`
-                  : formattedStartTime
-                    ? formattedStartTime
-                    : "Time TBA",
-              location: gig.location || "Location TBA",
-              image: gig.images?.[0] || null,
-              budget: gig.budget,
-              status: "Accepted",
-              gigId: gig.id,
-            });
-          }
-        });
-      }
-
-      // 2. Fetch confirmed studio bookings
-      const { data: studioBookings, error: studioError } = await supabase
-        .from("studio_bookings")
-        .select(
-          "id, studio_id, booking_date, start_time, end_time, final_price, total_price, status",
-        )
-        .eq("user_id", userId)
-        .in("status", ["confirmed", "pending"]);
-
-      if (studioError) {
-        debugLog("Error fetching studio bookings:", studioError);
-      } else if (studioBookings) {
-        const seenStudioBookingSlots = new Set<string>();
-        const studioIds = Array.from(
-          new Set(
-            studioBookings
-              .map((booking: any) => booking.studio_id)
-              .filter((id: any) => typeof id === "string" && id.length > 0),
-          ),
-        );
-
-        let studioById: Record<string, any> = {};
-        if (studioIds.length > 0) {
-          const { data: baseStudios, error: baseStudiosError } = await supabase
-            .from("studios")
-            .select("id, name, address")
-            .in("id", studioIds);
-
-          const { data: legacyStudios, error: legacyStudiosError } = await supabase
-            .from("studios_legacy_projection")
-            .select("id, images")
-            .in("id", studioIds);
-
-          if (baseStudiosError) {
-            debugLog(
-              "Error fetching base studios for upcoming events:",
-              baseStudiosError,
-            );
-          }
-          if (legacyStudiosError) {
-            debugLog(
-              "Error fetching studio legacy projection for upcoming events:",
-              legacyStudiosError,
-            );
-          }
-
-          const baseStudioMap = new Map(
-            (baseStudios || []).map((studio: any) => [studio.id, studio]),
-          );
-          const legacyStudioMap = new Map(
-            (legacyStudios || []).map((studio: any) => [studio.id, studio]),
-          );
-
-          studioIds.forEach((id: string) => {
-            const baseStudio = baseStudioMap.get(id);
-            if (!baseStudio) return;
-
-            const legacyStudio = legacyStudioMap.get(id) || {};
-            studioById[id] = {
-              ...baseStudio,
-              images: Array.isArray(legacyStudio.images)
-                ? legacyStudio.images
-                : [],
-            };
-          });
-        }
-
-        studioBookings.forEach((booking: any) => {
-          const studio = booking.studio_id ? studioById[booking.studio_id] : null;
-          if (!booking.booking_date) return;
-
-          const bookingDate = parseLocalDate(booking.booking_date);
-          const bookingDateTime = getEventDateTime(
-            booking.booking_date,
-            booking.end_time,
-            booking.start_time,
-          );
-          if (!bookingDate || !bookingDateTime) return;
-
-          if (bookingDateTime >= now) {
-            const formattedStartTime = formatTimeForDisplay(booking.start_time);
-            const formattedEndTime = formatTimeForDisplay(booking.end_time);
-            const bookingSlotKey = [
-              booking.studio_id || "unknown-studio",
-              bookingDate.toISOString().split("T")[0],
-              formattedStartTime || booking.start_time || "TBA",
-              formattedEndTime || booking.end_time || "TBA",
-            ].join("|");
-
-            if (seenStudioBookingSlots.has(bookingSlotKey)) return;
-            seenStudioBookingSlots.add(bookingSlotKey);
-
-            events.push({
-              id: booking.id,
-              type: "Studio",
-              name: studio?.name || "Studio Booking",
-              date: booking.booking_date,
-              sortTimestamp: bookingDateTime.getTime(),
-              formattedDate: bookingDate.toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              }),
-              time:
-                formattedStartTime && formattedEndTime
-                  ? `${formattedStartTime} - ${formattedEndTime}`
-                  : formattedStartTime
-                    ? formattedStartTime
-                    : "Time TBA",
-              location: studio?.address || "Address TBA",
-              image: studio?.images?.[0] || null,
-              price: booking.final_price || booking.total_price,
-              status: booking.status === "confirmed" ? "Confirmed" : "Pending",
-              studioId: studio?.id,
-            });
-          }
-        });
-      }
-
-      // Sort by date (closest first)
-      events.sort(
-        (a, b) =>
-          (a.sortTimestamp || new Date(a.date).getTime()) -
-          (b.sortTimestamp || new Date(b.date).getTime()),
-      );
-
-      setUpcomingEvents(events.slice(0, 5)); // Show max 5 upcoming events
-      debugLog(`Fetched ${events.length} upcoming events for musician`);
-    } catch (e) {
-      debugLog("Error fetching upcoming events:", e);
-    }
   };
 
   // 1. Immersive Hero Section
@@ -1745,7 +1753,7 @@ export default function HomeScreen() {
     };
 
     return (
-      <View style={[styles.sectionContainer, { marginTop: 20 }]}>
+      <View style={[styles.sectionContainer, { marginTop: 20 }]}> 
         {/* Header */}
         <View
           style={{
@@ -2198,242 +2206,6 @@ export default function HomeScreen() {
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
-      </View>
-    );
-  };
-
-  // 3.5 Upcoming Events Section (for Musicians only)
-  const renderUpcomingEvents = () => {
-    // Only show for musicians
-    if (userRole !== "musician" || upcomingEvents.length === 0) return null;
-
-    return (
-      <View style={styles.sectionContainer}>
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "flex-end",
-            paddingHorizontal: 24,
-            marginBottom: 16,
-          }}
-        >
-          <View>
-            <Text
-              style={[
-                styles.sectionTitle,
-                { color: colors.text, marginBottom: 0 },
-              ]}
-            >
-              Upcoming Events
-            </Text>
-            <Text
-              style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
-            >
-              Your scheduled gigs & bookings
-            </Text>
-          </View>
-          <TouchableOpacity activeOpacity={1} onPress={() => router.push("/bookings")}>
-            <Text
-              style={{
-                color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
-                fontSize: moderateScale(13),
-              }}
-            >
-              View all
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{
-            paddingLeft: 24,
-            paddingRight: 24,
-            paddingVertical: 8,
-          }}
-          decelerationRate="fast"
-          snapToInterval={280 + 16}
-        >
-          {upcomingEvents.map((event, index) => (
-            <TouchableOpacity
-              key={`${event.type}-${event.id}`}
-              activeOpacity={1}
-              onPress={() => {
-                // Navigate to appropriate detail screen
-                if (event.type === "Gig" && event.gigId) {
-                  // For now, just go to bookings since musicians can't view gig details directly
-                  router.push("/bookings");
-                } else if (event.type === "Studio" && event.studioId) {
-                  openListingDetails(event.studioId);
-                }
-              }}
-              style={[
-                styles.upcomingEventCard,
-                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
-              ]}
-            >
-              {/* Event Image */}
-              <View style={styles.upcomingEventImageContainer}>
-                {event.image ? (
-                  <CachedImage
-                    uri={event.image}
-                    style={styles.upcomingEventImage}
-                    width={560}
-                    height={240}
-                    cacheVersion={event.updated_at || event.date || event.id}
-                  />
-                ) : (
-                  <View
-                    style={[
-                      styles.upcomingEventImagePlaceholder,
-                      { backgroundColor: colors.primary + "20" },
-                    ]}
-                  >
-                    <Ionicons
-                      name={event.type === "Gig" ? "musical-notes" : "business"}
-                      size={32}
-                      color={colors.primary}
-                    />
-                  </View>
-                )}
-                {/* Type Badge */}
-                <View
-                  style={[
-                    styles.upcomingEventTypeBadge,
-                    {
-                      backgroundColor:
-                        event.type === "Gig" ? "#8B5CF6" : "#10B981",
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={event.type === "Gig" ? "mic" : "business"}
-                    size={12}
-                    color="#FFF"
-                  />
-                  <Text style={styles.upcomingEventTypeBadgeText}>
-                    {event.type}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Event Details */}
-              <View style={styles.upcomingEventDetails}>
-                <Text
-                  style={[styles.upcomingEventName, { color: colors.text }]}
-                  numberOfLines={1}
-                >
-                  {event.name}
-                </Text>
-
-                {/* Date & Time */}
-                <View style={styles.upcomingEventRow}>
-                  <Ionicons
-                    name="calendar-outline"
-                    size={14}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.upcomingEventText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {event.formattedDate}
-                  </Text>
-                </View>
-
-                <View style={styles.upcomingEventRow}>
-                  <Ionicons
-                    name="time-outline"
-                    size={14}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.upcomingEventText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {event.time}
-                  </Text>
-                </View>
-
-                {/* Location */}
-                <View style={styles.upcomingEventRow}>
-                  <Ionicons
-                    name="location-outline"
-                    size={14}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.upcomingEventText,
-                      { color: colors.textSecondary },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {event.location}
-                  </Text>
-                </View>
-
-                {/* Price/Budget & Status */}
-                <View
-                  style={[
-                    styles.upcomingEventRow,
-                    { justifyContent: "space-between", marginTop: 8 },
-                  ]}
-                >
-                  {(event.budget || event.price) && (
-                    <Text
-                      style={[
-                        styles.upcomingEventPrice,
-                        { color: colors.primary },
-                      ]}
-                    >
-                      ₱{(event.budget || event.price).toLocaleString()}
-                    </Text>
-                  )}
-                  <View
-                    style={[
-                      styles.upcomingEventStatusBadge,
-                      {
-                        backgroundColor:
-                          event.status === "Confirmed" ||
-                            event.status === "Accepted"
-                            ? "#10B98115"
-                            : "#F59E0B15",
-                        borderColor:
-                          event.status === "Confirmed" ||
-                            event.status === "Accepted"
-                            ? "#10B981"
-                            : "#F59E0B",
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.upcomingEventStatusText,
-                        {
-                          color:
-                            event.status === "Confirmed" ||
-                              event.status === "Accepted"
-                              ? "#10B981"
-                              : "#F59E0B",
-                        },
-                      ]}
-                    >
-                      {event.status}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
         </ScrollView>
       </View>
     );
@@ -3110,8 +2882,6 @@ export default function HomeScreen() {
 
         {renderHighlightsSection()}
 
-        {renderUpcomingEvents()}
-
         {renderNewArrivals()}
 
         {renderSmartFeed()}
@@ -3595,83 +3365,6 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     fontSize: 10,
     textTransform: "uppercase",
-  },
-
-  // Upcoming Events (for Musicians)
-  upcomingEventCard: {
-    width: 280,
-    borderRadius: 20,
-    overflow: "hidden",
-    marginRight: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  upcomingEventImageContainer: {
-    width: "100%",
-    height: 120,
-    position: "relative",
-  },
-  upcomingEventImage: {
-    width: "100%",
-    height: "100%",
-  },
-  upcomingEventImagePlaceholder: {
-    width: "100%",
-    height: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  upcomingEventTypeBadge: {
-    position: "absolute",
-    top: 12,
-    left: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 100,
-  },
-  upcomingEventTypeBadgeText: {
-    color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 11,
-  },
-  upcomingEventDetails: {
-    padding: 16,
-  },
-  upcomingEventName: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 16,
-    marginBottom: 8,
-  },
-  upcomingEventRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 4,
-  },
-  upcomingEventText: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 13,
-    flex: 1,
-  },
-  upcomingEventPrice: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 16,
-  },
-  upcomingEventStatusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 100,
-    borderWidth: 1,
-  },
-  upcomingEventStatusText: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 11,
   },
 
   // New Arrivals Section

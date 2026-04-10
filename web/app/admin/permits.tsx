@@ -1,7 +1,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -21,6 +21,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from './_cache';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -106,6 +107,8 @@ const adminTabRoutes: Record<Tab, string> = {
   audit: '/admin/audit',
 };
 
+const PERMITS_CACHE_TTL_MS = 45_000;
+
 interface PermitItem {
   id: string;
   name: string;
@@ -174,6 +177,55 @@ const getErrorMessage = async (error: unknown, fallback: string) => {
   }
 
   return baseMessage;
+};
+
+const isUnsupportedActionMessage = (message: string, action: string) => {
+  const normalizedMessage = String(message || '').toLowerCase();
+  const normalizedAction = String(action || '').toLowerCase();
+
+  if (!normalizedMessage) return false;
+  if (normalizedAction && normalizedMessage.includes(`unsupported action: ${normalizedAction}`)) {
+    return true;
+  }
+
+  return normalizedMessage.includes('unsupported action') || normalizedMessage.includes('invalid action');
+};
+
+const toRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+};
+
+const buildFallbackOwnerProfile = (item: PermitItem): Record<string, unknown> => ({
+  id: item.owner_id || null,
+  full_name: item.owner_name || null,
+  email: item.owner_email || null,
+});
+
+const buildFallbackListingTarget = (item: PermitItem): StudioDetailsEntry => {
+  const ownerReferenceKey = item.entity_type === 'gig' ? 'organizer_id' : 'owner_id';
+
+  return {
+    listing: {
+      id: item.id,
+      name: item.name || null,
+      entity_type: item.entity_type,
+      permit_status: item.permit_status || null,
+      business_permit_url: item.business_permit_url || null,
+      created_at: item.created_at || null,
+      permit_reviewed_at: item.permit_reviewed_at || null,
+      permit_rejection_reason: item.permit_rejection_reason || null,
+      [ownerReferenceKey]: item.owner_id || null,
+      owner_name: item.owner_name || null,
+      owner_email: item.owner_email || null,
+    },
+    owner: buildFallbackOwnerProfile(item),
+    listingName: item.name || (item.entity_type === 'gig' ? 'Gig' : 'Studio'),
+    entityType: item.entity_type,
+  };
 };
 
 const formatDetailLabel = (rawKey: string) => {
@@ -307,9 +359,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
     textTransform: 'capitalize',
   },
+  filterGroup: {
+    gap: 8,
+  },
+  filterLabel: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
   filterRow: {
     gap: 8,
     paddingVertical: 2,
+  },
+  filterRowWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
   },
   flex1: {
     flex: 1,
@@ -461,6 +527,7 @@ export default function AdminPermitsPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
+  const hasHydratedPermitsRef = useRef(false);
 
   const [initializingPermits, setInitializingPermits] = useState(false);
   const [permitsLoading, setPermitsLoading] = useState(false);
@@ -495,13 +562,24 @@ export default function AdminPermitsPage() {
     setAlertState({ visible: true, type, title, message });
   }, []);
 
+  const permitsCacheKey = useMemo(
+    () => getAdminPageCacheKey('permits', {
+      entityFilter,
+      permitFilter,
+    }),
+    [entityFilter, permitFilter],
+  );
+
   const handleTabChange = useCallback((nextTab: Tab) => {
     if (nextTab === 'permits') return;
     router.replace(adminTabRoutes[nextTab] as any);
   }, []);
 
-  const fetchPermits = useCallback(async () => {
-    setPermitsLoading(true);
+  const fetchPermits = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setPermitsLoading(true);
+    }
+
     try {
       const { data, error } = await supabase.functions.invoke<any>('permit-management', {
         body: {
@@ -513,36 +591,56 @@ export default function AdminPermitsPage() {
 
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));
-      setPermits(Array.isArray(data?.items) ? data.items : []);
+      const nextPermits = Array.isArray(data?.items) ? data.items : [];
+      setPermits(nextPermits);
+      writeAdminPageCache(permitsCacheKey, nextPermits);
     } catch (error) {
-      const message = await getErrorMessage(error, 'Unable to fetch permits.');
-      showAlert('error', 'Failed to load permits', message);
+      if (!options?.silent) {
+        const message = await getErrorMessage(error, 'Unable to fetch permits.');
+        showAlert('error', 'Failed to load permits', message);
+      }
     } finally {
-      setPermitsLoading(false);
+      if (!options?.silent) {
+        setPermitsLoading(false);
+      }
     }
-  }, [entityFilter, permitFilter, showAlert]);
+  }, [entityFilter, permitFilter, permitsCacheKey, showAlert]);
 
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
       setInitializingPermits(false);
+      hasHydratedPermitsRef.current = false;
       return;
     }
 
     let isMounted = true;
-    setInitializingPermits(true);
+    const cachedPermits = readAdminPageCache<PermitItem[]>(permitsCacheKey, PERMITS_CACHE_TTL_MS);
+
+    if (cachedPermits) {
+      setPermits(cachedPermits);
+      setInitializingPermits(false);
+      hasHydratedPermitsRef.current = true;
+    } else if (!hasHydratedPermitsRef.current) {
+      setInitializingPermits(true);
+    } else {
+      setInitializingPermits(false);
+    }
 
     void (async () => {
       try {
-        await fetchPermits();
+        await fetchPermits({ silent: Boolean(cachedPermits) });
       } finally {
-        if (isMounted) setInitializingPermits(false);
+        if (isMounted) {
+          setInitializingPermits(false);
+          hasHydratedPermitsRef.current = true;
+        }
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [loading, roleResolved, session, isGuest, isAdmin, fetchPermits]);
+  }, [loading, roleResolved, session, isGuest, isAdmin, permitsCacheKey, fetchPermits]);
 
   const openReviewModal = useCallback((item: PermitItem, action: 'approve' | 'reject') => {
     setReviewTarget(item);
@@ -578,37 +676,50 @@ export default function AdminPermitsPage() {
     setOwnerDetailsLoadingKey(requestLoadingKey);
 
     try {
-      const { data, error } = await supabase.functions.invoke<any>('permit-management', {
-        body: {
-          action: 'fetch_owner_details',
-          userId: ownerId,
-        },
-      });
+      let profile: Record<string, unknown> | null = null;
 
-      if (error) throw error;
-      if (data?.error) throw new Error(String(data.error));
+      try {
+        const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+          body: {
+            action: 'fetch_owner_details',
+            userId: ownerId,
+          },
+        });
 
-      const profile = data?.item && typeof data.item === 'object'
-        ? (data.item as Record<string, unknown>)
-        : {
-          id: ownerId,
-          full_name: item.owner_name || null,
-          email: item.owner_email || null,
-        };
+        if (error) throw error;
+        if (data?.error) throw new Error(String(data.error));
+
+        profile = toRecord(data?.item);
+      } catch (primaryError) {
+        const primaryMessage = await getErrorMessage(primaryError, 'Unable to load owner details.');
+
+        if (!isUnsupportedActionMessage(primaryMessage, 'fetch_owner_details')) {
+          throw primaryError;
+        }
+
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', ownerId)
+            .maybeSingle();
+
+          if (error) throw error;
+          profile = toRecord(data);
+        } catch {
+          profile = null;
+        }
+      }
 
       setOwnerDetailsTarget({
-        profile,
+        profile: profile || buildFallbackOwnerProfile(item),
         ownerName: item.owner_name || 'Owner',
       });
     } catch (error) {
       const message = await getErrorMessage(error, 'Unable to load owner details.');
       showAlert('error', 'Failed to load owner details', message);
       setOwnerDetailsTarget({
-        profile: {
-          id: ownerId,
-          full_name: item.owner_name || null,
-          email: item.owner_email || null,
-        },
+        profile: buildFallbackOwnerProfile(item),
         ownerName: item.owner_name || 'Owner',
       });
     } finally {
@@ -623,34 +734,65 @@ export default function AdminPermitsPage() {
     const entityLabel = item.entity_type === 'gig' ? 'gig' : 'studio';
 
     try {
-      const { data, error } = await supabase.functions.invoke<any>('permit-management', {
-        body: {
-          action: 'fetch_listing_details',
-          entityType: item.entity_type,
-          entityId: item.id,
-        },
-      });
+      let listing: Record<string, unknown> | null = null;
+      let owner: Record<string, unknown> | null = null;
 
-      if (error) throw error;
-      if (data?.error) throw new Error(String(data.error));
+      try {
+        const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+          body: {
+            action: 'fetch_listing_details',
+            entityType: item.entity_type,
+            entityId: item.id,
+          },
+        });
 
-      const listing = data?.item && typeof data.item === 'object'
-        ? (data.item as Record<string, unknown>)
-        : null;
+        if (error) throw error;
+        if (data?.error) throw new Error(String(data.error));
 
-      const owner = data?.owner && typeof data.owner === 'object'
-        ? (data.owner as Record<string, unknown>)
-        : null;
+        listing = toRecord(data?.item);
+        owner = toRecord(data?.owner);
+      } catch (primaryError) {
+        const primaryMessage = await getErrorMessage(primaryError, `Unable to load ${entityLabel} details.`);
+
+        if (!isUnsupportedActionMessage(primaryMessage, 'fetch_listing_details')) {
+          throw primaryError;
+        }
+
+        try {
+          const directResponse = item.entity_type === 'gig'
+            ? await supabase
+              .from('gigs')
+              .select('*, organizer:profiles!organizer_id(id, full_name, email, role, is_verified, created_at)')
+              .eq('id', item.id)
+              .maybeSingle()
+            : await supabase
+              .from('studios')
+              .select('*, owner:profiles!owner_id(id, full_name, email, role, is_verified, created_at)')
+              .eq('id', item.id)
+              .maybeSingle();
+
+          if (directResponse.error) throw directResponse.error;
+
+          const directListing = toRecord(directResponse.data);
+          listing = directListing;
+          owner = toRecord(directListing?.[item.entity_type === 'gig' ? 'organizer' : 'owner']);
+        } catch {
+          const fallback = buildFallbackListingTarget(item);
+          listing = fallback.listing;
+          owner = fallback.owner;
+        }
+      }
 
       setStudioDetailsTarget({
-        listing,
-        owner,
+        listing: listing || buildFallbackListingTarget(item).listing,
+        owner: owner || buildFallbackListingTarget(item).owner,
         listingName: item.name || (item.entity_type === 'gig' ? 'Gig' : 'Studio'),
         entityType: item.entity_type,
       });
     } catch (error) {
       const message = await getErrorMessage(error, `Unable to load ${entityLabel} details.`);
       showAlert('error', `Failed to load ${entityLabel} details`, message);
+      setStudioDetailsTarget(buildFallbackListingTarget(item));
     } finally {
       setStudioDetailsLoadingKey((prev) => (prev === requestLoadingKey ? null : prev));
     }
@@ -710,6 +852,7 @@ export default function AdminPermitsPage() {
       if (data?.error) throw new Error(String(data.error));
 
       const actionLabel = reviewAction === 'approve' ? 'approved' : 'rejected';
+      invalidateAdminPageCache();
       closeReviewModal();
       showAlert('success', 'Permit updated', `${reviewTarget.name} has been ${actionLabel}.`);
       await fetchPermits();
@@ -803,53 +946,59 @@ export default function AdminPermitsPage() {
             ]}
           />
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {permitStatuses.map((status) => {
-              const active = permitFilter === status;
-              return (
-                <TouchableOpacity
-                  key={status}
-                  activeOpacity={1}
-                  onPress={() => setPermitFilter(status)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {status.replace(/_/g, ' ')}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          <View style={styles.filterGroup}>
+            <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Permit Status</Text>
+            <View style={[styles.filterRow, styles.filterRowWrap]}>
+              {permitStatuses.map((status) => {
+                const active = permitFilter === status;
+                return (
+                  <TouchableOpacity
+                    key={status}
+                    activeOpacity={1}
+                    onPress={() => setPermitFilter(status)}
+                    style={[
+                      styles.filterChip,
+                      {
+                        backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                      {status.replace(/_/g, ' ')}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {entityTypes.map((entity) => {
-              const active = entityFilter === entity;
-              return (
-                <TouchableOpacity
-                  key={entity}
-                  activeOpacity={1}
-                  onPress={() => setEntityFilter(entity)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {entity}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          <View style={styles.filterGroup}>
+            <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Listing Type</Text>
+            <View style={[styles.filterRow, styles.filterRowWrap]}>
+              {entityTypes.map((entity) => {
+                const active = entityFilter === entity;
+                return (
+                  <TouchableOpacity
+                    key={entity}
+                    activeOpacity={1}
+                    onPress={() => setEntityFilter(entity)}
+                    style={[
+                      styles.filterChip,
+                      {
+                        backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                      {entity}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
 
           {permitsLoading ? (
             <View style={styles.inlineLoader}>

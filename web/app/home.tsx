@@ -173,7 +173,7 @@ const rankForYouOnDevice = (
       return Number(b.rating || 0) - Number(a.rating || 0);
     });
 
-  return ranked.slice(0, safeLimit);
+  return takeItemsWithTypeVariety(ranked, safeLimit);
 };
 
 const ResponsiveList = ({ children, style, contentContainerStyle, snapToInterval, ...props }: any) => {
@@ -212,6 +212,79 @@ const getTypeBadgeColor = (type: string) => {
     default:
       return "#7C3AED";
   }
+};
+
+const takeItemsWithTypeVariety = (items: any[], limit: number) => {
+  if (!Array.isArray(items) || limit <= 0) {
+    return [];
+  }
+
+  const buckets = new Map<string, any[]>();
+
+  items.forEach((item) => {
+    const typeKey = String(item?.type || "Unknown");
+    const existingBucket = buckets.get(typeKey);
+    if (existingBucket) {
+      existingBucket.push(item);
+      return;
+    }
+
+    buckets.set(typeKey, [item]);
+  });
+
+  const orderedTypes = Array.from(buckets.keys());
+  const output: any[] = [];
+
+  while (output.length < limit) {
+    let addedItem = false;
+
+    for (const typeKey of orderedTypes) {
+      const bucket = buckets.get(typeKey);
+      if (!bucket || bucket.length === 0) {
+        continue;
+      }
+
+      output.push(bucket.shift());
+      addedItem = true;
+
+      if (output.length >= limit) {
+        break;
+      }
+    }
+
+    if (!addedItem) {
+      break;
+    }
+  }
+
+  return output;
+};
+
+const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) => {
+  const valueMap = new Map<string, string[]>();
+
+  (rows || []).forEach((row: any) => {
+    const profileId = row?.profile_id;
+    const rawValue = row?.[valueKey];
+    if (typeof profileId !== "string" || typeof rawValue !== "string") {
+      return;
+    }
+
+    const nextValue = rawValue.trim();
+    if (!nextValue) {
+      return;
+    }
+
+    const existingValues = valueMap.get(profileId);
+    if (existingValues) {
+      existingValues.push(nextValue);
+      return;
+    }
+
+    valueMap.set(profileId, [nextValue]);
+  });
+
+  return valueMap;
 };
 
 const AutoCardImage = ({
@@ -450,12 +523,14 @@ export default function HomeScreen() {
   useEffect(() => {
     if (aiModeEnabled && aiRecommendations.length > 0) {
       debugLog("🤖 Switching to AI recommendations");
-      setFeatured(aiRecommendations.slice(0, 10));
-      setDiscover(aiRecommendations.slice(10, 20));
+      const diversifiedAiItems = takeItemsWithTypeVariety(aiRecommendations, 20);
+      setFeatured(diversifiedAiItems.slice(0, 10));
+      setDiscover(diversifiedAiItems.slice(10, 20));
     } else if (!aiModeEnabled && randomRecommendations.length > 0) {
       debugLog("🎲 Switching to random recommendations");
-      setFeatured(randomRecommendations.slice(0, 10));
-      setDiscover(randomRecommendations.slice(10, 20));
+      const diversifiedRandomItems = takeItemsWithTypeVariety(randomRecommendations, 20);
+      setFeatured(diversifiedRandomItems.slice(0, 10));
+      setDiscover(diversifiedRandomItems.slice(10, 20));
     }
   }, [aiModeEnabled, aiRecommendations, randomRecommendations]);
 
@@ -580,10 +655,14 @@ export default function HomeScreen() {
 
   const [hasGroups, setHasGroups] = useState(false);
 
-  const topItems = useMemo(
-    () => [...featured, ...discover].slice(0, 12),
-    [featured, discover],
-  );
+  const topItems = useMemo(() => {
+    const combined = [...featured, ...discover];
+    const dedupedCombined = combined.filter(
+      (item, index, self) => index === self.findIndex((t) => t.id === item.id),
+    );
+
+    return takeItemsWithTypeVariety(dedupedCombined, 12);
+  }, [featured, discover]);
 
   const uniqueSmartFeedItems = useMemo(() => {
     const allItems = [...featured, ...discover];
@@ -694,15 +773,41 @@ export default function HomeScreen() {
       const { data: pData, error: pError } = await supabase
         .from("profiles")
         .select(
-          "id, full_name, avatar_url, address, created_at, role, skills, genres, show_gig_statuses",
+          "id, full_name, avatar_url, address, created_at, role, show_gig_statuses",
         )
         .eq("role", "musician")
+        .order("created_at", { ascending: false })
         .limit(20);
       if (pError) debugLog("❌ Error fetching profiles:", pError);
 
-      // Filter out profiles that might be owners of the groups already fetched?
-      // For now, just show them as Solo Artists.
-      soloArtists = pData || [];
+      const profileIds = (pData || [])
+        .map((artist: any) => artist?.id)
+        .filter((value: any): value is string => typeof value === "string" && value.length > 0);
+
+      let profileGenresById = new Map<string, string[]>();
+      let profileSkillsById = new Map<string, string[]>();
+
+      if (profileIds.length > 0) {
+        const [{ data: profileGenreRows }, { data: profileSkillRows }] = await Promise.all([
+          supabase
+            .from("profile_genres")
+            .select("profile_id, genre")
+            .in("profile_id", profileIds),
+          supabase
+            .from("profile_skills")
+            .select("profile_id, skill")
+            .in("profile_id", profileIds),
+        ]);
+
+        profileGenresById = collectProfileValues(profileGenreRows, "genre");
+        profileSkillsById = collectProfileValues(profileSkillRows, "skill");
+      }
+
+      soloArtists = (pData || []).map((artist: any) => ({
+        ...artist,
+        genres: profileGenresById.get(artist.id) || [],
+        skills: profileSkillsById.get(artist.id) || [],
+      }));
       debugLog("🏠 Solo artists fetched:", soloArtists.length);
 
       const groupOwnerPreferenceMap = new Map<string, boolean>();
@@ -947,11 +1052,12 @@ export default function HomeScreen() {
         sortedByDate.length,
         "items available",
       );
-      setNewArrivals(sortedByDate.slice(0, 10));
+      setNewArrivals(takeItemsWithTypeVariety(sortedByDate, 10));
 
       // === RANDOM RECOMMENDATIONS - Simple random shuffle ===
       const shuffled = [...allItemsList].sort(() => Math.random() - 0.5);
-      setRandomRecommendations(shuffled.slice(0, 20));
+      const diversifiedRandomItems = takeItemsWithTypeVariety(shuffled, 20);
+      setRandomRecommendations(diversifiedRandomItems);
 
       // === AI RECOMMENDATIONS - On-device CPU ranking + optional local LLM rerank ===
       if (userId) {
@@ -1025,8 +1131,8 @@ export default function HomeScreen() {
       // Set featured/discover - AI mode uses AI recommendations if available
       // This will be toggled by the user with the switch
       // For initial load, use AI if enabled and available
-      setFeatured(shuffled.slice(0, 10));
-      setDiscover(shuffled.slice(10, 20));
+      setFeatured(diversifiedRandomItems.slice(0, 10));
+      setDiscover(diversifiedRandomItems.slice(10, 20));
 
       debugLog("✅ Home data loaded successfully");
     } catch (e) {
@@ -2864,11 +2970,13 @@ export default function HomeScreen() {
                 setAiModeEnabled(value);
                 // Update featured/discover based on mode
                 if (value && aiRecommendations.length > 0) {
-                  setFeatured(aiRecommendations.slice(0, 10));
-                  setDiscover(aiRecommendations.slice(10, 20));
+                  const diversifiedAiItems = takeItemsWithTypeVariety(aiRecommendations, 20);
+                  setFeatured(diversifiedAiItems.slice(0, 10));
+                  setDiscover(diversifiedAiItems.slice(10, 20));
                 } else {
-                  setFeatured(randomRecommendations.slice(0, 10));
-                  setDiscover(randomRecommendations.slice(10, 20));
+                  const diversifiedRandomItems = takeItemsWithTypeVariety(randomRecommendations, 20);
+                  setFeatured(diversifiedRandomItems.slice(0, 10));
+                  setDiscover(diversifiedRandomItems.slice(10, 20));
                 }
               }}
               trackColor={{

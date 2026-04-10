@@ -32,6 +32,9 @@ type RevenueTrendBucket = {
 
 type PermitStatus = "pending_review" | "approved" | "rejected" | "resubmitted";
 
+const METRICS_CACHE_TTL_MS = 15_000;
+const metricsResponseCache = new Map<string, { timestamp: number; payload: unknown }>();
+
 function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -116,6 +119,34 @@ function isInRange(rawValue: unknown, rangeStartMs: number | null): boolean {
   return ts !== null && ts >= rangeStartMs;
 }
 
+function normalizeSubscriptionStatus(rawValue: unknown): string {
+  const status = String(rawValue || "").trim().toLowerCase();
+  if (status === "canceled") return "cancelled";
+  return status;
+}
+
+function isActiveSubscriptionInRange(subscription: any, rangeStartMs: number | null, nowMs: number): boolean {
+  const status = normalizeSubscriptionStatus(subscription?.status);
+  if (!["active", "trialing"].includes(status)) return false;
+  if (!rangeStartMs) return true;
+
+  const activeStartMs = toTimestampMs(subscription?.current_period_start) ?? toTimestampMs(subscription?.created_at);
+  const activeEndMs = toTimestampMs(subscription?.current_period_end);
+
+  if (activeStartMs !== null && activeStartMs > nowMs) return false;
+  if (activeEndMs !== null && activeEndMs < rangeStartMs) return false;
+
+  return true;
+}
+
+function getSubscriptionChurnTimestampMs(subscription: any): number | null {
+  return (
+    toTimestampMs(subscription?.cancelled_at) ??
+    toTimestampMs(subscription?.current_period_end) ??
+    toTimestampMs(subscription?.created_at)
+  );
+}
+
 function toNumber(rawValue: unknown): number {
   const value = Number(rawValue || 0);
   return Number.isFinite(value) ? value : 0;
@@ -166,6 +197,33 @@ async function safeRows<T = any>(queryPromise: Promise<any>, tracker?: QueryHeal
   }
 
   return Array.isArray(result?.data) ? (result.data as T[]) : [];
+}
+
+function getMetricsCacheKey(dateRange: MetricsDateRange, searchTerm: string) {
+  return `${dateRange}:${searchTerm}`;
+}
+
+function readMetricsCache(cacheKey: string) {
+  const cached = metricsResponseCache.get(cacheKey);
+  if (!cached) return null;
+
+  if (Date.now() - cached.timestamp > METRICS_CACHE_TTL_MS) {
+    metricsResponseCache.delete(cacheKey);
+    return null;
+  }
+
+  return cached.payload;
+}
+
+function writeMetricsCache(cacheKey: string, payload: unknown) {
+  metricsResponseCache.set(cacheKey, {
+    timestamp: Date.now(),
+    payload,
+  });
+}
+
+function clearMetricsCache() {
+  metricsResponseCache.clear();
 }
 
 function categorizeIncidentType(rawIssueType: unknown): IncidentCategory {
@@ -642,6 +700,8 @@ serve(async (req: Request) => {
         }
       }
 
+      clearMetricsCache();
+
       return jsonResponse({
         item: {
           ...updatedItem,
@@ -656,9 +716,17 @@ serve(async (req: Request) => {
       const rangeStartMs = getRangeStartMs(dateRange);
       const rangeStartIso = rangeStartMs ? new Date(rangeStartMs).toISOString() : null;
       const nowMs = Date.now();
+      const oneDayAgoMs = nowMs - 24 * 60 * 60 * 1000;
+      const oneDayAgoIso = new Date(oneDayAgoMs).toISOString();
       const searchTerm = sanitizeSearchTerm(params.searchQuery);
+      const metricsCacheKey = getMetricsCacheKey(dateRange, searchTerm);
       const queryHealthTracker: QueryHealthTracker = { missingSchemaDetected: false };
       const revenueTrendBuckets = buildRevenueTrendBuckets(dateRange, nowMs, rangeStartMs);
+
+      const cachedMetrics = readMetricsCache(metricsCacheKey);
+      if (cachedMetrics) {
+        return jsonResponse(cachedMetrics);
+      }
 
       const [
         totalUsers,
@@ -677,6 +745,7 @@ serve(async (req: Request) => {
         openIncidents,
         resolvedIncidents,
         profileRows,
+        subscriptionRows,
         reportRows,
         incidentRows,
         bookingRows,
@@ -762,19 +831,43 @@ serve(async (req: Request) => {
         safeRows(
           client
             .from("profiles")
-            .select("id, created_at, subscription_status, subscription_expires_at, subscription_plan_id"),
+            .select("id, created_at")
+            .gte("created_at", oneDayAgoIso),
           queryHealthTracker,
         ),
         safeRows(
           client
-            .from("reports")
-            .select("id, reason, details, status, created_at, reviewed_at"),
+            .from("subscriptions")
+            .select("id, user_id, plan_id, status, current_period_start, current_period_end, cancelled_at, created_at"),
           queryHealthTracker,
         ),
         safeRows(
-          client
-            .from("booking_incidents")
-            .select("id, issue_type, status, created_at, resolved_at, reporter_notes, resolution"),
+          (() => {
+            let query = client
+              .from("reports")
+              .select("id, reason, details, status, created_at, reviewed_at")
+              .neq("status", "pending");
+
+            if (rangeStartIso) {
+              query = query.gte("created_at", rangeStartIso);
+            }
+
+            return query;
+          })(),
+          queryHealthTracker,
+        ),
+        safeRows(
+          (() => {
+            let query = client
+              .from("booking_incidents")
+              .select("id, issue_type, status, created_at, resolved_at, reporter_notes, resolution");
+
+            if (rangeStartIso) {
+              query = query.gte("created_at", rangeStartIso);
+            }
+
+            return query;
+          })(),
           queryHealthTracker,
         ),
         safeRows(
@@ -815,7 +908,6 @@ serve(async (req: Request) => {
         authMetricsHealthy = false;
       }
 
-      const oneDayAgoMs = nowMs - 24 * 60 * 60 * 1000;
       const newSignups24h = (profileRows as any[]).reduce((count, row) => {
         const createdAtMs = toTimestampMs(row?.created_at);
         if (createdAtMs !== null && createdAtMs >= oneDayAgoMs) {
@@ -824,20 +916,35 @@ serve(async (req: Request) => {
         return count;
       }, 0);
 
-      const activeSubscriptions = (profileRows as any[]).reduce((count, row) => {
-        const status = String(row?.subscription_status || "").trim().toLowerCase();
-        return status === "active" ? count + 1 : count;
-      }, 0);
+      const activeSubscriptionRows = (subscriptionRows as any[]).filter((row) =>
+        isActiveSubscriptionInRange(row, rangeStartMs, nowMs)
+      );
 
-      const churnedSubscriptions = (profileRows as any[]).reduce((count, row) => {
-        const status = String(row?.subscription_status || "").trim().toLowerCase();
-        if (!["cancelled", "expired", "past_due"].includes(status)) return count;
+      const activeSubscriptionUserIds = new Set<string>();
+      for (const subscription of activeSubscriptionRows) {
+        const userIdKey = String(subscription?.user_id || subscription?.id || "").trim();
+        if (userIdKey) {
+          activeSubscriptionUserIds.add(userIdKey);
+        }
+      }
 
-        const churnAt = toTimestampMs(row?.subscription_expires_at) ?? toTimestampMs(row?.created_at);
-        if (rangeStartMs && (churnAt === null || churnAt < rangeStartMs)) return count;
+      const activeSubscriptions = activeSubscriptionUserIds.size;
 
-        return count + 1;
-      }, 0);
+      const churnedSubscriptionUserIds = new Set<string>();
+      for (const subscription of subscriptionRows as any[]) {
+        const status = normalizeSubscriptionStatus(subscription?.status);
+        if (!["cancelled", "expired", "past_due"].includes(status)) continue;
+
+        const churnAtMs = getSubscriptionChurnTimestampMs(subscription);
+        if (rangeStartMs && (churnAtMs === null || churnAtMs < rangeStartMs)) continue;
+
+        const userIdKey = String(subscription?.user_id || subscription?.id || "").trim();
+        if (userIdKey) {
+          churnedSubscriptionUserIds.add(userIdKey);
+        }
+      }
+
+      const churnedSubscriptions = churnedSubscriptionUserIds.size;
 
       const churnBase = activeSubscriptions + churnedSubscriptions;
       const churnRatePercent = churnBase > 0
@@ -855,11 +962,8 @@ serve(async (req: Request) => {
       let subscriptionTierPro = 0;
       let subscriptionTierOther = 0;
 
-      for (const profile of profileRows as any[]) {
-        const status = String(profile?.subscription_status || "").trim().toLowerCase();
-        if (status !== "active") continue;
-
-        const planId = String(profile?.subscription_plan_id || "").trim();
+      for (const subscription of activeSubscriptionRows) {
+        const planId = String(subscription?.plan_id || "").trim();
         const normalizedPlan = (planNameById.get(planId) || planId).toLowerCase();
 
         if (
@@ -1140,7 +1244,7 @@ serve(async (req: Request) => {
       const dbHealthy = !queryHealthTracker.missingSchemaDetected;
       const apiHealthy = dbHealthy && authMetricsHealthy;
 
-      return jsonResponse({
+      const responsePayload = {
         dateRange,
         rangeStart: rangeStartIso,
         totalUsers,
@@ -1184,7 +1288,10 @@ serve(async (req: Request) => {
           transactions: searchTransactions,
           total: searchUsers + searchReports + searchIncidents + searchTransactions,
         },
-      });
+      };
+
+      writeMetricsCache(metricsCacheKey, responsePayload);
+      return jsonResponse(responsePayload);
     }
 
     if (action === "fetch_audit") {

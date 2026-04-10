@@ -18,7 +18,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets, type Edge } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
@@ -80,6 +80,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const [showOptions, setShowOptions] = useState(false);
     const [otherUserOnline, setOtherUserOnline] = useState(false);
     const [otherUserLastSeen, setOtherUserLastSeen] = useState<Date | null>(null);
+    const [headerHeight, setHeaderHeight] = useState(0);
     const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
     const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -541,6 +542,106 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 : null;
     const reportTargetName = isGroupChat ? (groupName || 'this group') : (otherUser?.full_name || 'this user');
     const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
+    const keyboardVerticalOffset = Platform.OS === 'ios' ? headerHeight : 0;
+    const composerBottomPadding = Platform.OS === 'ios'
+        ? (isKeyboardVisible ? 10 : Math.max(insets.bottom, 8) + 4)
+        : (isKeyboardVisible ? 0 : 8);
+    const composerSafeAreaEdges: Edge[] = Platform.OS === 'android' && !isKeyboardVisible ? ['bottom'] : [];
+    const chatContent = (
+        <>
+            {loading ? (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+            ) : messages.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                    <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
+                        <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.primary} />
+                    </View>
+                    <Text style={[styles.emptyText, { color: colors.text }]}>
+                        No messages yet
+                    </Text>
+                    <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+                        Say hi to kick things off! 👋
+                    </Text>
+                </View>
+            ) : (
+                <FlatList
+                    ref={flatListRef}
+                    data={reversedMessages}
+                    keyExtractor={(item) => item.id}
+                    renderItem={renderMessage}
+                    contentContainerStyle={styles.messagesList}
+                    initialNumToRender={18}
+                    maxToRenderPerBatch={24}
+                    windowSize={10}
+                    removeClippedSubviews={Platform.OS === 'android'}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                    inverted={true}
+                />
+            )}
+
+            <SafeAreaView
+                edges={composerSafeAreaEdges}
+                style={[
+                    styles.inputSafeArea,
+                    {
+                        backgroundColor: colors.background,
+                        borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
+                        borderTopWidth: StyleSheet.hairlineWidth,
+                    },
+                ]}
+            >
+                <View style={[
+                    styles.inputContainer,
+                    {
+                        backgroundColor: colors.background,
+                        paddingBottom: composerBottomPadding,
+                    },
+                ]}>
+                    <TouchableOpacity style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)} activeOpacity={0.7}>
+                        <Ionicons name="add-circle" size={30} color={colors.primary} />
+                    </TouchableOpacity>
+
+                    <View style={[
+                        styles.textInputWrapper,
+                        { backgroundColor: isDark ? '#2C2F3A' : '#F0F2F5' }
+                    ]}>
+                        <TextInput
+                            style={[styles.input, { color: colors.text }]}
+                            value={text}
+                            onChangeText={setText}
+                            placeholder="Message…"
+                            placeholderTextColor={colors.textSecondary}
+                            multiline
+                            maxLength={1000}
+                        />
+                    </View>
+
+                    {text.trim().length > 0 ? (
+                        <TouchableOpacity
+                            onPress={handleSend}
+                            disabled={!text.trim() || sending}
+                            style={[styles.sendButton, { backgroundColor: colors.primary, opacity: sending ? 0.7 : 1 }]}
+                            activeOpacity={0.8}
+                        >
+                            {sending ? (
+                                <ActivityIndicator size="small" color="#FFF" />
+                            ) : (
+                                <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
+                            )}
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity style={styles.thumbsUpButton} onPress={() => sendMessage('👍')} activeOpacity={0.7}>
+                            <Ionicons name="thumbs-up" size={28} color={colors.primary} />
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </SafeAreaView>
+        </>
+    );
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -552,7 +653,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
                     paddingTop: (insets.top || 16) + 6,
                 },
-            ]}>
+            ]}
+            onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)}>
                 {onBack && (
                     <TouchableOpacity
                         onPress={onBack}
@@ -678,92 +780,19 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             />
 
             {/* Messages */}
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                style={styles.messagesContainer}
-                keyboardVerticalOffset={0}
-            >
-                {loading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color={colors.primary} />
-                    </View>
-                ) : messages.length === 0 ? (
-                    <View style={styles.emptyContainer}>
-                        <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
-                            <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.primary} />
-                        </View>
-                        <Text style={[styles.emptyText, { color: colors.text }]}>
-                            No messages yet
-                        </Text>
-                        <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-                            Say hi to kick things off! 👋
-                        </Text>
-                    </View>
-                ) : (
-                    <FlatList
-                        ref={flatListRef}
-                        data={reversedMessages}
-                        keyExtractor={(item) => item.id}
-                        renderItem={renderMessage}
-                        contentContainerStyle={styles.messagesList}
-                        showsVerticalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled"
-                        keyboardDismissMode="interactive"
-                        inverted={true}
-                    />
-                )}
-
-                {/* Input */}
-                <View style={[
-                    styles.inputContainer,
-                    {
-                        backgroundColor: colors.background,
-                        borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
-                        paddingBottom: isKeyboardVisible
-                            ? (Platform.OS === 'ios' ? 6 : 4)
-                            : Math.max(insets.bottom, 8) + (Platform.OS === 'ios' ? 4 : 2),
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                    },
-                ]}>
-                    <TouchableOpacity style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)} activeOpacity={0.7}>
-                        <Ionicons name="add-circle" size={30} color={colors.primary} />
-                    </TouchableOpacity>
-
-                    <View style={[
-                        styles.textInputWrapper,
-                        { backgroundColor: isDark ? '#2C2F3A' : '#F0F2F5' }
-                    ]}>
-                        <TextInput
-                            style={[styles.input, { color: colors.text }]}
-                            value={text}
-                            onChangeText={setText}
-                            placeholder="Message…"
-                            placeholderTextColor={colors.textSecondary}
-                            multiline
-                            maxLength={1000}
-                        />
-                    </View>
-
-                    {text.trim().length > 0 ? (
-                        <TouchableOpacity
-                            onPress={handleSend}
-                            disabled={!text.trim() || sending}
-                            style={[styles.sendButton, { backgroundColor: colors.primary, opacity: sending ? 0.7 : 1 }]}
-                            activeOpacity={0.8}
-                        >
-                            {sending ? (
-                                <ActivityIndicator size="small" color="#FFF" />
-                            ) : (
-                                <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
-                            )}
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity style={styles.thumbsUpButton} onPress={() => sendMessage('👍')} activeOpacity={0.7}>
-                            <Ionicons name="thumbs-up" size={28} color={colors.primary} />
-                        </TouchableOpacity>
-                    )}
+            {Platform.OS === 'ios' ? (
+                <KeyboardAvoidingView
+                    behavior="padding"
+                    style={styles.messagesContainer}
+                    keyboardVerticalOffset={keyboardVerticalOffset}
+                >
+                    {chatContent}
+                </KeyboardAvoidingView>
+            ) : (
+                <View style={styles.messagesContainer}>
+                    {chatContent}
                 </View>
-            </KeyboardAvoidingView>
+            )}
 
             {/* Reaction Picker Modal */}
             <Modal
@@ -1032,6 +1061,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingTop: 8,
         gap: 6,
+    },
+    inputSafeArea: {
+        backgroundColor: '#FFFFFF',
     },
     inputAction: {
         paddingBottom: 6,

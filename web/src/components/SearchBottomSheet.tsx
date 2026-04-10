@@ -76,6 +76,83 @@ const SORT_OPTIONS = [
 
 const PAGE_SIZE = 10;
 
+const getSearchResultTimestamp = (item: any) => {
+  const rawValue = item?.created_at;
+  if (!rawValue) return 0;
+
+  const timestamp = new Date(rawValue).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const interleaveSearchResultsByType = (items: any[]) => {
+  if (!Array.isArray(items) || items.length <= 1) {
+    return items;
+  }
+
+  const buckets = new Map<string, any[]>();
+
+  items.forEach((item) => {
+    const typeKey = String(item?.type || "Unknown");
+    const bucket = buckets.get(typeKey);
+    if (bucket) {
+      bucket.push(item);
+      return;
+    }
+
+    buckets.set(typeKey, [item]);
+  });
+
+  const orderedTypes = Array.from(buckets.keys());
+  const output: any[] = [];
+
+  while (output.length < items.length) {
+    let addedItem = false;
+
+    for (const typeKey of orderedTypes) {
+      const bucket = buckets.get(typeKey);
+      if (!bucket || bucket.length === 0) {
+        continue;
+      }
+
+      output.push(bucket.shift());
+      addedItem = true;
+    }
+
+    if (!addedItem) {
+      break;
+    }
+  }
+
+  return output;
+};
+
+const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) => {
+  const valueMap = new Map<string, string[]>();
+
+  (rows || []).forEach((row: any) => {
+    const profileId = row?.profile_id;
+    const rawValue = row?.[valueKey];
+    if (typeof profileId !== "string" || typeof rawValue !== "string") {
+      return;
+    }
+
+    const nextValue = rawValue.trim();
+    if (!nextValue) {
+      return;
+    }
+
+    const existingValues = valueMap.get(profileId);
+    if (existingValues) {
+      existingValues.push(nextValue);
+      return;
+    }
+
+    valueMap.set(profileId, [nextValue]);
+  });
+
+  return valueMap;
+};
+
 interface SearchBottomSheetProps {
   onClose?: () => void;
   onItemPress?: (listingId: string) => void;
@@ -201,15 +278,13 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           let tables: string[] = [];
           const fetchedCountsByTable = new Map<string, number>();
 
-          if (isGuest) {
+          if (isGuest || isOwner) {
             tables = ["groups_with_stats", "profiles"];
-          } else if (isOwner) {
-            tables = ["groups_with_stats"];
           } else {
             if (activeFilter === "All") {
-              tables = ["groups_with_stats", "studios_with_stats", "gigs_with_stats"];
+              tables = ["groups_with_stats", "profiles", "studios_with_stats", "gigs_with_stats"];
             } else if (activeFilter === "Musician") {
-              tables = ["groups_with_stats"];
+              tables = ["groups_with_stats", "profiles"];
             } else if (activeFilter === "Studio") {
               tables = ["studios_with_stats"];
             } else if (activeFilter === "Gig") {
@@ -225,7 +300,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             if (table === "profiles") {
               query = query
                 .select(
-                  "id, full_name, avatar_url, address, created_at, role, genres, skills, show_gig_statuses",
+                  "id, full_name, avatar_url, address, created_at, role, show_gig_statuses",
                 )
                 .eq("role", "musician");
             }
@@ -311,6 +386,31 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             fetchedCountsByTable.set(table, fetchedCount);
 
             if (qData) {
+              let profileGenresById = new Map<string, string[]>();
+              let profileSkillsById = new Map<string, string[]>();
+
+              if (table === "profiles" && qData.length > 0) {
+                const profileIds = qData
+                  .map((item: any) => item?.id)
+                  .filter((value: any): value is string => typeof value === "string" && value.length > 0);
+
+                if (profileIds.length > 0) {
+                  const [{ data: profileGenreRows }, { data: profileSkillRows }] = await Promise.all([
+                    supabase
+                      .from("profile_genres")
+                      .select("profile_id, genre")
+                      .in("profile_id", profileIds),
+                    supabase
+                      .from("profile_skills")
+                      .select("profile_id, skill")
+                      .in("profile_id", profileIds),
+                  ]);
+
+                  profileGenresById = collectProfileValues(profileGenreRows, "genre");
+                  profileSkillsById = collectProfileValues(profileSkillRows, "skill");
+                }
+              }
+
               const type = table.includes("group")
                 ? "Group"
                 : table.includes("studio")
@@ -326,12 +426,18 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                   type === "Studio"
                     ? item.type || item.studio_type || null
                     : item.studio_type || null,
+                genres: table === "profiles" ? profileGenresById.get(item.id) || [] : item.genres,
+                skills: table === "profiles" ? profileSkillsById.get(item.id) || [] : item.skills,
                 name: item.name || item.full_name,
                 location: item.location || item.address,
                 image: item.images?.[0] || item.image || item.avatar_url,
                 genre:
                   item.genre ||
-                  (Array.isArray(item.genres) ? item.genres.join(", ") : ""),
+                  (table === "profiles"
+                    ? (profileGenresById.get(item.id) || []).join(", ")
+                    : Array.isArray(item.genres)
+                      ? item.genres.join(", ")
+                      : ""),
                 rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
                 show_gig_statuses: item.show_gig_statuses,
               }));
@@ -394,6 +500,24 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               const bPrice = parseFloat(b.rate?.replace(/,/g, "") || "0");
               return bPrice - aPrice;
             });
+          } else {
+            results.sort((a, b) => {
+              const timestampDelta =
+                getSearchResultTimestamp(b) - getSearchResultTimestamp(a);
+              if (timestampDelta !== 0) {
+                return timestampDelta;
+              }
+
+              return String(a.name || "").localeCompare(String(b.name || ""));
+            });
+          }
+
+          if (
+            sortBy === "newest" &&
+            results.some((item) => item.type === "Artist") &&
+            results.some((item) => item.type === "Group")
+          ) {
+            results = interleaveSearchResultsByType(results);
           }
 
           if (requestId !== requestIdRef.current) {

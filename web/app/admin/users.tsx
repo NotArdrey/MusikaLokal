@@ -1,7 +1,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from './_cache';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -106,6 +107,8 @@ const adminTabRoutes: Record<Tab, string> = {
   reports: '/admin/reports',
   audit: '/admin/audit',
 };
+
+const USERS_CACHE_TTL_MS = 45_000;
 
 interface UserEntry {
   id: string;
@@ -512,6 +515,7 @@ export default function AdminUsersPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
+  const hasHydratedUsersRef = useRef(false);
 
   const [initializingUsers, setInitializingUsers] = useState(false);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -554,6 +558,8 @@ export default function AdminUsersPage() {
     setAlertState({ visible: true, type, title, message });
   }, []);
 
+  const usersCacheKey = useMemo(() => getAdminPageCacheKey('users'), []);
+
   const handleTabChange = useCallback((nextTab: Tab) => {
     if (nextTab === 'users') return;
     router.replace(adminTabRoutes[nextTab] as any);
@@ -584,8 +590,11 @@ export default function AdminUsersPage() {
     return data;
   }, []);
 
-  const fetchUsers = useCallback(async () => {
-    setUsersLoading(true);
+  const fetchUsers = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setUsersLoading(true);
+    }
+
     try {
       const data = await invokeAdminUsersManagement({
         action: 'fetch_users',
@@ -594,35 +603,54 @@ export default function AdminUsersPage() {
 
       const items = Array.isArray(data?.items) ? data.items : [];
       setUsers(items);
+      writeAdminPageCache(usersCacheKey, items);
     } catch (error) {
-      const message = await getErrorMessage(error, 'Unable to fetch users.');
-      showAlert('error', 'Failed to load users', message);
+      if (!options?.silent) {
+        const message = await getErrorMessage(error, 'Unable to fetch users.');
+        showAlert('error', 'Failed to load users', message);
+      }
     } finally {
-      setUsersLoading(false);
+      if (!options?.silent) {
+        setUsersLoading(false);
+      }
     }
-  }, [showAlert, invokeAdminUsersManagement]);
+  }, [showAlert, usersCacheKey, invokeAdminUsersManagement]);
 
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
       setInitializingUsers(false);
+      hasHydratedUsersRef.current = false;
       return;
     }
 
     let isMounted = true;
-    setInitializingUsers(true);
+    const cachedUsers = readAdminPageCache<UserEntry[]>(usersCacheKey, USERS_CACHE_TTL_MS);
+
+    if (cachedUsers) {
+      setUsers(cachedUsers);
+      setInitializingUsers(false);
+      hasHydratedUsersRef.current = true;
+    } else if (!hasHydratedUsersRef.current) {
+      setInitializingUsers(true);
+    } else {
+      setInitializingUsers(false);
+    }
 
     void (async () => {
       try {
-        await fetchUsers();
+        await fetchUsers({ silent: Boolean(cachedUsers) });
       } finally {
-        if (isMounted) setInitializingUsers(false);
+        if (isMounted) {
+          setInitializingUsers(false);
+          hasHydratedUsersRef.current = true;
+        }
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [loading, roleResolved, session, isGuest, isAdmin, fetchUsers]);
+  }, [loading, roleResolved, session, isGuest, isAdmin, usersCacheKey, fetchUsers]);
 
   const resetUserForm = useCallback(() => {
     setUserFormFullName('');
@@ -805,6 +833,7 @@ export default function AdminUsersPage() {
         showAlert('success', 'User updated', 'User details have been updated.');
       }
 
+      invalidateAdminPageCache();
       setUserModalVisible(false);
       setEditingUserId(null);
       resetUserForm();
@@ -857,6 +886,7 @@ export default function AdminUsersPage() {
                     userId: targetUser.id,
                   });
 
+                  invalidateAdminPageCache();
                   showAlert('success', 'User deleted', 'The user account has been removed.');
                   await fetchUsers();
                 } catch (error) {

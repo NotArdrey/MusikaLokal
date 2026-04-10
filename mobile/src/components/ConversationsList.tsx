@@ -5,6 +5,7 @@ import {
     ActivityIndicator,
     FlatList,
     Image,
+    Platform,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -14,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_AVATAR } from '../constants/Images';
 import { useTheme } from '../context/ThemeContext';
 import { Conversation, useConversations } from '../hooks/useChat';
+import { NAVBAR_CLEARANCE } from './navbar';
 import UserSearchModal from './UserSearchModal';
 
 interface ConversationsListProps {
@@ -243,7 +245,11 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
                     data={conversations}
                     keyExtractor={(item) => item.id}
                     renderItem={renderConversation}
-                    contentContainerStyle={[styles.list, { paddingBottom: Math.max(insets.bottom, 16) + 80 }]}
+                    contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + NAVBAR_CLEARANCE }]}
+                    initialNumToRender={14}
+                    maxToRenderPerBatch={20}
+                    windowSize={10}
+                    removeClippedSubviews={Platform.OS === 'android'}
                     refreshing={loading}
                     onRefresh={refetch}
                     ItemSeparatorComponent={() => (

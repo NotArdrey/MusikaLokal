@@ -2682,6 +2682,11 @@ export default function EditStudioScreen() {
     const dateKey = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
       .toISOString()
       .split("T")[0];
+    const promoEndDate = new Date(Date.now() + 16 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+    const secondaryPromotionTarget =
+      allowedPromotionTargets[1] ?? allowedPromotionTargets[0];
 
     setStudioName((prev) => prev.trim() || "Test Studio Space (Edited)");
     setDescription(
@@ -2732,6 +2737,34 @@ export default function EditStudioScreen() {
             slots: [{ start: "10:00 AM", end: "06:00 PM" }],
           },
         },
+    );
+    setPromotions((prev) =>
+      prev.length > 0
+        ? prev
+        : [
+          {
+            id: `autofill-permanent-${studioType.toLowerCase()}`,
+            name: "Weekday Creator Deal",
+            description: "Test promo for daytime bookings and promo UI coverage.",
+            discount_type: "percentage",
+            discount_value: "15",
+            is_permanent: true,
+            start_date: "",
+            end_date: "",
+            applies_to: defaultPromotionAppliesTo,
+          },
+          {
+            id: `autofill-seasonal-${studioType.toLowerCase()}`,
+            name: "Weekend Session Saver",
+            description: "Time-limited sample promo used for booking regression checks.",
+            discount_type: "fixed_amount",
+            discount_value: "200",
+            is_permanent: false,
+            start_date: dateKey,
+            end_date: promoEndDate,
+            applies_to: secondaryPromotionTarget,
+          },
+        ],
     );
 
     showAlert(
