@@ -83,7 +83,7 @@ export default function SidebarNav() {
 
     const submenuHeight = rotateAnim.interpolate({
         inputRange: [0, 1],
-        outputRange: [0, 136], // ~60 per item * 2 + 8px gap + padding
+        outputRange: [0, 250], // ~60 per item * 2 + 8px gap + padding
     });
     const submenuMarginTop = rotateAnim.interpolate({
         inputRange: [0, 1],
@@ -511,7 +511,7 @@ export default function SidebarNav() {
                                                     borderLeftColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.09)',
                                                     overflow: 'hidden',
                                                     marginTop: submenuMarginTop,
-                                                    height: submenuHeight,
+                                                    maxHeight: submenuHeight,
                                                     opacity: submenuOpacity,
                                                 },
                                             ]}
@@ -550,13 +550,11 @@ export default function SidebarNav() {
                                                                         { color: subActive ? colors.primary : colors.text },
                                                                         subActive && { fontFamily: 'Poppins_600SemiBold' },
                                                                     ]}
-                                                                    numberOfLines={1}
                                                                 >
                                                                     {subItem.label}
                                                                 </Text>
                                                                 <Text
                                                                     style={[styles.subNavDescription, { color: colors.textSecondary }]}
-                                                                    numberOfLines={2}
                                                                 >
                                                                     {subItem.description}
                                                                 </Text>

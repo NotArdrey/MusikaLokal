@@ -781,7 +781,7 @@ export default function BookingsScreen() {
 
         const { data: permitRows, error: permitError } = await supabase
           .from(permitTable)
-          .select("id, name, permit_status, permit_reviewed_at, permit_rejection_reason, created_at")
+          .select("id, name, permit_status, permit_rejection_reason, permit_resubmissions_used, permit_reviewed_at, created_at")
           .eq(permitOwnerField, targetUserId)
           .in("permit_status", ["pending", "pending_review", "resubmitted", "rejected"])
           .order("created_at", { ascending: false });
@@ -2454,6 +2454,8 @@ export default function BookingsScreen() {
                 {pendingPermitStudios.map((listing: any) => {
                   const normalizedStatus = String(listing?.permit_status || "pending_review").toLowerCase();
                   const isRejected = normalizedStatus === "rejected";
+                  const permitResubmissionsUsed = Number(listing?.permit_resubmissions_used || 0);
+                  const hasReapplyRemaining = permitResubmissionsUsed < 1;
                   const statusLabel = isRejected
                     ? "Rejected - Action Needed"
                     : normalizedStatus === "resubmitted"
@@ -2488,10 +2490,12 @@ export default function BookingsScreen() {
                       )}
                       <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: moderateScale(12), marginTop: moderateScale(6) }}>
                         {isRejected
-                          ? `This ${listingType} remains hidden from Home. Update details and reapply to continue review.`
+                          ? hasReapplyRemaining
+                            ? `This ${listingType} remains hidden from Home. You have one reapply attempt left after this decline.`
+                            : `This ${listingType} remains hidden from Home. Your one allowed reapply attempt has already been used.`
                           : `This ${listingType} remains hidden from Home until permit approval is completed in Admin > Permits.`}
                       </Text>
-                      {isRejected && (
+                      {isRejected && hasReapplyRemaining && (
                         <TouchableOpacity
                           activeOpacity={1}
                           onPress={() =>

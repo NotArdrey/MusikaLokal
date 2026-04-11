@@ -2887,6 +2887,14 @@ export default function AddStudioScreen() {
                 >
                   Upload your business permit (PDF or Image)
                 </Text>
+                <Text
+                  style={[
+                    styles.inputSubLabel,
+                    { color: colors.textSecondary, marginTop: 4 },
+                  ]}
+                >
+                  If declined, only one resubmission is allowed after correction.
+                </Text>
                 {businessPermitUrl ? (
                   <View
                     style={[

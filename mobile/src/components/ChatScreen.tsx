@@ -544,8 +544,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
     const keyboardVerticalOffset = Platform.OS === 'ios' ? headerHeight : 0;
     const composerBottomPadding = Platform.OS === 'ios'
-        ? (isKeyboardVisible ? 10 : Math.max(insets.bottom, 8) + 4)
-        : (isKeyboardVisible ? 0 : 8);
+        ? (isKeyboardVisible ? 16 : Math.max(insets.bottom, 8) + 4)
+        : (isKeyboardVisible ? 12 : 8);
     const composerSafeAreaEdges: Edge[] = Platform.OS === 'android' && !isKeyboardVisible ? ['bottom'] : [];
     const chatContent = (
         <>

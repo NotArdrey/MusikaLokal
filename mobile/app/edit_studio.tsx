@@ -297,6 +297,10 @@ export default function EditStudioScreen() {
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
   const [permitStatus, setPermitStatus] = useState<string>("pending_review");
   const [permitRejectionReason, setPermitRejectionReason] = useState<string>("");
+  const [permitResubmissionsUsed, setPermitResubmissionsUsed] = useState(0);
+  const hasPermitResubmissionRemaining = permitResubmissionsUsed < 1;
+  const canReapplyPermit =
+    permitStatus === "rejected" && hasPermitResubmissionRemaining;
 
   // Availability state
   const daysOfWeek = [
@@ -1020,6 +1024,7 @@ export default function EditStudioScreen() {
       setInitialBusinessPermitUrl(data.business_permit_url || "");
       setPermitStatus(String(data.permit_status || "pending_review").toLowerCase());
       setPermitRejectionReason(data.permit_rejection_reason || "");
+      setPermitResubmissionsUsed(Number(data.permit_resubmissions_used || 0));
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
         console.log("🔧 Setting businessPermitFileName to:", fileName);
@@ -2425,9 +2430,13 @@ export default function EditStudioScreen() {
         businessPermitUrl !== initialBusinessPermitUrl;
 
       const isReapplyAction =
-        isReapplyRequested && permitStatus === "rejected";
+        isReapplyRequested && canReapplyPermit;
+      const reapplyLimitReached =
+        permitStatus === "rejected" &&
+        (shouldResetPermitReview || isReapplyRequested) &&
+        !hasPermitResubmissionRemaining;
 
-      if (shouldResetPermitReview || isReapplyAction) {
+      if ((shouldResetPermitReview || isReapplyAction) && !reapplyLimitReached) {
         const nextPermitStatus =
           isReapplyAction || permitStatus === "rejected"
             ? "resubmitted"
@@ -2451,6 +2460,9 @@ export default function EditStudioScreen() {
 
         setPermitStatus(nextPermitStatus);
         setPermitRejectionReason("");
+        if (nextPermitStatus === "resubmitted") {
+          setPermitResubmissionsUsed(1);
+        }
       }
 
       await supabase.from('studio_types').delete().eq('studio_id', studioId);
@@ -2619,10 +2631,14 @@ export default function EditStudioScreen() {
       }
 
       console.log("✅ Studio Updated successfully");
-      const successMessage =
+      let successMessage =
         isReapplyAction
           ? "Studio updated and permit resubmitted for admin review."
           : "Studio updated successfully!";
+
+      if (reapplyLimitReached) {
+        successMessage += "\n\nPermit remains rejected because the one allowed resubmission after decline was already used.";
+      }
 
       showAlert("success", "Success", successMessage, [
         {
@@ -2659,12 +2675,18 @@ export default function EditStudioScreen() {
       return;
     }
 
-    const isReapplyAction = isReapplyRequested && permitStatus === "rejected";
+    const isReapplyAction = isReapplyRequested && canReapplyPermit;
+    const reapplyLimitReached =
+      permitStatus === "rejected" &&
+      isReapplyRequested &&
+      !hasPermitResubmissionRemaining;
 
     showAlert(
       "warning",
       isReapplyAction ? "Save & Reapply" : "Save Changes",
-      isReapplyAction
+      reapplyLimitReached
+        ? "Save your updates now? Permit resubmission is no longer available because the one allowed retry was already used."
+        : isReapplyAction
         ? "Save your updates and resubmit this studio permit for admin review?"
         : "Are you sure you want to update this studio profile?",
       [
@@ -4171,9 +4193,11 @@ export default function EditStudioScreen() {
                   </Text>
                 )}
                 <Text style={styles.permitWarningText}>
-                  {isReapplyRequested
-                    ? "Update details as needed, then tap Save & Reapply to submit back for review."
-                    : "Upload a corrected permit and save your changes to resubmit for review."}
+                  {hasPermitResubmissionRemaining
+                    ? isReapplyRequested
+                      ? "Update details as needed, then tap Save & Reapply to submit back for review."
+                      : "Upload a corrected permit and save your changes to resubmit for review."
+                    : "You already used your one allowed resubmission. You can still edit details, but permit status stays rejected."}
                 </Text>
               </View>
             )}
@@ -5437,7 +5461,7 @@ export default function EditStudioScreen() {
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Text style={styles.saveButtonText}>
-                  {isReapplyRequested && permitStatus === "rejected"
+                  {isReapplyRequested && canReapplyPermit
                     ? "Save & Reapply"
                     : "Save Changes"}
                 </Text>
