@@ -63,7 +63,7 @@ export default function MyStudioScreen() {
         try {
             const { data: baseStudios, error: baseError } = await supabase
                 .from('studios')
-                .select('id, owner_id, name, description, created_at')
+                .select('id, owner_id, name, description, created_at, updated_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                 .eq('owner_id', userId)
                 .order('created_at', { ascending: false });
 
@@ -116,12 +116,16 @@ export default function MyStudioScreen() {
                 const reviewStats = reviewsByStudioId[studio.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
+                const normalizedPermitStatus = String(studio.permit_status || 'pending_review').toLowerCase();
 
                 return {
                     ...studio,
                     images: imagesByStudioId[studio.id] || [],
                     rating,
                     review_count: reviewCount,
+                    permit_status: normalizedPermitStatus,
+                    permit_rejection_reason: studio.permit_rejection_reason || null,
+                    permit_reviewed_at: studio.permit_reviewed_at || null,
                 };
             }));
         } catch (e) {
@@ -464,6 +468,19 @@ const styles = StyleSheet.create({
         fontSize: 12,
         lineHeight: 18,
     },
+    rejectionReasonText: {
+        marginTop: 8,
+        color: '#DC2626',
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
+        lineHeight: 18,
+    },
+    permitHintText: {
+        marginTop: 8,
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 12,
+        lineHeight: 18,
+    },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -493,6 +510,20 @@ const styles = StyleSheet.create({
         padding: 7,
         borderRadius: 10,
         borderWidth: 1,
+    },
+    reapplyBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    reapplyBtnText: {
+        color: '#EA580C',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
     },
     deleteBtn: {
         padding: 6,

@@ -1,7 +1,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -21,6 +21,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getAdminPageCacheKey, invalidateAdminPageCache, readAdminPageCache, writeAdminPageCache } from './_cache';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -106,17 +107,32 @@ const adminTabRoutes: Record<Tab, string> = {
   audit: '/admin/audit',
 };
 
+const PERMITS_CACHE_TTL_MS = 45_000;
+
 interface PermitItem {
   id: string;
   name: string;
   entity_type: 'studio' | 'gig';
   permit_status: string;
   business_permit_url: string | null;
+  owner_id: string;
   owner_name: string;
   owner_email: string;
   created_at: string;
   permit_reviewed_at: string | null;
   permit_rejection_reason: string | null;
+}
+
+interface OwnerDetailsEntry {
+  profile: Record<string, unknown> | null;
+  ownerName: string;
+}
+
+interface StudioDetailsEntry {
+  listing: Record<string, unknown> | null;
+  owner: Record<string, unknown> | null;
+  listingName: string;
+  entityType: 'studio' | 'gig';
 }
 
 const permitStatuses: PermitFilter[] = ['all', 'pending_review', 'approved', 'rejected', 'resubmitted'];
@@ -163,6 +179,87 @@ const getErrorMessage = async (error: unknown, fallback: string) => {
   return baseMessage;
 };
 
+const isUnsupportedActionMessage = (message: string, action: string) => {
+  const normalizedMessage = String(message || '').toLowerCase();
+  const normalizedAction = String(action || '').toLowerCase();
+
+  if (!normalizedMessage) return false;
+  if (normalizedAction && normalizedMessage.includes(`unsupported action: ${normalizedAction}`)) {
+    return true;
+  }
+
+  return normalizedMessage.includes('unsupported action') || normalizedMessage.includes('invalid action');
+};
+
+const toRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+};
+
+const buildFallbackOwnerProfile = (item: PermitItem): Record<string, unknown> => ({
+  id: item.owner_id || null,
+  full_name: item.owner_name || null,
+  email: item.owner_email || null,
+});
+
+const buildFallbackListingTarget = (item: PermitItem): StudioDetailsEntry => {
+  const ownerReferenceKey = item.entity_type === 'gig' ? 'organizer_id' : 'owner_id';
+
+  return {
+    listing: {
+      id: item.id,
+      name: item.name || null,
+      entity_type: item.entity_type,
+      permit_status: item.permit_status || null,
+      business_permit_url: item.business_permit_url || null,
+      created_at: item.created_at || null,
+      permit_reviewed_at: item.permit_reviewed_at || null,
+      permit_rejection_reason: item.permit_rejection_reason || null,
+      [ownerReferenceKey]: item.owner_id || null,
+      owner_name: item.owner_name || null,
+      owner_email: item.owner_email || null,
+    },
+    owner: buildFallbackOwnerProfile(item),
+    listingName: item.name || (item.entity_type === 'gig' ? 'Gig' : 'Studio'),
+    entityType: item.entity_type,
+  };
+};
+
+const formatDetailLabel = (rawKey: string) => {
+  const withSpaces = rawKey.replace(/_/g, ' ').trim();
+  if (!withSpaces) return 'Field';
+
+  return withSpaces
+    .split(' ')
+    .map((part) => {
+      if (!part) return part;
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(' ');
+};
+
+const formatDetailValue = (value: unknown) => {
+  if (value === null || value === undefined) return '-';
+
+  if (typeof value === 'boolean') {
+    return value ? 'Yes' : 'No';
+  }
+
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  const text = String(value).trim();
+  return text || '-';
+};
+
 const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
@@ -207,6 +304,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 24,
   },
+  detailLabel: {
+    fontSize: 11,
+    fontFamily: 'Poppins_600SemiBold',
+    textTransform: 'uppercase',
+  },
+  detailRow: {
+    gap: 4,
+  },
+  detailsEmptyText: {
+    fontSize: 12,
+    fontFamily: 'Poppins_400Regular',
+  },
+  detailsRows: {
+    gap: 8,
+  },
+  detailsScroll: {
+    maxHeight: 460,
+  },
+  detailsScrollContent: {
+    gap: 10,
+    paddingBottom: 4,
+  },
+  detailsSection: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  detailsSectionTitle: {
+    fontSize: 13,
+    fontFamily: 'Poppins_600SemiBold',
+  },
+  detailValue: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'Poppins_400Regular',
+  },
   emptyText: {
     fontSize: 13,
     fontFamily: 'Poppins_400Regular',
@@ -224,9 +359,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_500Medium',
     textTransform: 'capitalize',
   },
+  filterGroup: {
+    gap: 8,
+  },
+  filterLabel: {
+    fontSize: 12,
+    fontFamily: 'Poppins_600SemiBold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
   filterRow: {
     gap: 8,
     paddingVertical: 2,
+  },
+  filterRowWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
   },
   flex1: {
     flex: 1,
@@ -269,6 +418,14 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 560,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    gap: 10,
+  },
+  modalCardLarge: {
+    width: '100%',
+    maxWidth: 760,
     borderRadius: 16,
     borderWidth: 1,
     padding: 16,
@@ -370,6 +527,7 @@ export default function AdminPermitsPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
+  const hasHydratedPermitsRef = useRef(false);
 
   const [initializingPermits, setInitializingPermits] = useState(false);
   const [permitsLoading, setPermitsLoading] = useState(false);
@@ -377,6 +535,10 @@ export default function AdminPermitsPage() {
   const [permitSearch, setPermitSearch] = useState('');
   const [permitFilter, setPermitFilter] = useState<(typeof permitStatuses)[number]>('all');
   const [entityFilter, setEntityFilter] = useState<(typeof entityTypes)[number]>('all');
+  const [ownerDetailsLoadingKey, setOwnerDetailsLoadingKey] = useState<string | null>(null);
+  const [studioDetailsLoadingKey, setStudioDetailsLoadingKey] = useState<string | null>(null);
+  const [ownerDetailsTarget, setOwnerDetailsTarget] = useState<OwnerDetailsEntry | null>(null);
+  const [studioDetailsTarget, setStudioDetailsTarget] = useState<StudioDetailsEntry | null>(null);
   const [reviewTarget, setReviewTarget] = useState<PermitItem | null>(null);
   const [reviewAction, setReviewAction] = useState<'approve' | 'reject' | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -400,13 +562,24 @@ export default function AdminPermitsPage() {
     setAlertState({ visible: true, type, title, message });
   }, []);
 
+  const permitsCacheKey = useMemo(
+    () => getAdminPageCacheKey('permits', {
+      entityFilter,
+      permitFilter,
+    }),
+    [entityFilter, permitFilter],
+  );
+
   const handleTabChange = useCallback((nextTab: Tab) => {
     if (nextTab === 'permits') return;
     router.replace(adminTabRoutes[nextTab] as any);
   }, []);
 
-  const fetchPermits = useCallback(async () => {
-    setPermitsLoading(true);
+  const fetchPermits = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setPermitsLoading(true);
+    }
+
     try {
       const { data, error } = await supabase.functions.invoke<any>('permit-management', {
         body: {
@@ -418,36 +591,56 @@ export default function AdminPermitsPage() {
 
       if (error) throw error;
       if (data?.error) throw new Error(String(data.error));
-      setPermits(Array.isArray(data?.items) ? data.items : []);
+      const nextPermits = Array.isArray(data?.items) ? data.items : [];
+      setPermits(nextPermits);
+      writeAdminPageCache(permitsCacheKey, nextPermits);
     } catch (error) {
-      const message = await getErrorMessage(error, 'Unable to fetch permits.');
-      showAlert('error', 'Failed to load permits', message);
+      if (!options?.silent) {
+        const message = await getErrorMessage(error, 'Unable to fetch permits.');
+        showAlert('error', 'Failed to load permits', message);
+      }
     } finally {
-      setPermitsLoading(false);
+      if (!options?.silent) {
+        setPermitsLoading(false);
+      }
     }
-  }, [entityFilter, permitFilter, showAlert]);
+  }, [entityFilter, permitFilter, permitsCacheKey, showAlert]);
 
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
       setInitializingPermits(false);
+      hasHydratedPermitsRef.current = false;
       return;
     }
 
     let isMounted = true;
-    setInitializingPermits(true);
+    const cachedPermits = readAdminPageCache<PermitItem[]>(permitsCacheKey, PERMITS_CACHE_TTL_MS);
+
+    if (cachedPermits) {
+      setPermits(cachedPermits);
+      setInitializingPermits(false);
+      hasHydratedPermitsRef.current = true;
+    } else if (!hasHydratedPermitsRef.current) {
+      setInitializingPermits(true);
+    } else {
+      setInitializingPermits(false);
+    }
 
     void (async () => {
       try {
-        await fetchPermits();
+        await fetchPermits({ silent: Boolean(cachedPermits) });
       } finally {
-        if (isMounted) setInitializingPermits(false);
+        if (isMounted) {
+          setInitializingPermits(false);
+          hasHydratedPermitsRef.current = true;
+        }
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [loading, roleResolved, session, isGuest, isAdmin, fetchPermits]);
+  }, [loading, roleResolved, session, isGuest, isAdmin, permitsCacheKey, fetchPermits]);
 
   const openReviewModal = useCallback((item: PermitItem, action: 'approve' | 'reject') => {
     setReviewTarget(item);
@@ -463,6 +656,176 @@ export default function AdminPermitsPage() {
     setRejectReason('');
     setAdminNotes('');
   }, [reviewSubmitting]);
+
+  const closeOwnerDetailsModal = useCallback(() => {
+    setOwnerDetailsTarget(null);
+  }, []);
+
+  const closeStudioDetailsModal = useCallback(() => {
+    setStudioDetailsTarget(null);
+  }, []);
+
+  const openOwnerDetailsModal = useCallback(async (item: PermitItem, loadingKey?: string) => {
+    const ownerId = String(item.owner_id || '').trim();
+    if (!ownerId) {
+      showAlert('warning', 'Owner unavailable', 'This permit record has no owner reference.');
+      return;
+    }
+
+    const requestLoadingKey = loadingKey || `owner-${ownerId}`;
+    setOwnerDetailsLoadingKey(requestLoadingKey);
+
+    try {
+      let profile: Record<string, unknown> | null = null;
+
+      try {
+        const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+          body: {
+            action: 'fetch_owner_details',
+            userId: ownerId,
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(String(data.error));
+
+        profile = toRecord(data?.item);
+      } catch (primaryError) {
+        const primaryMessage = await getErrorMessage(primaryError, 'Unable to load owner details.');
+
+        if (!isUnsupportedActionMessage(primaryMessage, 'fetch_owner_details')) {
+          throw primaryError;
+        }
+
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', ownerId)
+            .maybeSingle();
+
+          if (error) throw error;
+          profile = toRecord(data);
+        } catch {
+          profile = null;
+        }
+      }
+
+      setOwnerDetailsTarget({
+        profile: profile || buildFallbackOwnerProfile(item),
+        ownerName: item.owner_name || 'Owner',
+      });
+    } catch (error) {
+      const message = await getErrorMessage(error, 'Unable to load owner details.');
+      showAlert('error', 'Failed to load owner details', message);
+      setOwnerDetailsTarget({
+        profile: buildFallbackOwnerProfile(item),
+        ownerName: item.owner_name || 'Owner',
+      });
+    } finally {
+      setOwnerDetailsLoadingKey((prev) => (prev === requestLoadingKey ? null : prev));
+    }
+  }, [showAlert]);
+
+  const openStudioDetailsModal = useCallback(async (item: PermitItem, loadingKey?: string) => {
+    const requestLoadingKey = loadingKey || `studio-${item.id}`;
+    setStudioDetailsLoadingKey(requestLoadingKey);
+
+    const entityLabel = item.entity_type === 'gig' ? 'gig' : 'studio';
+
+    try {
+      let listing: Record<string, unknown> | null = null;
+      let owner: Record<string, unknown> | null = null;
+
+      try {
+        const { data, error } = await supabase.functions.invoke<any>('permit-management', {
+          body: {
+            action: 'fetch_listing_details',
+            entityType: item.entity_type,
+            entityId: item.id,
+          },
+        });
+
+        if (error) throw error;
+        if (data?.error) throw new Error(String(data.error));
+
+        listing = toRecord(data?.item);
+        owner = toRecord(data?.owner);
+      } catch (primaryError) {
+        const primaryMessage = await getErrorMessage(primaryError, `Unable to load ${entityLabel} details.`);
+
+        if (!isUnsupportedActionMessage(primaryMessage, 'fetch_listing_details')) {
+          throw primaryError;
+        }
+
+        try {
+          const directResponse = item.entity_type === 'gig'
+            ? await supabase
+              .from('gigs')
+              .select('*, organizer:profiles!organizer_id(id, full_name, email, role, is_verified, created_at)')
+              .eq('id', item.id)
+              .maybeSingle()
+            : await supabase
+              .from('studios')
+              .select('*, owner:profiles!owner_id(id, full_name, email, role, is_verified, created_at)')
+              .eq('id', item.id)
+              .maybeSingle();
+
+          if (directResponse.error) throw directResponse.error;
+
+          const directListing = toRecord(directResponse.data);
+          listing = directListing;
+          owner = toRecord(directListing?.[item.entity_type === 'gig' ? 'organizer' : 'owner']);
+        } catch {
+          const fallback = buildFallbackListingTarget(item);
+          listing = fallback.listing;
+          owner = fallback.owner;
+        }
+      }
+
+      setStudioDetailsTarget({
+        listing: listing || buildFallbackListingTarget(item).listing,
+        owner: owner || buildFallbackListingTarget(item).owner,
+        listingName: item.name || (item.entity_type === 'gig' ? 'Gig' : 'Studio'),
+        entityType: item.entity_type,
+      });
+    } catch (error) {
+      const message = await getErrorMessage(error, `Unable to load ${entityLabel} details.`);
+      showAlert('error', `Failed to load ${entityLabel} details`, message);
+      setStudioDetailsTarget(buildFallbackListingTarget(item));
+    } finally {
+      setStudioDetailsLoadingKey((prev) => (prev === requestLoadingKey ? null : prev));
+    }
+  }, [showAlert]);
+
+  const renderDetailsSection = useCallback((
+    title: string,
+    rawData: Record<string, unknown> | null | undefined,
+    emptyMessage: string,
+  ) => {
+    const rows = rawData && typeof rawData === 'object'
+      ? Object.entries(rawData)
+      : [];
+
+    return (
+      <View style={[styles.detailsSection, { borderColor: colors.border, backgroundColor: isDark ? '#0F172A' : '#F8FAFC' }]}> 
+        <Text style={[styles.detailsSectionTitle, { color: colors.text }]}>{title}</Text>
+
+        {rows.length === 0 ? (
+          <Text style={[styles.detailsEmptyText, { color: colors.textSecondary }]}>{emptyMessage}</Text>
+        ) : (
+          <View style={styles.detailsRows}>
+            {rows.map(([key, value]) => (
+              <View key={`${title}-${key}`} style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{formatDetailLabel(key)}</Text>
+                <Text style={[styles.detailValue, { color: colors.text }]}>{formatDetailValue(value)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  }, [colors.border, colors.text, colors.textSecondary, isDark]);
 
   const submitReview = useCallback(async () => {
     if (!reviewTarget || !reviewAction) return;
@@ -489,6 +852,7 @@ export default function AdminPermitsPage() {
       if (data?.error) throw new Error(String(data.error));
 
       const actionLabel = reviewAction === 'approve' ? 'approved' : 'rejected';
+      invalidateAdminPageCache();
       closeReviewModal();
       showAlert('success', 'Permit updated', `${reviewTarget.name} has been ${actionLabel}.`);
       await fetchPermits();
@@ -582,53 +946,59 @@ export default function AdminPermitsPage() {
             ]}
           />
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {permitStatuses.map((status) => {
-              const active = permitFilter === status;
-              return (
-                <TouchableOpacity
-                  key={status}
-                  activeOpacity={1}
-                  onPress={() => setPermitFilter(status)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {status.replace(/_/g, ' ')}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          <View style={styles.filterGroup}>
+            <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Permit Status</Text>
+            <View style={[styles.filterRow, styles.filterRowWrap]}>
+              {permitStatuses.map((status) => {
+                const active = permitFilter === status;
+                return (
+                  <TouchableOpacity
+                    key={status}
+                    activeOpacity={1}
+                    onPress={() => setPermitFilter(status)}
+                    style={[
+                      styles.filterChip,
+                      {
+                        backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                      {status.replace(/_/g, ' ')}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-            {entityTypes.map((entity) => {
-              const active = entityFilter === entity;
-              return (
-                <TouchableOpacity
-                  key={entity}
-                  activeOpacity={1}
-                  onPress={() => setEntityFilter(entity)}
-                  style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
-                      borderColor: active ? colors.primary : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
-                    {entity}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          <View style={styles.filterGroup}>
+            <Text style={[styles.filterLabel, { color: colors.textSecondary }]}>Listing Type</Text>
+            <View style={[styles.filterRow, styles.filterRowWrap]}>
+              {entityTypes.map((entity) => {
+                const active = entityFilter === entity;
+                return (
+                  <TouchableOpacity
+                    key={entity}
+                    activeOpacity={1}
+                    onPress={() => setEntityFilter(entity)}
+                    style={[
+                      styles.filterChip,
+                      {
+                        backgroundColor: active ? colors.primary : (isDark ? '#1E293B' : '#FFFFFF'),
+                        borderColor: active ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.filterChipText, { color: active ? '#FFFFFF' : colors.textSecondary }]}>
+                      {entity}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
 
           {permitsLoading ? (
             <View style={styles.inlineLoader}>
@@ -641,6 +1011,9 @@ export default function AdminPermitsPage() {
               {filteredPermits.map((item) => {
                 const status = String(item.permit_status || 'pending_review').replace(/_/g, ' ');
                 const canReview = ['pending', 'pending_review', 'resubmitted'].includes(item.permit_status);
+                const ownerLoadingKey = `permit-owner-${item.entity_type}-${item.id}`;
+                const studioLoadingKey = `permit-studio-${item.entity_type}-${item.id}`;
+                const listingActionLabel = item.entity_type === 'gig' ? 'View Gig' : 'View Studio';
                 return (
                   <View key={`${item.entity_type}-${item.id}`} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}> 
                     <View style={styles.cardHeaderRow}>
@@ -658,6 +1031,53 @@ export default function AdminPermitsPage() {
                     )}
 
                     <View style={styles.cardActionsRow}>
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        disabled={!item.owner_id || ownerDetailsLoadingKey === ownerLoadingKey}
+                        onPress={() => {
+                          if (!item.owner_id) return;
+                          void openOwnerDetailsModal(item, ownerLoadingKey);
+                        }}
+                        style={[
+                          styles.smallActionButton,
+                          {
+                            borderColor: colors.border,
+                            opacity: item.owner_id ? 1 : 0.5,
+                          },
+                        ]}
+                      >
+                        {ownerDetailsLoadingKey === ownerLoadingKey ? (
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                          <>
+                            <Ionicons name="person-outline" size={14} color={colors.text} />
+                            <Text style={[styles.smallActionText, { color: colors.text }]}>View Owner</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        activeOpacity={1}
+                        disabled={studioDetailsLoadingKey === studioLoadingKey}
+                        onPress={() => {
+                          void openStudioDetailsModal(item, studioLoadingKey);
+                        }}
+                        style={[styles.smallActionButton, { borderColor: colors.border }]}
+                      >
+                        {studioDetailsLoadingKey === studioLoadingKey ? (
+                          <ActivityIndicator size="small" color={colors.primary} />
+                        ) : (
+                          <>
+                            <Ionicons
+                              name={item.entity_type === 'gig' ? 'musical-notes-outline' : 'business-outline'}
+                              size={14}
+                              color={colors.text}
+                            />
+                            <Text style={[styles.smallActionText, { color: colors.text }]}>{listingActionLabel}</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
                       {!!item.business_permit_url && (
                         <TouchableOpacity
                           activeOpacity={1}
@@ -699,6 +1119,61 @@ export default function AdminPermitsPage() {
           )}
         </View>
       </ScrollView>
+
+      <Modal visible={!!ownerDetailsTarget} transparent animationType="fade" onRequestClose={closeOwnerDetailsModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Owner Details</Text>
+            <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>{ownerDetailsTarget?.ownerName || 'Owner'}</Text>
+
+            <ScrollView style={styles.detailsScroll} contentContainerStyle={styles.detailsScrollContent}>
+              {renderDetailsSection('Profile', ownerDetailsTarget?.profile || null, 'Owner details are unavailable.')}
+            </ScrollView>
+
+            <View style={styles.modalActionsRow}>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={closeOwnerDetailsModal}
+                style={[styles.modalButton, { backgroundColor: isDark ? '#334155' : '#E5E7EB' }]}
+              >
+                <Text style={[styles.modalButtonText, { color: colors.text }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!studioDetailsTarget} transparent animationType="fade" onRequestClose={closeStudioDetailsModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCardLarge, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              {(studioDetailsTarget?.entityType === 'gig' ? 'Gig' : 'Studio')} Details
+            </Text>
+            <Text style={[styles.modalDescription, { color: colors.textSecondary }]}>
+              {studioDetailsTarget?.listingName || (studioDetailsTarget?.entityType === 'gig' ? 'Gig' : 'Studio')}
+            </Text>
+
+            <ScrollView style={styles.detailsScroll} contentContainerStyle={styles.detailsScrollContent}>
+              {renderDetailsSection(
+                studioDetailsTarget?.entityType === 'gig' ? 'Gig' : 'Studio',
+                studioDetailsTarget?.listing || null,
+                `${studioDetailsTarget?.entityType === 'gig' ? 'Gig' : 'Studio'} details are unavailable.`,
+              )}
+              {renderDetailsSection('Owner', studioDetailsTarget?.owner || null, 'Owner details are unavailable.')}
+            </ScrollView>
+
+            <View style={styles.modalActionsRow}>
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={closeStudioDetailsModal}
+                style={[styles.modalButton, { backgroundColor: isDark ? '#334155' : '#E5E7EB' }]}
+              >
+                <Text style={[styles.modalButtonText, { color: colors.text }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={!!reviewTarget && !!reviewAction} transparent animationType="fade" onRequestClose={closeReviewModal}>
         <KeyboardAvoidingView

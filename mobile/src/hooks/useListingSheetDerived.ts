@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { normalizeStudioType } from "../components/listingDetails/availability";
 
 const getTypeLabels = (type: string) => {
   switch (type) {
@@ -42,12 +43,7 @@ export const useListingSheetDerived = (group: any) => {
   );
 
   const isStudioLike = group?.type === "Studio" || group?.type === "Venue";
-  const studioMode =
-    group?.studio_type === "Rehearsal" ||
-    group?.studio_type === "Recording" ||
-    group?.studio_type === "Both"
-      ? group.studio_type
-      : null;
+  const studioMode = normalizeStudioType(group?.studio_type);
 
   const rehearsalRateNumber = useMemo(() => {
     const parsed = Number(group?.rehearsal_rate ?? 0);

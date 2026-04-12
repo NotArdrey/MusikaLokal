@@ -12,6 +12,8 @@ export default function EditGigPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const gigId = params.get("id");
+  const reapplyParam = params.get("reapply");
+  const isReapplyRequested = reapplyParam === "1" || reapplyParam === "true";
   const fileRef = useRef<HTMLInputElement>(null);
   const permitRef = useRef<HTMLInputElement>(null);
 
@@ -29,6 +31,7 @@ export default function EditGigPage() {
   const [newPermitFile, setNewPermitFile] = useState<File | null>(null);
   const [permitPreview, setPermitPreview] = useState<string | null>(null);
   const [permitStatus, setPermitStatus] = useState<string>("pending_review");
+  const [permitRejectionReason, setPermitRejectionReason] = useState<string>("");
   const [alert, setAlert] = useState({
     visible: false,
     type: "info" as "info" | "error" | "success" | "warning",
@@ -52,7 +55,8 @@ export default function EditGigPage() {
         setEventDate(data.event_date || "");
         setExistingImages(data.images || []);
         setExistingPermitUrl(data.business_permit_url || null);
-        setPermitStatus(data.permit_status || "pending_review");
+        setPermitStatus(String(data.permit_status || "pending_review").toLowerCase());
+        setPermitRejectionReason(data.permit_rejection_reason || "");
       }
       setLoading(false);
     })();
@@ -122,6 +126,12 @@ export default function EditGigPage() {
         }
       }
 
+      const previousPermitUrl = existingPermitUrl || "";
+      const currentPermitUrl = permitUrl || "";
+      const shouldResetPermitReview =
+        !!currentPermitUrl && currentPermitUrl !== previousPermitUrl;
+      const isReapplyAction = isReapplyRequested && permitStatus === "rejected";
+
       const updateData: any = {
         name,
         location,
@@ -132,9 +142,15 @@ export default function EditGigPage() {
         business_permit_url: permitUrl,
       };
 
-      if (newPermitFile && permitStatus === "rejected") {
-        updateData.permit_status = "resubmitted";
+      if (shouldResetPermitReview || isReapplyAction) {
+        updateData.permit_status =
+          isReapplyAction || permitStatus === "rejected"
+            ? "resubmitted"
+            : "pending_review";
         updateData.permit_rejection_reason = null;
+        updateData.permit_admin_notes = null;
+        updateData.permit_reviewed_by = null;
+        updateData.permit_reviewed_at = null;
       }
 
       const { error } = await supabase
@@ -143,11 +159,18 @@ export default function EditGigPage() {
         .eq("id", gigId);
       if (error) throw error;
 
+      if (updateData.permit_status) {
+        setPermitStatus(updateData.permit_status);
+        setPermitRejectionReason("");
+      }
+
       setAlert({
         visible: true,
         type: "success",
         title: "Saved",
-        message: "Gig updated.",
+        message: isReapplyRequested && permitStatus === "rejected"
+          ? "Gig updated and permit resubmitted for admin review."
+          : "Gig updated.",
       });
       setTimeout(() => navigate(-1), 1200);
     } catch {
@@ -374,9 +397,19 @@ export default function EditGigPage() {
             </span>
           </div>
           {permitStatus === "rejected" && (
-            <p className="text-xs text-red-500 mb-3">
-              Your permit was rejected. Please upload a new one to resubmit for review.
-            </p>
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-900/20">
+              <p className="text-xs font-semibold text-red-600 dark:text-red-300">
+                Permit Rejected
+              </p>
+              <p className="mt-1 text-xs text-red-500 dark:text-red-300">
+                Upload a corrected permit and save to resubmit for admin review.
+              </p>
+              {permitRejectionReason && (
+                <p className="mt-1.5 text-xs font-semibold text-red-500 dark:text-red-300">
+                  Reason: {permitRejectionReason}
+                </p>
+              )}
+            </div>
           )}
           {(newPermitFile || existingPermitUrl) ? (
             <div className="flex items-center gap-3 rounded-xl border p-3" style={{ borderColor: borderCol }}>
@@ -435,7 +468,7 @@ export default function EditGigPage() {
             onClick={handleSave}
             disabled={saving}
           >
-            {saving ? <span className="spinner" /> : "Save Changes"}
+            {saving ? <span className="spinner" /> : (isReapplyRequested && permitStatus === "rejected" ? "Save & Reapply" : "Save Changes")}
           </button>
         </div>
       </div>

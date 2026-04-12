@@ -103,6 +103,7 @@ interface StudioBookTabProps {
   setShowPaymentOptionModal: (value: boolean) => void;
   showPaymentOptionModal: boolean;
   selectedSessionType: "Rehearsal" | "Recording" | null;
+  promotions?: any[];
   showAlert: (
     type: "success" | "error" | "warning" | "info",
     title: string,
@@ -154,12 +155,66 @@ const StudioBookTab = ({
   setShowPaymentOptionModal,
   showPaymentOptionModal,
   selectedSessionType,
+  promotions = [],
   showAlert,
 }: StudioBookTabProps) => {
   const usesRecordingWholeDayMode = isRecordingStudioMode(
     group?.studio_type,
     selectedSessionType,
   );
+  const [recordingSongCountInput, setRecordingSongCountInput] = React.useState("1");
+
+  const parsePositiveInteger = (value: unknown): number | null => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return null;
+    const whole = Math.floor(parsed);
+    return whole > 0 ? whole : null;
+  };
+
+  const getRecordingSongCount = (): number | null =>
+    parsePositiveInteger(recordingSongCountInput);
+
+  const getRecordingRatePerSong = (): number => {
+    const fromGroup = Number(group?.recording_rate || 0);
+    if (Number.isFinite(fromGroup) && fromGroup > 0) return fromGroup;
+
+    const fromDisplay = Number(String(displayRate || "").replace(/[^\d.]/g, ""));
+    if (Number.isFinite(fromDisplay) && fromDisplay > 0) return fromDisplay;
+
+    return 0;
+  };
+
+  const getRecordingSongLimitForDate = (bookingDate: string): number | null => {
+    if (!bookingDate) return null;
+
+    const dateOverrides = Array.isArray(group?.dateOverrides)
+      ? group.dateOverrides
+      : [];
+    const matchingOverride = dateOverrides.find(
+      (entry: any) => entry?.override_date === bookingDate,
+    );
+    const overrideLimit = parsePositiveInteger(
+      matchingOverride?.max_recording_songs_per_day,
+    );
+    if (overrideLimit) return overrideLimit;
+
+    return parsePositiveInteger(group?.settings?.max_recording_songs_per_day);
+  };
+
+  const recordingSongLimitForSelectedDate = selectedDate
+    ? getRecordingSongLimitForDate(selectedDate)
+    : parsePositiveInteger(group?.settings?.max_recording_songs_per_day);
+
+  const getSlotDurationHours = (start: string, end: string): number => {
+    const startMinutes = toTimeMinutes(start);
+    const endMinutes = toTimeMinutes(end);
+
+    if (startMinutes === null || endMinutes === null) return 0;
+
+    const rawDuration = endMinutes - startMinutes;
+    if (rawDuration <= 0) return 0;
+    return rawDuration / 60;
+  };
 
   const toValidDate = (value: any): Date | null => {
     if (!value) return null;
@@ -223,6 +278,100 @@ const StudioBookTab = ({
     return hours * 60 + minutes;
   };
 
+  const getStudioLeadTimeHours = (): number => {
+    const rawLeadTime = Number(group?.settings?.lead_time_hours ?? group?.lead_time_hours);
+    if (!Number.isFinite(rawLeadTime)) return 24;
+    return Math.max(0, rawLeadTime);
+  };
+
+  const activePromotionsForBooking = React.useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const normalizedPromotions = Array.isArray(promotions) ? promotions : [];
+    const currentSessionType = usesRecordingWholeDayMode ? "recording" : "rehearsal";
+    const shouldFilterBySession =
+      String(group?.studio_type || "").toLowerCase() !== "both" ||
+      Boolean(selectedSessionType);
+
+    return normalizedPromotions
+      .filter((promo: any) => {
+        if (!promo || promo.is_active === false) return false;
+
+        const isInRange =
+          promo.is_permanent ||
+          (!promo.start_date || promo.start_date <= today) &&
+            (!promo.end_date || promo.end_date >= today);
+
+        if (!isInRange) return false;
+
+        if (!shouldFilterBySession) return true;
+
+        const appliesTo = String(promo.applies_to || "both").toLowerCase();
+        return appliesTo === "both" || appliesTo === currentSessionType;
+      })
+      .sort((a: any, b: any) => Number(b.discount_value || 0) - Number(a.discount_value || 0));
+  }, [promotions, usesRecordingWholeDayMode, group?.studio_type, selectedSessionType]);
+
+  const formatPromotionDiscountText = (promo: any) => {
+    const discountValue = Number(promo?.discount_value || 0);
+    const discountType = String(promo?.discount_type || "percentage").toLowerCase();
+    if (discountType === "percentage") {
+      return `${discountValue}% off`;
+    }
+    return `PHP ${discountValue} off`;
+  };
+
+  const formatPromotionWindow = (promo: any) => {
+    if (promo?.is_permanent) return "Always active";
+    if (!promo?.start_date || !promo?.end_date) return "Limited-time promo";
+
+    return `Valid ${new Date(`${promo.start_date}T00:00:00`).toLocaleDateString()} - ${new Date(
+      `${promo.end_date}T00:00:00`,
+    ).toLocaleDateString()}`;
+  };
+
+  const getLeadTimeViolationMessage = (
+    bookingDate: string,
+    slots: { start: string; end: string }[],
+  ): string | null => {
+    if (!bookingDate || !Array.isArray(slots) || slots.length === 0) return null;
+
+    const leadTimeHours = getStudioLeadTimeHours();
+    if (leadTimeHours <= 0) return null;
+
+    const earliestSlotStart = [...slots]
+      .map((slot) => toTimeLabel(slot.start))
+      .filter((time) => /^\d{2}:\d{2}$/.test(time))
+      .sort()[0];
+
+    if (!earliestSlotStart) return null;
+
+    const slotStart = new Date(`${bookingDate}T${earliestSlotStart}:00`);
+    if (Number.isNaN(slotStart.getTime())) return null;
+
+    const minAllowedStartMs = Date.now() + leadTimeHours * 60 * 60 * 1000;
+    if (slotStart.getTime() < minAllowedStartMs) {
+      return `This studio requires at least ${leadTimeHours} hour(s) advance booking.`;
+    }
+
+    return null;
+  };
+
+  const isExpectedBookingValidationError = (
+    status: number | undefined,
+    message: string,
+  ) => {
+    const normalized = String(message || "").toLowerCase();
+    return (
+      status === 409 ||
+      normalized.includes("advance booking") ||
+      normalized.includes("cannot create a booking in the past") ||
+      normalized.includes("bookings can only be made up to") ||
+      normalized.includes("time slot") ||
+      normalized.includes("already have a pending booking") ||
+      normalized.includes("outside operating hours")
+    );
+  };
+
   const slotsOverlap = (
     a: { start: string; end: string },
     b: { start: string; end: string },
@@ -261,6 +410,20 @@ const StudioBookTab = ({
     if (booking.pricing?.final_price) {
       return sum + booking.pricing.final_price;
     }
+
+    if (usesRecordingWholeDayMode) {
+      const recordingSongCount =
+        parsePositiveInteger(
+          booking.songCount ??
+            booking.pricing?.modifiers?.recording_session?.song_count ??
+            booking.pricing?.modifiers?.song_count,
+        ) || 1;
+      const recordingRate = getRecordingRatePerSong();
+      if (recordingRate > 0) {
+        return sum + recordingRate * recordingSongCount;
+      }
+    }
+
     const start = new Date(booking.startTime).getTime();
     const end = new Date(booking.endTime).getTime();
     let hours = (end - start) / (1000 * 60 * 60);
@@ -463,6 +626,7 @@ const StudioBookTab = ({
     time_slots: { start: string; end: string }[];
     notes: string | null;
     session_type: "recording" | "rehearsal";
+    song_count?: number | null;
   }, accessToken: string) => {
     if (!supabaseUrl || !supabaseAnonKey) {
       warnLog("⚠️ Missing Supabase URL/Anon key for direct function fetch; falling back to invoke().");
@@ -613,6 +777,78 @@ const StudioBookTab = ({
         </View>
       )}
 
+      {activePromotionsForBooking.length > 0 && (
+        <View
+          style={{
+            backgroundColor: isDark ? "rgba(16, 185, 129, 0.16)" : "#ECFDF5",
+            borderColor: isDark ? "rgba(52, 211, 153, 0.45)" : "#A7F3D0",
+            borderWidth: 1,
+            borderRadius: 12,
+            padding: 12,
+            marginBottom: 16,
+            gap: 8,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Ionicons name="pricetag" size={16} color="#10B981" />
+            <Text
+              style={{
+                color: isDark ? "#6EE7B7" : "#065F46",
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 13,
+                marginLeft: 6,
+              }}
+            >
+              Active Promotion{activePromotionsForBooking.length > 1 ? "s" : ""}
+            </Text>
+          </View>
+
+          {activePromotionsForBooking.slice(0, 2).map((promo: any, index: number) => {
+            const appliesTo = String(promo?.applies_to || "both").toLowerCase();
+            const appliesToLabel =
+              appliesTo === "rehearsal"
+                ? "Rehearsal"
+                : appliesTo === "recording"
+                  ? "Recording"
+                  : "All sessions";
+
+            return (
+              <View key={String(promo.id || promo.name || index)}>
+                <Text
+                  style={{
+                    color: colors.text,
+                    fontFamily: "Poppins_600SemiBold",
+                    fontSize: 12,
+                  }}
+                >
+                  {promo?.name || "Studio Promo"}
+                </Text>
+                <Text
+                  style={{
+                    color: isDark ? "#A7F3D0" : "#047857",
+                    fontFamily: "Poppins_500Medium",
+                    fontSize: 12,
+                    marginTop: 1,
+                  }}
+                >
+                  {formatPromotionDiscountText(promo)} - {appliesToLabel}
+                </Text>
+                <Text
+                  style={{
+                    color: colors.textSecondary,
+                    fontFamily: "Poppins_400Regular",
+                    fontSize: 11,
+                    marginTop: 1,
+                  }}
+                >
+                  {formatPromotionWindow(promo)}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       {bookings.length > 0 && (
         <View style={[styles.section, { marginBottom: 16 }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Bookings ({bookings.length})</Text>
@@ -622,7 +858,15 @@ const StudioBookTab = ({
             let hours = (end - start) / (1000 * 60 * 60);
             if (hours < 0) hours += 24;
 
-            const cost = booking.pricing?.final_price || parseInt(displayRate.replace(/,/g, "")) * hours;
+            const bookingSongCount = parsePositiveInteger(
+              booking.songCount ??
+                booking.pricing?.modifiers?.recording_session?.song_count ??
+                booking.pricing?.modifiers?.song_count,
+            );
+            const cost = booking.pricing?.final_price ||
+              (usesRecordingWholeDayMode && bookingSongCount
+                ? getRecordingRatePerSong() * bookingSongCount
+                : parseInt(displayRate.replace(/,/g, "")) * hours);
             const hasModifiers = booking.pricing?.modifiers && Object.keys(booking.pricing.modifiers).length > 0;
             const slots = booking.timeSlots || [
               {
@@ -728,7 +972,9 @@ const StudioBookTab = ({
                         marginLeft: 8,
                       }}
                     >
-                      ({booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h total)
+                      {usesRecordingWholeDayMode && bookingSongCount
+                        ? `${bookingSongCount} song${bookingSongCount > 1 ? "s" : ""}`
+                        : `(${booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h total)`}
                     </Text>
                     {hasModifiers && (
                       <View
@@ -767,6 +1013,40 @@ const StudioBookTab = ({
         <>
           {renderBookingControls()}
 
+          {isRecordingMode && (
+            <View style={[styles.inputContainer, { marginBottom: 12 }]}> 
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Songs to Record</Text>
+              <View
+                style={[
+                  styles.inputWrapper,
+                  {
+                    backgroundColor: isDark ? "#374151" : "#F9FAFB",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingHorizontal: 12,
+                  },
+                ]}
+              >
+                <Ionicons name="musical-notes-outline" size={16} color={colors.primary} />
+                <TextInput
+                  style={[styles.input, { color: colors.text, marginLeft: 8, flex: 1 }]}
+                  keyboardType="number-pad"
+                  value={recordingSongCountInput}
+                  onChangeText={(text) =>
+                    setRecordingSongCountInput(text.replace(/[^0-9]/g, ""))
+                  }
+                  placeholder="Number of songs"
+                  placeholderTextColor={colors.textSecondary}
+                />
+              </View>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 6 }}>
+                {recordingSongLimitForSelectedDate
+                  ? `Recording sessions are priced per song. Max ${recordingSongLimitForSelectedDate} song${recordingSongLimitForSelectedDate > 1 ? "s" : ""} for this date.`
+                  : "Recording sessions are priced per song."}
+              </Text>
+            </View>
+          )}
+
           {isRecordingMode ? (
             <TouchableOpacity
               style={[
@@ -787,6 +1067,39 @@ const StudioBookTab = ({
                     const bookingDate = selectedDate;
                     const startTime = recordingDaySlot.start;
                     const endTimeStr = recordingDaySlot.end;
+                    const songCount = getRecordingSongCount();
+
+                    if (!songCount) {
+                      showAlert(
+                        "warning",
+                        "Song Count Required",
+                        "Please enter how many songs you plan to record.",
+                      );
+                      setIsCheckingAvailability(false);
+                      return;
+                    }
+
+                    const recordingSongLimit = getRecordingSongLimitForDate(bookingDate);
+                    if (recordingSongLimit && songCount > recordingSongLimit) {
+                      showAlert(
+                        "warning",
+                        "Song Limit Exceeded",
+                        `This studio allows up to ${recordingSongLimit} song${recordingSongLimit > 1 ? "s" : ""} on ${new Date(`${bookingDate}T00:00:00`).toLocaleDateString()}.`,
+                      );
+                      setIsCheckingAvailability(false);
+                      return;
+                    }
+
+                    const recordingRate = getRecordingRatePerSong();
+                    if (recordingRate <= 0) {
+                      showAlert(
+                        "error",
+                        "Recording Rate Missing",
+                        "This studio does not have a valid recording rate yet.",
+                      );
+                      setIsCheckingAvailability(false);
+                      return;
+                    }
 
                     const existingBookingIndex = bookings.findIndex(
                       (b) => toDateKey(b.date) === bookingDate,
@@ -819,30 +1132,32 @@ const StudioBookTab = ({
                       return;
                     }
 
-                    const { data: pricing, error: pricingError } = await supabase.rpc("calculate_booking_price", {
-                      p_studio_id: group.id,
-                      p_booking_date: bookingDate,
-                      p_start_time: startTime,
-                      p_end_time: endTimeStr,
-                      p_session_type: selectedSessionType?.toLowerCase() || "rehearsal",
-                    });
+                    const durationHours = getSlotDurationHours(startTime, endTimeStr);
+                    const baseRecordingPrice = recordingRate * songCount;
 
-                    if (pricingError || !pricing || pricing.length === 0) {
-                      console.error("Pricing error:", pricingError);
-                      showAlert("error", "Pricing Error", "Failed to calculate price. Please try again.");
-                      setIsCheckingAvailability(false);
-                      return;
-                    }
+                    let finalPricing: any = {
+                      base_rate: recordingRate,
+                      hours: durationHours,
+                      total_hours: durationHours,
+                      subtotal: baseRecordingPrice,
+                      modifiers: {
+                        rate_model: "per_song",
+                        song_count: songCount,
+                        recording_session: {
+                          rate_model: "per_song",
+                          song_count: songCount,
+                        },
+                      },
+                      final_price: baseRecordingPrice,
+                    };
 
-                    // Apply promotion discount if available
-                    let finalPricing = pricing[0];
                     try {
                       const { data: promoResult } = await supabase.rpc("apply_studio_promotion", {
                         p_studio_id: group.id,
                         p_booking_date: bookingDate,
                         p_session_type: selectedSessionType?.toLowerCase() || "rehearsal",
                         p_base_price: finalPricing.final_price || 0,
-                        p_hours: finalPricing.hours || 0,
+                        p_hours: songCount,
                       });
                       if (promoResult) {
                         finalPricing = {
@@ -865,6 +1180,7 @@ const StudioBookTab = ({
                         startTime: startDate,
                         endTime: endDate,
                         timeSlots: [{ start: startTime, end: endTimeStr }],
+                        songCount,
                         pricing: finalPricing,
                       },
                     ]);
@@ -952,7 +1268,6 @@ const StudioBookTab = ({
                         p_booking_date: bookingDate,
                         p_start_time: startTime,
                         p_end_time: endTime2,
-                        p_session_type: selectedSessionType?.toLowerCase() || "rehearsal",
                       });
 
                       if (pricingError || !pricing || pricing.length === 0) {
@@ -1129,7 +1444,9 @@ const StudioBookTab = ({
         >
           <View style={styles.summaryRow}>
             <Text style={{ color: colors.textSecondary }}>Rate</Text>
-            <Text style={{ color: colors.text }}>{`₱${displayRate} / hr`}</Text>
+            <Text style={{ color: colors.text }}>
+              {usesRecordingWholeDayMode ? `₱${displayRate} / song` : `₱${displayRate} / hr`}
+            </Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={{ color: colors.textSecondary }}>Total Sessions</Text>
@@ -1222,6 +1539,25 @@ const StudioBookTab = ({
 
                       const sessionType =
                         usesRecordingWholeDayMode ? "recording" : "rehearsal";
+                      const bookingSongCount =
+                        sessionType === "recording"
+                          ? parsePositiveInteger(
+                            booking.songCount ??
+                              booking.pricing?.modifiers?.recording_session?.song_count ??
+                              booking.pricing?.modifiers?.song_count,
+                          )
+                          : null;
+
+                      if (sessionType === "recording" && !bookingSongCount) {
+                        errors.push({
+                          booking,
+                          error: {
+                            message: "Recording bookings require a valid song count.",
+                            serverError: null,
+                          },
+                        });
+                        continue;
+                      }
 
                       debugLog("📤 Creating multi-slot booking:", {
                         studio_id: group.id,
@@ -1230,6 +1566,7 @@ const StudioBookTab = ({
                         time_slots: timeSlots,
                         notes: bookingNotes,
                         session_type: sessionType,
+                        song_count: bookingSongCount,
                       });
 
                       let data: any = null;
@@ -1251,6 +1588,26 @@ const StudioBookTab = ({
                           a.start.localeCompare(b.start),
                         );
 
+                        const leadTimeViolationMessage = getLeadTimeViolationMessage(
+                          bookingDate,
+                          sortedByStart,
+                        );
+                        if (leadTimeViolationMessage) {
+                          warnLog("⚠️ Lead-time validation blocked booking before submit", {
+                            bookingDate,
+                            slots: sortedByStart,
+                            leadTimeHours: getStudioLeadTimeHours(),
+                          });
+                          errors.push({
+                            booking,
+                            error: {
+                              message: leadTimeViolationMessage,
+                              serverError: null,
+                            },
+                          });
+                          continue;
+                        }
+
                         debugLog("📡 Invoking manage-bookings:create", {
                           bookingDate,
                           studioId: group.id,
@@ -1266,6 +1623,7 @@ const StudioBookTab = ({
                           time_slots: sortedByStart,
                           notes: bookingNotes || null,
                           session_type: sessionType,
+                          song_count: sessionType === "recording" ? bookingSongCount : null,
                         }, bookingAccessToken);
 
                         data = invokeResult.data;
@@ -1280,18 +1638,37 @@ const StudioBookTab = ({
                         let errorMessage = error.message || "Unknown error";
                         let serverError: any = null;
 
-                        console.error("❌ Booking invoke error details:", {
-                          name: error?.name,
-                          message: error?.message,
-                          status: error?.status,
-                          code: error?.code,
-                          details: error?.details,
-                          hint: error?.hint,
-                          hasContext: Boolean(error?.context),
-                          contextType: error?.context?.constructor?.name || null,
-                        });
+                        if (error?.serverError && typeof error.serverError === "object") {
+                          serverError = error.serverError;
+                          if (serverError?.error) {
+                            errorMessage = serverError.error;
+                          }
+                        }
 
-                        if (error.context && typeof error.context === "object") {
+                        let shouldLogAsError = !isExpectedBookingValidationError(
+                          Number(error?.status),
+                          errorMessage,
+                        );
+
+                        if (shouldLogAsError) {
+                          console.error("❌ Booking invoke error details:", {
+                            name: error?.name,
+                            message: error?.message,
+                            status: error?.status,
+                            code: error?.code,
+                            details: error?.details,
+                            hint: error?.hint,
+                            hasContext: Boolean(error?.context),
+                            contextType: error?.context?.constructor?.name || null,
+                          });
+                        } else {
+                          warnLog("⚠️ Booking validation rejected by server", {
+                            status: error?.status,
+                            message: errorMessage,
+                          });
+                        }
+
+                        if (!serverError && error.context && typeof error.context === "object") {
                           try {
                             const response = error.context;
                             debugLog("📥 Error response status:", response.status);
@@ -1328,12 +1705,21 @@ const StudioBookTab = ({
                           }
                         }
 
+                        shouldLogAsError = !isExpectedBookingValidationError(
+                          Number(error?.status),
+                          errorMessage,
+                        );
+
                         errors.push({
                           booking,
                           error: { message: errorMessage, serverError },
                         });
-                        console.error("❌ Booking error:", errorMessage);
-                        if (serverError) {
+                        if (shouldLogAsError) {
+                          console.error("❌ Booking error:", errorMessage);
+                        } else {
+                          warnLog("⚠️ Booking blocked:", errorMessage);
+                        }
+                        if (serverError && shouldLogAsError) {
                           console.error("❌ Full server error:", JSON.stringify(serverError, null, 2));
                         }
 
@@ -1354,13 +1740,28 @@ const StudioBookTab = ({
 
                     if (errors.length > 0 && results.length === 0) {
                       let errorMsg = errors[0].error?.message || "Failed to create bookings";
+                      const normalizedErrorMsg = String(errorMsg).toLowerCase();
 
                       if (errorMsg.includes("no_overlapping_bookings") || errorMsg.includes("exclusion constraint")) {
                         errorMsg =
                           "This time slot was just booked by someone else. Please select a different time slot or refresh and try again.";
                       }
 
-                      showAlert("error", "Booking Error", errorMsg);
+                      if (normalizedErrorMsg.includes("advance booking")) {
+                        showAlert("warning", "Advance Booking Required", errorMsg);
+                      } else if (
+                        normalizedErrorMsg.includes("cannot create a booking in the past") ||
+                        normalizedErrorMsg.includes("bookings can only be made up to")
+                      ) {
+                        showAlert("warning", "Invalid Booking Date", errorMsg);
+                      } else if (
+                        normalizedErrorMsg.includes("time slot") ||
+                        normalizedErrorMsg.includes("outside operating hours")
+                      ) {
+                        showAlert("warning", "Time Slot Unavailable", errorMsg);
+                      } else {
+                        showAlert("error", "Booking Error", errorMsg);
+                      }
                     } else if (errors.length > 0) {
                       showAlert("warning", "Partial Success", `${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`);
                       setBookings([]);

@@ -1,4 +1,5 @@
 export type SessionType = "Rehearsal" | "Recording" | null;
+export type CanonicalStudioType = "Rehearsal" | "Recording" | "Both" | null;
 
 export interface TimeSlot {
   start: string;
@@ -65,9 +66,48 @@ const toDateString = (date: Date) =>
 export const isRecordingStudioMode = (
   studioType?: string | null,
   selectedSessionType?: SessionType,
-) =>
-  studioType === "Recording" ||
-  (studioType === "Both" && selectedSessionType === "Recording");
+) => {
+  const normalizedStudioType = normalizeStudioType(studioType);
+  return (
+    normalizedStudioType === "Recording" ||
+    (normalizedStudioType === "Both" && selectedSessionType === "Recording")
+  );
+};
+
+export const normalizeStudioType = (
+  studioType?: string | null,
+): CanonicalStudioType => {
+  if (typeof studioType !== "string") {
+    return null;
+  }
+
+  const normalized = studioType.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const hasRehearsal = normalized.includes("rehearsal");
+  const hasRecording = normalized.includes("recording");
+
+  if (
+    normalized === "both" ||
+    normalized === "rehearsal & recording" ||
+    normalized === "rehearsal and recording" ||
+    (hasRehearsal && hasRecording)
+  ) {
+    return "Both";
+  }
+
+  if (normalized === "rehearsal" || hasRehearsal) {
+    return "Rehearsal";
+  }
+
+  if (normalized === "recording" || hasRecording) {
+    return "Recording";
+  }
+
+  return null;
+};
 
 const getDotColor = (isOverride: boolean | undefined, primaryColor: string) =>
   isOverride ? OVERRIDE_DOT : primaryColor;

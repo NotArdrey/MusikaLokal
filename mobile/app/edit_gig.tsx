@@ -96,7 +96,13 @@ type EventSchedule = {
 
 export default function EditGigScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams();
+  const { id, reapply } = useLocalSearchParams<{
+    id?: string | string[];
+    reapply?: string | string[];
+  }>();
+  const reapplyParam = Array.isArray(reapply) ? reapply[0] : reapply;
+  const isReapplyRequested =
+    reapplyParam === "1" || reapplyParam === "true";
   const [gigName, setGigName] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
@@ -215,6 +221,11 @@ export default function EditGigScreen() {
   const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
   const [permitStatus, setPermitStatus] = useState<string>("pending_review");
+  const [permitRejectionReason, setPermitRejectionReason] = useState<string>("");
+  const [permitResubmissionsUsed, setPermitResubmissionsUsed] = useState(0);
+  const hasPermitResubmissionRemaining = permitResubmissionsUsed < 1;
+  const canReapplyPermit =
+    permitStatus === "rejected" && hasPermitResubmissionRemaining;
 
   const getNormalizedEventSchedules = (): EventSchedule[] => {
     const cleanedSchedules = eventSchedules
@@ -569,7 +580,9 @@ export default function EditGigScreen() {
       }
       setBusinessPermitUrl(data.business_permit_url || "");
       setInitialBusinessPermitUrl(data.business_permit_url || "");
-      setPermitStatus(data.permit_status || "pending_review");
+      setPermitStatus(String(data.permit_status || "pending_review").toLowerCase());
+      setPermitRejectionReason(data.permit_rejection_reason || "");
+      setPermitResubmissionsUsed(Number(data.permit_resubmissions_used || 0));
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
         setBusinessPermitFileName(decodeURIComponent(fileName));
@@ -787,17 +800,31 @@ export default function EditGigScreen() {
         throw new Error(rpcResult?.message || 'Failed to update gig');
       }
 
-      const shouldMarkResubmitted =
-        permitStatus === "rejected" &&
+      const shouldResetPermitReview =
         !!businessPermitUrl &&
         businessPermitUrl !== initialBusinessPermitUrl;
 
-      if (shouldMarkResubmitted) {
+      const isReapplyAction =
+        isReapplyRequested && canReapplyPermit;
+      const reapplyLimitReached =
+        permitStatus === "rejected" &&
+        (shouldResetPermitReview || isReapplyRequested) &&
+        !hasPermitResubmissionRemaining;
+
+      if ((shouldResetPermitReview || isReapplyAction) && !reapplyLimitReached) {
+        const nextPermitStatus =
+          isReapplyAction || permitStatus === "rejected"
+            ? "resubmitted"
+            : "pending_review";
+
         const { error: permitStatusError } = await supabase
           .from("gigs")
           .update({
-            permit_status: "resubmitted",
+            permit_status: nextPermitStatus,
             permit_rejection_reason: null,
+            permit_admin_notes: null,
+            permit_reviewed_by: null,
+            permit_reviewed_at: null,
           })
           .eq("id", gigId)
           .eq("organizer_id", user.id);
@@ -806,7 +833,11 @@ export default function EditGigScreen() {
           throw new Error(`Failed to update permit status: ${permitStatusError.message}`);
         }
 
-        setPermitStatus("resubmitted");
+        setPermitStatus(nextPermitStatus);
+        setPermitRejectionReason("");
+        if (nextPermitStatus === "resubmitted") {
+          setPermitResubmissionsUsed(1);
+        }
       }
 
       const reconfirmRequired = Number(rpcResult?.reconfirmation?.required_count || 0);
@@ -814,7 +845,10 @@ export default function EditGigScreen() {
       const softClosed = Boolean(rpcResult?.soft_closed);
       const softClosedRejected = Number(rpcResult?.soft_closed_rejected_count || 0);
 
-      let successMessage = 'Gig updated successfully!';
+      let successMessage =
+        isReapplyAction
+          ? 'Gig updated and permit resubmitted for admin review.'
+          : 'Gig updated successfully!';
       const updateNotes: string[] = [];
 
       if (reconfirmRequired > 0) {
@@ -831,6 +865,10 @@ export default function EditGigScreen() {
         if (softClosedRejected > 0) {
           updateNotes.push(`${softClosedRejected} pending applicant(s) were notified that slots are full.`);
         }
+      }
+
+      if (reapplyLimitReached) {
+        updateNotes.push('Permit remains rejected because the one allowed resubmission after decline was already used.');
       }
 
       if (updateNotes.length > 0) {
@@ -867,14 +905,24 @@ export default function EditGigScreen() {
       return;
     }
 
+    const isReapplyAction = isReapplyRequested && canReapplyPermit;
+    const reapplyLimitReached =
+      permitStatus === "rejected" &&
+      isReapplyRequested &&
+      !hasPermitResubmissionRemaining;
+
     showAlert(
       "warning",
-      "Save Changes",
-      "Are you sure you want to update this gig profile?",
+      isReapplyAction ? "Save & Reapply" : "Save Changes",
+      reapplyLimitReached
+        ? "Save your updates now? Permit resubmission is no longer available because the one allowed retry was already used."
+        : isReapplyAction
+        ? "Save your updates and resubmit this gig permit for admin review?"
+        : "Are you sure you want to update this gig profile?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Save & Update",
+          text: isReapplyAction ? "Save & Reapply" : "Save & Update",
           style: "default",
           onPress: () => performSave(),
         },
@@ -2726,6 +2774,29 @@ export default function EditGigScreen() {
 
           {renderSectionHeader("Business Permit", "shield-checkmark")}
           <View style={styles.inputContainer}>
+            {permitStatus === "rejected" && (
+              <View
+                style={[
+                  styles.rejectionNotice,
+                  {
+                    backgroundColor: isDark ? "rgba(220,38,38,0.14)" : "#FEE2E2",
+                    borderColor: isDark ? "rgba(220,38,38,0.45)" : "#FECACA",
+                  },
+                ]}
+              >
+                <Text style={styles.rejectionNoticeTitle}>Permit Rejected</Text>
+                <Text style={styles.rejectionNoticeText}>
+                  {hasPermitResubmissionRemaining
+                    ? "Upload a corrected permit and save to resubmit for admin review."
+                    : "You already used your one allowed resubmission. You can still edit details, but permit status stays rejected."}
+                </Text>
+                {!!permitRejectionReason && (
+                  <Text style={styles.rejectionNoticeReason} numberOfLines={4}>
+                    Reason: {permitRejectionReason}
+                  </Text>
+                )}
+              </View>
+            )}
             <Text
               style={[styles.inputSubLabel, { color: colors.textSecondary }]}
             >
@@ -2838,7 +2909,11 @@ export default function EditGigScreen() {
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={styles.saveButtonText}>
+                  {isReapplyRequested && canReapplyPermit
+                    ? "Save & Reapply"
+                    : "Save Changes"}
+                </Text>
               )}
             </TouchableOpacity>
 
@@ -2996,6 +3071,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Poppins_400Regular",
     marginBottom: 8,
+  },
+  rejectionNotice: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  rejectionNoticeTitle: {
+    color: "#B91C1C",
+    fontSize: 12,
+    fontFamily: "Poppins_700Bold",
+  },
+  rejectionNoticeText: {
+    marginTop: 4,
+    color: "#DC2626",
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Poppins_500Medium",
+  },
+  rejectionNoticeReason: {
+    marginTop: 6,
+    color: "#DC2626",
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Poppins_600SemiBold",
   },
   uploadContractBtn: {
     padding: 32,

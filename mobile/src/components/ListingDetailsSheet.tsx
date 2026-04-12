@@ -278,6 +278,7 @@ const ListingDetailsSheet = forwardRef<
       startTime: Date;
       endTime: Date;
       timeSlots?: { start: string; end: string }[];
+      songCount?: number;
       pricing?: any;
     }[]
   >([]);
@@ -540,9 +541,22 @@ const ListingDetailsSheet = forwardRef<
     return normalized || "profile";
   };
 
+  const normalizedListingType = String(group?.type || "").toLowerCase();
+  const listingOwnerId =
+    group?.owner_id ||
+    group?.organizer_id ||
+    (normalizedListingType === "artist" ? group?.id || null : null);
+  const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
+  const showReportButton = !!group && !isOwnListing;
+
   const submitReport = async (reason: string, details?: string) => {
     if (!userId) {
       showSheetAlert("warning", "Login Required", "You need to be logged in to submit a report.");
+      return;
+    }
+
+    if (isOwnListing) {
+      showSheetAlert("info", "Can't Report Your Listing", "You can't report your own listing.");
       return;
     }
 
@@ -572,6 +586,12 @@ const ListingDetailsSheet = forwardRef<
       showSheetAlert("error", "Unable to Report", "Missing listing details.");
       return;
     }
+
+    if (isOwnListing) {
+      showSheetAlert("info", "Can't Report Your Listing", "You can't report your own listing.");
+      return;
+    }
+
     setShowListingReportModal(true);
   };
 
@@ -1340,6 +1360,8 @@ const ListingDetailsSheet = forwardRef<
           images: resolvedImages.length > 0 ? resolvedImages : (data.avatar_url ? [data.avatar_url] : []),
           location: data.location || data.address, // Handle profile address
           genre: data.genre || (data.genres ? data.genres.join(", ") : ""),
+          owner_id: data.owner_id || ownerId,
+          organizer_id: data.organizer_id || null,
           owner_name:
             ownerProfile?.full_name || data.name || data.full_name || "Unknown", // Use data.full_name if ownerProfile fails (self-managed)
           owner_avatar: ownerProfile?.avatar_url || data.avatar_url,
@@ -1887,6 +1909,24 @@ const ListingDetailsSheet = forwardRef<
         // No bookings - date is available for whole-day recording booking
         // Get the operating hours for this day
         const operatingSlot = daySchedule.slots[0]; // Use first slot as operating hours
+
+        const leadTimeHours = Number(group?.settings?.lead_time_hours || 0);
+        const minBookingTime = new Date();
+        minBookingTime.setHours(minBookingTime.getHours() + leadTimeHours);
+        const recordingStart = new Date(`${dateStr}T${operatingSlot.start}`);
+
+        if (!Number.isNaN(recordingStart.getTime()) && recordingStart < minBookingTime) {
+          setIsRecordingWholeDayAvailable(false);
+          setRecordingDaySlot(null);
+          setAvailableSlots([]);
+          debugLog("🎙️ Recording studio: blocked by lead-time requirement", {
+            dateStr,
+            operatingStart: operatingSlot.start,
+            leadTimeHours,
+          });
+          return [];
+        }
+
         setIsRecordingWholeDayAvailable(true);
         setRecordingDaySlot({ start: operatingSlot.start, end: operatingSlot.end });
         setAvailableSlots(["whole-day"]); // Special marker for whole-day booking
@@ -2150,9 +2190,6 @@ const ListingDetailsSheet = forwardRef<
     }
   }, [activeTab, tabsToRender]);
 
-  const listingOwnerId = group?.owner_id || group?.organizer_id || group?.id;
-  const showReportButton = !!group && !!userId && listingOwnerId !== userId;
-
   const renderTabs = () => (
     <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>
       {tabsToRender.map((tab) => (
@@ -2282,6 +2319,7 @@ const ListingDetailsSheet = forwardRef<
       setShowPaymentOptionModal={setShowPaymentOptionModal}
       showPaymentOptionModal={showPaymentOptionModal}
       selectedSessionType={selectedSessionType}
+      promotions={group?.promotions || []}
       showAlert={showSheetAlert}
     />
   );

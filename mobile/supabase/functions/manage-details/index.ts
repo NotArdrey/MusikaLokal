@@ -8,6 +8,64 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform',
 }
 
+type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile'
+
+const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
+    group: 'groups',
+    studio: 'studios',
+    gig: 'gigs',
+    profile: 'profiles',
+}
+
+const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const isUuid = (value: string): boolean => uuidPattern.test(value)
+
+const normalizeReportTargetType = (rawType: unknown): NormalizedReportTargetType | null => {
+    const value = String(rawType || '').trim().toLowerCase()
+
+    if (value === 'venue') return 'studio'
+    if (value === 'artist' || value === 'user') return 'profile'
+    if (value === 'group' || value === 'studio' || value === 'gig' || value === 'profile') {
+        return value
+    }
+
+    return null
+}
+
+const normalizeRequiredText = (rawValue: unknown, maxLength: number): string => {
+    const value = typeof rawValue === 'string' ? rawValue.trim() : ''
+    if (!value) return ''
+    return value.slice(0, maxLength)
+}
+
+const normalizeOptionalText = (rawValue: unknown, maxLength: number): string | null => {
+    if (typeof rawValue !== 'string') return null
+    const value = rawValue.trim()
+    if (!value) return null
+    return value.slice(0, maxLength)
+}
+
+const assertReportTargetExists = async (
+    client: any,
+    targetType: NormalizedReportTargetType,
+    targetId: string,
+) => {
+    const tableName = reportTargetTableMap[targetType]
+
+    const { data, error } = await client
+        .from(tableName)
+        .select('id')
+        .eq('id', targetId)
+        .maybeSingle()
+
+    if (error) throw error
+    if (!data) {
+        throw new Error(`Cannot report missing ${targetType}.`)
+    }
+}
+
 serve(async (req: Request) => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
@@ -148,20 +206,86 @@ serve(async (req: Request) => {
 
         // 4. REPORT
         if (action === 'report') {
-            const { reason, details } = params
+            const normalizedUserId = String(userId || '').trim()
+            const normalizedTargetType = normalizeReportTargetType(type)
+            const normalizedTargetId = String(id || '').trim()
+            const normalizedReason = normalizeRequiredText(params.reason, 180)
+            const normalizedDetails = normalizeOptionalText(params.details, 1000)
+
+            if (!normalizedUserId || !isUuid(normalizedUserId)) {
+                throw new Error('A valid userId is required to submit a report.')
+            }
+
+            if (!normalizedTargetType) {
+                throw new Error('Invalid report target type.')
+            }
+
+            if (!normalizedTargetId || !isUuid(normalizedTargetId)) {
+                throw new Error('Invalid report target id.')
+            }
+
+            if (!normalizedReason) {
+                throw new Error('Report reason is required.')
+            }
+
+            if (normalizedTargetType === 'profile' && normalizedTargetId === normalizedUserId) {
+                throw new Error('You cannot report your own profile.')
+            }
+
+            await assertReportTargetExists(
+                supabaseClient,
+                normalizedTargetType,
+                normalizedTargetId,
+            )
+
+            const { data: existingPendingReport, error: existingPendingReportError } = await supabaseClient
+                .from('reports')
+                .select('id')
+                .eq('reporter_id', normalizedUserId)
+                .eq('target_type', normalizedTargetType)
+                .eq('target_id', normalizedTargetId)
+                .eq('reason', normalizedReason)
+                .eq('status', 'pending')
+                .limit(1)
+                .maybeSingle()
+
+            if (existingPendingReportError) throw existingPendingReportError
+
+            if (existingPendingReport?.id) {
+                return new Response(
+                    JSON.stringify({
+                        id: existingPendingReport.id,
+                        already_reported: true,
+                    }),
+                    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+                )
+            }
 
             const { data, error } = await supabaseClient
                 .from('reports')
                 .insert({
-                    reporter_id: userId,
-                    target_type: type,
-                    target_id: id,
-                    reason,
-                    details
+                    reporter_id: normalizedUserId,
+                    target_type: normalizedTargetType,
+                    target_id: normalizedTargetId,
+                    reason: normalizedReason,
+                    details: normalizedDetails,
                 })
                 .select()
 
-            if (error) throw error
+            if (error) {
+                const errorCode = String(error?.code || '').toUpperCase()
+
+                if (errorCode === '23505') {
+                    throw new Error('You already have a pending report for this target and reason.')
+                }
+
+                if (errorCode === '23503') {
+                    throw new Error('This target no longer exists. Please refresh and try again.')
+                }
+
+                throw error
+            }
+
             return new Response(JSON.stringify(data), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
         }
 

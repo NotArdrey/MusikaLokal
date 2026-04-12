@@ -54,6 +54,7 @@ import ListingBottomBar from "./listingDetails/ListingBottomBar";
 import ListingContentBody from "./listingDetails/ListingContentBody";
 import ListingHeroSection from "./listingDetails/ListingHeroSection";
 import ReviewsTab from "./listingDetails/ReviewsTab";
+import { isRecordingStudioMode, normalizeStudioType } from "./listingDetails/availability";
 import StudioBookTab from "./listingDetails/StudioBookTab";
 import StudioGigVenueAboutTab from "./listingDetails/StudioGigVenueAboutTab";
 import StudioSetupTab from "./listingDetails/StudioSetupTab";
@@ -226,8 +227,11 @@ const ListingDetailsSheet = forwardRef<
   const [selectedSessionType, setSelectedSessionType] = useState<"Rehearsal" | "Recording" | null>(null);
 
   // Helper: Check if we're in recording mode (either pure Recording studio OR Both with Recording selected)
-  const isRecordingMode = group?.studio_type === "Recording" ||
-    (group?.studio_type === "Both" && selectedSessionType === "Recording");
+  const normalizedStudioType = normalizeStudioType(group?.studio_type);
+  const isRecordingMode = isRecordingStudioMode(
+    normalizedStudioType,
+    selectedSessionType,
+  );
 
   // Multiple time slots state for multi-slot bookings (same day)
   const [selectedTimeSlots, setSelectedTimeSlots] = useState<
@@ -241,6 +245,7 @@ const ListingDetailsSheet = forwardRef<
       startTime: Date;
       endTime: Date;
       timeSlots?: { start: string; end: string }[];
+      songCount?: number;
       pricing?: any;
     }[]
   >([]);
@@ -1221,6 +1226,7 @@ const ListingDetailsSheet = forwardRef<
             operatingHoursResult,
             dateOverridesResult,
             studioSettingsResult,
+            studioPromotionsResult,
           ] = await Promise.all([
             supabase
               .from("studio_operating_hours")
@@ -1236,6 +1242,11 @@ const ListingDetailsSheet = forwardRef<
               .select("*")
               .eq("studio_id", data.id)
               .single(),
+            supabase
+              .from("studio_promotions")
+              .select("*")
+              .eq("studio_id", data.id)
+              .eq("is_active", true),
           ]);
 
           const operatingHours = operatingHoursResult.data;
@@ -1244,6 +1255,8 @@ const ListingDetailsSheet = forwardRef<
           const overridesError = dateOverridesResult.error;
           const studioSettings = studioSettingsResult.data;
           const settingsError = studioSettingsResult.error;
+
+          normalizedData.promotions = studioPromotionsResult.data || [];
 
           if (!hoursError && operatingHours) {
             debugLog("📅 Operating hours fetched:", operatingHours);
@@ -1473,8 +1486,10 @@ const ListingDetailsSheet = forwardRef<
 
         // RECORDING STUDIO WHOLE-DAY LOGIC:
         // For recording studios, if there are ANY bookings on this date, block the entire day
-        const isRecordingStudio = group?.studio_type === "Recording" ||
-          (group?.studio_type === "Both" && selectedSessionType === "Recording");
+        const isRecordingStudio = isRecordingStudioMode(
+          group?.studio_type,
+          selectedSessionType,
+        );
         if (isRecordingStudio) {
           // Also check cart bookings for recording studios
           const cartBookingsForDate = (cartBookings || []).filter((b) => {
@@ -1690,8 +1705,10 @@ const ListingDetailsSheet = forwardRef<
 
     // RECORDING STUDIO WHOLE-DAY LOGIC:
     // For recording studios, the entire day is booked as one unit
-    const isRecordingStudio = group?.studio_type === "Recording" ||
-      (group?.studio_type === "Both" && selectedSessionType === "Recording");
+    const isRecordingStudio = isRecordingStudioMode(
+      group?.studio_type,
+      selectedSessionType,
+    );
     if (isRecordingStudio) {
       // Also check cart bookings for recording studios
       const cartBookingsForDate = bookings.filter((b) => {
@@ -1712,6 +1729,24 @@ const ListingDetailsSheet = forwardRef<
         // No bookings - date is available for whole-day recording booking
         // Get the operating hours for this day
         const operatingSlot = daySchedule.slots[0]; // Use first slot as operating hours
+
+        const leadTimeHours = Number(group?.settings?.lead_time_hours || 0);
+        const minBookingTime = new Date();
+        minBookingTime.setHours(minBookingTime.getHours() + leadTimeHours);
+        const recordingStart = new Date(`${dateStr}T${operatingSlot.start}`);
+
+        if (!Number.isNaN(recordingStart.getTime()) && recordingStart < minBookingTime) {
+          setIsRecordingWholeDayAvailable(false);
+          setRecordingDaySlot(null);
+          setAvailableSlots([]);
+          debugLog("🎙️ Recording studio: blocked by lead-time requirement", {
+            dateStr,
+            operatingStart: operatingSlot.start,
+            leadTimeHours,
+          });
+          return [];
+        }
+
         setIsRecordingWholeDayAvailable(true);
         setRecordingDaySlot({ start: operatingSlot.start, end: operatingSlot.end });
         setAvailableSlots(["whole-day"]); // Special marker for whole-day booking
@@ -1880,8 +1915,58 @@ const ListingDetailsSheet = forwardRef<
     showTabs,
   } = useListingSheetDerived(group);
 
-  const listingOwnerId = group?.owner_id || group?.organizer_id || group?.id;
-  const showReportButton = !!group && !!userId && listingOwnerId !== userId;
+  const effectiveDisplayRate = useMemo(() => {
+    const isStudioLike = group?.type === "Studio" || group?.type === "Venue";
+    if (!isStudioLike) return displayRate;
+
+    const rehearsal = Number(group?.rehearsal_rate || 0);
+    const recording = Number(group?.recording_rate || 0);
+
+    if (normalizedStudioType === "Recording") {
+      if (recording > 0) return recording.toLocaleString();
+      const fallbackHourly = Number(group?.hourly_rate || 0);
+      if (fallbackHourly > 0) return fallbackHourly.toLocaleString();
+      if (rehearsal > 0) return rehearsal.toLocaleString();
+      return displayRate;
+    }
+
+    if (normalizedStudioType === "Rehearsal") {
+      if (rehearsal > 0) return rehearsal.toLocaleString();
+      const fallbackHourly = Number(group?.hourly_rate || 0);
+      if (fallbackHourly > 0) return fallbackHourly.toLocaleString();
+      if (recording > 0) return recording.toLocaleString();
+      return displayRate;
+    }
+
+    if (normalizedStudioType === "Both") {
+      if (selectedSessionType === "Recording" && recording > 0) {
+        return recording.toLocaleString();
+      }
+      if (selectedSessionType === "Rehearsal" && rehearsal > 0) {
+        return rehearsal.toLocaleString();
+      }
+      if (rehearsal > 0) return rehearsal.toLocaleString();
+      if (recording > 0) return recording.toLocaleString();
+      return displayRate;
+    }
+
+    return displayRate;
+  }, [
+    displayRate,
+    group?.hourly_rate,
+    group?.rehearsal_rate,
+    group?.recording_rate,
+    group?.type,
+    normalizedStudioType,
+    selectedSessionType,
+  ]);
+
+  const normalizedListingType = String(group?.type || "").toLowerCase();
+  const listingOwnerId = normalizedListingType === "artist"
+    ? group?.id || null
+    : group?.owner_id || group?.organizer_id || null;
+  const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
+  const showReportButton = !!group && !isOwnListing;
 
   const renderTabs = () => (
     <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>
@@ -1938,7 +2023,7 @@ const ListingDetailsSheet = forwardRef<
       endTime={endTime}
       recordingDaySlot={recordingDaySlot}
       isRecordingWholeDayAvailable={isRecordingWholeDayAvailable}
-      displayRate={displayRate}
+      displayRate={effectiveDisplayRate}
     />
   );
 
@@ -1972,7 +2057,7 @@ const ListingDetailsSheet = forwardRef<
       group={group}
       bookings={bookings}
       setBookings={setBookings}
-      displayRate={displayRate}
+      displayRate={effectiveDisplayRate}
       isDark={isDark}
       colors={colors}
       hasExistingStudioBooking={hasExistingStudioBooking}
@@ -2012,6 +2097,7 @@ const ListingDetailsSheet = forwardRef<
       setShowPaymentOptionModal={setShowPaymentOptionModal}
       showPaymentOptionModal={showPaymentOptionModal}
       selectedSessionType={selectedSessionType}
+      promotions={group?.promotions || []}
       showAlert={showSheetAlert}
     />
   );
@@ -2186,7 +2272,7 @@ const ListingDetailsSheet = forwardRef<
       hasDualPricing={Boolean(hasDualPricing)}
       rehearsalRate={rehearsalRate || ""}
       recordingRate={recordingRate || ""}
-      displayRate={displayRate}
+      displayRate={effectiveDisplayRate}
       labels={labels}
       currentUserId={currentUserId}
       calculateCompletion={calculateCompletion}
@@ -2236,7 +2322,7 @@ const ListingDetailsSheet = forwardRef<
         <ListingBottomBar
           styles={styles}
           colors={colors}
-          displayRate={displayRate}
+          displayRate={effectiveDisplayRate}
           labels={labels}
           onReserve={() =>
             handleConfirm(

@@ -1,7 +1,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -18,6 +18,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -98,6 +99,8 @@ const adminTabRoutes: Record<Tab, string> = {
   reports: '/admin/reports',
   audit: '/admin/audit',
 };
+
+const DASHBOARD_CACHE_TTL_MS = 30_000;
 
 interface DashboardMetrics {
   totalUsers: number;
@@ -549,6 +552,7 @@ export default function AdminDashboardPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
+  const hasHydratedDashboardRef = useRef(false);
 
   const [initializingDashboard, setInitializingDashboard] = useState(false);
   const [metrics, setMetrics] = useState<DashboardMetrics>(defaultMetrics);
@@ -574,6 +578,14 @@ export default function AdminDashboardPage() {
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message });
   }, []);
+
+  const dashboardCacheKey = useMemo(
+    () => getAdminPageCacheKey('dashboard', {
+      dateRange: dashboardDateRange,
+      searchQuery: dashboardSearchQuery,
+    }),
+    [dashboardDateRange, dashboardSearchQuery],
+  );
 
   const handleTabChange = useCallback((nextTab: Tab) => {
     if (nextTab === 'dashboard') return;
@@ -634,7 +646,7 @@ export default function AdminDashboardPage() {
       }))
       : [];
 
-    setMetrics({
+    const nextMetrics: DashboardMetrics = {
       totalUsers: Number(data?.totalUsers || 0),
       totalStudios: Number(data?.totalStudios || 0),
       totalGigs: Number(data?.totalGigs || 0),
@@ -676,17 +688,34 @@ export default function AdminDashboardPage() {
         transactions: Number(data?.searchSummary?.transactions || 0),
         total: Number(data?.searchSummary?.total || 0),
       },
-    });
-  }, []);
+    };
+
+    setMetrics(nextMetrics);
+    writeAdminPageCache(dashboardCacheKey, nextMetrics);
+  }, [dashboardCacheKey]);
 
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
       setInitializingDashboard(false);
+      hasHydratedDashboardRef.current = false;
       return;
     }
 
     let isMounted = true;
-    setInitializingDashboard(true);
+    const cachedMetrics = readAdminPageCache<DashboardMetrics>(
+      dashboardCacheKey,
+      DASHBOARD_CACHE_TTL_MS,
+    );
+
+    if (cachedMetrics) {
+      setMetrics(cachedMetrics);
+      setInitializingDashboard(false);
+      hasHydratedDashboardRef.current = true;
+    } else if (!hasHydratedDashboardRef.current) {
+      setInitializingDashboard(true);
+    } else {
+      setInitializingDashboard(false);
+    }
 
     void (async () => {
       try {
@@ -695,10 +724,15 @@ export default function AdminDashboardPage() {
           searchQuery: dashboardSearchQuery,
         });
       } catch (error) {
-        const message = await getErrorMessage(error, 'Unable to load admin metrics.');
-        showAlert('error', 'Admin dashboard unavailable', message);
+        if (!cachedMetrics) {
+          const message = await getErrorMessage(error, 'Unable to load admin metrics.');
+          showAlert('error', 'Admin dashboard unavailable', message);
+        }
       } finally {
-        if (isMounted) setInitializingDashboard(false);
+        if (isMounted) {
+          setInitializingDashboard(false);
+          hasHydratedDashboardRef.current = true;
+        }
       }
     })();
 
@@ -711,6 +745,7 @@ export default function AdminDashboardPage() {
     session,
     isGuest,
     isAdmin,
+    dashboardCacheKey,
     fetchMetrics,
     showAlert,
     dashboardDateRange,
@@ -900,7 +935,7 @@ export default function AdminDashboardPage() {
                 <View style={styles.badgeGreen}><Text style={styles.badgeTextGreen}>Active subscribers</Text></View>
                 <View style={styles.badgeRed}><Text style={styles.badgeTextRed}>Churn {formatPercent(metrics.churnRatePercent)}</Text></View>
               </View>
-              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Tier base tracked from active profiles</Text>
+              <Text style={[styles.pulseSubtitle, { color: colors.textSecondary, marginTop: 8 }]}>Tier base tracked from live subscription records</Text>
             </View>
 
             <View style={[styles.pulseCard, { backgroundColor: colors.card, borderColor: colors.border }]}>

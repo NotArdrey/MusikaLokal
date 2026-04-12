@@ -94,7 +94,7 @@ export default function MyVenueScreen() {
         try {
             const { data: baseGigs, error: baseError } = await supabase
                 .from('gigs')
-                .select('id, organizer_id, name, location, budget, description, event_date, status, created_at')
+                .select('id, organizer_id, name, location, budget, description, event_date, status, created_at, updated_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                 .eq('organizer_id', userId)
                 .order('created_at', { ascending: false });
 
@@ -160,6 +160,7 @@ export default function MyVenueScreen() {
                 const reviewStats = reviewsByGigId[gig.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
+                const normalizedPermitStatus = String(gig.permit_status || 'pending_review').toLowerCase();
 
                 return {
                     ...gig,
@@ -167,6 +168,9 @@ export default function MyVenueScreen() {
                     images: imagesByGigId[gig.id] || [],
                     rating,
                     review_count: reviewCount,
+                    permit_status: normalizedPermitStatus,
+                    permit_rejection_reason: gig.permit_rejection_reason || null,
+                    permit_reviewed_at: gig.permit_reviewed_at || null,
                 };
             }));
         } catch (e) {
@@ -518,6 +522,30 @@ const styles = StyleSheet.create({
         fontSize: 12,
         lineHeight: 18,
     },
+    permitStatusChip: {
+        marginTop: 10,
+        alignSelf: 'flex-start',
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+    },
+    permitStatusChipText: {
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 11,
+    },
+    rejectionReasonText: {
+        marginTop: 8,
+        color: '#DC2626',
+        fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
+        lineHeight: 17,
+    },
+    permitHintText: {
+        marginTop: 8,
+        fontFamily: 'Poppins_400Regular',
+        fontSize: 12,
+        lineHeight: 17,
+    },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -547,6 +575,20 @@ const styles = StyleSheet.create({
         padding: 7,
         borderRadius: 10,
         borderWidth: 1,
+    },
+    reapplyBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: 12,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    reapplyBtnText: {
+        color: '#EA580C',
+        fontFamily: 'Poppins_600SemiBold',
+        fontSize: 12,
     },
     deleteBtn: {
         padding: 6,

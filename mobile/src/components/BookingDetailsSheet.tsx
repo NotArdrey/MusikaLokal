@@ -205,6 +205,57 @@ const BookingDetailsSheet = forwardRef<
 
   const isStudio = booking.type_id === "studio_booking" || !!booking.studio_id;
   const isGig = booking.type_id === "gig_application" || !!booking.gig_id;
+  const normalizedSessionType =
+    typeof booking.session_type === "string"
+      ? booking.session_type.trim().toLowerCase()
+      : typeof booking?.modifiers_applied?.session_type === "string"
+        ? booking.modifiers_applied.session_type.trim().toLowerCase()
+        : "";
+  const normalizedRateModel =
+    typeof booking?.modifiers_applied?.rate_model === "string"
+      ? booking.modifiers_applied.rate_model.trim().toLowerCase()
+      : typeof booking?.modifiers_applied?.recording_session?.rate_model === "string"
+        ? booking.modifiers_applied.recording_session.rate_model
+          .trim()
+          .toLowerCase()
+        : "";
+  const normalizedStudioType = String(
+    booking?.studio_type ??
+    booking?.studio?.studio_type ??
+    studioDetails?.studio_type ??
+    "",
+  )
+    .trim()
+    .toLowerCase();
+  const hasRecordingStudioType = normalizedStudioType.includes("recording");
+  const hasRehearsalStudioType = normalizedStudioType.includes("rehearsal");
+  const parsedSongCount = Number.parseInt(
+    String(
+      booking.song_count ??
+      booking?.modifiers_applied?.recording_session?.song_count ??
+      booking?.modifiers_applied?.song_count ??
+      "",
+    ).trim(),
+    10,
+  );
+  const effectiveSongCount =
+    Number.isFinite(parsedSongCount) && parsedSongCount > 0
+      ? parsedSongCount
+      : null;
+  const isRecordingByStudioType =
+    hasRecordingStudioType && !hasRehearsalStudioType;
+  const isRecordingByRateModel = normalizedRateModel === "per_song";
+  const isRecordingSession =
+    isStudio &&
+    (normalizedSessionType === "recording" ||
+      Boolean(effectiveSongCount) ||
+      isRecordingByRateModel ||
+      isRecordingByStudioType);
+  const effectiveDurationHours = Number(
+    booking.duration_hours || booking?.modifiers_applied?.hours || 4,
+  );
+  const baseRateValue = Number(booking.base_rate || 0);
+  const normalizedTotalCost = Number(booking.total_cost || 0);
 
   const inferApplicationKind = (item: any): "solo" | "duo" | "group" => {
     const candidates = [
@@ -800,6 +851,43 @@ const BookingDetailsSheet = forwardRef<
                     </View>
                   )}
 
+                  {isStudio && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Session Type
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {isRecordingSession ? "Recording" : "Rehearsal"}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && effectiveSongCount && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Songs
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {effectiveSongCount} song
+                        {effectiveSongCount > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+
                   {/* Show studio operating hours for this day */}
                   {dateOverride && isStudio && (
                     <View style={styles.detailItem}>
@@ -918,16 +1006,17 @@ const BookingDetailsSheet = forwardRef<
                           { color: colors.textSecondary },
                         ]}
                       >
-                        Base Rate ({booking.duration_hours || "4"} hrs × ₱
-                        {Number(booking.base_rate).toLocaleString()})
+                        {isRecordingSession
+                          ? `Base Rate (${effectiveSongCount || 1} song${(effectiveSongCount || 1) > 1 ? "s" : ""} × ₱${baseRateValue.toLocaleString()})`
+                          : `Base Rate (${effectiveDurationHours} hrs × ₱${baseRateValue.toLocaleString()})`}
                       </Text>
                       <Text
                         style={[styles.pricingValue, { color: colors.text }]}
                       >
                         ₱
-                        {(
-                          Number(booking.base_rate) *
-                          (booking.duration_hours || 4)
+                        {(isRecordingSession
+                          ? baseRateValue * (effectiveSongCount || 1)
+                          : baseRateValue * effectiveDurationHours
                         ).toLocaleString()}
                       </Text>
                     </View>
@@ -1076,12 +1165,14 @@ const BookingDetailsSheet = forwardRef<
                           { color: colors.textSecondary },
                         ]}
                       >
-                        Rate ({booking.duration_hours || "4"} hrs)
+                        {isRecordingSession
+                          ? `Recording Total${effectiveSongCount ? ` (${effectiveSongCount} songs)` : ""}`
+                          : `Rate (${effectiveDurationHours} hrs)`}
                       </Text>
                       <Text
                         style={[styles.pricingValue, { color: colors.text }]}
                       >
-                        ₱{booking.total_cost?.toLocaleString()}
+                        ₱{normalizedTotalCost.toLocaleString()}
                       </Text>
                     </View>
                   )}
@@ -1097,7 +1188,7 @@ const BookingDetailsSheet = forwardRef<
                     <Text
                       style={[styles.totalValue, { color: colors.primary }]}
                     >
-                      ₱{booking.total_cost?.toLocaleString()}
+                      ₱{normalizedTotalCost.toLocaleString()}
                     </Text>
                   </View>
                 </View>

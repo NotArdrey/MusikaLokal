@@ -124,10 +124,90 @@ function isMissingColumnError(error: any) {
   const message = String(error?.message || "").toLowerCase();
 
   return (
+    code === "42P01" ||
     code === "42703" ||
     message.includes("does not exist") ||
+    message.includes("relation") ||
     message.includes("unknown column")
   );
+}
+
+async function fetchProfileById(client: any, profileId: string) {
+  const normalizedProfileId = String(profileId || "").trim();
+  if (!normalizedProfileId) return null;
+
+  const { data, error } = await client
+    .from("profiles")
+    .select("*")
+    .eq("id", normalizedProfileId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+function selectPreferredLinkedUserId<T extends Record<string, unknown>>(
+  rows: T[],
+  userIdKey: keyof T,
+  roleKey: keyof T,
+) {
+  const rankedRows = [...rows].sort((left, right) => {
+    const leftRole = String(left?.[roleKey] || "").trim().toLowerCase();
+    const rightRole = String(right?.[roleKey] || "").trim().toLowerCase();
+    const leftRank = leftRole === "owner" ? 0 : leftRole === "leader" ? 1 : 2;
+    const rightRank = rightRole === "owner" ? 0 : rightRole === "leader" ? 1 : 2;
+    return leftRank - rightRank;
+  });
+
+  for (const row of rankedRows) {
+    const userId = String(row?.[userIdKey] || "").trim();
+    if (userId) return userId;
+  }
+
+  return "";
+}
+
+async function resolveGroupOwnerId(client: any, groupId: string, directOwnerId?: unknown) {
+  const normalizedGroupId = String(groupId || "").trim();
+  const normalizedDirectOwnerId = String(directOwnerId || "").trim();
+
+  if (!normalizedGroupId) return "";
+  if (normalizedDirectOwnerId) return normalizedDirectOwnerId;
+
+  try {
+    const { data, error } = await client
+      .from("group_members")
+      .select("user_id, role")
+      .eq("group_id", normalizedGroupId);
+
+    if (error) {
+      if (!isMissingColumnError(error)) throw error;
+    } else if (Array.isArray(data) && data.length > 0) {
+      const linkedUserId = selectPreferredLinkedUserId(data, "user_id", "role");
+      if (linkedUserId) return linkedUserId;
+    }
+  } catch (error) {
+    if (!isMissingColumnError(error)) throw error;
+  }
+
+  try {
+    const { data, error } = await client
+      .from("group_roster_members")
+      .select("user_id, member_role")
+      .eq("group_id", normalizedGroupId)
+      .not("user_id", "is", null);
+
+    if (error) {
+      if (!isMissingColumnError(error)) throw error;
+    } else if (Array.isArray(data) && data.length > 0) {
+      const linkedUserId = selectPreferredLinkedUserId(data, "user_id", "member_role");
+      if (linkedUserId) return linkedUserId;
+    }
+  } catch (error) {
+    if (!isMissingColumnError(error)) throw error;
+  }
+
+  return "";
 }
 
 async function assertAdmin(client: any, userId: string) {
@@ -244,23 +324,30 @@ async function fetchReportTargetDetails(client: any, rawTargetType: unknown, raw
 
   if (recordError) throw recordError;
 
-  const ownerId = String(
+  if (targetType === "profile" || targetType === "user") {
+    return {
+      type: targetType,
+      id: targetId,
+      table,
+      record: record || null,
+      owner_profile: record || null,
+    };
+  }
+
+  let ownerId = String(
     record?.owner_id ||
     record?.organizer_id ||
     record?.user_id ||
     "",
   ).trim();
 
+  if (!ownerId && targetType === "group") {
+    ownerId = await resolveGroupOwnerId(client, targetId, record?.owner_id);
+  }
+
   let ownerProfile = null;
   if (ownerId) {
-    const { data: ownerRow, error: ownerError } = await client
-      .from("profiles")
-      .select("*")
-      .eq("id", ownerId)
-      .maybeSingle();
-
-    if (ownerError) throw ownerError;
-    ownerProfile = ownerRow || null;
+    ownerProfile = await fetchProfileById(client, ownerId);
   }
 
   return {

@@ -3,6 +3,7 @@ import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { Calendar } from "react-native-calendars";
 import styles from "../ListingDetailsSheet.styles";
+import { normalizeStudioType } from "./availability";
 
 interface BookingControlsProps {
   colors: any;
@@ -79,6 +80,8 @@ const BookingControls = ({
   const now = new Date();
   const minLeadDateTime = new Date(now.getTime() + leadTimeHours * 60 * 60 * 1000);
   const minSelectableDate = toLocalDateKey(minLeadDateTime);
+  const normalizedStudioType = normalizeStudioType(group?.studio_type);
+  const supportsSessionTypeSelection = normalizedStudioType === "Both";
 
   return (
     <View
@@ -95,7 +98,7 @@ const BookingControls = ({
         },
       ]}
     >
-      {group?.studio_type === "Both" && (
+      {supportsSessionTypeSelection && (
         <View style={{ marginBottom: 16 }}>
           <Text
             style={[
@@ -474,7 +477,6 @@ const BookingControls = ({
                     const endMinutes = endParts[0] * 60 + endParts[1];
                     const durationHours = (endMinutes - startMinutes) / 60;
                     const rate = parseInt(displayRate.replace(/,/g, "")) || 0;
-                    const totalCost = rate * durationHours;
 
                     return (
                       <View
@@ -491,15 +493,25 @@ const BookingControls = ({
                         </View>
                         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                           <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular" }}>Rate</Text>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>₱{displayRate}/hr</Text>
+                          <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>₱{displayRate}/song</Text>
                         </View>
                         <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 8 }} />
                         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold" }}>Total</Text>
+                          <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold" }}>Minimum (1 song)</Text>
                           <Text style={{ color: colors.primary, fontFamily: "Poppins_600SemiBold", fontSize: 16 }}>
-                            ₱{totalCost.toLocaleString()}
+                            ₱{rate.toLocaleString()}
                           </Text>
                         </View>
+                        <Text
+                          style={{
+                            color: colors.textSecondary,
+                            fontFamily: "Poppins_400Regular",
+                            fontSize: 11,
+                            marginTop: 8,
+                          }}
+                        >
+                          Final total depends on the number of songs you enter below.
+                        </Text>
                       </View>
                     );
                   })()}

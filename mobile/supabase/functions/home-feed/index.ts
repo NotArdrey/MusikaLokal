@@ -420,11 +420,13 @@ const fetchCandidates = async (supabaseClient: any): Promise<CandidateItem[]> =>
         supabaseClient
             .from("studios_with_stats")
             .select("id, name, images, address, type, hourly_rate, rehearsal_rate, recording_rate, rating, review_count, owner_id, created_at")
+            .eq("permit_status", "approved")
             .limit(60),
         supabaseClient
             .from("gigs_with_stats")
             .select("id, name, images, location, budget, rate, requirements, rating, review_count, organizer_id, created_at, status")
             .eq("status", "open")
+            .eq("permit_status", "approved")
             .limit(60),
     ]);
 
@@ -587,11 +589,14 @@ const getFeaturedPayload = async (supabaseClient: any) => {
         supabaseClient
             .from("gigs_with_stats")
             .select("*")
+            .eq("status", "open")
+            .eq("permit_status", "approved")
             .order("created_at", { ascending: false })
             .limit(5),
         supabaseClient
             .from("studios_with_stats")
             .select("*")
+            .eq("permit_status", "approved")
             .order("rating", { ascending: false })
             .limit(5),
         supabaseClient

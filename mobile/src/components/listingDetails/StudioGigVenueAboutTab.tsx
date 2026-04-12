@@ -53,6 +53,19 @@ const StudioGigVenueAboutTab = ({
     destinationText,
   });
   const isStudioOrVenue = group.type === "Studio" || group.type === "Venue";
+  const normalizedStudioType =
+    typeof group?.studio_type === "string"
+      ? group.studio_type.toLowerCase()
+      : "";
+  const supportsRecordingPricing =
+    Boolean(recordingRate) || normalizedStudioType.includes("recording");
+  const supportsRecording = group.type === "Studio" && supportsRecordingPricing;
+  const parsedSongCap = Number.parseInt(
+    String(group?.settings?.max_recording_songs_per_day ?? "").trim(),
+    10,
+  );
+  const globalRecordingSongCap =
+    Number.isFinite(parsedSongCap) && parsedSongCap > 0 ? parsedSongCap : null;
   const isMediaCarouselType =
     group.type === "Studio" || group.type === "Venue" || group.type === "Gig";
 
@@ -378,6 +391,24 @@ const StudioGigVenueAboutTab = ({
                 </Text>
               </View>
             )}
+          </View>
+        )}
+
+        {supportsRecording && (
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <View
+              style={[
+                styles.statCard,
+                { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
+              ]}
+            >
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+                Song Cap / Day
+              </Text>
+              <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
+                {globalRecordingSongCap ? `${globalRecordingSongCap} songs` : "No limit"}
+              </Text>
+            </View>
           </View>
         )}
       </View>

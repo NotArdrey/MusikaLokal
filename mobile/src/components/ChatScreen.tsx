@@ -18,7 +18,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets, type Edge } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
@@ -80,6 +80,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const [showOptions, setShowOptions] = useState(false);
     const [otherUserOnline, setOtherUserOnline] = useState(false);
     const [otherUserLastSeen, setOtherUserLastSeen] = useState<Date | null>(null);
+    const [headerHeight, setHeaderHeight] = useState(0);
+    const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
     const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
     const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
@@ -184,29 +186,31 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         return map;
     }, [participants]);
 
+    const reversedMessages = React.useMemo(() => [...messages].reverse(), [messages]);
+
     // Mark messages as read when viewing
     useEffect(() => {
         markAsRead();
     }, [messages.length, markAsRead]);
 
-    // Auto-scroll to bottom on new messages
-    useEffect(() => {
-        if (messages.length > 0) {
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, 100);
-        }
-    }, [messages.length]);
-
     // Scroll to bottom when keyboard opens so latest messages stay visible
     useEffect(() => {
         const keyboardShowEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-        const sub = Keyboard.addListener(keyboardShowEvent, () => {
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, Platform.OS === 'ios' ? 50 : 150);
+        const keyboardHideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+        const showSub = Keyboard.addListener(keyboardShowEvent, () => {
+            setIsKeyboardVisible(true);
+            // With inverted list, no need to scroll on keyboard open - it naturally stays anchored to the bottom
         });
-        return () => sub.remove();
+
+        const hideSub = Keyboard.addListener(keyboardHideEvent, () => {
+            setIsKeyboardVisible(false);
+        });
+
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
     }, []);
 
     const handleSend = async () => {
@@ -241,14 +245,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // Index of the last message I sent that has been seen (read_at set) — Messenger-style
     const lastSeenMessageIndex = React.useMemo(() => {
         if (isGroupChat) return -1;
-        let lastIdx = -1;
-        messages.forEach((m, i) => {
-            if (m.sender_id === currentUserId && m.read_at) {
-                lastIdx = i;
-            }
-        });
-        return lastIdx;
-    }, [messages, currentUserId, isGroupChat]);
+        return reversedMessages.findIndex(m => m.sender_id === currentUserId && m.read_at);
+    }, [reversedMessages, currentUserId, isGroupChat]);
 
     // Pick and send a file/document (5 MB limit)
     const handlePickFile = async () => {
@@ -330,22 +328,28 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
     const renderMessage = ({ item, index }: { item: Message; index: number }) => {
         const isMe = item.sender_id === currentUserId;
-        const showDate = index === 0 ||
-            formatDate(messages[index - 1].created_at) !== formatDate(item.created_at);
+        
+        // Since reversedMessages holds newest at index 0,
+        // message ABOVE visually is index + 1 (older chronologically).
+        // message BELOW visually is index - 1 (newer chronologically).
+        const olderMessage = index < reversedMessages.length - 1 ? reversedMessages[index + 1] : null;
+        const newerMessage = index > 0 ? reversedMessages[index - 1] : null;
 
-        // For group chats, check if we should show sender name
-        const prevMessage = index > 0 ? messages[index - 1] : null;
-        const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+        // Show date header if it's the oldest message or the date changes from the older message
+        const showDate = !olderMessage ||
+            formatDate(olderMessage.created_at) !== formatDate(item.created_at);
+
+        // For group chats, check if we should show sender name (if older message is from someone else or day changed)
         const showSenderName = isGroupChat && !isMe && (
-            index === 0 ||
-            prevMessage?.sender_id !== item.sender_id ||
+            !olderMessage ||
+            olderMessage.sender_id !== item.sender_id ||
             showDate
         );
 
-        // Tail: last message in a run (next message is from a different sender or date changes)
-        const isLastInRun = !nextMessage ||
-            nextMessage.sender_id !== item.sender_id ||
-            formatDate(nextMessage.created_at) !== formatDate(item.created_at);
+        // Tail: last message in a run (newer message is from a different sender or date changes)
+        const isLastInRun = !newerMessage ||
+            newerMessage.sender_id !== item.sender_id ||
+            formatDate(newerMessage.created_at) !== formatDate(item.created_at);
 
         // Get sender info from message or participant map
         const senderProfile = item.sender || participantMap.get(item.sender_id);
@@ -538,13 +542,109 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 : null;
     const reportTargetName = isGroupChat ? (groupName || 'this group') : (otherUser?.full_name || 'this user');
     const reportTitle = isGroupChat ? 'Report Group' : 'Report User';
+    const keyboardVerticalOffset = Platform.OS === 'ios' ? headerHeight : 0;
+    const composerBottomPadding = Platform.OS === 'ios'
+        ? (isKeyboardVisible ? 16 : Math.max(insets.bottom, 8) + 4)
+        : (isKeyboardVisible ? 12 : 8);
+    const composerSafeAreaEdges: Edge[] = Platform.OS === 'android' && !isKeyboardVisible ? ['bottom'] : [];
+    const chatContent = (
+        <>
+            {loading ? (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+            ) : messages.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                    <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
+                        <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.primary} />
+                    </View>
+                    <Text style={[styles.emptyText, { color: colors.text }]}>
+                        No messages yet
+                    </Text>
+                    <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+                        Say hi to kick things off! 👋
+                    </Text>
+                </View>
+            ) : (
+                <FlatList
+                    ref={flatListRef}
+                    data={reversedMessages}
+                    keyExtractor={(item) => item.id}
+                    renderItem={renderMessage}
+                    contentContainerStyle={styles.messagesList}
+                    initialNumToRender={18}
+                    maxToRenderPerBatch={24}
+                    windowSize={10}
+                    removeClippedSubviews={Platform.OS === 'android'}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                    inverted={true}
+                />
+            )}
+
+            <SafeAreaView
+                edges={composerSafeAreaEdges}
+                style={[
+                    styles.inputSafeArea,
+                    {
+                        backgroundColor: colors.background,
+                        borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
+                        borderTopWidth: StyleSheet.hairlineWidth,
+                    },
+                ]}
+            >
+                <View style={[
+                    styles.inputContainer,
+                    {
+                        backgroundColor: colors.background,
+                        paddingBottom: composerBottomPadding,
+                    },
+                ]}>
+                    <TouchableOpacity style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)} activeOpacity={0.7}>
+                        <Ionicons name="add-circle" size={30} color={colors.primary} />
+                    </TouchableOpacity>
+
+                    <View style={[
+                        styles.textInputWrapper,
+                        { backgroundColor: isDark ? '#2C2F3A' : '#F0F2F5' }
+                    ]}>
+                        <TextInput
+                            style={[styles.input, { color: colors.text }]}
+                            value={text}
+                            onChangeText={setText}
+                            placeholder="Message…"
+                            placeholderTextColor={colors.textSecondary}
+                            multiline
+                            maxLength={1000}
+                        />
+                    </View>
+
+                    {text.trim().length > 0 ? (
+                        <TouchableOpacity
+                            onPress={handleSend}
+                            disabled={!text.trim() || sending}
+                            style={[styles.sendButton, { backgroundColor: colors.primary, opacity: sending ? 0.7 : 1 }]}
+                            activeOpacity={0.8}
+                        >
+                            {sending ? (
+                                <ActivityIndicator size="small" color="#FFF" />
+                            ) : (
+                                <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
+                            )}
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity style={styles.thumbsUpButton} onPress={() => sendMessage('👍')} activeOpacity={0.7}>
+                            <Ionicons name="thumbs-up" size={28} color={colors.primary} />
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </SafeAreaView>
+        </>
+    );
 
     return (
-        <KeyboardAvoidingView
-            style={[styles.container, { backgroundColor: colors.background }]}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-        >
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
             {/* Header */}
             <View style={[
                 styles.header,
@@ -553,7 +653,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
                     paddingTop: (insets.top || 16) + 6,
                 },
-            ]}>
+            ]}
+            onLayout={(event) => setHeaderHeight(event.nativeEvent.layout.height)}>
                 {onBack && (
                     <TouchableOpacity
                         onPress={onBack}
@@ -679,86 +780,19 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             />
 
             {/* Messages */}
-            <View style={styles.messagesContainer}>
-                {loading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color={colors.primary} />
-                    </View>
-                ) : messages.length === 0 ? (
-                    <View style={styles.emptyContainer}>
-                        <View style={[styles.emptyIconWrap, { backgroundColor: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.1)' }]}>
-                            <Ionicons name="chatbubble-ellipses-outline" size={36} color={colors.primary} />
-                        </View>
-                        <Text style={[styles.emptyText, { color: colors.text }]}>
-                            No messages yet
-                        </Text>
-                        <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
-                            Say hi to kick things off! 👋
-                        </Text>
-                    </View>
-                ) : (
-                    <FlatList
-                        ref={flatListRef}
-                        data={messages}
-                        keyExtractor={(item) => item.id}
-                        renderItem={renderMessage}
-                        contentContainerStyle={styles.messagesList}
-                        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
-                        showsVerticalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled"
-                        keyboardDismissMode="interactive"
-                    />
-                )}
-
-                {/* Input */}
-                <View style={[
-                    styles.inputContainer,
-                    {
-                        backgroundColor: colors.background,
-                        borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)',
-                        paddingBottom: Math.max(insets.bottom, 8) + (Platform.OS === 'ios' ? 4 : 2),
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                    },
-                ]}>
-                    <TouchableOpacity style={styles.inputAction} onPress={() => setShowAttachmentPicker(true)} activeOpacity={0.7}>
-                        <Ionicons name="add-circle" size={30} color={colors.primary} />
-                    </TouchableOpacity>
-
-                    <View style={[
-                        styles.textInputWrapper,
-                        { backgroundColor: isDark ? '#2C2F3A' : '#F0F2F5' }
-                    ]}>
-                        <TextInput
-                            style={[styles.input, { color: colors.text }]}
-                            value={text}
-                            onChangeText={setText}
-                            placeholder="Message…"
-                            placeholderTextColor={colors.textSecondary}
-                            multiline
-                            maxLength={1000}
-                        />
-                    </View>
-
-                    {text.trim().length > 0 ? (
-                        <TouchableOpacity
-                            onPress={handleSend}
-                            disabled={!text.trim() || sending}
-                            style={[styles.sendButton, { backgroundColor: colors.primary, opacity: sending ? 0.7 : 1 }]}
-                            activeOpacity={0.8}
-                        >
-                            {sending ? (
-                                <ActivityIndicator size="small" color="#FFF" />
-                            ) : (
-                                <Ionicons name="send" size={19} color="#FFF" style={{ marginLeft: 2 }} />
-                            )}
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity style={styles.thumbsUpButton} onPress={() => sendMessage('👍')} activeOpacity={0.7}>
-                            <Ionicons name="thumbs-up" size={28} color={colors.primary} />
-                        </TouchableOpacity>
-                    )}
+            {Platform.OS === 'ios' ? (
+                <KeyboardAvoidingView
+                    behavior="padding"
+                    style={styles.messagesContainer}
+                    keyboardVerticalOffset={keyboardVerticalOffset}
+                >
+                    {chatContent}
+                </KeyboardAvoidingView>
+            ) : (
+                <View style={styles.messagesContainer}>
+                    {chatContent}
                 </View>
-            </View>
+            )}
 
             {/* Reaction Picker Modal */}
             <Modal
@@ -832,7 +866,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 buttons={alertConfig.buttons}
                 onClose={() => setAlertVisible(false)}
             />
-        </KeyboardAvoidingView>
+        </View>
     );
 };
 
@@ -1027,6 +1061,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingTop: 8,
         gap: 6,
+    },
+    inputSafeArea: {
+        backgroundColor: '#FFFFFF',
     },
     inputAction: {
         paddingBottom: 6,

@@ -1,7 +1,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -18,6 +18,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { getAdminPageCacheKey, readAdminPageCache, writeAdminPageCache } from './_cache';
 
 const readErrorContextMessage = async (context: unknown): Promise<string | null> => {
   if (!context) return null;
@@ -102,6 +103,8 @@ const adminTabRoutes: Record<Tab, string> = {
   reports: '/admin/reports',
   audit: '/admin/audit',
 };
+
+const AUDIT_CACHE_TTL_MS = 45_000;
 
 interface AuditEntry {
   id: string;
@@ -263,6 +266,7 @@ export default function AdminAuditPage() {
   const { colors, isDark } = useTheme();
   const { session, loading, isGuest, isAdmin, roleResolved } = useAuth();
   const { width } = useWindowDimensions();
+  const hasHydratedAuditRef = useRef(false);
 
   const [initializingAudit, setInitializingAudit] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -287,6 +291,8 @@ export default function AdminAuditPage() {
   const showAlert = useCallback((type: AlertType, title: string, message: string) => {
     setAlertState({ visible: true, type, title, message });
   }, []);
+
+  const auditCacheKey = useMemo(() => getAdminPageCacheKey('audit'), []);
 
   const handleTabChange = useCallback((nextTab: Tab) => {
     if (nextTab === 'audit') return;
@@ -339,8 +345,11 @@ export default function AdminAuditPage() {
     });
   }, []);
 
-  const fetchAudit = useCallback(async () => {
-    setAuditLoading(true);
+  const fetchAudit = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setAuditLoading(true);
+    }
+
     try {
       let rawItems: any[] = [];
 
@@ -369,36 +378,55 @@ export default function AdminAuditPage() {
 
       const mappedItems = await mapAuditRows(rawItems);
       setAuditEntries(mappedItems);
+      writeAdminPageCache(auditCacheKey, mappedItems);
     } catch (error) {
-      const message = await getErrorMessage(error, 'Unable to fetch audit entries.');
-      showAlert('error', 'Failed to load audit log', message);
-      setAuditEntries([]);
+      if (!options?.silent) {
+        const message = await getErrorMessage(error, 'Unable to fetch audit entries.');
+        showAlert('error', 'Failed to load audit log', message);
+        setAuditEntries([]);
+      }
     } finally {
-      setAuditLoading(false);
+      if (!options?.silent) {
+        setAuditLoading(false);
+      }
     }
-  }, [showAlert, mapAuditRows]);
+  }, [auditCacheKey, showAlert, mapAuditRows]);
 
   useEffect(() => {
     if (loading || !roleResolved || !session || isGuest || !isAdmin) {
       setInitializingAudit(false);
+      hasHydratedAuditRef.current = false;
       return;
     }
 
     let isMounted = true;
-    setInitializingAudit(true);
+    const cachedAuditEntries = readAdminPageCache<AuditEntry[]>(auditCacheKey, AUDIT_CACHE_TTL_MS);
+
+    if (cachedAuditEntries) {
+      setAuditEntries(cachedAuditEntries);
+      setInitializingAudit(false);
+      hasHydratedAuditRef.current = true;
+    } else if (!hasHydratedAuditRef.current) {
+      setInitializingAudit(true);
+    } else {
+      setInitializingAudit(false);
+    }
 
     void (async () => {
       try {
-        await fetchAudit();
+        await fetchAudit({ silent: Boolean(cachedAuditEntries) });
       } finally {
-        if (isMounted) setInitializingAudit(false);
+        if (isMounted) {
+          setInitializingAudit(false);
+          hasHydratedAuditRef.current = true;
+        }
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [loading, roleResolved, session, isGuest, isAdmin, fetchAudit]);
+  }, [loading, roleResolved, session, isGuest, isAdmin, auditCacheKey, fetchAudit]);
 
   const filteredAuditEntries = useMemo(() => {
     const query = auditSearch.trim().toLowerCase();
