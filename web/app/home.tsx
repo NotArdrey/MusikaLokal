@@ -1599,7 +1599,7 @@ export default function HomeScreen() {
 
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={openSearchSheet}
+              onPress={() => router.push('/discover')}
               style={[
                 styles.webHeroButton,
                 {

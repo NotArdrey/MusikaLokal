@@ -2375,7 +2375,7 @@ export default function BookingsScreen() {
               )}
             </View>
           ) : (
-            <View style={[width >= 768 && { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 16 }]}>
+            <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
               {currentItems.map((item: any) => {
                 // ==========================================
               // 1. GIG APPLICATION CARD (Recruitment View)
@@ -2392,7 +2392,7 @@ export default function BookingsScreen() {
                     style={[
                       styles.cardContainer,
                       isWebDesktop && styles.cardContainerWeb,
-                      width >= 768 && { width: '48%', flexGrow: 1, marginBottom: 0 },
+                      isWebDesktop && styles.gridItemWeb,
                       {
                         backgroundColor: pageCardBackground,
                         borderColor: borderSoft,
@@ -3097,7 +3097,8 @@ export default function BookingsScreen() {
                   key={item.id}
                   style={[
                     styles.cardContainer,
-                    width >= 768 && { width: '48%', flexGrow: 1, marginBottom: 0 },
+                    isWebDesktop && styles.cardContainerWeb,
+                    isWebDesktop && styles.gridItemWeb,
                     {
                       backgroundColor: colors.card,
                       borderColor: colors.border,
@@ -4608,6 +4609,18 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     paddingHorizontal: 12,
     paddingTop: moderateScale(18),
+  },
+  gridWrap: {
+    width: "100%",
+  },
+  gridWrapWeb: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  gridItemWeb: {
+    width: "49%",
+    marginBottom: moderateScale(18),
   },
   centerContainer: {
     alignItems: "center",

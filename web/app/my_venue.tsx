@@ -288,70 +288,74 @@ export default function MyVenueScreen() {
                                 <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No gigs found</Text>
                             </View>
                         ) : (
-                            gigs.map((gig) => (
-                                <View key={gig.id} style={[styles.cardContainer, {
-                                    backgroundColor: pageCardBackground,
-                                    borderColor: borderSoft,
-                                }, isWebDesktop && styles.webSectionCard, {
-                                    shadowColor: isWebDesktop ? '#0F172A' : colors.primary,
-                                }]}>
-                                    <View style={styles.imageWrapper}>
-                                        <CachedImage
-                                            uri={resolveGigImage(gig)}
-                                            style={styles.cardImage}
-                                            width={800}
-                                            height={384}
-                                            quality={72}
-                                            cacheVersion={gig.updated_at || gig.created_at || gig.id}
-                                            contentFit="cover"
-                                        />
-                                        <View style={[styles.statusBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                            <Text style={[styles.statusText, { color: colors.primary }]}>{gig.status || 'Active'}</Text>
-                                        </View>
-                                        <View style={styles.budgetBadge}>
-                                            <Text style={styles.budgetText}>₱{gig.budget?.toLocaleString()}</Text>
-                                        </View>
-                                    </View>
-
-                                    <View style={styles.cardContent}>
-                                        <Text style={[styles.cardTitle, { color: colors.text }]}>{gig.name}</Text>
-                                        <Text style={[styles.cardSubTitle, { color: colors.primary }]}>
-                                            {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'}
-                                            {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} • {gig.location}
-                                        </Text>
-
-                                        <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
-                                            {gig.description}
-                                        </Text>
-
-                                        <View style={[styles.actionRow, { borderColor: colors.border }]}>
-                                            <View style={styles.actionLeft}>
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/manage_gig', params: { id: gig.id } })}
-                                                    style={[styles.manageBtn, { backgroundColor: colors.primary }]}
-                                                >
-                                                    <Ionicons name="settings-outline" size={18} color="#FFF" />
-                                                    <Text style={styles.manageBtnText}>Manage</Text>
-                                                </TouchableOpacity>
-
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="pencil-outline" size={20} color={colors.text} />
-                                                </TouchableOpacity>
+                            <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
+                                {gigs.map((gig) => (
+                                    <View key={gig.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
+                                        <View style={[styles.cardContainer, {
+                                            backgroundColor: pageCardBackground,
+                                            borderColor: borderSoft,
+                                        }, isWebDesktop && styles.webSectionCard, {
+                                            shadowColor: isWebDesktop ? '#0F172A' : colors.primary,
+                                        }]}>
+                                            <View style={[styles.imageWrapper, isWebDesktop && styles.imageWrapperWeb]}>
+                                                <CachedImage
+                                                    uri={resolveGigImage(gig)}
+                                                    style={styles.cardImage}
+                                                    width={800}
+                                                    height={384}
+                                                    quality={72}
+                                                    cacheVersion={gig.updated_at || gig.created_at || gig.id}
+                                                    contentFit="cover"
+                                                />
+                                                <View style={[styles.statusBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
+                                                    <Text style={[styles.statusText, { color: colors.primary }]}>{gig.status || 'Active'}</Text>
+                                                </View>
+                                                <View style={styles.budgetBadge}>
+                                                    <Text style={styles.budgetText}>₱{gig.budget?.toLocaleString()}</Text>
+                                                </View>
                                             </View>
 
-                                            <TouchableOpacity activeOpacity={1}
-                                                onPress={() => confirmDelete(gig.id, gig.name)}
-                                                style={styles.deleteBtn}
-                                            >
-                                                <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                                            </TouchableOpacity>
+                                            <View style={styles.cardContent}>
+                                                <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{gig.name}</Text>
+                                                <Text style={[styles.cardSubTitle, { color: colors.primary }]} numberOfLines={1}>
+                                                    {gig.event_date ? new Date(gig.event_date).toLocaleDateString() : 'Date TBA'}
+                                                    {gig.requirements?.event_start_time && gig.requirements?.event_end_time ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}` : ''} • {gig.location}
+                                                </Text>
+
+                                                <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
+                                                    {gig.description}
+                                                </Text>
+
+                                                <View style={[styles.actionRow, { borderColor: colors.border }]}>
+                                                    <View style={styles.actionLeft}>
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => router.push({ pathname: '/manage_gig', params: { id: gig.id } })}
+                                                            style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                                                        >
+                                                            <Ionicons name="settings-outline" size={16} color="#FFF" />
+                                                            <Text style={styles.manageBtnText}>Manage</Text>
+                                                        </TouchableOpacity>
+
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => router.push({ pathname: '/edit_gig', params: { id: gig.id } })}
+                                                            style={[styles.editBtn, { borderColor: colors.border }]}
+                                                        >
+                                                            <Ionicons name="pencil-outline" size={18} color={colors.text} />
+                                                        </TouchableOpacity>
+                                                    </View>
+
+                                                    <TouchableOpacity activeOpacity={1}
+                                                        onPress={() => confirmDelete(gig.id, gig.name)}
+                                                        style={styles.deleteBtn}
+                                                    >
+                                                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
                                         </View>
                                     </View>
-                                </View>
-                            ))
+                                ))}
+                            </View>
                         )}
 
                     </ScrollView>
@@ -402,15 +406,31 @@ const styles = StyleSheet.create({
         paddingTop: 12,
     },
     scrollContent: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 16,
         paddingBottom: 180,
-        paddingTop: 16,
+        paddingTop: 12,
     },
     scrollContentWeb: {
         maxWidth: 1120,
         width: '100%',
         alignSelf: 'center',
-        paddingTop: 12,
+        paddingTop: 10,
+    },
+    gridWrap: {
+        width: '100%',
+    },
+    gridWrapWeb: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+    },
+    gridItem: {
+        width: '100%',
+        marginBottom: 14,
+    },
+    gridItemWeb: {
+        width: '49%',
+        marginBottom: 18,
     },
     loadingText: {
         textAlign: 'center',
@@ -427,13 +447,12 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
     },
     cardContainer: {
-        marginBottom: 24,
-        borderRadius: 24,
+        borderRadius: 18,
         borderWidth: 1,
         overflow: 'hidden',
-        shadowOffset: { width: 0, height: 8 },
+        shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.1,
-        shadowRadius: 16,
+        shadowRadius: 12,
     },
     webSectionCard: {
         shadowOffset: { width: 0, height: 10 },
@@ -442,10 +461,13 @@ const styles = StyleSheet.create({
         elevation: 3,
     },
     imageWrapper: {
-        height: 224,
+        height: 170,
         position: 'relative',
         overflow: 'hidden',
         backgroundColor: '#0F172A',
+    },
+    imageWrapperWeb: {
+        height: 186,
     },
     cardImage: {
         width: '100%',
@@ -478,54 +500,56 @@ const styles = StyleSheet.create({
         color: '#FFF',
     },
     cardContent: {
-        padding: 16,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
     },
     cardTitle: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 18,
+        fontSize: 16,
         marginBottom: 2,
     },
     cardSubTitle: {
         fontFamily: 'Poppins_500Medium',
-        fontSize: 13,
-        marginBottom: 6,
+        fontSize: 12,
+        marginBottom: 5,
     },
     cardDescription: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 13,
-        lineHeight: 20,
+        fontSize: 12,
+        lineHeight: 18,
     },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 16,
+        marginTop: 12,
         borderTopWidth: 1,
-        paddingTop: 16,
+        paddingTop: 12,
     },
     actionLeft: {
         flexDirection: 'row',
-        gap: 12,
+        gap: 8,
     },
     manageBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 12,
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        borderRadius: 10,
     },
     manageBtnText: {
         fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
         color: '#FFF',
     },
     editBtn: {
-        padding: 8,
-        borderRadius: 12,
+        padding: 7,
+        borderRadius: 10,
         borderWidth: 1,
     },
     deleteBtn: {
-        padding: 8,
+        padding: 6,
     },
 });
 

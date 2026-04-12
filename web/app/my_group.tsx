@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
@@ -13,6 +13,23 @@ import { useTheme } from '../src/context/ThemeContext';
 
 export default function MyGroupScreen() {
     const { colors, isDark } = useTheme();
+    const { width } = useWindowDimensions();
+    const isWebDesktop = Platform.OS === 'web' && width >= 768;
+    const pageBackground = isWebDesktop
+        ? isDark
+            ? '#0A1224'
+            : '#E9EEF8'
+        : colors.background;
+    const pageCardBackground = isWebDesktop
+        ? isDark
+            ? '#0F172A'
+            : '#FFFFFF'
+        : colors.surface;
+    const borderSoft = isWebDesktop
+        ? isDark
+            ? '#1E2C48'
+            : '#D8E3F2'
+        : colors.border;
     const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
     const params = useLocalSearchParams<{ refresh?: string }>();
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
@@ -195,13 +212,13 @@ export default function MyGroupScreen() {
 
     return (
         <>
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-                <View style={[Platform.OS === 'web' && { width: '100%' }, { flex: 1 }]}>
+            <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
+                <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
                     <Header title="My Group" />
 
                     <ScrollView
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={styles.scrollContent}
+                        contentContainerStyle={[styles.scrollContent, isWebDesktop && styles.scrollContentWeb]}
                         style={styles.flex1}
                         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                     >
@@ -213,72 +230,78 @@ export default function MyGroupScreen() {
                                 <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No groups found</Text>
                             </View>
                         ) : (
-                            groups.map((group) => (
-                                <View key={group.id} style={[styles.cardContainer, {
-                                    backgroundColor: colors.surface,
-                                    shadowColor: colors.primary,
-                                }]}>
-                                    <View style={styles.imageWrapper}>
-                                        <CachedImage
-                                            uri={(group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop'}
-                                            style={styles.cardImage}
-                                            width={800}
-                                            height={384}
-                                            quality={72}
-                                            cacheVersion={group.updated_at || group.created_at || group.id}
-                                        />
-                                        <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                            <Text style={[styles.activeText, { color: colors.primary }]}>Active</Text>
-                                        </View>
-                                    </View>
-
-                                    <View style={styles.cardContent}>
-                                        <Text style={[styles.cardTitle, { color: colors.text }]}>{group.name}</Text>
-                                        <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
-                                            {group.description}
-                                        </Text>
-
-                                        <View style={[styles.actionRow, { borderColor: colors.border }]}>
-                                            <View style={styles.actionLeft}>
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/manage_group', params: { id: group.id } })}
-                                                    style={[styles.manageBtn, { backgroundColor: colors.primary }]}
-                                                >
-                                                    <Ionicons name="settings-outline" size={18} color="#FFF" />
-                                                    <Text style={styles.manageBtnText}>Manage</Text>
-                                                </TouchableOpacity>
-
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({
-                                                        pathname: '/chat',
-                                                        params: {
-                                                            isGroupChat: 'true',
-                                                            groupChatId: group.id
-                                                        }
-                                                    })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="chatbubbles-outline" size={20} color={colors.text} />
-                                                </TouchableOpacity>
-
-                                                <TouchableOpacity activeOpacity={1}
-                                                    onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
-                                                    style={[styles.editBtn, { borderColor: colors.border }]}
-                                                >
-                                                    <Ionicons name="pencil-outline" size={20} color={colors.text} />
-                                                </TouchableOpacity>
+                            <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
+                                {groups.map((group) => (
+                                    <View key={group.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
+                                        <View style={[styles.cardContainer, {
+                                            backgroundColor: pageCardBackground,
+                                            borderColor: borderSoft,
+                                        }, isWebDesktop && styles.webSectionCard, {
+                                            shadowColor: isWebDesktop ? '#0F172A' : colors.primary,
+                                        }]}>
+                                            <View style={[styles.imageWrapper, isWebDesktop && styles.imageWrapperWeb]}>
+                                                <CachedImage
+                                                    uri={(group.images && group.images[0]) || 'https://images.unsplash.com/photo-1511735111819-9a3f7709049c?w=800&fit=crop'}
+                                                    style={styles.cardImage}
+                                                    width={800}
+                                                    height={384}
+                                                    quality={72}
+                                                    cacheVersion={group.updated_at || group.created_at || group.id}
+                                                />
+                                                <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
+                                                    <Text style={[styles.activeText, { color: colors.primary }]}>Active</Text>
+                                                </View>
                                             </View>
 
-                                            <TouchableOpacity activeOpacity={1}
-                                                onPress={() => confirmDelete(group.id, group.name)}
-                                                style={styles.deleteBtn}
-                                            >
-                                                <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                                            </TouchableOpacity>
+                                            <View style={styles.cardContent}>
+                                                <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{group.name}</Text>
+                                                <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
+                                                    {group.description}
+                                                </Text>
+
+                                                <View style={[styles.actionRow, { borderColor: colors.border }]}>
+                                                    <View style={styles.actionLeft}>
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => router.push({ pathname: '/manage_group', params: { id: group.id } })}
+                                                            style={[styles.manageBtn, { backgroundColor: colors.primary }]}
+                                                        >
+                                                            <Ionicons name="settings-outline" size={16} color="#FFF" />
+                                                            <Text style={styles.manageBtnText}>Manage</Text>
+                                                        </TouchableOpacity>
+
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => router.push({
+                                                                pathname: '/chat',
+                                                                params: {
+                                                                    isGroupChat: 'true',
+                                                                    groupChatId: group.id
+                                                                }
+                                                            })}
+                                                            style={[styles.editBtn, { borderColor: colors.border }]}
+                                                        >
+                                                            <Ionicons name="chatbubbles-outline" size={18} color={colors.text} />
+                                                        </TouchableOpacity>
+
+                                                        <TouchableOpacity activeOpacity={1}
+                                                            onPress={() => router.push({ pathname: '/edit_group', params: { id: group.id } })}
+                                                            style={[styles.editBtn, { borderColor: colors.border }]}
+                                                        >
+                                                            <Ionicons name="pencil-outline" size={18} color={colors.text} />
+                                                        </TouchableOpacity>
+                                                    </View>
+
+                                                    <TouchableOpacity activeOpacity={1}
+                                                        onPress={() => confirmDelete(group.id, group.name)}
+                                                        style={styles.deleteBtn}
+                                                    >
+                                                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
                                         </View>
                                     </View>
-                                </View>
-                            ))
+                                ))}
+                            </View>
                         )}
                     </ScrollView>
 
@@ -316,10 +339,43 @@ const styles = StyleSheet.create({
     flex1: {
         flex: 1,
     },
+    pageFrame: {
+        flex: 1,
+        width: '100%',
+    },
+    pageFrameWeb: {
+        maxWidth: 1240,
+        width: '100%',
+        alignSelf: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 12,
+    },
     scrollContent: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 16,
         paddingBottom: 180,
-        paddingTop: 16,
+        paddingTop: 12,
+    },
+    scrollContentWeb: {
+        maxWidth: 1120,
+        width: '100%',
+        alignSelf: 'center',
+        paddingTop: 10,
+    },
+    gridWrap: {
+        width: '100%',
+    },
+    gridWrapWeb: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+    },
+    gridItem: {
+        width: '100%',
+        marginBottom: 14,
+    },
+    gridItemWeb: {
+        width: '49%',
+        marginBottom: 18,
     },
     loadingText: {
         textAlign: 'center',
@@ -336,16 +392,25 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_400Regular',
     },
     cardContainer: {
-        marginBottom: 24,
-        borderRadius: 24,
+        borderRadius: 18,
+        borderWidth: 1,
         overflow: 'hidden',
-        shadowOffset: { width: 0, height: 8 },
+        shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.1,
+        shadowRadius: 12,
+    },
+    webSectionCard: {
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.08,
         shadowRadius: 16,
+        elevation: 3,
     },
     imageWrapper: {
-        height: 192,
+        height: 170,
         position: 'relative',
+    },
+    imageWrapperWeb: {
+        height: 186,
     },
     cardImage: {
         width: '100%',
@@ -364,49 +429,51 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_600SemiBold',
     },
     cardContent: {
-        padding: 16,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
     },
     cardTitle: {
         fontFamily: 'Poppins_600SemiBold',
-        fontSize: 18,
+        fontSize: 16,
         marginBottom: 4,
     },
     cardDescription: {
         fontFamily: 'Poppins_400Regular',
-        fontSize: 13,
-        lineHeight: 20,
+        fontSize: 12,
+        lineHeight: 18,
     },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 16,
+        marginTop: 12,
         borderTopWidth: 1,
-        paddingTop: 16,
+        paddingTop: 12,
     },
     actionLeft: {
         flexDirection: 'row',
-        gap: 12,
+        gap: 8,
     },
     manageBtn: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 8,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 12,
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+        borderRadius: 10,
     },
     manageBtnText: {
         fontFamily: 'Poppins_500Medium',
+        fontSize: 12,
         color: '#FFF',
     },
     editBtn: {
-        padding: 8,
-        borderRadius: 12,
+        padding: 7,
+        borderRadius: 10,
         borderWidth: 1,
     },
     deleteBtn: {
-        padding: 8,
+        padding: 6,
     },
 });
 
