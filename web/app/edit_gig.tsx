@@ -313,6 +313,10 @@ export default function EditGigScreen() {
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
   const [permitStatus, setPermitStatus] = useState<string>("pending_review");
   const [permitRejectionReason, setPermitRejectionReason] = useState<string>("");
+  const [permitResubmissionsUsed, setPermitResubmissionsUsed] = useState(0);
+  const hasPermitResubmissionRemaining = permitResubmissionsUsed < 1;
+  const canReapplyPermit =
+    permitStatus === "rejected" && hasPermitResubmissionRemaining;
 
   const getNormalizedEventSchedules = (): EventSchedule[] => {
     const cleanedSchedules = eventSchedules
@@ -670,6 +674,7 @@ export default function EditGigScreen() {
       setInitialBusinessPermitUrl(data.business_permit_url || "");
       setPermitStatus(String(data.permit_status || "pending_review").toLowerCase());
       setPermitRejectionReason(data.permit_rejection_reason || "");
+      setPermitResubmissionsUsed(Number(data.permit_resubmissions_used || 0));
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
         setBusinessPermitFileName(decodeURIComponent(fileName));
@@ -963,9 +968,13 @@ export default function EditGigScreen() {
         businessPermitUrl !== previousBusinessPermit;
 
       const isReapplyAction =
-        isReapplyRequested && permitStatus === "rejected";
+        isReapplyRequested && canReapplyPermit;
+      const reapplyLimitReached =
+        permitStatus === "rejected" &&
+        (shouldResetPermitReview || isReapplyRequested) &&
+        !hasPermitResubmissionRemaining;
 
-      if (shouldResetPermitReview || isReapplyAction) {
+      if ((shouldResetPermitReview || isReapplyAction) && !reapplyLimitReached) {
         const nextPermitStatus =
           isReapplyAction || permitStatus === "rejected"
             ? "resubmitted"
@@ -989,6 +998,9 @@ export default function EditGigScreen() {
 
         setPermitStatus(nextPermitStatus);
         setPermitRejectionReason("");
+        if (nextPermitStatus === "resubmitted") {
+          setPermitResubmissionsUsed(1);
+        }
       }
 
       const reconfirmRequired = Number(rpcResult?.reconfirmation?.required_count || 0);
@@ -1016,6 +1028,10 @@ export default function EditGigScreen() {
         if (softClosedRejected > 0) {
           updateNotes.push(`${softClosedRejected} pending applicant(s) were notified that slots are full.`);
         }
+      }
+
+      if (reapplyLimitReached) {
+        updateNotes.push('Permit remains rejected because the one allowed resubmission after decline was already used.');
       }
 
       if (storageCleanupWarnings.length > 0) {
@@ -1060,12 +1076,18 @@ export default function EditGigScreen() {
       return;
     }
 
-    const isReapplyAction = isReapplyRequested && permitStatus === "rejected";
+    const isReapplyAction = isReapplyRequested && canReapplyPermit;
+    const reapplyLimitReached =
+      permitStatus === "rejected" &&
+      isReapplyRequested &&
+      !hasPermitResubmissionRemaining;
 
     showAlert(
       "warning",
       isReapplyAction ? "Save & Reapply" : "Save Changes",
-      isReapplyAction
+      reapplyLimitReached
+        ? "Save your updates now? Permit resubmission is no longer available because the one allowed retry was already used."
+        : isReapplyAction
         ? "Save your updates and resubmit this gig permit for admin review?"
         : "Are you sure you want to update this gig profile?",
       [
@@ -2847,7 +2869,9 @@ export default function EditGigScreen() {
               >
                 <Text style={styles.rejectionNoticeTitle}>Permit Rejected</Text>
                 <Text style={styles.rejectionNoticeText}>
-                  Upload a corrected permit and save to resubmit for admin review.
+                  {hasPermitResubmissionRemaining
+                    ? "Upload a corrected permit and save to resubmit for admin review."
+                    : "You already used your one allowed resubmission. You can still edit details, but permit status stays rejected."}
                 </Text>
                 {!!permitRejectionReason && (
                   <Text style={styles.rejectionNoticeReason} numberOfLines={4}>
@@ -2969,7 +2993,7 @@ export default function EditGigScreen() {
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <Text style={styles.saveButtonText}>
-                  {isReapplyRequested && permitStatus === "rejected"
+                  {isReapplyRequested && canReapplyPermit
                     ? "Save & Reapply"
                     : "Save Changes"}
                 </Text>

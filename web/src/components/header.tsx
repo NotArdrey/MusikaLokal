@@ -44,7 +44,7 @@ function Header({ title, transparent, onBackPress, hideBackButton = false }: Hea
     );
 
     const backVisible = !hideBackButton && (!!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isManageDetailPath));
-    const notifVisible = isMainNavPath && !isGuest;
+    const notifVisible = isMainNavPath && !isGuest && !isWebDesktop;
     const addbtnvisible = isMyListingPath;
 
     const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group'>(() => {
@@ -55,8 +55,10 @@ function Header({ title, transparent, onBackPress, hideBackButton = false }: Hea
 
     useFocusEffect(
         useCallback(() => {
-            checkUnreadNotifications();
-        }, [])
+            if (!isWebDesktop) {
+                checkUnreadNotifications();
+            }
+        }, [isWebDesktop])
     );
 
     const checkUnreadNotifications = async () => {

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -43,6 +43,7 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
 
     const backVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isManageDetailPath);
     const notifVisible = isMainNavPath && !isGuest;
+    const notifVisibleOnWebOnly = Platform.OS === 'web' && notifVisible;
     const addbtnvisible = isMyListingPath;
 
     const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group'>(() => {
@@ -194,7 +195,7 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
 
             {/* Action Buttons */}
             <View style={styles.rightContainer}>
-                {notifVisible ? (
+                {notifVisibleOnWebOnly ? (
                     <View style={styles.iconRow}>
                         {/* Chat Button */}
                         <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>

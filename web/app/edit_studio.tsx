@@ -170,7 +170,13 @@ const inferStudioTypeFromRows = (
 
 export default function EditStudioScreen() {
   const { colors, isDark } = useTheme();
-  const { id } = useLocalSearchParams();
+  const { id, reapply } = useLocalSearchParams<{
+    id?: string | string[];
+    reapply?: string | string[];
+  }>();
+  const reapplyParam = Array.isArray(reapply) ? reapply[0] : reapply;
+  const isReapplyRequested =
+    reapplyParam === "1" || reapplyParam === "true";
   const [studioName, setStudioName] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
@@ -299,6 +305,11 @@ export default function EditStudioScreen() {
   const [uploadingBusinessPermit, setUploadingBusinessPermit] = useState(false);
   const businessPermitInputRef = useRef<HTMLInputElement>(null);
   const [permitStatus, setPermitStatus] = useState<string>("pending_review");
+  const [permitRejectionReason, setPermitRejectionReason] = useState<string>("");
+  const [permitResubmissionsUsed, setPermitResubmissionsUsed] = useState(0);
+  const hasPermitResubmissionRemaining = permitResubmissionsUsed < 1;
+  const canReapplyPermit =
+    permitStatus === "rejected" && hasPermitResubmissionRemaining;
 
   // Availability state
   const daysOfWeek = [
@@ -1035,7 +1046,9 @@ export default function EditStudioScreen() {
       console.log("🔧 Setting businessPermitUrl to:", data.business_permit_url || "");
       setBusinessPermitUrl(data.business_permit_url || "");
       setInitialBusinessPermitUrl(data.business_permit_url || "");
-      setPermitStatus(data.permit_status || "pending_review");
+      setPermitStatus(String(data.permit_status || "pending_review").toLowerCase());
+      setPermitRejectionReason(data.permit_rejection_reason || "");
+      setPermitResubmissionsUsed(Number(data.permit_resubmissions_used || 0));
       if (data.business_permit_url) {
         const fileName = data.business_permit_url.split("/").pop() || "BusinessPermit.pdf";
         console.log("🔧 Setting businessPermitFileName to:", fileName);
@@ -2455,9 +2468,18 @@ export default function EditStudioScreen() {
         !!businessPermitUrl &&
         businessPermitUrl !== initialBusinessPermitUrl;
 
-      if (shouldResetPermitReview) {
+      const isReapplyAction =
+        isReapplyRequested && canReapplyPermit;
+      const reapplyLimitReached =
+        permitStatus === "rejected" &&
+        (shouldResetPermitReview || isReapplyRequested) &&
+        !hasPermitResubmissionRemaining;
+
+      if ((shouldResetPermitReview || isReapplyAction) && !reapplyLimitReached) {
         const nextPermitStatus =
-          permitStatus === "rejected" ? "resubmitted" : "pending_review";
+          isReapplyAction || permitStatus === "rejected"
+            ? "resubmitted"
+            : "pending_review";
 
         const { error: permitStatusError } = await supabase
           .from("studios")
@@ -2476,6 +2498,10 @@ export default function EditStudioScreen() {
         }
 
         setPermitStatus(nextPermitStatus);
+        setPermitRejectionReason("");
+        if (nextPermitStatus === "resubmitted") {
+          setPermitResubmissionsUsed(1);
+        }
       }
 
       await supabase.from('studio_types').delete().eq('studio_id', studioId);
@@ -2649,7 +2675,16 @@ export default function EditStudioScreen() {
       }
 
       console.log("✅ Studio Updated successfully");
-      showAlert("success", "Success", "Studio updated successfully!", [
+      let successMessage =
+        isReapplyAction
+          ? "Studio updated and permit resubmitted for admin review."
+          : "Studio updated successfully!";
+
+      if (reapplyLimitReached) {
+        successMessage += "\n\nPermit remains rejected because the one allowed resubmission after decline was already used.";
+      }
+
+      showAlert("success", "Success", successMessage, [
         {
           text: "OK",
           onPress: () => {
@@ -2684,14 +2719,24 @@ export default function EditStudioScreen() {
       return;
     }
 
+    const isReapplyAction = isReapplyRequested && canReapplyPermit;
+    const reapplyLimitReached =
+      permitStatus === "rejected" &&
+      isReapplyRequested &&
+      !hasPermitResubmissionRemaining;
+
     showAlert(
       "warning",
-      "Save Changes",
-      "Are you sure you want to update this studio profile?",
+      isReapplyAction ? "Save & Reapply" : "Save Changes",
+      reapplyLimitReached
+        ? "Save your updates now? Permit resubmission is no longer available because the one allowed retry was already used."
+        : isReapplyAction
+        ? "Save your updates and resubmit this studio permit for admin review?"
+        : "Are you sure you want to update this studio profile?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Save & Update",
+          text: isReapplyAction ? "Save & Reapply" : "Save & Update",
           style: "default",
           onPress: () => performSave(),
         },
@@ -4123,6 +4168,33 @@ export default function EditStudioScreen() {
             >
               Upload your business permit (PDF or Image)
             </Text>
+
+            {permitStatus === "rejected" && (
+              <View
+                style={[
+                  styles.permitWarningBox,
+                  {
+                    borderColor: "#FCA5A5",
+                    backgroundColor: isDark ? "rgba(185,28,28,0.18)" : "#FEF2F2",
+                  },
+                ]}
+              >
+                <Text style={styles.permitWarningTitle}>Permit rejected</Text>
+                {!!permitRejectionReason && (
+                  <Text style={styles.permitWarningText}>
+                    Reason: {permitRejectionReason}
+                  </Text>
+                )}
+                <Text style={styles.permitWarningText}>
+                  {hasPermitResubmissionRemaining
+                    ? isReapplyRequested
+                      ? "Update details as needed, then tap Save & Reapply to submit back for review."
+                      : "Upload a corrected permit and save your changes to resubmit for review."
+                    : "You already used your one allowed resubmission. You can still edit details, but permit status stays rejected."}
+                </Text>
+              </View>
+            )}
+
             {businessPermitUrl ? (
               <View
                 style={[
@@ -5381,7 +5453,11 @@ export default function EditStudioScreen() {
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={styles.saveButtonText}>
+                  {isReapplyRequested && canReapplyPermit
+                    ? "Save & Reapply"
+                    : "Save Changes"}
+                </Text>
               )}
             </TouchableOpacity>
 
@@ -5841,6 +5917,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Poppins_400Regular",
     marginBottom: 8,
+  },
+  permitWarningBox: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  permitWarningTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
+    color: "#B91C1C",
+  },
+  permitWarningText: {
+    marginTop: 4,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    color: "#7F1D1D",
   },
   uploadContractBtn: {
     padding: 32,

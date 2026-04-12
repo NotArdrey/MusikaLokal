@@ -29,6 +29,8 @@ interface ListingCardProps {
   style?: any;
   hasGroups?: boolean;
   showGigSummary?: boolean;
+  cleanMode?: boolean;
+  verticalImageHeight?: number;
 }
 
 const ListingCard: React.FC<ListingCardProps> = ({
@@ -40,6 +42,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
   style,
   hasGroups,
   showGigSummary = true,
+  cleanMode = false,
+  verticalImageHeight = 180,
 }) => {
   const { colors, isDark } = useTheme();
   const { userRole, userId } = useAuth(); // To avoid showing warning to owners
@@ -725,7 +729,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
 
   // 2. STANDARD VERTICAL CARD (For Search / Lists)
   // Legacy Layout: Image Top, White Info Box Bottom
-  const imageHeight = 180;
+  const imageHeight = verticalImageHeight;
 
   return (
     <Pressable
@@ -736,8 +740,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
           width: "100%", 
           backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
           flex: Platform.OS === 'web' ? 1 : undefined,
-          minWidth: Platform.OS === 'web' ? 260 : undefined,
-          maxWidth: Platform.OS === 'web' ? 380 : undefined,
+          minWidth: Platform.OS === 'web' ? (cleanMode ? 320 : 260) : undefined,
+          maxWidth: Platform.OS === 'web' ? (cleanMode ? 520 : 380) : undefined,
           transform: [{ scale: pressed ? 0.99 : hovered ? 1.02 : 1 }],
           ...(hovered && Platform.OS === 'web' ? {
             shadowOpacity: 0.3,
@@ -929,12 +933,9 @@ const ListingCard: React.FC<ListingCardProps> = ({
             )}
 
           {/* Top Actions for Standard Card */}
-          <View style={[styles.topActions]}>
-            <View style={{ flex: 1 }} />
-
-            {/* Rating moved to right or kept at top? Keeping original rating logic but ensuring zIndex */}
+          <View style={[styles.topActions, cleanMode && styles.topActionsClean]}>
             {item.rating > 0 && (item.review_count || 0) > 0 ? (
-              <View style={[styles.ratingBadge, { marginRight: "auto" }]}>
+              <View style={[styles.ratingBadge, !cleanMode && { marginRight: "auto" }]}>
                 <Ionicons name="star" size={12} color="#FBBF24" />
                 <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
               </View>
@@ -944,7 +945,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   styles.ratingBadge,
                   {
                     backgroundColor: "rgba(148, 163, 184, 0.9)",
-                    marginRight: "auto",
+                    marginRight: cleanMode ? 0 : "auto",
                   },
                 ]}
               >
@@ -952,33 +953,35 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </View>
             )}
 
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              {/* Invite Button Vertical */}
-              {canInvite && (
-                <TouchableOpacity activeOpacity={1}
-                  style={[styles.iconBtn, { backgroundColor: colors.primary }]}
-                  onPress={handleInviteAction}
-                >
-                  <Ionicons name="mail" size={20} color="#FFF" />
+            {!cleanMode && (
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {/* Invite Button Vertical */}
+                {canInvite && (
+                  <TouchableOpacity activeOpacity={1}
+                    style={[styles.iconBtn, { backgroundColor: colors.primary }]}
+                    onPress={handleInviteAction}
+                  >
+                    <Ionicons name="mail" size={20} color="#FFF" />
+                  </TouchableOpacity>
+                )}
+                {/* Chat Button Vertical */}
+                {canChat && (
+                  <TouchableOpacity activeOpacity={1}
+                    style={[styles.iconBtn, { backgroundColor: colors.primary }]}
+                    onPress={handleChatAction}
+                  >
+                    <Ionicons name="chatbubble-ellipses" size={18} color="#FFF" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity activeOpacity={1} style={styles.iconBtn} onPress={toggleLike}>
+                  <Ionicons
+                    name={isLiked ? "heart" : "heart-outline"}
+                    size={20}
+                    color={isLiked ? "#EF4444" : "#000"}
+                  />
                 </TouchableOpacity>
-              )}
-              {/* Chat Button Vertical */}
-              {canChat && (
-                <TouchableOpacity activeOpacity={1}
-                  style={[styles.iconBtn, { backgroundColor: colors.primary }]}
-                  onPress={handleChatAction}
-                >
-                  <Ionicons name="chatbubble-ellipses" size={18} color="#FFF" />
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity activeOpacity={1} style={styles.iconBtn} onPress={toggleLike}>
-                <Ionicons
-                  name={isLiked ? "heart" : "heart-outline"}
-                  size={20}
-                  color={isLiked ? "#EF4444" : "#000"}
-                />
-              </TouchableOpacity>
-            </View>
+              </View>
+            )}
           </View>
         </View>
 
@@ -1045,7 +1048,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   </Text>
                 </View>
               )}
-            {showOpenApplicationsBadge && (
+            {showOpenApplicationsBadge && !cleanMode && (
               <View
                 style={[
                   styles.tagBadge,
@@ -1332,6 +1335,9 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     zIndex: 10,
     gap: 12, // Added gap to separate rating and heart
+  },
+  topActionsClean: {
+    justifyContent: "flex-start",
   },
   ratingBadge: {
     backgroundColor: "rgba(255, 255, 255, 0.95)",
