@@ -26,6 +26,7 @@ import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
+import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { createBookingCheckout } from "../src/services/paymongo";
 
@@ -161,22 +162,57 @@ export default function BookingsScreen() {
     setAlertVisible(true);
   };
 
-  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
-    const lowerTitle = (title || "").toLowerCase();
-    let type: AlertType = "info";
+  const isSimpleTopToastButtons = (buttons?: any[]) => {
+    if (!buttons || buttons.length === 0) return true;
+    if (buttons.length !== 1) return false;
+
+    const onlyButton = buttons[0];
+    const normalizedText = String(onlyButton?.text ?? "OK").trim().toLowerCase();
+    const hasNoCallback = !onlyButton?.onPress;
+    const isNeutralStyle =
+      !onlyButton?.style || onlyButton.style === "default" || onlyButton.style === "cancel";
+
+    return (
+      hasNoCallback &&
+      isNeutralStyle &&
+      (normalizedText === "ok" || normalizedText === "close" || normalizedText === "got it")
+    );
+  };
+
+  const resolveAlertType = (title: string): AlertType => {
+    const lowerTitle = title.toLowerCase();
     if (
       lowerTitle.includes("error") ||
       lowerTitle.includes("failed") ||
       lowerTitle.includes("invalid") ||
       lowerTitle.includes("required")
     ) {
-      type = "error";
-    } else if (lowerTitle.includes("success")) {
-      type = "success";
-    } else if (lowerTitle.includes("warning") || lowerTitle.includes("info")) {
-      type = "warning";
+      return "error";
     }
-    showAlert(type, title || "Notice", message || "", buttons);
+    if (lowerTitle.includes("success")) {
+      return "success";
+    }
+    if (lowerTitle.includes("warning") || lowerTitle.includes("info")) {
+      return "warning";
+    }
+    return "info";
+  };
+
+  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+    const normalizedTitle = title || "Notice";
+    const normalizedMessage = message || "";
+    const type = resolveAlertType(normalizedTitle);
+
+    if (isSimpleTopToastButtons(buttons)) {
+      showTopToast({
+        type,
+        title: normalizedTitle,
+        message: normalizedMessage.trim() ? normalizedMessage : normalizedTitle,
+      });
+      return;
+    }
+
+    showAlert(type, normalizedTitle, normalizedMessage, buttons);
   };
 
   const Alert = { alert: showAlertNative };
@@ -3593,6 +3629,66 @@ export default function BookingsScreen() {
                               }
                             }
 
+                            const parsedSongCount = Number(
+                              item.song_count ??
+                                item.modifiers_applied?.recording_session
+                                  ?.song_count ??
+                                item.modifiers_applied?.song_count ??
+                                0,
+                            );
+                            const recordingSongCount =
+                              Number.isFinite(parsedSongCount) &&
+                              parsedSongCount > 0
+                                ? parsedSongCount
+                                : null;
+                            const parsedMinHoursPerSong = Number(
+                              item.modifiers_applied?.recording_session
+                                ?.min_hours_per_song ??
+                                item.modifiers_applied?.min_hours_per_song ??
+                                0,
+                            );
+                            const minHoursPerSong =
+                              Number.isFinite(parsedMinHoursPerSong) &&
+                              parsedMinHoursPerSong > 0
+                                ? parsedMinHoursPerSong
+                                : null;
+                            const parsedRequiredTotalHours = Number(
+                              item.modifiers_applied?.recording_session
+                                ?.required_total_hours ??
+                                item.modifiers_applied?.required_total_hours ??
+                                0,
+                            );
+                            const requiredTotalHours =
+                              Number.isFinite(parsedRequiredTotalHours) &&
+                              parsedRequiredTotalHours > 0
+                                ? parsedRequiredTotalHours
+                                : recordingSongCount && minHoursPerSong
+                                  ? recordingSongCount * minHoursPerSong
+                                  : null;
+                            const parsedSelectedTotalHours = Number(
+                              item.modifiers_applied?.recording_session
+                                ?.selected_total_hours ??
+                                item.modifiers_applied?.selected_total_hours ??
+                                item.duration_hours ??
+                                item.modifiers_applied?.hours ??
+                                0,
+                            );
+                            const selectedTotalHours =
+                              Number.isFinite(parsedSelectedTotalHours) &&
+                              parsedSelectedTotalHours > 0
+                                ? parsedSelectedTotalHours
+                                : null;
+                            const showRecordingMeta =
+                              Boolean(recordingSongCount) ||
+                              Boolean(requiredTotalHours) ||
+                              Boolean(minHoursPerSong);
+                            const recordingDurationColor =
+                              selectedTotalHours &&
+                              requiredTotalHours &&
+                              selectedTotalHours + 1e-9 < requiredTotalHours
+                                ? "#F59E0B"
+                                : colors.textSecondary;
+
                             return (
                               <>
                                 <View style={styles.cardDetailRow}>
@@ -3608,6 +3704,48 @@ export default function BookingsScreen() {
                                       {timeStr}
                                     </Text>
                                   </View>
+                                ) : null}
+                                {showRecordingMeta ? (
+                                  <>
+                                    {recordingSongCount ? (
+                                      <View style={styles.cardDetailRow}>
+                                        <Ionicons
+                                          name="musical-notes-outline"
+                                          size={14}
+                                          color={colors.textSecondary}
+                                        />
+                                        <Text
+                                          style={[
+                                            styles.cardDetailText,
+                                            { color: colors.textSecondary },
+                                          ]}
+                                        >
+                                          Recording • {recordingSongCount} song
+                                          {recordingSongCount > 1 ? "s" : ""}
+                                        </Text>
+                                      </View>
+                                    ) : null}
+                                    {requiredTotalHours ? (
+                                      <View style={styles.cardDetailRow}>
+                                        <Ionicons
+                                          name="hourglass-outline"
+                                          size={14}
+                                          color={recordingDurationColor}
+                                        />
+                                        <Text
+                                          style={[
+                                            styles.cardDetailText,
+                                            { color: recordingDurationColor },
+                                          ]}
+                                        >
+                                          Min {requiredTotalHours.toFixed(1)}h
+                                          {selectedTotalHours
+                                            ? ` • Selected ${selectedTotalHours.toFixed(1)}h`
+                                            : ""}
+                                        </Text>
+                                      </View>
+                                    ) : null}
+                                  </>
                                 ) : null}
                               </>
                             );

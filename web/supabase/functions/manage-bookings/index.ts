@@ -1096,9 +1096,16 @@ serve(async (req: Request) => {
       const configuredMinBookingDurationHours = Number(
         studioSettingsData?.min_booking_duration_hours ?? 0,
       );
-      const minBookingDurationHours = Number.isFinite(configuredMinBookingDurationHours)
-        ? Math.max(0, Math.min(1, configuredMinBookingDurationHours))
-        : 1;
+      const normalizedConfiguredMinBookingDurationHours = Number.isFinite(
+        configuredMinBookingDurationHours,
+      )
+        ? Math.max(0, configuredMinBookingDurationHours)
+        : 0;
+      const recordingMinHoursPerSong =
+        normalizedConfiguredMinBookingDurationHours > 0
+          ? normalizedConfiguredMinBookingDurationHours
+          : 3;
+      const minSlotDurationHours = 1;
 
       const dayDiff = Math.floor(
         (bookingDateStartUtc.getTime() - todayManilaStartUtc.getTime()) /
@@ -1176,10 +1183,37 @@ serve(async (req: Request) => {
         const durationHours =
           (slotEndUtc.getTime() - slotStartUtc.getTime()) / (60 * 60 * 1000);
 
-        if (minBookingDurationHours > 0 && durationHours < minBookingDurationHours) {
+        if (durationHours < minSlotDurationHours) {
           return new Response(
             JSON.stringify({
-              error: `Each booking slot must be at least ${minBookingDurationHours} hour(s).`,
+              error: `Each booking slot must be at least ${minSlotDurationHours} hour(s).`,
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 409,
+            },
+          );
+        }
+      }
+
+      if (isRecordingSession) {
+        const totalSelectedHours = slots.reduce(
+          (total, slot) => total + toHours(slot.start, slot.end),
+          0,
+        );
+        const requiredRecordingHours =
+          requestedSongCount * recordingMinHoursPerSong;
+
+        if (totalSelectedHours + 1e-9 < requiredRecordingHours) {
+          return new Response(
+            JSON.stringify({
+              error: `Recording booking requires at least ${requiredRecordingHours.toFixed(1)} hour(s) for ${requestedSongCount} song(s), but only ${totalSelectedHours.toFixed(1)} hour(s) were selected.`,
+              debug: {
+                requested_song_count: requestedSongCount,
+                min_hours_per_song: recordingMinHoursPerSong,
+                required_total_hours: requiredRecordingHours,
+                selected_total_hours: totalSelectedHours,
+              },
             }),
             {
               headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -1375,6 +1409,8 @@ serve(async (req: Request) => {
 
         const recordingRate = Number(studioData.recording_rate || 0);
         const recordingSubtotal = recordingRate * requestedSongCount;
+        const requiredRecordingHours =
+          requestedSongCount * recordingMinHoursPerSong;
 
         pricingData = {
           base_rate: recordingRate,
@@ -1384,9 +1420,15 @@ serve(async (req: Request) => {
           modifiers: {
             rate_model: "per_song",
             song_count: requestedSongCount,
+            min_hours_per_song: recordingMinHoursPerSong,
+            required_total_hours: requiredRecordingHours,
+            selected_total_hours: totalHours,
             recording_session: {
               rate_model: "per_song",
               song_count: requestedSongCount,
+              min_hours_per_song: recordingMinHoursPerSong,
+              required_total_hours: requiredRecordingHours,
+              selected_total_hours: totalHours,
             },
           },
           final_price: recordingSubtotal,
@@ -1472,6 +1514,8 @@ serve(async (req: Request) => {
 
         if (isRecordingSession) {
           const recordingRate = Number(studioData.recording_rate || 0);
+          const requiredRecordingHours =
+            requestedSongCount * recordingMinHoursPerSong;
           pricingData = {
             base_rate: recordingRate,
             hours: totalHours,
@@ -1480,9 +1524,15 @@ serve(async (req: Request) => {
             modifiers: {
               rate_model: "per_song",
               song_count: requestedSongCount,
+              min_hours_per_song: recordingMinHoursPerSong,
+              required_total_hours: requiredRecordingHours,
+              selected_total_hours: totalHours,
               recording_session: {
                 rate_model: "per_song",
                 song_count: requestedSongCount,
+                min_hours_per_song: recordingMinHoursPerSong,
+                required_total_hours: requiredRecordingHours,
+                selected_total_hours: totalHours,
               },
             },
             final_price: recordingRate * requestedSongCount,

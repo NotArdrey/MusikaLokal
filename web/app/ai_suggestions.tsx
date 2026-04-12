@@ -22,7 +22,11 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
-import { generateOfflineSuggestionsWithLocalLLM } from '../src/services/offlineLlmEnhancer';
+import {
+    generateInstrumentSuggestionsWithGeminiFlashLite,
+    getGeminiFlashLiteInfo,
+} from '../src/services/groqModelRouter';
+import { getOfflineInstrumentSuggestions } from '../src/utils/offlineInstrumentRecommender';
 import {
     EXPERIENCE_OPTIONS,
     ExperienceLevel,
@@ -86,6 +90,14 @@ export default function AiSuggestionsScreen() {
     const [isAIPowered, setIsAIPowered] = useState(false);
     const [aiProvider, setAIProvider] = useState<string>('');
     const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
+    const geminiInfo = getGeminiFlashLiteInfo();
+    const geminiModelLabel = geminiInfo.modelLabel;
+    const geminiTransportLabel = geminiInfo.transportLabel;
+    const geminiConfigured = geminiInfo.configured;
+    const geminiStatusMessage = geminiInfo.statusMessage;
+    const geminiModelSource = geminiInfo.modelSource;
+    const geminiApiKeySource = geminiInfo.apiKeySource;
+    const geminiApiKeySignature = geminiInfo.apiKeySignature;
 
     // User profile data
     const [userRoles, setUserRoles] = useState<string[]>([]);
@@ -96,6 +108,36 @@ export default function AiSuggestionsScreen() {
     useEffect(() => {
         loadUserProfile();
     }, [refreshKey]);
+
+    useEffect(() => {
+        if (step !== 'results') {
+            return;
+        }
+
+        console.log('[AI_SUGGESTIONS] Groq provider', {
+            platform: 'web',
+            aiPowered: isAIPowered,
+            provider: aiProvider || null,
+            configured: geminiConfigured,
+            model: geminiModelLabel,
+            modelSource: geminiModelSource,
+            apiKeySource: geminiApiKeySource,
+            apiKeySignature: geminiApiKeySignature,
+            transport: geminiTransportLabel,
+            status: geminiStatusMessage,
+        });
+    }, [
+        aiProvider,
+        geminiApiKeySignature,
+        geminiApiKeySource,
+        geminiConfigured,
+        geminiModelLabel,
+        geminiModelSource,
+        geminiStatusMessage,
+        geminiTransportLabel,
+        isAIPowered,
+        step,
+    ]);
 
     const applyProfileSignals = (profile: CachedOfflineProfile) => {
         const safeRoles = Array.isArray(profile.roles)
@@ -189,40 +231,63 @@ export default function AiSuggestionsScreen() {
         );
     }, []);
 
-    // Fetch AI suggestions
+    // Fetch Groq-backed suggestions with local ranking fallback.
     const fetchSuggestions = async () => {
         setLoading(true);
         setError(null);
         setSuggestionMessage(null);
 
+        const requestInput = {
+            genres: selectedGenres,
+            currentInstruments,
+            userRoles,
+            experienceLevel,
+            purpose,
+            limit: 10,
+        };
+
         try {
-            const generated = await generateOfflineSuggestionsWithLocalLLM({
-                genres: selectedGenres,
-                currentInstruments,
-                userRoles,
-                experienceLevel,
-                purpose,
-                limit: 10,
-            });
+            const generated = await generateInstrumentSuggestionsWithGeminiFlashLite(requestInput);
 
             if (generated.suggestions.length > 0) {
                 setSuggestions(generated.suggestions);
-                setIsAIPowered(Boolean(generated.aiPowered));
-                setAIProvider(generated.aiProvider || 'On-Device LLM');
-                // Do not treat local fallback as an error. Only show an informational message
-                // when the suggestions were produced by an AI model.
-                setSuggestionMessage(generated.aiPowered ? generated.message : null);
+                setIsAIPowered(generated.aiPowered);
+                setAIProvider(
+                    generated.aiProvider ||
+                    (generated.aiPowered ? geminiModelLabel : 'Local Ranker')
+                );
+                setSuggestionMessage(generated.message || null);
+                setStep('results');
+                return;
+            }
+
+            const fallbackSuggestions = getOfflineInstrumentSuggestions(requestInput);
+            if (fallbackSuggestions.length > 0) {
+                setSuggestions(fallbackSuggestions);
+                setIsAIPowered(false);
+                setAIProvider('Local Ranker');
+                setSuggestionMessage(generated.message || null);
                 setStep('results');
             } else {
                 setSuggestions([]);
                 setIsAIPowered(false);
-                setAIProvider(generated.aiProvider || 'On-Device LLM');
-                setError(generated.message || 'Unable to generate LLM suggestions right now.');
+                setAIProvider(generated.aiProvider || geminiModelLabel);
+                setError(generated.message || 'Unable to generate suggestions right now.');
             }
         } catch (err: any) {
             console.error('Error fetching suggestions:', err);
-            setError('Failed to generate on-device LLM suggestions. Please try again.');
-            setSuggestionMessage(null);
+
+            const fallbackSuggestions = getOfflineInstrumentSuggestions(requestInput);
+            if (fallbackSuggestions.length > 0) {
+                setSuggestions(fallbackSuggestions);
+                setIsAIPowered(false);
+                setAIProvider('Local Ranker');
+                setSuggestionMessage(`${geminiModelLabel} request failed. Showing local suggestions.`);
+                setStep('results');
+            } else {
+                setError('Failed to generate suggestions right now. Please try again.');
+                setSuggestionMessage(null);
+            }
         } finally {
             setLoading(false);
         }
@@ -271,7 +336,7 @@ export default function AiSuggestionsScreen() {
                             You're a <Text style={{ color: accentColor, fontFamily: 'Poppins_600SemiBold' }}>{userRoles.join(', ')}</Text>
                         </Text>
                         <Text style={[styles.profileHint, { color: textSecondary }]}>
-                            On-device LLM generates instruments that complement your role
+                            {geminiModelLabel} suggests instruments that complement your role
                         </Text>
                     </>
                 ) : (
@@ -734,8 +799,23 @@ export default function AiSuggestionsScreen() {
                     <Text style={[styles.aiHeaderSubtitle, { color: textSecondary }]}>
                         {isAIPowered
                             ? `Powered by ${aiProvider || 'AI'} • Analyzed your profile`
-                            : `Using ${aiProvider || 'On-Device LLM'} • Personalized from your profile`}
+                            : `Using ${aiProvider || 'Local Match'} • Personalized from your profile`}
                     </Text>
+
+                    {/* Groq Provider Info */}
+                    {(isAIPowered || suggestionMessage || !geminiConfigured) && (
+                        <>
+                            <View style={styles.llmConfigRow}>
+                                <Ionicons name="cloud-outline" size={12} color={textSecondary} />
+                                <Text style={[styles.llmConfigText, { color: textSecondary }]}>
+                                    {geminiModelLabel} • {geminiTransportLabel}
+                                </Text>
+                            </View>
+                            <Text style={[styles.llmLimitText, { color: textSecondary }]}>
+                                {geminiStatusMessage}
+                            </Text>
+                        </>
+                    )}
 
                     {/* User Role Badge */}
                     {userRoles.length > 0 && (
@@ -1125,6 +1205,23 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontFamily: 'Poppins_400Regular',
         marginBottom: 12,
+    },
+    llmConfigRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 10,
+    },
+    llmConfigText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_400Regular',
+    },
+    llmLimitText: {
+        fontSize: 11,
+        fontFamily: 'Poppins_500Medium',
+        lineHeight: 16,
+        marginBottom: 12,
+        textAlign: 'center',
     },
     roleBadge: {
         flexDirection: 'row',

@@ -50,16 +50,17 @@ export default function SettingsScreen() {
   // Check if user is studio/venue owner (shows wallet & subscription)
   const isOwner = userRole === 'studio-owner' || userRole === 'venue-owner';
 
-  const settingsSections: Array<{
+  const settingsSections: {
     title: string;
-    items: Array<{ label: string; icon: string; route: string }>;
-  }> = [];
+    items: { label: string; icon: string; route: string }[];
+  }[] = [];
 
   if (!isGuest) {
     settingsSections.push({
       title: 'Preferences',
       items: [
         { label: 'Account Security', icon: 'shield-outline', route: '/account_details' },
+        { label: 'Notification Preferences', icon: 'notifications-outline', route: '/notification_settings' },
         { label: 'Identity Verification', icon: 'card-outline', route: '/identity_verification' },
         ...(isOwner
           ? [{ label: 'Wallet & Subscription', icon: 'wallet-outline', route: '/wallet' }]

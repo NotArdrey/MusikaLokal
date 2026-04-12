@@ -16,6 +16,188 @@ const CACHE_TTL_MS = 1000 * 60 * 60 * 12;
 const GENERATION_TIMEOUT_MS = 3500;
 const HOME_FEED_TIMEOUT_MS = 1800;
 
+// ── RAM-based device config (web equivalent of mobile musikaLlmAdapter) ──
+
+export interface LlmDeviceConfig {
+  nCtx: number;
+  ramTierLabel: string;
+  totalRamGB: number | null;
+}
+
+export interface LlmDeviceCapabilityInfo {
+  config: LlmDeviceConfig;
+  summaryText: string;
+  limitationText: string;
+  maxCandidateCap: number;
+  maxTokens: number;
+  timeoutMs: number;
+}
+
+interface LlmRamTierProfile {
+  minDetectedRamGB: number;
+  label: string;
+  nCtx: number;
+  maxCandidateCap: number;
+  maxTokens: number;
+  timeoutMs: number;
+  limitationText: string;
+}
+
+const LLM_RAM_TIER_PROFILES: LlmRamTierProfile[] = [
+  {
+    minDetectedRamGB: 7.5,
+    label: "8 GB",
+    nCtx: 8192,
+    maxCandidateCap: 14,
+    maxTokens: 260,
+    timeoutMs: 32000,
+    limitationText:
+      "Current device limit: up to 14 candidate instruments, 260 AI output tokens, and a 32s local generation window.",
+  },
+  {
+    minDetectedRamGB: 5.5,
+    label: "6 GB",
+    nCtx: 4096,
+    maxCandidateCap: 12,
+    maxTokens: 220,
+    timeoutMs: 28000,
+    limitationText:
+      "Current device limit: up to 12 candidate instruments, 220 AI output tokens, and a 28s local generation window.",
+  },
+  {
+    minDetectedRamGB: 3.5,
+    label: "4 GB",
+    nCtx: 3072,
+    maxCandidateCap: 10,
+    maxTokens: 180,
+    timeoutMs: 24000,
+    limitationText:
+      "Current device limit: up to 10 candidate instruments, 180 AI output tokens, and a 24s local generation window.",
+  },
+  {
+    minDetectedRamGB: 2.5,
+    label: "3 GB",
+    nCtx: 2048,
+    maxCandidateCap: 8,
+    maxTokens: 140,
+    timeoutMs: 22000,
+    limitationText:
+      "Current device limit: up to 8 candidate instruments, 140 AI output tokens, and a 22s local generation window.",
+  },
+  {
+    minDetectedRamGB: 1.75,
+    label: "2 GB",
+    nCtx: 1536,
+    maxCandidateCap: 7,
+    maxTokens: 120,
+    timeoutMs: 21000,
+    limitationText:
+      "This device runs AI in compact mode: up to 7 candidate instruments, 120 AI output tokens, and a 21s local generation window. Broader requests may fall back to smart local ranking.",
+  },
+  {
+    minDetectedRamGB: 0,
+    label: "<2 GB",
+    nCtx: 1024,
+    maxCandidateCap: 6,
+    maxTokens: 100,
+    timeoutMs: 20000,
+    limitationText:
+      "This device runs AI in compact mode: up to 6 candidate instruments, 100 AI output tokens, and a 20s local generation window. Broader requests may fall back to smart local ranking.",
+  },
+];
+
+let deviceConfig: LlmDeviceConfig | null = null;
+
+const buildDeviceSummaryText = (config: LlmDeviceConfig): string => {
+  if (config.totalRamGB != null) {
+    return `Context: ${config.nCtx.toLocaleString()} tokens \u00B7 ${config.ramTierLabel} RAM tier`;
+  }
+
+  return `Context: ${config.nCtx.toLocaleString()} tokens \u00B7 RAM not detected`;
+};
+
+const resolveLlmRamTier = (totalRamGB: number | null): LlmRamTierProfile | null => {
+  if (totalRamGB == null) {
+    return null;
+  }
+
+  return (
+    LLM_RAM_TIER_PROFILES.find((profile) => totalRamGB >= profile.minDetectedRamGB) ??
+    LLM_RAM_TIER_PROFILES[LLM_RAM_TIER_PROFILES.length - 1]
+  );
+};
+
+const buildLlmDeviceCapabilityInfo = (
+  config: LlmDeviceConfig,
+): LlmDeviceCapabilityInfo => {
+  const summaryText = buildDeviceSummaryText(config);
+
+  const tier = resolveLlmRamTier(config.totalRamGB);
+  if (!tier) {
+    return {
+      config,
+      summaryText,
+      limitationText:
+        "RAM could not be detected, so AI stays in the safest compact mode: up to 6 candidate instruments, 100 AI output tokens, and a 20s local generation window.",
+      maxCandidateCap: 6,
+      maxTokens: 100,
+      timeoutMs: 20000,
+    };
+  }
+
+  return {
+    config,
+    summaryText,
+    limitationText: tier.limitationText,
+    maxCandidateCap: tier.maxCandidateCap,
+    maxTokens: tier.maxTokens,
+    timeoutMs: tier.timeoutMs,
+  };
+};
+
+const detectDeviceConfig = (): LlmDeviceConfig => {
+  if (deviceConfig) return deviceConfig;
+
+  // navigator.deviceMemory is a Chrome/Edge API that returns approximate RAM in GiB
+  const navMemory =
+    typeof navigator !== "undefined"
+      ? ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? undefined)
+      : undefined;
+  if (navMemory == null || !Number.isFinite(navMemory)) {
+    deviceConfig = { nCtx: 1024, ramTierLabel: "Unknown RAM", totalRamGB: null };
+  } else {
+    const totalGB = Math.round(navMemory * 10) / 10;
+    const tier = resolveLlmRamTier(totalGB) ?? LLM_RAM_TIER_PROFILES[LLM_RAM_TIER_PROFILES.length - 1];
+
+    deviceConfig = {
+      nCtx: tier.nCtx,
+      ramTierLabel: tier.label,
+      totalRamGB: totalGB,
+    };
+  }
+
+  const capabilityInfo = buildLlmDeviceCapabilityInfo(deviceConfig);
+  console.log("[MusikaLLM:webDeviceConfig]", {
+    totalRamGB: deviceConfig.totalRamGB,
+    ramTier: deviceConfig.ramTierLabel,
+    nCtx: deviceConfig.nCtx,
+    maxCandidates: capabilityInfo.maxCandidateCap,
+    maxTokens: capabilityInfo.maxTokens,
+    timeoutMs: capabilityInfo.timeoutMs,
+    limitation: capabilityInfo.limitationText,
+  });
+  return deviceConfig;
+};
+
+/**
+ * Returns the RAM-based LLM configuration for this device (web).
+ * Safe to call at any time — detection is lazy and cached.
+ */
+export const getLlmDeviceConfig = (): LlmDeviceConfig => detectDeviceConfig();
+
+export const getLlmDeviceCapabilityInfo = (): LlmDeviceCapabilityInfo =>
+  buildLlmDeviceCapabilityInfo(detectDeviceConfig());
+
 interface OfflineLlmRuntime {
   isModelReady?: (() => Promise<boolean>) | (() => boolean);
   prepareModel?: (() => Promise<boolean>) | (() => boolean);
@@ -61,6 +243,14 @@ interface HomeFeedLlmRec {
   id?: unknown;
   score?: unknown;
   reason?: unknown;
+}
+
+interface LlmOnlyAttemptConfig {
+  candidateCap: number;
+  maxTokens: number;
+  temperature: number;
+  compactMode: boolean;
+  timeoutMs: number;
 }
 
 export interface HomeFeedProfileSignals {
@@ -149,6 +339,15 @@ const extractJsonObject = (raw: string) => {
     return fenced[1].trim();
   }
 
+  const firstBracket = raw.indexOf("[");
+  const lastBracket = raw.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    const arrayCandidate = raw.slice(firstBracket, lastBracket + 1);
+    if (arrayCandidate.includes("{") || /\d/.test(arrayCandidate)) {
+      return arrayCandidate;
+    }
+  }
+
   const firstBrace = raw.indexOf("{");
   const lastBrace = raw.lastIndexOf("}");
   if (firstBrace >= 0 && lastBrace > firstBrace) {
@@ -216,15 +415,19 @@ const generateWithRuntime = async (
   runtime: OfflineLlmRuntime,
   systemPrompt: string,
   userPrompt: string,
-  timeoutMs = GENERATION_TIMEOUT_MS,
+  options: { timeoutMs?: number; maxTokens?: number; temperature?: number } = {},
 ): Promise<string | null> => {
+  const timeoutMs = options.timeoutMs ?? GENERATION_TIMEOUT_MS;
+  const maxTokens = options.maxTokens ?? 100;
+  const temperature = options.temperature ?? 0.2;
+
   if (typeof runtime.generateJson === "function") {
     const result = await withTimeout(
       runtime.generateJson({
         prompt: userPrompt,
         systemPrompt,
-        maxTokens: 650,
-        temperature: 0.3,
+        maxTokens,
+        temperature,
       }),
       timeoutMs,
     );
@@ -236,8 +439,8 @@ const generateWithRuntime = async (
   if (typeof runtime.generateText === "function") {
     const result = await withTimeout(
       runtime.generateText(`${systemPrompt}\n\n${userPrompt}`, {
-        maxTokens: 650,
-        temperature: 0.3,
+        maxTokens,
+        temperature,
       }),
       timeoutMs,
     );
@@ -249,6 +452,7 @@ const generateWithRuntime = async (
 };
 
 const buildLlmOnlyCacheKey = (input: GenerateOfflineSuggestionsWithLlmInput) => {
+  const llmNctx = getLlmDeviceCapabilityInfo().config.nCtx;
   const keyPayload = {
     genres: [...input.genres].map(normalize).sort(),
     currentInstruments: [...input.currentInstruments].map(normalize).sort(),
@@ -256,43 +460,152 @@ const buildLlmOnlyCacheKey = (input: GenerateOfflineSuggestionsWithLlmInput) => 
     experienceLevel: input.experienceLevel,
     purpose: input.purpose,
     limit: input.limit,
+    llmNctx,
   };
 
   return `${LLM_ONLY_CACHE_PREFIX}${hashString(JSON.stringify(keyPayload))}`;
 };
 
+const compactLlmPromptText = (value: unknown, maxLength: number): string => {
+  if (typeof value !== "string") return "";
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}~`;
+};
+
+const isLlmContextFullError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /context is full|context full|n_ctx|prompt.+long|too many tokens|token limit/i.test(message);
+};
+
+const isRetriableLlmError = (error: unknown): boolean => {
+  if (isLlmContextFullError(error)) {
+    return true;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return /offline_llm_timeout|timed out|timeout/i.test(message);
+};
+
+const prioritizeLlmOnlyCandidates = (
+  input: GenerateOfflineSuggestionsWithLlmInput,
+  candidates: LocalInstrumentProfile[],
+): LocalInstrumentProfile[] => {
+  const seedLimit = clamp(Math.max(input.limit * 2, 12), 6, 24);
+  const seedSuggestions = getOfflineInstrumentSuggestions({
+    genres: input.genres,
+    currentInstruments: input.currentInstruments,
+    userRoles: input.userRoles,
+    experienceLevel: input.experienceLevel,
+    purpose: input.purpose,
+    limit: seedLimit,
+  });
+
+  if (seedSuggestions.length === 0) {
+    return candidates;
+  }
+
+  const byName = new Map(candidates.map((item) => [normalize(item.name), item]));
+  const prioritized: LocalInstrumentProfile[] = [];
+  const used = new Set<string>();
+
+  for (const suggestion of seedSuggestions) {
+    const key = normalize(suggestion.name);
+    const candidate = byName.get(key);
+    if (!candidate || used.has(key)) {
+      continue;
+    }
+
+    prioritized.push(candidate);
+    used.add(key);
+  }
+
+  for (const candidate of candidates) {
+    const key = normalize(candidate.name);
+    if (used.has(key)) {
+      continue;
+    }
+
+    prioritized.push(candidate);
+  }
+
+  return prioritized.length > 0 ? prioritized : candidates;
+};
+
+const buildLlmOnlyAttemptConfigs = (
+  limit: number,
+  candidateCount: number,
+): LlmOnlyAttemptConfig[] => {
+  if (candidateCount <= 0) {
+    return [];
+  }
+
+  const capabilityInfo = getLlmDeviceCapabilityInfo();
+  const cap = (count: number) => clamp(count, 1, candidateCount);
+
+  const firstCap = cap(
+    Math.min(
+      capabilityInfo.maxCandidateCap,
+      Math.max(limit + 2, Math.min(capabilityInfo.maxCandidateCap, 6)),
+    ),
+  );
+  const secondCap = cap(
+    Math.max(Math.min(firstCap - 2, Math.max(limit, 4)), 4),
+  );
+  const thirdCap = cap(
+    Math.max(Math.min(secondCap - 2, Math.max(limit - 1, 3)), 3),
+  );
+
+  const caps = [firstCap, secondCap, thirdCap];
+  const tokenBudgets = [
+    capabilityInfo.maxTokens,
+    Math.max(Math.round(capabilityInfo.maxTokens * 0.75), 75),
+    Math.max(Math.round(capabilityInfo.maxTokens * 0.6), 60),
+  ];
+  const timeouts = [
+    capabilityInfo.timeoutMs,
+    Math.max(capabilityInfo.timeoutMs - 4000, 15000),
+    Math.max(capabilityInfo.timeoutMs - 8000, 12000),
+  ];
+
+  for (let i = 1; i < caps.length; i += 1) {
+    if (caps[i] >= caps[i - 1]) {
+      caps[i] = Math.max(caps[i - 1] - 1, 1);
+    }
+  }
+
+  return caps.map((candidateCap, index) => ({
+    candidateCap,
+    maxTokens: tokenBudgets[index],
+    temperature: 0.1,
+    compactMode: true,
+    timeoutMs: timeouts[index],
+  }));
+};
+
 const buildLlmOnlyPrompt = (
   input: GenerateOfflineSuggestionsWithLlmInput,
   candidates: LocalInstrumentProfile[],
+  _options: { compactMode?: boolean } = {},
 ) => {
-  const compactCandidates = candidates.slice(0, 24).map((item) => ({
-    name: item.name,
-    category: item.category,
-    difficulty: item.difficulty,
-    genres: item.genres,
-    description: item.description,
-    relatedInstruments: item.relatedInstruments,
-  }));
+  const genres = input.genres
+    .slice(0, 4)
+    .map((g) => compactLlmPromptText(g, 16))
+    .join(",");
+  const skills = input.currentInstruments
+    .slice(0, 4)
+    .map((s) => compactLlmPromptText(s, 16))
+    .join(",");
+  const names = candidates.map((c) => c.name).join(",");
 
-  const systemPrompt =
-    "You are an on-device AI music advisor. Return strict JSON only and do not invent instruments outside candidates.";
+  const systemPrompt = "Music advisor. JSON array only, no markdown.";
 
   const userPrompt = [
-    "Generate personalized instrument recommendations from the candidate list.",
-    `Genres: ${input.genres.join(", ") || "none"}`,
-    `Current skills: ${input.currentInstruments.join(", ") || "none"}`,
-    `User roles: ${input.userRoles.join(", ") || "none"}`,
-    `Experience level: ${input.experienceLevel}`,
-    `Purpose: ${input.purpose}`,
-    "Return JSON with shape:",
-    '{"recommendations":[{"name":"candidate name","score":0-100,"headline":"short line","whyThisFits":"1-2 short sentences","learningCurve":"easy|moderate|challenging","timeToBasics":"X-Y weeks/months","proTip":"actionable tip","famousPlayers":["Name 1","Name 2"],"perfectFor":"short tag"}]}',
-    "Rules:",
-    "- Use only candidate names.",
-    "- Return up to requested limit sorted best to worst.",
-    "- Keep whyThisFits under 220 chars.",
-    "- Keep proTip under 140 chars.",
-    `Requested limit: ${input.limit}`,
-    `Candidates: ${JSON.stringify(compactCandidates)}`,
+    `Rank for: ${genres || "general"} | has:${skills || "none"} | ${input.experienceLevel} | ${input.purpose}`,
+    `Pick from:[${names}]`,
+    `Reply:[{"n":"Name","r":"why"}]`,
+    `Max ${input.limit}, best first.`,
   ].join("\n");
 
   return { systemPrompt, userPrompt };
@@ -301,11 +614,28 @@ const buildLlmOnlyPrompt = (
 const parseLlmOnlyResult = (raw: string): LlmOnlyRec[] => {
   try {
     const parsed = JSON.parse(extractJsonObject(raw));
-    if (!Array.isArray(parsed?.recommendations)) {
-      return [];
-    }
 
-    return parsed.recommendations as LlmOnlyRec[];
+    const recs: unknown[] = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.recommendations)
+        ? parsed.recommendations
+        : Array.isArray(parsed?.r)
+          ? parsed.r
+          : [];
+
+    return recs
+      .map((entry: any) => ({
+        name: entry?.n ?? entry?.name,
+        score: entry?.s ?? entry?.score,
+        whyThisFits: entry?.r ?? entry?.reason ?? entry?.whyThisFits,
+        headline: entry?.headline,
+        learningCurve: entry?.learningCurve,
+        timeToBasics: entry?.timeToBasics,
+        proTip: entry?.proTip,
+        famousPlayers: entry?.famousPlayers,
+        perfectFor: entry?.perfectFor,
+      }))
+      .filter((rec: LlmOnlyRec) => rec.name);
   } catch {
     return [];
   }
@@ -314,9 +644,11 @@ const parseLlmOnlyResult = (raw: string): LlmOnlyRec[] => {
 const mapLlmOnlySuggestions = (
   llmRecommendations: LlmOnlyRec[],
   candidates: LocalInstrumentProfile[],
+  cpuSuggestions: InstrumentSuggestion[],
   limit: number,
 ): InstrumentSuggestion[] => {
   const byName = new Map(candidates.map((item) => [item.name.toLowerCase(), item]));
+  const cpuByName = new Map(cpuSuggestions.map((item) => [item.name.toLowerCase(), item]));
 
   const mapped: InstrumentSuggestion[] = [];
 
@@ -327,41 +659,35 @@ const mapLlmOnlySuggestions = (
     const candidate = byName.get(name.toLowerCase());
     if (!candidate) continue;
 
+    const cpu = cpuByName.get(name.toLowerCase());
+
     const parsedScore = Number(rec?.score);
     const score = Number.isFinite(parsedScore)
       ? clamp(Math.round(parsedScore), 0, 100)
-      : 80;
+      : cpu?.score ?? 80;
+
+    const llmReason =
+      typeof rec?.whyThisFits === "string" && rec.whyThisFits.trim().length > 0
+        ? rec.whyThisFits.trim().slice(0, 220)
+        : null;
 
     mapped.push({
       name: candidate.name,
       image: candidate.image,
       score,
       headline:
-        typeof rec?.headline === "string" && rec.headline.trim().length > 0
-          ? rec.headline.trim().slice(0, 80)
-          : `${candidate.name} fits your musical profile`,
+        cpu?.headline ?? `${candidate.name} fits your musical profile`,
       matchReason:
-        typeof rec?.whyThisFits === "string" && rec.whyThisFits.trim().length > 0
-          ? rec.whyThisFits.trim().slice(0, 220)
-          : candidate.description,
-      learningCurve: normalizeLearningCurve(rec?.learningCurve),
-      timeToBasics:
-        typeof rec?.timeToBasics === "string" && rec.timeToBasics.trim().length > 0
-          ? rec.timeToBasics.trim().slice(0, 40)
-          : "4-8 weeks",
+        llmReason ?? cpu?.matchReason ?? candidate.description,
+      learningCurve:
+        cpu?.learningCurve ?? normalizeLearningCurve(candidate.difficulty),
+      timeToBasics: cpu?.timeToBasics ?? "4-8 weeks",
       proTip:
-        typeof rec?.proTip === "string" && rec.proTip.trim().length > 0
-          ? rec.proTip.trim().slice(0, 140)
-          : "Practice short focused sessions and track your progress weekly.",
-      famousPlayers: Array.isArray(rec?.famousPlayers)
-        ? rec.famousPlayers
-            .filter((value: unknown) => typeof value === "string")
-            .slice(0, 2)
-        : candidate.famousPlayers.slice(0, 2),
-      perfectFor:
-        typeof rec?.perfectFor === "string" && rec.perfectFor.trim().length > 0
-          ? rec.perfectFor.trim().slice(0, 32)
-          : "your next step",
+        cpu?.proTip ??
+        "Practice short focused sessions and track your progress weekly.",
+      famousPlayers:
+        cpu?.famousPlayers ?? candidate.famousPlayers.slice(0, 2),
+      perfectFor: cpu?.perfectFor ?? "your next step",
       genres: candidate.genres,
       difficulty: candidate.difficulty,
       category: candidate.category,
@@ -442,51 +768,113 @@ export const generateOfflineSuggestionsWithLocalLLM = async (
     );
   }
 
-  try {
-    const { systemPrompt, userPrompt } = buildLlmOnlyPrompt(
-      { ...input, limit: safeLimit },
-      candidates,
-    );
+  const prioritizedCandidates = prioritizeLlmOnlyCandidates(
+    { ...input, limit: safeLimit },
+    candidates,
+  );
 
-    const raw = await generateWithRuntime(runtime, systemPrompt, userPrompt);
-    if (!raw) {
-      return buildLocalFallback(
-        "empty_llm_output",
-        "Using smart local suggestions.",
-      );
-    }
+  // Pre-compute CPU ranker suggestions for enrichment
+  const cpuSuggestions = getOfflineInstrumentSuggestions({
+    genres: input.genres,
+    currentInstruments: input.currentInstruments,
+    userRoles: input.userRoles,
+    experienceLevel: input.experienceLevel,
+    purpose: input.purpose,
+    limit: 20,
+  });
 
-    const parsed = parseLlmOnlyResult(raw);
-    const suggestions = mapLlmOnlySuggestions(parsed, candidates, safeLimit);
+  const attempts = buildLlmOnlyAttemptConfigs(
+    safeLimit,
+    prioritizedCandidates.length,
+  );
 
-    if (suggestions.length === 0) {
-      return buildLocalFallback(
-        "invalid_llm_output",
-        "Using smart local suggestions.",
-      );
-    }
-
-    await setCachedSuggestions<InstrumentSuggestion>(cacheKey, suggestions);
-
-    return {
-      suggestions,
-      aiPowered: true,
-      aiProvider: "On-Device LLM",
-      message: "Generated by on-device LLM. No internet or paid API used.",
-    };
-  } catch {
+  if (attempts.length === 0) {
     return buildLocalFallback(
-      "llm_exception",
+      "candidate_attempt_empty",
       "Using smart local suggestions.",
     );
   }
+
+  for (let attemptIndex = 0; attemptIndex < attempts.length; attemptIndex += 1) {
+    const attempt = attempts[attemptIndex];
+    const attemptCandidates = prioritizedCandidates.slice(0, attempt.candidateCap);
+
+    try {
+      const { systemPrompt, userPrompt } = buildLlmOnlyPrompt(
+        { ...input, limit: safeLimit },
+        attemptCandidates,
+        { compactMode: attempt.compactMode },
+      );
+
+      const raw = await generateWithRuntime(runtime, systemPrompt, userPrompt, {
+        timeoutMs: attempt.timeoutMs,
+        maxTokens: attempt.maxTokens,
+        temperature: attempt.temperature,
+      });
+
+      if (!raw) {
+        if (attemptIndex < attempts.length - 1) {
+          continue;
+        }
+
+        return buildLocalFallback(
+          "empty_llm_output",
+          "Using smart local suggestions.",
+        );
+      }
+
+      const parsed = parseLlmOnlyResult(raw);
+      const suggestions = mapLlmOnlySuggestions(
+        parsed,
+        attemptCandidates,
+        cpuSuggestions,
+        safeLimit,
+      );
+
+      if (suggestions.length === 0) {
+        if (attemptIndex < attempts.length - 1) {
+          continue;
+        }
+
+        return buildLocalFallback(
+          "invalid_llm_output",
+          "Using smart local suggestions.",
+        );
+      }
+
+      await setCachedSuggestions<InstrumentSuggestion>(cacheKey, suggestions);
+
+      return {
+        suggestions,
+        aiPowered: true,
+        aiProvider: "On-Device LLM",
+        message: "Generated by on-device LLM. No internet or paid API used.",
+      };
+    } catch (error: unknown) {
+      if (attemptIndex < attempts.length - 1 && isRetriableLlmError(error)) {
+        continue;
+      }
+
+      return buildLocalFallback(
+        isLlmContextFullError(error) ? "llm_context_full" : "llm_exception",
+        "Using smart local suggestions.",
+      );
+    }
+  }
+
+  return buildLocalFallback(
+    "llm_attempt_exhausted",
+    "Using smart local suggestions.",
+  );
 };
 
 const buildHomeFeedCacheKey = (input: RerankHomeFeedInput) => {
+  const llmNctx = getLlmDeviceCapabilityInfo().config.nCtx;
   const keyPayload = {
     skills: [...input.profileSignals.skills].map(normalize).sort(),
     genres: [...input.profileSignals.genres].map(normalize).sort(),
     limit: input.limit,
+    llmNctx,
     candidates: input.candidates.slice(0, 30).map((item: any) => ({
       id: item.id,
       type: item.type,
@@ -597,7 +985,7 @@ export const rerankHomeFeedWithLocalLLM = async (
       runtime,
       systemPrompt,
       userPrompt,
-      HOME_FEED_TIMEOUT_MS,
+      { timeoutMs: HOME_FEED_TIMEOUT_MS },
     );
 
     if (!raw) {

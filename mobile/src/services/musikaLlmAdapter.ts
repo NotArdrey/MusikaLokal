@@ -16,12 +16,234 @@ import {
 } from "expo-file-system/legacy";
 import { TurboModuleRegistry } from "react-native";
 
+// expo-device requires a native module that is only available in custom dev
+// client builds (expo run:android / EAS).  In Expo Go the import throws
+// "Cannot find native module 'ExpoDevice'" which would crash the entire
+// module and make every export (including getLlmDeviceConfig) undefined.
+let Device: { totalMemory: number | null } | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  Device = require("expo-device") as typeof import("expo-device");
+} catch {
+  // Expo Go — Device will stay null, detectDeviceConfig uses fallback.
+}
+
 // ── Model configuration ──────────────────────────────────────────────
 // Small instruct model suitable for JSON generation on mobile.
 // Override via setModelConfig() before first prepareModel() call.
 let MODEL_DOWNLOAD_URL =
   "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
 let MODEL_FILENAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf";
+
+// ── RAM-based context configuration ─────────────────────────────────
+
+export interface LlmDeviceConfig {
+  nCtx: number;
+  ramTierLabel: string;
+  totalRamGB: number | null;
+  nBatch: number;
+  nThreads: number;
+}
+
+export interface LlmDeviceCapabilityInfo {
+  config: LlmDeviceConfig;
+  summaryText: string;
+  limitationText: string;
+  maxCandidateCap: number;
+  maxTokens: number;
+  timeoutMs: number;
+}
+
+interface LlmRamTierProfile {
+  minDetectedRamGB: number;
+  label: string;
+  nCtx: number;
+  nBatch: number;
+  nThreads: number;
+  maxCandidateCap: number;
+  maxTokens: number;
+  timeoutMs: number;
+  limitationText: string;
+}
+
+const LLM_RAM_TIER_PROFILES: LlmRamTierProfile[] = [
+  {
+    minDetectedRamGB: 7.5,
+    label: "8 GB",
+    nCtx: 8192,
+    nBatch: 512,
+    nThreads: 6,
+    maxCandidateCap: 14,
+    maxTokens: 260,
+    timeoutMs: 32000,
+    limitationText:
+      "Current device limit: up to 14 candidate instruments, 260 AI output tokens, and a 32s local generation window.",
+  },
+  {
+    minDetectedRamGB: 5.5,
+    label: "6 GB",
+    nCtx: 4096,
+    nBatch: 384,
+    nThreads: 5,
+    maxCandidateCap: 12,
+    maxTokens: 220,
+    timeoutMs: 28000,
+    limitationText:
+      "Current device limit: up to 12 candidate instruments, 220 AI output tokens, and a 28s local generation window.",
+  },
+  {
+    minDetectedRamGB: 3.5,
+    label: "4 GB",
+    nCtx: 3072,
+    nBatch: 320,
+    nThreads: 4,
+    maxCandidateCap: 10,
+    maxTokens: 180,
+    timeoutMs: 24000,
+    limitationText:
+      "Current device limit: up to 10 candidate instruments, 180 AI output tokens, and a 24s local generation window.",
+  },
+  {
+    minDetectedRamGB: 2.5,
+    label: "3 GB",
+    nCtx: 2048,
+    nBatch: 256,
+    nThreads: 3,
+    maxCandidateCap: 8,
+    maxTokens: 140,
+    timeoutMs: 22000,
+    limitationText:
+      "Current device limit: up to 8 candidate instruments, 140 AI output tokens, and a 22s local generation window.",
+  },
+  {
+    minDetectedRamGB: 1.75,
+    label: "2 GB",
+    nCtx: 1536,
+    nBatch: 192,
+    nThreads: 2,
+    maxCandidateCap: 7,
+    maxTokens: 120,
+    timeoutMs: 21000,
+    limitationText:
+      "This device runs AI in compact mode: up to 7 candidate instruments, 120 AI output tokens, and a 21s local generation window. Broader requests may fall back to smart local ranking.",
+  },
+  {
+    minDetectedRamGB: 0,
+    label: "<2 GB",
+    nCtx: 1024,
+    nBatch: 128,
+    nThreads: 2,
+    maxCandidateCap: 6,
+    maxTokens: 100,
+    timeoutMs: 20000,
+    limitationText:
+      "This device runs AI in compact mode: up to 6 candidate instruments, 100 AI output tokens, and a 20s local generation window. Broader requests may fall back to smart local ranking.",
+  },
+];
+
+let deviceConfig: LlmDeviceConfig | null = null;
+
+const buildDeviceSummaryText = (config: LlmDeviceConfig): string => {
+  if (config.totalRamGB != null) {
+    return `Context: ${config.nCtx.toLocaleString()} tokens \u00B7 ${config.ramTierLabel} RAM tier`;
+  }
+
+  return `Context: ${config.nCtx.toLocaleString()} tokens \u00B7 RAM not detected`;
+};
+
+const resolveLlmRamTier = (totalRamGB: number | null): LlmRamTierProfile | null => {
+  if (totalRamGB == null) {
+    return null;
+  }
+
+  return (
+    LLM_RAM_TIER_PROFILES.find((profile) => totalRamGB >= profile.minDetectedRamGB) ??
+    LLM_RAM_TIER_PROFILES[LLM_RAM_TIER_PROFILES.length - 1]
+  );
+};
+
+const buildLlmDeviceCapabilityInfo = (
+  config: LlmDeviceConfig,
+): LlmDeviceCapabilityInfo => {
+  const summaryText = buildDeviceSummaryText(config);
+
+  const tier = resolveLlmRamTier(config.totalRamGB);
+  if (!tier) {
+    return {
+      config,
+      summaryText,
+      limitationText:
+        "RAM could not be detected, so AI stays in the safest compact mode: up to 6 candidate instruments, 100 AI output tokens, and a 20s local generation window.",
+      maxCandidateCap: 6,
+      maxTokens: 100,
+      timeoutMs: 20000,
+    };
+  }
+
+  return {
+    config,
+    summaryText,
+    limitationText: tier.limitationText,
+    maxCandidateCap: tier.maxCandidateCap,
+    maxTokens: tier.maxTokens,
+    timeoutMs: tier.timeoutMs,
+  };
+};
+
+const detectDeviceConfig = (): LlmDeviceConfig => {
+  if (deviceConfig) return deviceConfig;
+
+  const totalBytes = Device?.totalMemory ?? null;
+  if (totalBytes == null) {
+    deviceConfig = {
+      nCtx: 1024,
+      ramTierLabel: "Unknown RAM",
+      totalRamGB: null,
+      nBatch: 128,
+      nThreads: 2,
+    };
+    log("config", "Device.totalMemory unavailable — using fallback n_ctx=1024");
+  } else {
+    const totalGB = totalBytes / (1024 ** 3);
+    const roundedTotalGB = Math.round(totalGB * 10) / 10;
+    const tier = resolveLlmRamTier(roundedTotalGB) ?? LLM_RAM_TIER_PROFILES[LLM_RAM_TIER_PROFILES.length - 1];
+
+    deviceConfig = {
+      nCtx: tier.nCtx,
+      ramTierLabel: tier.label,
+      totalRamGB: roundedTotalGB,
+      nBatch: tier.nBatch,
+      nThreads: tier.nThreads,
+    };
+    log(
+      "config",
+      `RAM: ${roundedTotalGB} GB measured, using ${tier.label} tier with n_ctx=${tier.nCtx}, n_batch=${tier.nBatch}, n_threads=${tier.nThreads}`,
+    );
+  }
+
+  const capabilityInfo = buildLlmDeviceCapabilityInfo(deviceConfig);
+  console.log("[MusikaLLM:deviceConfig]", {
+    totalRamGB: deviceConfig.totalRamGB,
+    ramTier: deviceConfig.ramTierLabel,
+    nCtx: deviceConfig.nCtx,
+    nBatch: deviceConfig.nBatch,
+    nThreads: deviceConfig.nThreads,
+    maxCandidates: capabilityInfo.maxCandidateCap,
+    maxTokens: capabilityInfo.maxTokens,
+    timeoutMs: capabilityInfo.timeoutMs,
+    limitation: capabilityInfo.limitationText,
+  });
+  return deviceConfig;
+};
+
+/**
+ * Returns the RAM-based LLM configuration for this device.
+ * Safe to call at any time — detection is lazy and cached.
+ */
+export const getLlmDeviceConfig = (): LlmDeviceConfig => detectDeviceConfig();
+
+export const getLlmDeviceCapabilityInfo = (): LlmDeviceCapabilityInfo =>
+  buildLlmDeviceCapabilityInfo(detectDeviceConfig());
 
 // ── Runtime state ────────────────────────────────────────────────────
 let llamaContext: LlamaContext | null = null;
@@ -34,6 +256,8 @@ let onModelReadyCallbacks: Array<() => void> = [];
 let warmupComplete = false;
 let warmupPromise: Promise<void> | null = null;
 let completionQueue: Promise<void> = Promise.resolve();
+const NATIVE_RUNTIME_UNAVAILABLE_ERROR =
+  "llama.rn native module is not available — requires a custom dev client build (expo run:android).";
 
 // ── Native runtime check ─────────────────────────────────────────────
 
@@ -46,7 +270,7 @@ let completionQueue: Promise<void> = Promise.resolve();
  * llama.rn's installJsi() calls .install() on. If it's null, the native
  * side is not linked (e.g. Expo Go).
  */
-const isNativeRuntimeAvailable = (): boolean => {
+export const isNativeRuntimeAvailable = (): boolean => {
   try {
     const nativeModule = TurboModuleRegistry.get("RNLlama");
     return nativeModule != null;
@@ -146,6 +370,10 @@ const runQueuedCompletion = async <T>(task: () => Promise<T>): Promise<T> => {
   }
 };
 
+export const waitForIdle = async (): Promise<void> => {
+  await completionQueue.catch(() => {});
+};
+
 const warmModel = async (): Promise<void> => {
   if (warmupComplete || !llamaContext) {
     return;
@@ -202,16 +430,22 @@ const doPrepareModel = async (): Promise<boolean> => {
   const runtimeAvailable = isNativeRuntimeAvailable();
 
   // Gate: skip the entire download + init if native runtime is missing
-  if (nativeUnavailable || !runtimeAvailable) {
+  if (!runtimeAvailable) {
     const wasUnavailable = nativeUnavailable;
     nativeUnavailable = true;
-    prepareError = "llama.rn native module is not available — requires a custom dev client build (expo run:android).";
+    prepareError = NATIVE_RUNTIME_UNAVAILABLE_ERROR;
     if (!wasUnavailable) {
       log("init", prepareError, {
         runtimeAvailable,
       });
     }
     return false;
+  }
+
+  if (nativeUnavailable) {
+    nativeUnavailable = false;
+    backgroundSkipLogged = false;
+    log("init", "Native runtime became available. Retrying model preparation...");
   }
 
   try {
@@ -222,9 +456,16 @@ const doPrepareModel = async (): Promise<boolean> => {
     }
 
     log("init", "Initialising llama context...");
+    const config = detectDeviceConfig();
+    log(
+      "init",
+      `Using n_ctx=${config.nCtx}, n_batch=${config.nBatch}, n_threads=${config.nThreads} (${config.ramTierLabel} RAM detected)`,
+    );
     llamaContext = await initLlama({
       model: modelPath,
-      n_ctx: 1024,
+      n_ctx: config.nCtx,
+      n_batch: config.nBatch,
+      n_threads: config.nThreads,
       n_gpu_layers: 0, // CPU-only — safe for emulators and all devices
       use_mlock: false,
       use_mmap: true,
@@ -258,6 +499,7 @@ const generateJson = async (payload: {
   temperature?: number;
 }): Promise<string> => {
   if (!llamaContext) throw new Error("LLM not ready — call prepareModel first");
+  const startedAt = Date.now();
 
   const messages: Array<{ role: string; content: string }> = [];
   const jsonSystemPrompt = payload.systemPrompt
@@ -276,7 +518,11 @@ const generateJson = async (payload: {
     } as any),
   );
 
-  log("generate", `Tokens: ${result.timings?.predicted_n ?? "?"}, Time: ${Math.round(result.timings?.predicted_ms ?? 0)}ms`);
+  const wallMs = Date.now() - startedAt;
+  log(
+    "generate",
+    `Tokens: ${result.timings?.predicted_n ?? "?"}, Time: ${Math.round(result.timings?.predicted_ms ?? 0)}ms, Wall: ${wallMs}ms`,
+  );
   return result.text;
 };
 
@@ -289,6 +535,7 @@ const generateText = async (
   options?: { maxTokens?: number; temperature?: number },
 ): Promise<string> => {
   if (!llamaContext) throw new Error("LLM not ready — call prepareModel first");
+  const startedAt = Date.now();
 
   const result = await runQueuedCompletion(() =>
     llamaContext!.completion({
@@ -299,7 +546,24 @@ const generateText = async (
     } as any),
   );
 
+  const wallMs = Date.now() - startedAt;
+  log(
+    "generate",
+    `Tokens: ${result.timings?.predicted_n ?? "?"}, Time: ${Math.round(result.timings?.predicted_ms ?? 0)}ms, Wall: ${wallMs}ms`,
+  );
   return result.text;
+};
+
+/**
+ * Cancel any in-progress completion.
+ * Call this before retrying to avoid queueing behind a timed-out generation.
+ */
+export const stopGeneration = (): void => {
+  if (llamaContext) {
+    try {
+      llamaContext.stopCompletion();
+    } catch { /* ignore */ }
+  }
 };
 
 /**
@@ -357,21 +621,36 @@ export const isModelPreparing = (): boolean => preparePromise !== null;
 let backgroundStarted = false;
 
 export const startBackgroundPreparation = () => {
-  if (backgroundStarted) return;
   if (modelReady && llamaContext) return;
   if (preparePromise) return; // already in progress
-  if (nativeUnavailable) {
+  if (backgroundStarted) return;
+
+  const runtimeAvailable = isNativeRuntimeAvailable();
+  if (!runtimeAvailable) {
+    nativeUnavailable = true;
+    prepareError = NATIVE_RUNTIME_UNAVAILABLE_ERROR;
     if (!backgroundSkipLogged) {
       log("background", "Skipping preparation because native runtime is unavailable.");
       backgroundSkipLogged = true;
     }
-    return; // already determined unavailable
+    return;
   }
+
+  nativeUnavailable = false;
+  backgroundSkipLogged = false;
 
   backgroundStarted = true;
   log("background", "Starting background model preparation...");
   prepareModel().then((success) => {
     log("background", success ? "Model ready for inference" : "Model preparation failed");
+    if (!success) {
+      backgroundStarted = false;
+    }
+  }).catch((error: unknown) => {
+    const msg = error instanceof Error ? error.message : String(error);
+    prepareError = msg;
+    backgroundStarted = false;
+    log("background", "Model preparation crashed", msg);
   });
 };
 
@@ -383,4 +662,5 @@ export const musikaLlmAdapter = {
   prepareModel,
   generateJson,
   generateText,
+  waitForIdle,
 } as const;

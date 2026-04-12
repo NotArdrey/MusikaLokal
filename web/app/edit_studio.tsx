@@ -121,6 +121,13 @@ const parsePositiveInteger = (value: unknown): number | null => {
   return parsed;
 };
 
+const parsePositiveDecimal = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number.parseFloat(String(value).trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
 const getAllowedPromotionTargets = (
   type: "Rehearsal" | "Recording" | "Both",
 ): Array<"rehearsal" | "recording" | "both"> => {
@@ -177,6 +184,8 @@ export default function EditStudioScreen() {
     "Rehearsal" | "Recording" | "Both"
   >("Both");
   const [maxRecordingSongsPerDay, setMaxRecordingSongsPerDay] = useState("");
+  const [estimatedRecordingHoursPerSong, setEstimatedRecordingHoursPerSong] =
+    useState("3");
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -497,6 +506,12 @@ export default function EditStudioScreen() {
       setMaxRecordingSongsPerDay("");
     }
 
+    if (studioType === "Recording" || studioType === "Both") {
+      if (!parsePositiveDecimal(estimatedRecordingHoursPerSong)) {
+        setEstimatedRecordingHoursPerSong("3");
+      }
+    }
+
     setPromotionForm((prev) => {
       const nextAppliesTo = normalizePromotionTarget(prev.applies_to, studioType);
       if (prev.applies_to === nextAppliesTo) return prev;
@@ -513,7 +528,7 @@ export default function EditStudioScreen() {
       });
       return changed ? next : prev;
     });
-  }, [studioType, maxRecordingSongsPerDay]);
+  }, [studioType, maxRecordingSongsPerDay, estimatedRecordingHoursPerSong]);
 
   useEffect(() => {
     const backSubscription = BackHandler.addEventListener(
@@ -688,7 +703,7 @@ export default function EditStudioScreen() {
         supabase
           .from('studio_settings')
           .select(
-            'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates, max_recording_songs_per_day',
+            'lead_time_hours, weekend_multiplier, peak_season_multiplier, peak_season_dates, off_peak_multiplier, off_peak_dates, min_booking_duration_hours, max_recording_songs_per_day',
           )
           .eq('studio_id', studioId)
           .maybeSingle(),
@@ -813,6 +828,8 @@ export default function EditStudioScreen() {
         peak_season_dates: studioSettingsData?.peak_season_dates ?? [],
         off_peak_multiplier: studioSettingsData?.off_peak_multiplier ?? 1.0,
         off_peak_dates: studioSettingsData?.off_peak_dates ?? [],
+        min_booking_duration_hours:
+          studioSettingsData?.min_booking_duration_hours ?? null,
         max_recording_songs_per_day:
           studioSettingsData?.max_recording_songs_per_day ?? null,
       } as any;
@@ -982,6 +999,13 @@ export default function EditStudioScreen() {
       );
       setMaxRecordingSongsPerDay(
         loadedMaxSongs ? String(loadedMaxSongs) : "",
+      );
+
+      const loadedEstimatedHours = parsePositiveDecimal(
+        data.min_booking_duration_hours,
+      );
+      setEstimatedRecordingHoursPerSong(
+        loadedEstimatedHours ? String(loadedEstimatedHours) : "3",
       );
 
       const paxValue = data.pax?.toString() || "";
@@ -1513,6 +1537,17 @@ export default function EditStudioScreen() {
         "error",
         "Invalid Limit",
         "Please enter a valid max songs per day value greater than 0.",
+      );
+      return false;
+    }
+    if (
+      (studioType === "Recording" || studioType === "Both") &&
+      !parsePositiveDecimal(estimatedRecordingHoursPerSong)
+    ) {
+      showAlert(
+        "error",
+        "Invalid Estimated Duration",
+        "Please enter a valid estimated recording duration per song greater than 0.",
       );
       return false;
     }
@@ -2347,6 +2382,10 @@ export default function EditStudioScreen() {
           peak_season_dates: [],
           off_peak_multiplier: 1.0,
           off_peak_dates: [],
+          min_booking_duration_hours:
+            studioType === "Recording" || studioType === "Both"
+              ? parsePositiveDecimal(estimatedRecordingHoursPerSong) || 3
+              : 2,
           max_recording_songs_per_day: parsePositiveInteger(
             maxRecordingSongsPerDay,
           ),
@@ -2514,6 +2553,11 @@ export default function EditStudioScreen() {
           peak_season_dates: payload.booking_settings.peak_season_dates || [],
           off_peak_multiplier: payload.booking_settings.off_peak_multiplier || 1.0,
           off_peak_dates: payload.booking_settings.off_peak_dates || [],
+          min_booking_duration_hours:
+            parsePositiveDecimal(
+              payload.booking_settings.min_booking_duration_hours,
+            ) ||
+            (studioType === 'Recording' || studioType === 'Both' ? 3 : 2),
           max_recording_songs_per_day:
             parsePositiveInteger(payload.booking_settings.max_recording_songs_per_day),
         }, { onConflict: 'studio_id' });
@@ -3417,6 +3461,80 @@ export default function EditStudioScreen() {
                     }}
                   >
                     Applies to recording bookings unless a specific date override is set.
+                  </Text>
+                </View>
+
+                <View style={{ marginTop: 10 }}>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_500Medium",
+                      fontSize: 12,
+                      marginBottom: 6,
+                    }}
+                  >
+                    Estimated Hours Per Song (Minimum)
+                  </Text>
+                  <View
+                    style={[
+                      styles.inputWrapper,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        flexDirection: "row",
+                        alignItems: "center",
+                        paddingHorizontal: 16,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name="time-outline"
+                      size={20}
+                      color="#EF4444"
+                      style={{ marginRight: 10 }}
+                    />
+                    <TextInput
+                      value={estimatedRecordingHoursPerSong}
+                      onChangeText={(text) => {
+                        const sanitized = text.replace(/[^0-9.]/g, "");
+                        const firstDot = sanitized.indexOf(".");
+                        const normalized =
+                          firstDot === -1
+                            ? sanitized
+                            : `${sanitized.slice(0, firstDot + 1)}${sanitized
+                                .slice(firstDot + 1)
+                                .replace(/\./g, "")}`;
+                        setEstimatedRecordingHoursPerSong(normalized);
+                      }}
+                      placeholder="e.g. 3"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="decimal-pad"
+                      style={{
+                        flex: 1,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 15,
+                        paddingVertical: 14,
+                      }}
+                    />
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontFamily: "Poppins_400Regular",
+                      }}
+                    >
+                      hr/song
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      fontSize: 11,
+                      marginTop: 6,
+                    }}
+                  >
+                    Minimum recording hours = songs × this value (example: 2 songs × 3 hr = 6 hr minimum).
                   </Text>
                 </View>
               </View>

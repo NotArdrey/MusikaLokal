@@ -116,6 +116,13 @@ const parsePositiveInteger = (value: unknown): number | null => {
   return parsed;
 };
 
+const parsePositiveDecimal = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number.parseFloat(String(value).trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
 const getAllowedPromotionTargets = (
   type: "Rehearsal" | "Recording" | "Both",
 ): Array<"rehearsal" | "recording" | "both"> => {
@@ -156,6 +163,8 @@ export default function AddStudioScreen() {
     "Rehearsal" | "Recording" | "Both"
   >("Both");
   const [maxRecordingSongsPerDay, setMaxRecordingSongsPerDay] = useState("");
+  const [estimatedRecordingHoursPerSong, setEstimatedRecordingHoursPerSong] =
+    useState("3");
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -400,6 +409,13 @@ export default function AddStudioScreen() {
       setMaxRecordingSongsPerDay("");
     }
 
+    if (
+      (studioType === "Recording" || studioType === "Both") &&
+      !parsePositiveDecimal(estimatedRecordingHoursPerSong)
+    ) {
+      setEstimatedRecordingHoursPerSong("3");
+    }
+
     setPromotionForm((prev) => {
       const nextAppliesTo = normalizePromotionTarget(prev.applies_to, studioType);
       if (prev.applies_to === nextAppliesTo) return prev;
@@ -416,7 +432,7 @@ export default function AddStudioScreen() {
       });
       return changed ? next : prev;
     });
-  }, [studioType, maxRecordingSongsPerDay]);
+  }, [studioType, maxRecordingSongsPerDay, estimatedRecordingHoursPerSong]);
 
   const checkAuthorization = async () => {
     try {
@@ -602,6 +618,17 @@ export default function AddStudioScreen() {
         );
         return false;
       }
+      if (
+        (studioType === "Recording" || studioType === "Both") &&
+        !parsePositiveDecimal(estimatedRecordingHoursPerSong)
+      ) {
+        showAlert(
+          "error",
+          "Invalid Estimated Duration",
+          "Please enter a valid estimated recording hours per song greater than 0.",
+        );
+        return false;
+      }
       if (images.length === 0) {
         showAlert(
           "error",
@@ -697,6 +724,9 @@ export default function AddStudioScreen() {
     }
     if (studioType === "Both" || studioType === "Recording") {
       setRecordingRate((prev) => prev.trim() || "1200");
+      setEstimatedRecordingHoursPerSong((prev) =>
+        parsePositiveDecimal(prev) ? prev : "3",
+      );
     }
 
     setPax((prev) => prev.trim() || "8");
@@ -896,6 +926,10 @@ export default function AddStudioScreen() {
           peak_season_dates: [],
           off_peak_multiplier: 1.0,
           off_peak_dates: [],
+          min_booking_duration_hours:
+            studioType === "Recording" || studioType === "Both"
+              ? parsePositiveDecimal(estimatedRecordingHoursPerSong) || 3
+              : 2,
           max_recording_songs_per_day: parsePositiveInteger(
             maxRecordingSongsPerDay,
           ),
@@ -1042,6 +1076,8 @@ export default function AddStudioScreen() {
         buffer_minutes: 30,
         bulk_discount_threshold_hours: 10,
         bulk_discount_percentage: 0,
+        min_booking_duration_hours:
+          Number(bookingSettings.min_booking_duration_hours) || 2,
         lead_time_hours: Number(bookingSettings.lead_time_hours) || 24,
         weekend_multiplier: Number(bookingSettings.weekend_multiplier) || 1.0,
         peak_season_multiplier: Number(bookingSettings.peak_season_multiplier) || 1.0,
@@ -2398,6 +2434,80 @@ export default function AddStudioScreen() {
                         }}
                       >
                         Applies to recording bookings unless a specific date override is set.
+                      </Text>
+                    </View>
+
+                    <View style={{ marginTop: 10 }}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontFamily: "Poppins_500Medium",
+                          fontSize: 12,
+                          marginBottom: 6,
+                        }}
+                      >
+                        Estimated Hours Per Song (Minimum)
+                      </Text>
+                      <View
+                        style={[
+                          styles.inputWrapper,
+                          {
+                            backgroundColor: colors.inputBackground,
+                            borderColor: isDark ? "#374151" : "#E5E7EB",
+                            flexDirection: "row",
+                            alignItems: "center",
+                            paddingHorizontal: 16,
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="time-outline"
+                          size={20}
+                          color="#EF4444"
+                          style={{ marginRight: 10 }}
+                        />
+                        <TextInput
+                          value={estimatedRecordingHoursPerSong}
+                          onChangeText={(text) => {
+                            const sanitized = text.replace(/[^0-9.]/g, "");
+                            const firstDot = sanitized.indexOf(".");
+                            const normalized =
+                              firstDot === -1
+                                ? sanitized
+                                : `${sanitized.slice(0, firstDot + 1)}${sanitized
+                                  .slice(firstDot + 1)
+                                  .replace(/\./g, "")}`;
+                            setEstimatedRecordingHoursPerSong(normalized);
+                          }}
+                          placeholder="e.g. 3"
+                          placeholderTextColor={colors.textSecondary}
+                          keyboardType="decimal-pad"
+                          style={{
+                            flex: 1,
+                            color: colors.text,
+                            fontFamily: "Poppins_500Medium",
+                            fontSize: 15,
+                            paddingVertical: 14,
+                          }}
+                        />
+                        <Text
+                          style={{
+                            color: colors.textSecondary,
+                            fontFamily: "Poppins_400Regular",
+                          }}
+                        >
+                          hr/song
+                        </Text>
+                      </View>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontFamily: "Poppins_400Regular",
+                          fontSize: 11,
+                          marginTop: 6,
+                        }}
+                      >
+                        Minimum recording hours = songs × this value (example: 2 songs × 3 hr = 6 hr minimum).
                       </Text>
                     </View>
                   </View>
@@ -4428,6 +4538,26 @@ export default function AddStudioScreen() {
                         }}
                       >
                         Recording: ₱{recordingRate || "0"}/song
+                      </Text>
+                    </View>
+                  )}
+                  {(studioType === "Recording" || studioType === "Both") && (
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        marginTop: 4,
+                      }}
+                    >
+                      <Ionicons name="time-outline" size={14} color="#EF4444" />
+                      <Text
+                        style={{
+                          color: colors.text,
+                          fontFamily: "Poppins_500Medium",
+                        }}
+                      >
+                        Estimated Duration: {estimatedRecordingHoursPerSong || "3"} hr/song minimum
                       </Text>
                     </View>
                   )}

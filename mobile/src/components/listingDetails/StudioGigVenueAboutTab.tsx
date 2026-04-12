@@ -66,6 +66,13 @@ const StudioGigVenueAboutTab = ({
   );
   const globalRecordingSongCap =
     Number.isFinite(parsedSongCap) && parsedSongCap > 0 ? parsedSongCap : null;
+  const parsedMinHoursPerSong = Number.parseFloat(
+    String(group?.settings?.min_booking_duration_hours ?? "").trim(),
+  );
+  const recordingMinHoursPerSong =
+    Number.isFinite(parsedMinHoursPerSong) && parsedMinHoursPerSong > 0
+      ? parsedMinHoursPerSong
+      : null;
   const isMediaCarouselType =
     group.type === "Studio" || group.type === "Venue" || group.type === "Gig";
 
@@ -409,6 +416,22 @@ const StudioGigVenueAboutTab = ({
                 {globalRecordingSongCap ? `${globalRecordingSongCap} songs` : "No limit"}
               </Text>
             </View>
+
+            {recordingMinHoursPerSong && (
+              <View
+                style={[
+                  styles.statCard,
+                  { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
+                ]}
+              >
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+                  Est. Hours / Song
+                </Text>
+                <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
+                  {recordingMinHoursPerSong} hrs
+                </Text>
+              </View>
+            )}
           </View>
         )}
       </View>

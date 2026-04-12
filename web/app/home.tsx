@@ -30,7 +30,10 @@ import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBann
 import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import { useTheme } from "../src/context/ThemeContext";
-import { rerankHomeFeedWithLocalLLM } from "../src/services/offlineLlmEnhancer";
+import {
+  getGeminiFlashLiteInfo,
+  rerankHomeFeedWithGeminiFlashLite,
+} from "../src/services/groqModelRouter";
 
 const { width, height } = Dimensions.get("window");
 
@@ -383,12 +386,14 @@ export default function HomeScreen() {
   const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
   const [userName, setUserName] = useState("Guest");
   const [timeGreeting, setTimeGreeting] = useState("Hey");
+  const geminiInfo = getGeminiFlashLiteInfo();
+  const geminiModelLabel = geminiInfo.modelLabel;
 
   // AI Recommendation Mode
   const [aiModeEnabled, setAiModeEnabled] = useState(true);
   const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
   const [randomRecommendations, setRandomRecommendations] = useState<any[]>([]);
-  const [aiFeedProvider, setAiFeedProvider] = useState("On-Device CPU Ranker");
+  const [aiFeedProvider, setAiFeedProvider] = useState(geminiModelLabel);
   const [aiFeedMessage, setAiFeedMessage] = useState("");
 
   // ... refs ...
@@ -1059,10 +1064,10 @@ export default function HomeScreen() {
       const diversifiedRandomItems = takeItemsWithTypeVariety(shuffled, 20);
       setRandomRecommendations(diversifiedRandomItems);
 
-      // === AI RECOMMENDATIONS - On-device CPU ranking + optional local LLM rerank ===
+      // === AI RECOMMENDATIONS - Prefer Groq reranking, fallback to local ranking ===
       if (userId) {
         try {
-          debugLog("🤖 Building on-device For You recommendations for user:", userId);
+          debugLog("🤖 Building Groq For You recommendations for user:", userId);
           const [skillsResult, genresResult] = await Promise.all([
             supabase.from("profile_skills").select("skill").eq("profile_id", userId),
             supabase.from("profile_genres").select("genre").eq("profile_id", userId),
@@ -1085,21 +1090,21 @@ export default function HomeScreen() {
 
           // Keep feed realtime: show local ranking immediately while LLM rerank runs.
           setAiRecommendations(localRankedItems);
-          setAiFeedProvider("On-Device CPU Ranker");
+          setAiFeedProvider(geminiModelLabel);
 
           const hasProfileSignals =
             profileSignals.skills.length > 0 || profileSignals.genres.length > 0;
 
           if (localRankedItems.length === 0) {
-            setAiFeedMessage("No listings available for ranking yet.");
+            setAiFeedMessage("No listings available for AI feed ranking yet.");
           } else if (hasProfileSignals) {
-            setAiFeedMessage("Personalized locally on your device CPU. No paid AI API used.");
+            setAiFeedMessage(`Preparing ${geminiModelLabel} feed for your profile.`);
           } else {
-            setAiFeedMessage("Ranked locally using popularity and freshness.");
+            setAiFeedMessage(`Preparing ${geminiModelLabel} feed.`);
           }
 
           void (async () => {
-            const llmResult = await rerankHomeFeedWithLocalLLM({
+            const llmResult = await rerankHomeFeedWithGeminiFlashLite({
               candidates: localRankedItems,
               profileSignals,
               limit: 20,
@@ -1111,20 +1116,25 @@ export default function HomeScreen() {
 
             if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
               setAiRecommendations(llmResult.recommendations);
-              setAiFeedProvider(llmResult.aiProvider);
+              setAiFeedProvider(llmResult.aiProvider || geminiModelLabel);
+              setAiFeedMessage(llmResult.message);
+              return;
+            }
+
+            if (llmResult.message && llmResult.message.trim().length > 0) {
               setAiFeedMessage(llmResult.message);
             }
           })();
         } catch (aiErr) {
-          debugLog("🤖 On-device ranking error, using general fallback:", aiErr);
+          debugLog("🤖 Groq ranking error, using local fallback:", aiErr);
           setAiRecommendations([]);
-          setAiFeedProvider("On-Device CPU Ranker");
+          setAiFeedProvider(geminiModelLabel);
           setAiFeedMessage("Local personalization is temporarily unavailable. Showing general picks.");
         }
       } else {
         debugLog("🤖 No user logged in - skipping AI recommendations");
         setAiRecommendations([]);
-        setAiFeedProvider("On-Device CPU Ranker");
+        setAiFeedProvider(geminiModelLabel);
         setAiFeedMessage("");
       }
 
@@ -1836,7 +1846,7 @@ export default function HomeScreen() {
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
               {aiModeEnabled
-                ? "On-device personalized recommendations"
+                ? "AI-personalized recommendations"
                 : "Random selection"}
             </Text>
           </View>
@@ -2532,7 +2542,7 @@ export default function HomeScreen() {
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
               {aiModeEnabled
-                ? "Personalized picks reranked on-device in realtime"
+                ? "Personalized picks reranked in realtime"
                 : "Random suggestions for comparison"}
             </Text>
           </View>
@@ -3089,7 +3099,7 @@ export default function HomeScreen() {
                   flex: 1,
                 }}
               >
-                {aiFeedMessage || "Add profile skills and genres for stronger local ranking signals."}
+                {aiFeedMessage || "Add profile skills and genres for stronger AI ranking signals."}
               </Text>
             </View>
           )}

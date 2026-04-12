@@ -254,6 +254,41 @@ const BookingDetailsSheet = forwardRef<
   const effectiveDurationHours = Number(
     booking.duration_hours || booking?.modifiers_applied?.hours || 4,
   );
+  const parsedMinHoursPerSong = Number(
+    booking?.modifiers_applied?.recording_session?.min_hours_per_song ??
+      booking?.modifiers_applied?.min_hours_per_song ??
+      booking?.studio_settings?.min_booking_duration_hours ??
+      studioDetails?.settings?.min_booking_duration_hours ??
+      "",
+  );
+  const recordingMinHoursPerSong =
+    Number.isFinite(parsedMinHoursPerSong) && parsedMinHoursPerSong > 0
+      ? parsedMinHoursPerSong
+      : null;
+  const parsedRequiredRecordingHours = Number(
+    booking?.modifiers_applied?.recording_session?.required_total_hours ??
+      booking?.modifiers_applied?.required_total_hours ??
+      "",
+  );
+  const requiredRecordingHours =
+    Number.isFinite(parsedRequiredRecordingHours) &&
+    parsedRequiredRecordingHours > 0
+      ? parsedRequiredRecordingHours
+      : effectiveSongCount && recordingMinHoursPerSong
+        ? effectiveSongCount * recordingMinHoursPerSong
+        : null;
+  const parsedSelectedRecordingHours = Number(
+    booking?.modifiers_applied?.recording_session?.selected_total_hours ??
+      booking?.modifiers_applied?.selected_total_hours ??
+      booking.duration_hours ??
+      booking?.modifiers_applied?.hours ??
+      "",
+  );
+  const selectedRecordingHours =
+    Number.isFinite(parsedSelectedRecordingHours) &&
+    parsedSelectedRecordingHours > 0
+      ? parsedSelectedRecordingHours
+      : null;
   const baseRateValue = Number(booking.base_rate || 0);
   const normalizedTotalCost = Number(booking.total_cost || 0);
 
@@ -859,6 +894,71 @@ const BookingDetailsSheet = forwardRef<
                       </Text>
                     </View>
                   )}
+
+                  {isStudio && isRecordingSession && recordingMinHoursPerSong && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Estimated Hours / Song
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {recordingMinHoursPerSong} hr/song
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && requiredRecordingHours && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Minimum Required Time
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {requiredRecordingHours.toFixed(1)} hours
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio &&
+                    isRecordingSession &&
+                    selectedRecordingHours && (
+                      <View style={styles.detailItem}>
+                        <Text
+                          style={[
+                            styles.detailLabel,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Selected Time
+                        </Text>
+                        <Text
+                          style={[
+                            styles.detailValue,
+                            {
+                              color:
+                                requiredRecordingHours &&
+                                selectedRecordingHours < requiredRecordingHours
+                                  ? "#F59E0B"
+                                  : colors.text,
+                            },
+                          ]}
+                        >
+                          {selectedRecordingHours.toFixed(1)} hours
+                        </Text>
+                      </View>
+                    )}
 
                   {/* Show studio operating hours for this day */}
                   {dateOverride && isStudio && (

@@ -26,9 +26,11 @@ import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBann
 import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
 import { useTheme } from "../src/context/ThemeContext";
-import { rerankHomeFeedWithLocalLLM } from "../src/services/offlineLlmEnhancer";
-import { startBackgroundPreparation, isModelPreparing, onModelReady } from "../src/services/musikaLlmAdapter";
-import { getScreenCacheKey, readScreenCache, writeScreenCache } from "../src/utils/screenCache";
+import {
+  getGeminiFlashLiteInfo,
+  rerankHomeFeedWithGeminiFlashLite,
+} from "../src/services/groqModelRouter";
+import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../src/utils/screenCache";
 
 const { width, height } = Dimensions.get("window");
 
@@ -343,71 +345,122 @@ const AutoCardImage = ({
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
-  const { userRole, userId, isGuest } = useAuth();
+  const { userRole, userId, isGuest, roleResolved } = useAuth();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
-  const [loading, setLoading] = useState(true);
+
+  const homeCacheBaseParams = useMemo(
+    () => ({
+      userId: userId || "guest",
+      isGuest,
+    }),
+    [userId, isGuest],
+  );
+
+  const homeCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-feed", {
+      ...homeCacheBaseParams,
+      userRole: userRole || "guest",
+    }),
+    [homeCacheBaseParams, userRole],
+  );
+
+  const homeFallbackCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-feed", homeCacheBaseParams),
+    [homeCacheBaseParams],
+  );
+
+  const homeProfileCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-profile", {
+      userId: userId || "guest",
+      isGuest,
+    }),
+    [userId, isGuest],
+  );
+
+  const initialHomeFeedSnapshot = useMemo(
+    () =>
+      peekScreenCache<HomeFeedCachePayload>(homeCacheKey, HOME_CACHE_TTL_MS) ??
+      peekScreenCache<HomeFeedCachePayload>(homeFallbackCacheKey, HOME_CACHE_TTL_MS),
+    [homeCacheKey, homeFallbackCacheKey],
+  );
+
+  const initialHomeProfileSnapshot = useMemo(
+    () => peekScreenCache<HomeProfileCachePayload>(homeProfileCacheKey, HOME_PROFILE_CACHE_TTL_MS),
+    [homeProfileCacheKey],
+  );
+
+  const [loading, setLoading] = useState(() => initialHomeFeedSnapshot == null);
   const [refreshing, setRefreshing] = useState(false);
-  const [featured, setFeatured] = useState<any[]>([]);
-  const [discover, setDiscover] = useState<any[]>([]);
-  const [newArrivals, setNewArrivals] = useState<any[]>([]); // New Arrivals State
+  const [featured, setFeatured] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.featured) ? initialHomeFeedSnapshot.featured : [],
+  );
+  const [discover, setDiscover] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.discover) ? initialHomeFeedSnapshot.discover : [],
+  );
+  const [newArrivals, setNewArrivals] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.newArrivals) ? initialHomeFeedSnapshot.newArrivals : [],
+  ); // New Arrivals State
   const [viewedNewArrivals, setViewedNewArrivals] = useState<Set<string>>(new Set());
   const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
-  const [userName, setUserName] = useState("Guest");
+  const [userName, setUserName] = useState(() => initialHomeProfileSnapshot?.userName || "Guest");
   const [timeGreeting, setTimeGreeting] = useState("Hey");
+  const geminiInfo = getGeminiFlashLiteInfo();
+  const geminiModelLabel = geminiInfo.modelLabel;
+  const geminiConfigured = geminiInfo.configured;
+  const geminiModelSource = geminiInfo.modelSource;
+  const geminiApiKeySource = geminiInfo.apiKeySource;
+  const geminiApiKeySignature = geminiInfo.apiKeySignature;
 
   // AI Recommendation Mode
   const aiModeEnabled = true;
   const strictLlmModeForAiPages = true;
   const showForYouAiCard = false;
-  const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
-  const [randomRecommendations, setRandomRecommendations] = useState<any[]>([]);
-  const [aiFeedProvider, setAiFeedProvider] = useState("On-Device LLM (Required)");
-  const [aiFeedMessage, setAiFeedMessage] = useState("");
-  const [isOnDeviceLlmReady, setIsOnDeviceLlmReady] = useState(false);
+  const [aiRecommendations, setAiRecommendations] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.aiRecommendations) ? initialHomeFeedSnapshot.aiRecommendations : [],
+  );
+  const [randomRecommendations, setRandomRecommendations] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.randomRecommendations) ? initialHomeFeedSnapshot.randomRecommendations : [],
+  );
+  const [aiFeedProvider, setAiFeedProvider] = useState(
+    () => initialHomeFeedSnapshot?.aiFeedProvider || geminiModelLabel,
+  );
+  const [aiFeedMessage, setAiFeedMessage] = useState(
+    () => initialHomeFeedSnapshot?.aiFeedMessage || "",
+  );
   const [isHomeLlmRerankPending, setIsHomeLlmRerankPending] = useState(false);
 
   const homeAiStatusLabel = useMemo(() => {
     if (!userId) return "AI status: Sign in required";
 
-    const providerText = aiFeedProvider || "On-Device LLM (Required)";
+    const providerText = aiFeedProvider || geminiModelLabel;
     const hasResults = aiRecommendations.length > 0;
-    const providerUsesLlm = providerText.toLowerCase().includes("llm");
-    const llmActive = providerUsesLlm && hasResults;
 
-    if (llmActive) {
-      return `AI status: Working (${providerText})`;
-    }
-
-    if (isModelPreparing()) {
-      return "AI status: Downloading LLM model...";
-    }
-
-    if (isOnDeviceLlmReady && hasResults) {
-      return providerUsesLlm
-        ? `AI status: Working (${providerText})`
-        : `AI status: On-device LLM ready (${providerText} feed active)`;
-    }
-
-    if (isOnDeviceLlmReady) {
-      return "AI status: On-device LLM ready";
-    }
-
-    if (aiFeedMessage && aiFeedMessage.trim().length > 0) {
-      return `AI status: ${aiFeedMessage}`;
+    if (isHomeLlmRerankPending) {
+      return `AI status: Fetching ${geminiModelLabel} picks...`;
     }
 
     if (hasResults) {
       return `AI status: Working (${providerText})`;
     }
 
+    if (!geminiConfigured) {
+      return "AI status: Groq API key not configured";
+    }
+
+    if (aiFeedMessage && aiFeedMessage.trim().length > 0) {
+      return `AI status: ${aiFeedMessage}`;
+    }
+
     return "AI status: Initializing...";
   }, [
-    userId,
     aiFeedProvider,
     aiFeedMessage,
     aiRecommendations.length,
-    isOnDeviceLlmReady,
+    geminiConfigured,
+    geminiModelLabel,
+    isHomeLlmRerankPending,
+    userId,
   ]);
 
   // ... refs ...
@@ -421,11 +474,11 @@ export default function HomeScreen() {
   const homeRealtimeRefreshTimerRef =
     React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeDataFetchInFlightRef = React.useRef(false);
-  const hasHydratedHomeCacheRef = React.useRef(false);
+  const hasHydratedHomeCacheRef = React.useRef(Boolean(initialHomeFeedSnapshot));
   const homeLlmRequestIdRef = React.useRef(0);
   const homeLlmRerankInFlightRef = React.useRef(false);
-  const lastHomeRefreshAtRef = React.useRef(0);
-  const lastProfileRefreshAtRef = React.useRef(0);
+  const lastHomeRefreshAtRef = React.useRef(initialHomeFeedSnapshot?.fetchedAt || 0);
+  const lastProfileRefreshAtRef = React.useRef(initialHomeProfileSnapshot?.fetchedAt || 0);
   const viewedNewArrivalsLoadedRef = React.useRef(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
@@ -446,34 +499,17 @@ export default function HomeScreen() {
   // Scroll State for Sticky Header
   const [isScrolled, setIsScrolled] = useState(false);
 
-  const homeCacheKey = useMemo(
-    () => getScreenCacheKey("mobile-home-feed", {
-      userId: userId || "guest",
-      userRole: userRole || "guest",
-      isGuest,
-    }),
-    [userId, userRole, isGuest],
-  );
-
-  const homeProfileCacheKey = useMemo(
-    () => getScreenCacheKey("mobile-home-profile", {
-      userId: userId || "guest",
-      isGuest,
-    }),
-    [userId, isGuest],
-  );
-
   const applyHomeFeedSnapshot = useCallback((snapshot: HomeFeedCachePayload) => {
     setFeatured(Array.isArray(snapshot.featured) ? snapshot.featured : []);
     setDiscover(Array.isArray(snapshot.discover) ? snapshot.discover : []);
     setNewArrivals(Array.isArray(snapshot.newArrivals) ? snapshot.newArrivals : []);
     setRandomRecommendations(Array.isArray(snapshot.randomRecommendations) ? snapshot.randomRecommendations : []);
     setAiRecommendations(Array.isArray(snapshot.aiRecommendations) ? snapshot.aiRecommendations : []);
-    setAiFeedProvider(snapshot.aiFeedProvider || "On-Device LLM (Required)");
+    setAiFeedProvider(snapshot.aiFeedProvider || geminiModelLabel);
     setAiFeedMessage(snapshot.aiFeedMessage || "");
     lastHomeRefreshAtRef.current = snapshot.fetchedAt || Date.now();
     hasHydratedHomeCacheRef.current = true;
-  }, []);
+  }, [geminiModelLabel]);
 
   const loadViewedNewArrivals = useCallback(async () => {
     if (viewedNewArrivalsLoadedRef.current) {
@@ -608,54 +644,68 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!userId) return;
 
-    const providerText = aiFeedProvider || "On-Device LLM (Required)";
-    const providerUsesLlm = providerText.toLowerCase().includes("llm");
-    const llmFeedActive = providerUsesLlm && aiRecommendations.length > 0;
-    const llmActive = isOnDeviceLlmReady || llmFeedActive;
+    const providerText = aiFeedProvider || geminiModelLabel;
+    const aiFeedActive = aiRecommendations.length > 0;
 
     console.log("[HOME_AI_STATUS]", {
       provider: providerText,
       picks: aiRecommendations.length,
-      llmActive,
-      llmFeedActive,
-      llmFeedPending: isHomeLlmRerankPending,
-      llmReady: isOnDeviceLlmReady,
+      aiActive: aiFeedActive,
+      aiFeedPending: isHomeLlmRerankPending,
+      configured: geminiConfigured,
+      modelSource: geminiModelSource,
+      apiKeySource: geminiApiKeySource,
+      apiKeySignature: geminiApiKeySignature,
       message: aiFeedMessage || "",
     });
   }, [
-    userId,
     aiFeedProvider,
     aiFeedMessage,
     aiRecommendations.length,
+    geminiApiKeySignature,
+    geminiApiKeySource,
+    geminiConfigured,
+    geminiModelLabel,
+    geminiModelSource,
     isHomeLlmRerankPending,
-    isOnDeviceLlmReady,
+    userId,
   ]);
-
-  // Kick off LLM model download + initialization in background as early
-  // as possible so it's ready by the time AI features are needed.
-  useEffect(() => {
-    startBackgroundPreparation();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
-    hasHydratedHomeCacheRef.current = false;
-    lastHomeRefreshAtRef.current = 0;
-    lastProfileRefreshAtRef.current = 0;
+    if (initialHomeFeedSnapshot) {
+      applyHomeFeedSnapshot(initialHomeFeedSnapshot);
+      setLoading(false);
+    }
+
+    if (initialHomeProfileSnapshot) {
+      setUserName(initialHomeProfileSnapshot.userName || "Guest");
+      setHasGroups(Boolean(initialHomeProfileSnapshot.hasGroups));
+      lastProfileRefreshAtRef.current = initialHomeProfileSnapshot.fetchedAt || Date.now();
+    } else if (isGuest) {
+      setUserName("Guest");
+      setHasGroups(false);
+    }
+
+    hasHydratedHomeCacheRef.current = Boolean(initialHomeFeedSnapshot);
+    lastHomeRefreshAtRef.current = initialHomeFeedSnapshot?.fetchedAt || 0;
+    lastProfileRefreshAtRef.current = initialHomeProfileSnapshot?.fetchedAt || lastProfileRefreshAtRef.current;
 
     void (async () => {
-      const [cachedHomeFeed, cachedProfile] = await Promise.all([
+      const [cachedHomeFeed, cachedFallbackHomeFeed, cachedProfile] = await Promise.all([
         readScreenCache<HomeFeedCachePayload>(homeCacheKey, HOME_CACHE_TTL_MS),
+        readScreenCache<HomeFeedCachePayload>(homeFallbackCacheKey, HOME_CACHE_TTL_MS),
         readScreenCache<HomeProfileCachePayload>(homeProfileCacheKey, HOME_PROFILE_CACHE_TTL_MS),
       ]);
+      const resolvedHomeFeed = cachedHomeFeed ?? cachedFallbackHomeFeed;
 
       if (cancelled) {
         return;
       }
 
-      if (cachedHomeFeed) {
-        applyHomeFeedSnapshot(cachedHomeFeed);
+      if (resolvedHomeFeed) {
+        applyHomeFeedSnapshot(resolvedHomeFeed);
         setLoading(false);
       }
 
@@ -672,7 +722,15 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [applyHomeFeedSnapshot, homeCacheKey, homeProfileCacheKey, isGuest]);
+  }, [
+    applyHomeFeedSnapshot,
+    homeCacheKey,
+    homeFallbackCacheKey,
+    homeProfileCacheKey,
+    initialHomeFeedSnapshot,
+    initialHomeProfileSnapshot,
+    isGuest,
+  ]);
 
   useEffect(() => {
     if (
@@ -696,7 +754,10 @@ export default function HomeScreen() {
       aiFeedMessage,
     };
 
-    void writeScreenCache(homeCacheKey, payload);
+    void Promise.all([
+      writeScreenCache(homeCacheKey, payload),
+      writeScreenCache(homeFallbackCacheKey, payload),
+    ]);
   }, [
     aiFeedMessage,
     aiFeedProvider,
@@ -704,20 +765,10 @@ export default function HomeScreen() {
     discover,
     featured,
     homeCacheKey,
+    homeFallbackCacheKey,
     newArrivals,
     randomRecommendations,
   ]);
-
-  // Re-fetch home feed AI recommendations once the on-device LLM becomes ready.
-  const fetchHomeDataRef = React.useRef<((showLoading?: boolean, options?: { bypassCooldown?: boolean }) => Promise<void>) | null>(null);
-  useEffect(() => {
-    return onModelReady(() => {
-      setIsOnDeviceLlmReady(true);
-      if (!homeDataFetchInFlightRef.current) {
-        fetchHomeDataRef.current?.(false, { bypassCooldown: true });
-      }
-    });
-  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -777,7 +828,7 @@ export default function HomeScreen() {
       };
 
       void restorePendingReopen();
-    }, [discover.length, featured.length, isGuest, loadViewedNewArrivals, params.reopenListingId, userId, userRole]),
+    }, [discover.length, featured.length, isGuest, loadViewedNewArrivals, params.reopenListingId, roleResolved, userId, userRole]),
   );
 
   // Handler for realtime updates - defined before useEffect that uses it
@@ -790,7 +841,7 @@ export default function HomeScreen() {
       // Silent refresh to keep UI stable during realtime bursts.
       void fetchHomeData(false, { bypassCooldown: true });
     }, 450);
-  }, [userRole, userId]);
+  }, [roleResolved, userId, userRole]);
 
   // Realtime Updates
   useEffect(() => {
@@ -844,7 +895,7 @@ export default function HomeScreen() {
       fetchRecentlyViewed(),
     ]);
     setRefreshing(false);
-  }, [userRole, userId, isGuest]);
+  }, [isGuest, roleResolved, userId, userRole]);
 
   const setTimeBasedGreeting = () => {
     const hour = new Date().getHours();
@@ -853,7 +904,7 @@ export default function HomeScreen() {
     else setTimeGreeting("Good evening");
   };
 
-  const [hasGroups, setHasGroups] = useState(false);
+  const [hasGroups, setHasGroups] = useState(() => Boolean(initialHomeProfileSnapshot?.hasGroups));
 
   const topItems = useMemo(() => {
     const combined = [...featured, ...discover];
@@ -951,6 +1002,11 @@ export default function HomeScreen() {
     options?: { bypassCooldown?: boolean },
   ) => {
     debugLog("fetchHomeData called, showLoading:", showLoading);
+    if (Boolean(userId) && !isGuest && !roleResolved) {
+      debugLog("Skipping home fetch while user role is still resolving");
+      return;
+    }
+
     if (homeDataFetchInFlightRef.current) {
       return;
     }
@@ -965,7 +1021,14 @@ export default function HomeScreen() {
     }
 
     homeDataFetchInFlightRef.current = true;
-    if (showLoading) setLoading(true);
+    const hasVisibleFeed =
+      featured.length > 0 ||
+      discover.length > 0 ||
+      newArrivals.length > 0 ||
+      randomRecommendations.length > 0 ||
+      aiRecommendations.length > 0;
+
+    if (showLoading && !hasVisibleFeed) setLoading(true);
     try {
       // Fetch based on Role
       // If Owner, ONLY fetch groups (musicians)
@@ -1313,10 +1376,14 @@ export default function HomeScreen() {
       const diversifiedRandomItems = takeItemsWithTypeVariety(shuffled, 20);
       setRandomRecommendations(diversifiedRandomItems);
 
-      // === AI RECOMMENDATIONS - Prefer on-device LLM, fallback to on-device CPU ranking ===
+      // === AI RECOMMENDATIONS - Prefer Groq reranking, fallback to local ranking ===
       if (userId) {
         try {
-          debugLog("Building on-device For You recommendations for user:", userId);
+          const hasExistingAiFeed =
+            aiRecommendations.length > 0 &&
+            !/(local ranker|local matching)/i.test(aiFeedProvider || "");
+
+          debugLog("Building Groq For You recommendations for user:", userId);
           const [skillsResult, genresResult] = await Promise.all([
             supabase.from("profile_skills").select("skill").eq("profile_id", userId),
             supabase.from("profile_genres").select("genre").eq("profile_id", userId),
@@ -1338,18 +1405,19 @@ export default function HomeScreen() {
           const hasProfileSignals =
             profileSignals.skills.length > 0 || profileSignals.genres.length > 0;
 
-          setAiRecommendations([]);
-          setAiFeedProvider("On-Device LLM (Required)");
-          if (localRankedItems.length === 0) {
-            setAiFeedMessage("No listings available for LLM feed ranking yet.");
-          } else if (homeLlmRerankInFlightRef.current) {
-            setAiFeedMessage("On-device LLM rerank is already running for Home feed.");
-          } else if (isOnDeviceLlmReady) {
-            setAiFeedMessage("On-device LLM rerank is running for Home feed.");
-          } else if (hasProfileSignals) {
-            setAiFeedMessage("Preparing on-device LLM feed for your profile.");
-          } else {
-            setAiFeedMessage("Preparing on-device LLM feed.");
+          if (!hasExistingAiFeed) {
+            setAiRecommendations([]);
+            setAiFeedProvider(geminiModelLabel);
+
+            if (localRankedItems.length === 0) {
+              setAiFeedMessage("No listings available for AI feed ranking yet.");
+            } else if (homeLlmRerankInFlightRef.current) {
+              setAiFeedMessage(`${geminiModelLabel} rerank is already running for Home feed.`);
+            } else if (hasProfileSignals) {
+              setAiFeedMessage(`Preparing ${geminiModelLabel} feed for your profile.`);
+            } else {
+              setAiFeedMessage(`Preparing ${geminiModelLabel} feed.`);
+            }
           }
 
           if (homeLlmRerankInFlightRef.current) {
@@ -1362,7 +1430,7 @@ export default function HomeScreen() {
 
           void (async () => {
             try {
-              const llmResult = await rerankHomeFeedWithLocalLLM({
+              const llmResult = await rerankHomeFeedWithGeminiFlashLite({
                 candidates: localRankedItems,
                 profileSignals,
                 limit: 20,
@@ -1374,20 +1442,24 @@ export default function HomeScreen() {
 
               if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
                 setAiRecommendations(llmResult.recommendations);
-                setAiFeedProvider(llmResult.aiProvider || "On-Device LLM");
+                setAiFeedProvider(llmResult.aiProvider || geminiModelLabel);
                 setAiFeedMessage(
                   llmResult.message ||
-                  "Realtime For You feed reranked by on-device LLM.",
+                  `Realtime For You feed reranked by ${geminiModelLabel}.`,
                 );
                 return;
               }
 
               if (strictLlmModeForAiPages) {
-                setAiRecommendations([]);
-                setAiFeedProvider("On-Device LLM (Required)");
+                if (!hasExistingAiFeed) {
+                  setAiRecommendations([]);
+                  setAiFeedProvider(geminiModelLabel);
+                }
                 setAiFeedMessage(
                   llmResult.message ||
-                  "On-device LLM is required for Home AI mode on this build.",
+                  (hasExistingAiFeed
+                    ? `Keeping the previous ${geminiModelLabel} feed while Home refresh retries.`
+                    : `${geminiModelLabel} is required for Home AI mode on this build.`),
                 );
                 return;
               }
@@ -1403,19 +1475,27 @@ export default function HomeScreen() {
             }
           })();
         } catch (aiErr) {
-          debugLog("On-device ranking error:", aiErr);
-          setAiRecommendations([]);
-          setAiFeedProvider("On-Device LLM (Required)");
+          debugLog("Groq ranking error:", aiErr);
+          const hasExistingAiFeed =
+            aiRecommendations.length > 0 &&
+            !/(local ranker|local matching)/i.test(aiFeedProvider || "");
+
+          if (!hasExistingAiFeed) {
+            setAiRecommendations([]);
+            setAiFeedProvider(geminiModelLabel);
+          }
           setAiFeedMessage(
             strictLlmModeForAiPages
-              ? "Home AI mode requires on-device LLM runtime/model on this build."
+              ? hasExistingAiFeed
+                ? `Keeping the previous ${geminiModelLabel} feed while Home refresh retries.`
+                : `${geminiModelLabel} is unavailable for Home AI mode right now.`
               : "Local personalization is temporarily unavailable. Showing general picks.",
           );
         }
       } else {
         debugLog("No user logged in - skipping AI recommendations");
         setAiRecommendations([]);
-        setAiFeedProvider("On-Device LLM (Required)");
+        setAiFeedProvider(geminiModelLabel);
         setAiFeedMessage("");
       }
 
@@ -1433,7 +1513,6 @@ export default function HomeScreen() {
       setLoading(false);
     }
   };
-  fetchHomeDataRef.current = fetchHomeData;
 
   const handleCardPress = async (item: any) => {
     debugLog("=== handleCardPress called ===");

@@ -243,32 +243,9 @@ const BookingControls = ({
             { color: colors.text, fontSize: 16, marginBottom: 0 },
           ]}
         >
-          {isRecordingMode ? "Select Recording Date" : "Select Date & Time"}
+          Select Date & Time
         </Text>
-        {isRecordingMode ? (
-          <View
-            style={[
-              styles.durationBadge,
-              {
-                backgroundColor: isDark
-                  ? "rgba(124, 58, 237, 0.15)"
-                  : "rgba(124, 58, 237, 0.1)",
-              },
-            ]}
-          >
-            <Ionicons name="mic" size={14} color={colors.primary} />
-            <Text
-              style={{
-                fontFamily: "Poppins_600SemiBold",
-                color: colors.primary,
-                marginLeft: 4,
-                fontSize: 12,
-              }}
-            >
-              Whole Day
-            </Text>
-          </View>
-        ) : duration > 0 ? (
+        {duration > 0 ? (
           <View
             style={[
               styles.durationBadge,
@@ -401,7 +378,7 @@ const BookingControls = ({
             },
           ]}
         >
-          {isRecordingMode ? (
+          {false ? (
             <View>
               <Text
                 style={{

@@ -27,6 +27,7 @@ type AuthContextType = {
   setGuestMode: (enabled: boolean) => Promise<void>;
   isAdmin: boolean;
   userRole: string | null;
+  roleResolved: boolean;
   userId: string | null;
   // System lock for unpaid balances
   isSystemLocked: boolean;
@@ -52,6 +53,7 @@ const AuthContext = createContext<AuthContextType>({
   setGuestMode: async () => { },
   isAdmin: false,
   userRole: null,
+  roleResolved: false,
   userId: null,
   isSystemLocked: false,
   unpaidBalance: 0,
@@ -106,6 +108,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isGuest, setIsGuest] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [roleResolved, setRoleResolved] = useState(false);
 
   // System lock state
   const [isSystemLocked, setIsSystemLocked] = useState(false);
@@ -454,6 +457,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(null);
       setIsAdmin(false);
       setUserRole(null);
+      setRoleResolved(true);
       setIsSystemLocked(false);
       setUnpaidBalance(0);
       setUnpaidBookings([]);
@@ -501,7 +505,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (secureSession) {
           setGuestMode(false);
           checkAdmin(secureSession.user.id);
+          setRoleResolved(false);
           fetchUserRole(secureSession.user.id);
+        } else {
+          setRoleResolved(true);
         }
         setLoading(false);
       } catch (error) {
@@ -526,6 +533,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(null);
         setIsAdmin(false);
         setUserRole(null);
+        setRoleResolved(true);
         setIsSystemLocked(false);
         setUnpaidBalance(0);
         setUnpaidBookings([]);
@@ -553,11 +561,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (secureSession) {
         setGuestMode(false);
         checkAdmin(secureSession.user.id);
+        setRoleResolved(false);
         fetchUserRole(secureSession.user.id);
       } else if (event !== "INITIAL_SESSION") {
         // Only reset state if this isn't the initial session load
         setIsAdmin(false);
         setUserRole(null);
+        setRoleResolved(true);
         setIsSystemLocked(false);
         setUnpaidBalance(0);
         setUnpaidBookings([]);
@@ -815,19 +825,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (error) {
         console.log("❌ Error fetching user role:", error.message, error);
         setUserRole(null);
+        setRoleResolved(true);
         return;
       }
 
       if (data && data.length > 0) {
         console.log("✅ User role fetched:", data[0].role);
         setUserRole(data[0].role);
+        setRoleResolved(true);
       } else {
         console.log("⚠️ No profile data found for user");
         setUserRole(null);
+        setRoleResolved(true);
       }
     } catch (error) {
       console.log("❌ Exception fetching user role:", error);
       setUserRole(null);
+      setRoleResolved(true);
     }
   };
 
@@ -840,6 +854,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setGuestMode,
         isAdmin,
         userRole,
+        roleResolved,
         userId: session?.user?.id || null,
         isSystemLocked,
         unpaidBalance,
