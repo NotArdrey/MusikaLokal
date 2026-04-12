@@ -12,23 +12,14 @@ import type {
 const SUGGESTION_CACHE_PREFIX = "groq_suggestions:";
 const HOME_CACHE_PREFIX = "groq_home:";
 const SUGGESTION_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
-const HOME_CACHE_TTL_MS = 1000 * 60 * 20;
+const HOME_CACHE_TTL_MS = 1000 * 60 * 10;
 const SUGGESTION_TIMEOUT_MS = 20000;
 const HOME_TIMEOUT_MS = 16000;
-const MAX_SUGGESTION_CANDIDATES = 10;
-const MAX_HOME_CANDIDATES = 10;
+const MAX_SUGGESTION_CANDIDATES = 12;
+const MAX_HOME_CANDIDATES = 12;
 const MAX_HOME_TARGET_COUNT = 6;
 const GROQ_CHAT_COMPLETIONS_URL =
   "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_USAGE_GUARD_KEY = "groq_usage_guard:v1";
-const GROQ_MINUTE_WINDOW_MS = 1000 * 60;
-const GROQ_DAY_WINDOW_MS = 1000 * 60 * 60 * 24;
-const GROQ_FREE_TIER_SAFETY_LIMITS = {
-  requestsPerMinute: 8,
-  tokensPerMinute: 3500,
-  requestsPerDay: 120,
-  tokensPerDay: 120000,
-};
 
 const DEFAULT_GROQ_MODEL_ID = "qwen/qwen3-32b";
 const GROQ_MODEL_FALLBACK_IDS = [
@@ -89,24 +80,6 @@ interface ResolvedConfigValue {
   source: string;
 }
 
-interface GroqUsageEvent {
-  timestamp: number;
-  estimatedTokens: number;
-}
-
-interface GroqUsageState {
-  events: GroqUsageEvent[];
-}
-
-interface GroqBudgetBlockInfo {
-  reason:
-    | "requests_per_minute"
-    | "tokens_per_minute"
-    | "requests_per_day"
-    | "tokens_per_day";
-  waitMs: number;
-}
-
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
 
@@ -128,259 +101,7 @@ const hashString = (value: string) => {
   return Math.abs(hash).toString(16);
 };
 
-let groqUsageLock: Promise<void> = Promise.resolve();
-
 const pendingGroqRequests = new Map<string, Promise<GroqRequestResult>>();
-
-const withGroqUsageLock = async <T>(operation: () => Promise<T>): Promise<T> => {
-  const previousLock = groqUsageLock;
-  let releaseLock: () => void = () => {};
-  groqUsageLock = new Promise<void>((resolve) => {
-    releaseLock = resolve;
-  });
-
-  await previousLock;
-
-  try {
-    return await operation();
-  } finally {
-    releaseLock();
-  }
-};
-
-const loadGroqUsageState = async (): Promise<GroqUsageState> => {
-  try {
-    const raw = await AsyncStorage.getItem(GROQ_USAGE_GUARD_KEY);
-    if (!raw) {
-      return { events: [] };
-    }
-
-    const parsed = JSON.parse(raw) as GroqUsageState;
-    if (!Array.isArray(parsed?.events)) {
-      return { events: [] };
-    }
-
-    return {
-      events: parsed.events.filter(
-        (entry) =>
-          entry &&
-          typeof entry.timestamp === "number" &&
-          Number.isFinite(entry.timestamp) &&
-          typeof entry.estimatedTokens === "number" &&
-          Number.isFinite(entry.estimatedTokens),
-      ),
-    };
-  } catch {
-    return { events: [] };
-  }
-};
-
-const saveGroqUsageState = async (state: GroqUsageState) => {
-  try {
-    await AsyncStorage.setItem(GROQ_USAGE_GUARD_KEY, JSON.stringify(state));
-  } catch {
-    // Ignore storage failures and fall back to network-side limits.
-  }
-};
-
-const pruneGroqUsageEvents = (events: GroqUsageEvent[], now: number) => {
-  return events.filter(
-    (event) =>
-      now - event.timestamp < GROQ_DAY_WINDOW_MS &&
-      event.estimatedTokens > 0,
-  );
-};
-
-const sumGroqEstimatedTokens = (events: GroqUsageEvent[]) => {
-  return events.reduce((total, event) => total + event.estimatedTokens, 0);
-};
-
-const getRequestLimitResetDelay = (
-  events: GroqUsageEvent[],
-  limit: number,
-  windowMs: number,
-  now: number,
-) => {
-  const overflowCount = events.length + 1 - limit;
-  if (overflowCount <= 0) {
-    return 0;
-  }
-
-  const sortedEvents = [...events].sort((left, right) => left.timestamp - right.timestamp);
-  const blockingEvent = sortedEvents[Math.max(0, overflowCount - 1)];
-  return Math.max(1000, blockingEvent.timestamp + windowMs - now);
-};
-
-const getTokenLimitResetDelay = (
-  events: GroqUsageEvent[],
-  limit: number,
-  estimatedTokens: number,
-  windowMs: number,
-  now: number,
-) => {
-  let remainingTokens = sumGroqEstimatedTokens(events) + estimatedTokens;
-  if (remainingTokens <= limit) {
-    return 0;
-  }
-
-  const sortedEvents = [...events].sort((left, right) => left.timestamp - right.timestamp);
-  let blockingTimestamp = now;
-
-  for (const event of sortedEvents) {
-    remainingTokens -= event.estimatedTokens;
-    blockingTimestamp = event.timestamp;
-    if (remainingTokens <= limit) {
-      return Math.max(1000, blockingTimestamp + windowMs - now);
-    }
-  }
-
-  return windowMs;
-};
-
-const estimateGroqTextTokens = (value: string) => {
-  const normalizedValue = value.replace(/\s+/g, " ").trim();
-  if (!normalizedValue) {
-    return 0;
-  }
-
-  return Math.ceil(normalizedValue.length / 4);
-};
-
-const estimateGroqRequestTokens = (input: {
-  systemPrompt: string;
-  userPrompt: string;
-  maxOutputTokens: number;
-}) => {
-  return (
-    estimateGroqTextTokens(input.systemPrompt) +
-    estimateGroqTextTokens(input.userPrompt) +
-    Math.max(64, input.maxOutputTokens) +
-    32
-  );
-};
-
-const buildGroqBudgetError = (info: GroqBudgetBlockInfo) => {
-  return new Error(`groq_free_tier_guard:${info.reason}:${info.waitMs}`);
-};
-
-const parseGroqBudgetError = (message: string): GroqBudgetBlockInfo | null => {
-  const match = message.match(
-    /^groq_free_tier_guard:(requests_per_minute|tokens_per_minute|requests_per_day|tokens_per_day):(\d+)$/,
-  );
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    reason: match[1] as GroqBudgetBlockInfo["reason"],
-    waitMs: Number(match[2]),
-  };
-};
-
-const formatGroqBudgetWait = (waitMs: number) => {
-  if (waitMs < 60_000) {
-    return `${Math.max(1, Math.ceil(waitMs / 1000))}s`;
-  }
-
-  const minutes = Math.ceil(waitMs / 60_000);
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-
-  const hours = Math.ceil(minutes / 60);
-  return `${hours}h`;
-};
-
-const formatGroqBudgetReason = (reason: GroqBudgetBlockInfo["reason"]) => {
-  switch (reason) {
-    case "requests_per_minute":
-      return "the per-minute request budget";
-    case "tokens_per_minute":
-      return "the per-minute token budget";
-    case "requests_per_day":
-      return "the daily request budget";
-    case "tokens_per_day":
-      return "the daily token budget";
-    default:
-      return "the local Groq budget";
-  }
-};
-
-const reserveGroqFreeTierBudget = async (estimatedTokens: number) => {
-  await withGroqUsageLock(async () => {
-    const now = Date.now();
-    const state = await loadGroqUsageState();
-    const events = pruneGroqUsageEvents(state.events, now);
-    const minuteEvents = events.filter(
-      (event) => now - event.timestamp < GROQ_MINUTE_WINDOW_MS,
-    );
-
-    const requestMinuteDelay = getRequestLimitResetDelay(
-      minuteEvents,
-      GROQ_FREE_TIER_SAFETY_LIMITS.requestsPerMinute,
-      GROQ_MINUTE_WINDOW_MS,
-      now,
-    );
-    if (requestMinuteDelay > 0) {
-      await saveGroqUsageState({ events });
-      throw buildGroqBudgetError({
-        reason: "requests_per_minute",
-        waitMs: requestMinuteDelay,
-      });
-    }
-
-    const tokenMinuteDelay = getTokenLimitResetDelay(
-      minuteEvents,
-      GROQ_FREE_TIER_SAFETY_LIMITS.tokensPerMinute,
-      estimatedTokens,
-      GROQ_MINUTE_WINDOW_MS,
-      now,
-    );
-    if (tokenMinuteDelay > 0) {
-      await saveGroqUsageState({ events });
-      throw buildGroqBudgetError({
-        reason: "tokens_per_minute",
-        waitMs: tokenMinuteDelay,
-      });
-    }
-
-    const requestDayDelay = getRequestLimitResetDelay(
-      events,
-      GROQ_FREE_TIER_SAFETY_LIMITS.requestsPerDay,
-      GROQ_DAY_WINDOW_MS,
-      now,
-    );
-    if (requestDayDelay > 0) {
-      await saveGroqUsageState({ events });
-      throw buildGroqBudgetError({
-        reason: "requests_per_day",
-        waitMs: requestDayDelay,
-      });
-    }
-
-    const tokenDayDelay = getTokenLimitResetDelay(
-      events,
-      GROQ_FREE_TIER_SAFETY_LIMITS.tokensPerDay,
-      estimatedTokens,
-      GROQ_DAY_WINDOW_MS,
-      now,
-    );
-    if (tokenDayDelay > 0) {
-      await saveGroqUsageState({ events });
-      throw buildGroqBudgetError({
-        reason: "tokens_per_day",
-        waitMs: tokenDayDelay,
-      });
-    }
-
-    events.push({
-      timestamp: now,
-      estimatedTokens,
-    });
-    await saveGroqUsageState({ events });
-  });
-};
 
 const compactText = (value: unknown, maxLength: number) => {
   if (typeof value !== "string") return "";
@@ -575,7 +296,7 @@ export const getGroqModelInfo = (): GroqModelInfo => {
     configured,
     transportLabel: "Network (Groq)",
     statusMessage: configured
-      ? `Uses Groq model routing over the network with local free-tier safeguards: ${GROQ_FALLBACK_CHAIN}.`
+      ? `Uses Groq model routing over the network: ${GROQ_FALLBACK_CHAIN}.`
       : "Set EXPO_PUBLIC_GROQ_API_KEY in .env to enable Groq routing.",
     modelSource: resolvedConfig.model.source,
     apiKeySource: resolvedConfig.apiKey.source,
@@ -691,18 +412,14 @@ const performGroqJsonRequest = async (input: {
   }
 
   let lastModelError: Error | null = null;
-  const estimatedTokens = estimateGroqRequestTokens(input);
 
   for (const modelId of getGroqModelCandidates()) {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), input.timeoutMs);
 
     try {
-      await reserveGroqFreeTierBudget(estimatedTokens);
-
       console.log("[GROQ_ROUTER] Request start", {
         modelId,
-        estimatedTokens,
         modelSource: resolvedConfig.model.source,
         apiKeySource: resolvedConfig.apiKey.source,
         apiKeySignature: formatApiKeySignature(apiKey),
@@ -1115,11 +832,6 @@ const formatGroqFallbackMessage = (error: unknown, fallbackLabel: string) => {
 
   if (message === "groq_model_unavailable") {
     return `${providerLabel} and fallback models are unavailable for this request. ${fallbackLabel}`;
-  }
-
-  const budgetBlockInfo = parseGroqBudgetError(message);
-  if (budgetBlockInfo) {
-    return `Local free-tier guard paused ${providerLabel} for about ${formatGroqBudgetWait(budgetBlockInfo.waitMs)} to stay under ${formatGroqBudgetReason(budgetBlockInfo.reason)}. ${fallbackLabel}`;
   }
 
   if (isApiLimitErrorMessage(message)) {

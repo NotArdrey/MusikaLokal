@@ -121,6 +121,13 @@ const buildOnDeviceReason = (
   return "Strong overall quality and relevance right now.";
 };
 
+const isGroqQuotaExhaustedMessage = (message: string | null | undefined) => {
+  if (!message) return false;
+  return /out of api calls|rate limit|too many requests|insufficient[_ -]?quota|quota|credits|\b429\b/i.test(
+    message,
+  );
+};
+
 const rankForYouOnDevice = (
   candidates: any[],
   profileSignals: { skills: string[]; genres: string[] },
@@ -1114,6 +1121,13 @@ export default function HomeScreen() {
               return;
             }
 
+            if (isGroqQuotaExhaustedMessage(llmResult.message)) {
+              setAiRecommendations([]);
+              setAiFeedProvider("Normal Feed");
+              setAiFeedMessage("Groq free-tier limit reached. Showing normal Home feed.");
+              return;
+            }
+
             if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
               setAiRecommendations(llmResult.recommendations);
               setAiFeedProvider(llmResult.aiProvider || geminiModelLabel);
@@ -1127,6 +1141,14 @@ export default function HomeScreen() {
           })();
         } catch (aiErr) {
           debugLog("🤖 Groq ranking error, using local fallback:", aiErr);
+          const errorMessage = aiErr instanceof Error ? aiErr.message : String(aiErr);
+          if (isGroqQuotaExhaustedMessage(errorMessage)) {
+            setAiRecommendations([]);
+            setAiFeedProvider("Normal Feed");
+            setAiFeedMessage("Groq free-tier limit reached. Showing normal Home feed.");
+            return;
+          }
+
           setAiRecommendations([]);
           setAiFeedProvider(geminiModelLabel);
           setAiFeedMessage("Local personalization is temporarily unavailable. Showing general picks.");

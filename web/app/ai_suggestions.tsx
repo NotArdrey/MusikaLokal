@@ -104,6 +104,11 @@ export default function AiSuggestionsScreen() {
     const [userGenres, setUserGenres] = useState<string[]>([]);
     const [userName, setUserName] = useState<string>('');
 
+    const isGroqQuotaExhausted = (message: string | null | undefined) => {
+        if (!message) return false;
+        return /out of api calls|rate limit|too many requests|insufficient[_ -]?quota|quota|credits|\b429\b/i.test(message);
+    };
+
     // Load user profile on mount
     useEffect(() => {
         loadUserProfile();
@@ -249,6 +254,16 @@ export default function AiSuggestionsScreen() {
         try {
             const generated = await generateInstrumentSuggestionsWithGeminiFlashLite(requestInput);
 
+            if (!generated.aiPowered && isGroqQuotaExhausted(generated.message || '')) {
+                setSuggestions([]);
+                setIsAIPowered(false);
+                setAIProvider(generated.aiProvider || geminiModelLabel);
+                setSuggestionMessage(null);
+                setStep('preferences');
+                setError(`${geminiModelLabel} free-tier limit is exhausted. AI suggestions are temporarily unavailable.`);
+                return;
+            }
+
             if (generated.suggestions.length > 0) {
                 setSuggestions(generated.suggestions);
                 setIsAIPowered(generated.aiPowered);
@@ -276,6 +291,17 @@ export default function AiSuggestionsScreen() {
             }
         } catch (err: any) {
             console.error('Error fetching suggestions:', err);
+
+            const errorMessage = typeof err?.message === 'string' ? err.message : '';
+            if (isGroqQuotaExhausted(errorMessage)) {
+                setSuggestions([]);
+                setIsAIPowered(false);
+                setAIProvider(geminiModelLabel);
+                setSuggestionMessage(null);
+                setStep('preferences');
+                setError(`${geminiModelLabel} free-tier limit is exhausted. AI suggestions are temporarily unavailable.`);
+                return;
+            }
 
             const fallbackSuggestions = getOfflineInstrumentSuggestions(requestInput);
             if (fallbackSuggestions.length > 0) {
