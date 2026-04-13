@@ -228,37 +228,7 @@ const buildFallbackListingTarget = (item: PermitItem): StudioDetailsEntry => {
   };
 };
 
-const formatDetailLabel = (rawKey: string) => {
-  const withSpaces = rawKey.replace(/_/g, ' ').trim();
-  if (!withSpaces) return 'Field';
-
-  return withSpaces
-    .split(' ')
-    .map((part) => {
-      if (!part) return part;
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    .join(' ');
-};
-
-const formatDetailValue = (value: unknown) => {
-  if (value === null || value === undefined) return '-';
-
-  if (typeof value === 'boolean') {
-    return value ? 'Yes' : 'No';
-  }
-
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-
-  const text = String(value).trim();
-  return text || '-';
-};
+import { formatDetailLabel, formatDetailValue } from './_formatters';
 
 const styles = StyleSheet.create({
   card: {

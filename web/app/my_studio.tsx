@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
@@ -10,6 +10,16 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+
+const normalizePermitStatus = (permitStatus: string | null | undefined) => {
+    const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
+    if (!normalizedPermitStatus) return 'approved';
+    if (['approved', 'approved_by_admin', 'verified'].includes(normalizedPermitStatus)) return 'approved';
+    if (['pending', 'pending_review', 'in_review', 'under_review'].includes(normalizedPermitStatus)) return 'pending_review';
+    if (['resubmitted', 'resubmit', 'reapplied'].includes(normalizedPermitStatus)) return 'resubmitted';
+    if (['rejected', 'declined'].includes(normalizedPermitStatus)) return 'rejected';
+    return normalizedPermitStatus;
+};
 
 export default function MyStudioScreen() {
     const { colors, isDark } = useTheme();
@@ -58,7 +68,7 @@ export default function MyStudioScreen() {
         setAlertVisible(true);
     };
 
-    const fetchStudios = async () => {
+    const fetchStudios = useCallback(async () => {
         if (!userId) return;
         try {
             const { data: baseStudios, error: baseError } = await supabase
@@ -116,7 +126,7 @@ export default function MyStudioScreen() {
                 const reviewStats = reviewsByStudioId[studio.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
-                const normalizedPermitStatus = String(studio.permit_status || 'pending_review').toLowerCase();
+                const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
 
                 return {
                     ...studio,
@@ -134,7 +144,7 @@ export default function MyStudioScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [userId]);
 
     useFocusEffect(
         useCallback(() => {
@@ -148,8 +158,27 @@ export default function MyStudioScreen() {
             return () => {
                 clearInterval(refreshInterval);
             };
-        }, [isAuthenticated, userId, refreshKey])
+        }, [isAuthenticated, userId, refreshKey, fetchStudios])
     );
+
+    useEffect(() => {
+        if (!isAuthenticated || !userId) return;
+
+        const channel = supabase
+            .channel(`my-studio-listings:${userId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'studios', filter: `owner_id=eq.${userId}` },
+                () => {
+                    fetchStudios();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [isAuthenticated, userId, fetchStudios]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -270,7 +299,40 @@ export default function MyStudioScreen() {
                             </View>
                         ) : (
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
-                                {studios.map((studio) => (
+                                {studios.map((studio) => {
+                                    const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
+                                    const isRejected = normalizedPermitStatus === 'rejected';
+                                    const isApproved = normalizedPermitStatus === 'approved';
+                                    const isResubmitted = normalizedPermitStatus === 'resubmitted';
+
+                                    const permitStatusLabel =
+                                        isApproved
+                                            ? 'Approved by Admin'
+                                            : isRejected
+                                                ? 'Rejected'
+                                                : isResubmitted
+                                                    ? 'Resubmitted'
+                                                    : 'Pending Review';
+
+                                    const permitBadgeBackground =
+                                        isApproved
+                                            ? (isDark ? 'rgba(22,163,74,0.22)' : '#DCFCE7')
+                                            : isRejected
+                                                ? (isDark ? 'rgba(220,38,38,0.22)' : '#FEE2E2')
+                                                : isResubmitted
+                                                    ? (isDark ? 'rgba(37,99,235,0.22)' : '#DBEAFE')
+                                                    : (isDark ? 'rgba(245,158,11,0.22)' : '#FEF3C7');
+
+                                    const permitBadgeColor =
+                                        isApproved
+                                            ? '#16A34A'
+                                            : isRejected
+                                                ? '#DC2626'
+                                                : isResubmitted
+                                                    ? '#2563EB'
+                                                    : '#B45309';
+
+                                    return (
                                     <View key={studio.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
                                         <View key={studio.id} style={[styles.cardContainer, {
                                             backgroundColor: pageCardBackground,
@@ -287,8 +349,8 @@ export default function MyStudioScreen() {
                                                     quality={72}
                                                     cacheVersion={studio.updated_at || studio.created_at || studio.id}
                                                 />
-                                                <View style={[styles.activeBadge, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)' }]}>
-                                                    <Text style={[styles.activeText, { color: colors.primary }]}>Active</Text>
+                                                <View style={[styles.activeBadge, { backgroundColor: permitBadgeBackground }]}>
+                                                    <Text style={[styles.activeText, { color: permitBadgeColor }]}>{permitStatusLabel}</Text>
                                                 </View>
                                             </View>
 
@@ -297,6 +359,18 @@ export default function MyStudioScreen() {
                                                 <Text style={[styles.cardDescription, { color: colors.textSecondary }]} numberOfLines={2}>
                                                     {studio.description}
                                                 </Text>
+
+                                                {isRejected && !!studio.permit_rejection_reason && (
+                                                    <Text style={styles.rejectionReasonText} numberOfLines={3}>
+                                                        Rejection reason: {studio.permit_rejection_reason}
+                                                    </Text>
+                                                )}
+
+                                                {(normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
+                                                    <Text style={[styles.permitHintText, { color: colors.textSecondary }]}> 
+                                                        Hidden from Home until admin permit approval is completed.
+                                                    </Text>
+                                                )}
 
                                                 <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                                     <View style={styles.actionLeft}>
@@ -326,7 +400,8 @@ export default function MyStudioScreen() {
                                             </View>
                                         </View>
                                     </View>
-                                ))}
+                                    );
+                                })}
                             </View>
                         )}
                     </ScrollView>

@@ -112,9 +112,16 @@ const toastTypeConfig: Record<
 const TopToastContext = createContext<TopToastContextValue | undefined>(undefined);
 
 let externalShowToast: ((payload: TopToastPayload) => void) | null = null;
+let pendingToastPayload: TopToastPayload | null = null;
 
 export const showTopToast = (payload: TopToastPayload) => {
-  externalShowToast?.(payload);
+  if (externalShowToast) {
+    externalShowToast(payload);
+    return;
+  }
+
+  // If the provider is not mounted yet, keep the latest toast and flush it once ready.
+  pendingToastPayload = payload;
 };
 
 export function TopToastProvider({ children }: { children: React.ReactNode }) {
@@ -199,6 +206,12 @@ export function TopToastProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     externalShowToast = showToast;
+
+    if (pendingToastPayload) {
+      const queuedToast = pendingToastPayload;
+      pendingToastPayload = null;
+      showToast(queuedToast);
+    }
 
     return () => {
       if (externalShowToast === showToast) {

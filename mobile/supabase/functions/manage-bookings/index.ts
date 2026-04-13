@@ -64,6 +64,116 @@ function toManilaDateTime(dateValue: string, timeValue: string): Date | null {
   return parsed;
 }
 
+function toPositiveInteger(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function toPositiveNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(String(value).trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function formatHoursValue(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value)
+    ? String(value)
+    : value.toFixed(1).replace(/\.0$/, "");
+}
+
+function getRecordingRule(source: any) {
+  const songsPerBlock = toPositiveInteger(source?.recording_songs_per_block) ?? 1;
+  const hoursPerBlock =
+    toPositiveNumber(source?.recording_hours_per_block) ??
+    toPositiveNumber(source?.min_booking_duration_hours) ??
+    3;
+
+  return {
+    songsPerBlock,
+    hoursPerBlock,
+  };
+}
+
+function getRequiredRecordingBlocks(
+  songCount: number,
+  rule: { songsPerBlock: number },
+): number {
+  if (!Number.isFinite(songCount) || songCount <= 0) return 0;
+  return Math.ceil(songCount / Math.max(1, rule.songsPerBlock));
+}
+
+function getRequiredRecordingHours(
+  songCount: number,
+  rule: { songsPerBlock: number; hoursPerBlock: number },
+): number {
+  const requiredBlocks = getRequiredRecordingBlocks(songCount, rule);
+  return requiredBlocks * Math.max(rule.hoursPerBlock, 0);
+}
+
+function buildRecordingPricingModifiers(
+  songCount: number,
+  selectedTotalHours: number,
+  rule: { songsPerBlock: number; hoursPerBlock: number },
+) {
+  const requiredBlocks = getRequiredRecordingBlocks(songCount, rule);
+  const requiredTotalHours = getRequiredRecordingHours(songCount, rule);
+
+  return {
+    rate_model: "per_song",
+    song_count: songCount,
+    songs_per_block: rule.songsPerBlock,
+    hours_per_block: rule.hoursPerBlock,
+    required_blocks: requiredBlocks,
+    required_total_hours: requiredTotalHours,
+    selected_total_hours: selectedTotalHours,
+    recording_session: {
+      rate_model: "per_song",
+      song_count: songCount,
+      songs_per_block: rule.songsPerBlock,
+      hours_per_block: rule.hoursPerBlock,
+      required_blocks: requiredBlocks,
+      required_total_hours: requiredTotalHours,
+      selected_total_hours: selectedTotalHours,
+    },
+  };
+}
+
+type DateOverrideSessionType = "rehearsal" | "recording" | "both";
+
+function parseDateOverrideSessionType(
+  reason: unknown,
+): DateOverrideSessionType {
+  const text = String(reason || "");
+  const match = text.match(/session_type:(rehearsal|recording|both)/i);
+  if (!match) return "both";
+
+  const normalized = match[1].toLowerCase();
+  if (
+    normalized === "rehearsal" ||
+    normalized === "recording" ||
+    normalized === "both"
+  ) {
+    return normalized;
+  }
+
+  return "both";
+}
+
+function isSessionAllowedByDateOverride(
+  overrideReason: unknown,
+  requestedSessionType: "rehearsal" | "recording",
+): boolean {
+  const overrideSessionType = parseDateOverrideSessionType(overrideReason);
+  return (
+    overrideSessionType === "both" ||
+    overrideSessionType === requestedSessionType
+  );
+}
+
 async function insertNotificationIfMissing(
   supabaseAdmin: any,
   payload: {
@@ -1113,6 +1223,122 @@ serve(async (req: Request) => {
         );
       }
 
+      const { data: dateOverride, error: dateOverrideError } =
+        await supabaseClient
+          .from("studio_date_overrides")
+          .select("is_open, reason")
+          .eq("studio_id", studio_id)
+          .eq("override_date", date)
+          .maybeSingle();
+
+      if (dateOverrideError) {
+        console.error("❌ Failed to load studio date override:", dateOverrideError);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to validate date availability. Please try again.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        dateOverride?.is_open &&
+        !isSessionAllowedByDateOverride(
+          dateOverride.reason,
+          normalizedSessionType,
+        )
+      ) {
+        const restrictedType = parseDateOverrideSessionType(dateOverride.reason);
+        const restrictedLabel =
+          restrictedType === "recording"
+            ? "recording only"
+            : restrictedType === "rehearsal"
+              ? "rehearsal only"
+              : "the selected session type";
+
+        return new Response(
+          JSON.stringify({
+            error: `This date is configured for ${restrictedLabel}. Please choose a different date or switch session type.`,
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      if (!dateOverride) {
+        const bookingWeekDate = new Date(`${date}T00:00:00Z`);
+        if (Number.isNaN(bookingWeekDate.getTime())) {
+          return new Response(
+            JSON.stringify({
+              error: "Invalid booking date.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 400,
+            },
+          );
+        }
+
+        const bookingDayOfWeek = bookingWeekDate.getUTCDay();
+        const { data: weeklyOperatingHours, error: weeklyHoursError } =
+          await supabaseAdmin
+            .from("studio_operating_hours")
+            .select("reason")
+            .eq("studio_id", studio_id)
+            .eq("day_of_week", bookingDayOfWeek)
+            .eq("is_open", true)
+            .order("slot_order", { ascending: true });
+
+        if (weeklyHoursError) {
+          console.error(
+            "❌ Failed to load weekly studio operating hours:",
+            weeklyHoursError,
+          );
+          return new Response(
+            JSON.stringify({
+              error: "Failed to validate weekly availability. Please try again.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 400,
+            },
+          );
+        }
+
+        if (weeklyOperatingHours && weeklyOperatingHours.length > 0) {
+          const weeklyAllowsSession = weeklyOperatingHours.some((row: any) =>
+            isSessionAllowedByDateOverride(row.reason, normalizedSessionType),
+          );
+
+          if (!weeklyAllowsSession) {
+            const restrictedType = parseDateOverrideSessionType(
+              weeklyOperatingHours[0]?.reason,
+            );
+            const restrictedLabel =
+              restrictedType === "recording"
+                ? "recording only"
+                : restrictedType === "rehearsal"
+                  ? "rehearsal only"
+                  : "the selected session type";
+
+            return new Response(
+              JSON.stringify({
+                error: `This day's weekly schedule is configured for ${restrictedLabel}. Please choose a different date or switch session type.`,
+              }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 409,
+              },
+            );
+          }
+        }
+      }
+
       const bookingDateStartUtc = toManilaDateTime(date, "00:00:00");
       const nowUtc = new Date();
 
@@ -1143,11 +1369,32 @@ serve(async (req: Request) => {
         );
       }
 
-      const { data: studioSettingsData, error: studioSettingsError } = await supabaseClient
+      const extendedStudioSettingsSelect =
+        "lead_time_hours, booking_horizon_days, min_booking_duration_hours, recording_songs_per_block, recording_hours_per_block";
+      const legacyStudioSettingsSelect =
+        "lead_time_hours, booking_horizon_days, min_booking_duration_hours";
+
+      let studioSettingsResult = await supabaseClient
         .from("studio_settings")
-        .select("lead_time_hours, booking_horizon_days, min_booking_duration_hours")
+        .select(extendedStudioSettingsSelect)
         .eq("studio_id", studio_id)
         .maybeSingle();
+
+      if (
+        studioSettingsResult.error &&
+        String(studioSettingsResult.error.message || "").includes(
+          "recording_songs_per_block",
+        )
+      ) {
+        studioSettingsResult = await supabaseClient
+          .from("studio_settings")
+          .select(legacyStudioSettingsSelect)
+          .eq("studio_id", studio_id)
+          .maybeSingle();
+      }
+
+      const { data: studioSettingsData, error: studioSettingsError } =
+        studioSettingsResult;
 
       if (studioSettingsError) {
         console.warn("⚠️ Could not load studio settings, using defaults:", studioSettingsError);
@@ -1155,18 +1402,7 @@ serve(async (req: Request) => {
 
       const leadTimeHours = Math.max(0, Number(studioSettingsData?.lead_time_hours ?? 24));
       const bookingHorizonDays = Math.max(1, Number(studioSettingsData?.booking_horizon_days ?? 90));
-      const configuredMinBookingDurationHours = Number(
-        studioSettingsData?.min_booking_duration_hours ?? 0,
-      );
-      const normalizedConfiguredMinBookingDurationHours = Number.isFinite(
-        configuredMinBookingDurationHours,
-      )
-        ? Math.max(0, configuredMinBookingDurationHours)
-        : 0;
-      const recordingMinHoursPerSong =
-        normalizedConfiguredMinBookingDurationHours > 0
-          ? normalizedConfiguredMinBookingDurationHours
-          : 3;
+      const recordingRule = getRecordingRule(studioSettingsData);
       const minSlotDurationHours = 1;
 
       const dayDiff = Math.floor(
@@ -1258,21 +1494,27 @@ serve(async (req: Request) => {
         }
       }
 
-      if (isRecordingSession) {
-        const totalSelectedHours = slots.reduce(
-          (total, slot) => total + toHours(slot.start, slot.end),
-          0,
-        );
-        const requiredRecordingHours =
-          requestedSongCount * recordingMinHoursPerSong;
+      const totalSelectedHours = slots.reduce(
+        (total, slot) => total + toHours(slot.start, slot.end),
+        0,
+      );
+      const requiredRecordingBlocks = isRecordingSession
+        ? getRequiredRecordingBlocks(requestedSongCount, recordingRule)
+        : 0;
+      const requiredRecordingHours = isRecordingSession
+        ? getRequiredRecordingHours(requestedSongCount, recordingRule)
+        : 0;
 
+      if (isRecordingSession) {
         if (totalSelectedHours + 1e-9 < requiredRecordingHours) {
           return new Response(
             JSON.stringify({
-              error: `Recording booking requires at least ${requiredRecordingHours.toFixed(1)} hour(s) for ${requestedSongCount} song(s), but only ${totalSelectedHours.toFixed(1)} hour(s) were selected.`,
+              error: `Recording booking requires at least ${formatHoursValue(requiredRecordingHours)} hour(s) across ${requiredRecordingBlocks} block(s) for ${requestedSongCount} song(s), but only ${formatHoursValue(totalSelectedHours)} hour(s) were selected.`,
               debug: {
                 requested_song_count: requestedSongCount,
-                min_hours_per_song: recordingMinHoursPerSong,
+                songs_per_block: recordingRule.songsPerBlock,
+                hours_per_block: recordingRule.hoursPerBlock,
+                required_blocks: requiredRecordingBlocks,
                 required_total_hours: requiredRecordingHours,
                 selected_total_hours: totalSelectedHours,
               },
@@ -1464,35 +1706,19 @@ serve(async (req: Request) => {
       let pricingData: any = null;
 
       if (isRecordingSession) {
-        let totalHours = 0;
-        for (const slot of slots) {
-          totalHours += toHours(slot.start, slot.end);
-        }
-
         const recordingRate = Number(studioData.recording_rate || 0);
         const recordingSubtotal = recordingRate * requestedSongCount;
-        const requiredRecordingHours =
-          requestedSongCount * recordingMinHoursPerSong;
 
         pricingData = {
           base_rate: recordingRate,
-          hours: totalHours,
-          total_hours: totalHours,
+          hours: totalSelectedHours,
+          total_hours: totalSelectedHours,
           subtotal: recordingSubtotal,
-          modifiers: {
-            rate_model: "per_song",
-            song_count: requestedSongCount,
-            min_hours_per_song: recordingMinHoursPerSong,
-            required_total_hours: requiredRecordingHours,
-            selected_total_hours: totalHours,
-            recording_session: {
-              rate_model: "per_song",
-              song_count: requestedSongCount,
-              min_hours_per_song: recordingMinHoursPerSong,
-              required_total_hours: requiredRecordingHours,
-              selected_total_hours: totalHours,
-            },
-          },
+          modifiers: buildRecordingPricingModifiers(
+            requestedSongCount,
+            totalSelectedHours,
+            recordingRule,
+          ),
           final_price: recordingSubtotal,
         };
       }
@@ -1564,49 +1790,28 @@ serve(async (req: Request) => {
         console.error(
           "❌ No pricing data returned, falling back to manual calculation",
         );
-        // Fallback: Calculate manually using studio's hourly rate
-        let totalHours = 0;
-        for (const slot of slots) {
-          const startParts = slot.start.split(":").map(Number);
-          const endParts = slot.end.split(":").map(Number);
-          const startMinutes = startParts[0] * 60 + startParts[1];
-          const endMinutes = endParts[0] * 60 + endParts[1];
-          totalHours += (endMinutes - startMinutes) / 60;
-        }
-
         if (isRecordingSession) {
           const recordingRate = Number(studioData.recording_rate || 0);
-          const requiredRecordingHours =
-            requestedSongCount * recordingMinHoursPerSong;
           pricingData = {
             base_rate: recordingRate,
-            hours: totalHours,
-            total_hours: totalHours,
+            hours: totalSelectedHours,
+            total_hours: totalSelectedHours,
             subtotal: recordingRate * requestedSongCount,
-            modifiers: {
-              rate_model: "per_song",
-              song_count: requestedSongCount,
-              min_hours_per_song: recordingMinHoursPerSong,
-              required_total_hours: requiredRecordingHours,
-              selected_total_hours: totalHours,
-              recording_session: {
-                rate_model: "per_song",
-                song_count: requestedSongCount,
-                min_hours_per_song: recordingMinHoursPerSong,
-                required_total_hours: requiredRecordingHours,
-                selected_total_hours: totalHours,
-              },
-            },
+            modifiers: buildRecordingPricingModifiers(
+              requestedSongCount,
+              totalSelectedHours,
+              recordingRule,
+            ),
             final_price: recordingRate * requestedSongCount,
           };
         } else {
           pricingData = {
             base_rate: studioData.hourly_rate,
-            hours: totalHours,
-            total_hours: totalHours,
-            subtotal: studioData.hourly_rate * totalHours,
+            hours: totalSelectedHours,
+            total_hours: totalSelectedHours,
+            subtotal: studioData.hourly_rate * totalSelectedHours,
             modifiers: {},
-            final_price: studioData.hourly_rate * totalHours,
+            final_price: studioData.hourly_rate * totalSelectedHours,
           };
         }
         console.log("📊 Manual pricing fallback:", pricingData);
@@ -1721,15 +1926,14 @@ serve(async (req: Request) => {
       finalModifiers.session_type = normalizedSessionType;
 
       if (isRecordingSession) {
-        finalModifiers.rate_model = "per_song";
-        finalModifiers.song_count = requestedSongCount;
-        finalModifiers.recording_session = {
-          ...(typeof finalModifiers.recording_session === "object" && finalModifiers.recording_session
-            ? finalModifiers.recording_session
-            : {}),
-          rate_model: "per_song",
-          song_count: requestedSongCount,
-        };
+        Object.assign(
+          finalModifiers,
+          buildRecordingPricingModifiers(
+            requestedSongCount,
+            Number(finalHours || 0),
+            recordingRule,
+          ),
+        );
       }
 
       const bookingInsertPayload: Record<string, any> = {

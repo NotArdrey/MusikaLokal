@@ -29,6 +29,13 @@ import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 import { createBookingCheckout } from "../src/services/paymongo";
+import {
+  formatRecordingHours,
+  formatRecordingRuleShort,
+  getRecordingRequiredBlocks,
+  getRecordingRequiredHours,
+  resolveRecordingRule,
+} from "../src/utils/recordingRule";
 
 const debugLog = (..._args: unknown[]) => { };
 
@@ -2516,6 +2523,25 @@ export default function BookingsScreen() {
                       ? "Resubmitted - Awaiting Admin Review"
                       : "Pending Admin Review";
                   const statusColor = isRejected ? "#EF4444" : "#F59E0B";
+                  const chipLabel = isRejected
+                    ? "Rejected"
+                    : normalizedStatus === "resubmitted"
+                      ? "Resubmitted"
+                      : "Pending";
+                  const statusChipBackground = isRejected
+                    ? isDark
+                      ? "rgba(239,68,68,0.2)"
+                      : "#FEE2E2"
+                    : isDark
+                      ? "rgba(245,158,11,0.2)"
+                      : "#FEF3C7";
+                  const noticeBackground = isRejected
+                    ? isDark
+                      ? "rgba(239,68,68,0.08)"
+                      : "#FEF2F2"
+                    : isDark
+                      ? "rgba(245,158,11,0.08)"
+                      : "#FFFBEB";
                   const listingType = listing?.entity_type === "gig" ? "gig" : "studio";
                   const listingName = listing?.name || (listingType === "gig" ? "Gig" : "Studio");
                   const rejectionReason = String(listing?.permit_rejection_reason || "").trim();
@@ -2523,61 +2549,135 @@ export default function BookingsScreen() {
                   return (
                     <View
                       key={`permit-${listingType}-${listing.id}`}
-                      style={{
-                        backgroundColor: colors.card,
-                        borderColor: colors.border,
-                        borderWidth: 1,
-                        borderRadius: moderateScale(14),
-                        padding: moderateScale(14),
-                      }}
+                      style={[
+                        styles.cardContainer,
+                        {
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                          borderWidth: 1,
+                          marginBottom: 0,
+                        },
+                      ]}
                     >
-                      <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: moderateScale(14) }}>
-                        {listingName}
-                      </Text>
-                      <Text style={{ color: statusColor, fontFamily: "Poppins_600SemiBold", fontSize: moderateScale(12), marginTop: moderateScale(4) }}>
-                        {statusLabel}
-                      </Text>
-                      {isRejected && rejectionReason.length > 0 && (
-                        <Text style={{ color: "#DC2626", fontFamily: "Poppins_500Medium", fontSize: moderateScale(12), marginTop: moderateScale(6) }}>
-                          Reason: {rejectionReason}
-                        </Text>
-                      )}
-                      <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_400Regular", fontSize: moderateScale(12), marginTop: moderateScale(6) }}>
-                        {isRejected
-                          ? hasReapplyRemaining
-                            ? `This ${listingType} remains hidden from Home. You have one reapply attempt left after this decline.`
-                            : `This ${listingType} remains hidden from Home. Your one allowed reapply attempt has already been used.`
-                          : `This ${listingType} remains hidden from Home until permit approval is completed in Admin > Permits.`}
-                      </Text>
-                      {isRejected && hasReapplyRemaining && (
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          onPress={() =>
-                            router.push({
-                              pathname: listingType === "gig" ? "/edit_gig" : "/edit_studio",
-                              params: { id: listing.id, reapply: "1" },
-                            } as any)
-                          }
-                          style={{
-                            marginTop: moderateScale(10),
-                            alignSelf: "flex-start",
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: moderateScale(6),
-                            borderWidth: 1,
-                            borderColor: "#F97316",
-                            backgroundColor: isDark ? "rgba(249,115,22,0.12)" : "#FFF7ED",
-                            borderRadius: moderateScale(10),
-                            paddingHorizontal: moderateScale(10),
-                            paddingVertical: moderateScale(7),
-                          }}
+                      <View style={styles.cardContent}>
+                        <View style={styles.cardHeader}>
+                          <View style={styles.cardTitleContainer}>
+                            <Text
+                              style={[styles.cardTitle, { color: colors.text }]}
+                              numberOfLines={1}
+                            >
+                              {listingName}
+                            </Text>
+                            <View style={styles.cardDetailRow}>
+                              <Ionicons
+                                name={listingType === "gig" ? "musical-notes-outline" : "business-outline"}
+                                size={moderateScale(14)}
+                                color={colors.textSecondary}
+                              />
+                              <Text style={[styles.cardDetailText, { color: colors.textSecondary }]}>
+                                {listingType === "gig" ? "Venue Listing Permit" : "Studio Listing Permit"}
+                              </Text>
+                            </View>
+                          </View>
+                          <View
+                            style={[
+                              styles.permitStatusChip,
+                              { backgroundColor: statusChipBackground, borderColor: statusColor },
+                            ]}
+                          >
+                            <Text style={[styles.permitStatusChipText, { color: statusColor }]}>
+                              {chipLabel}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View
+                          style={[
+                            styles.permitNoticeBox,
+                            { backgroundColor: noticeBackground, borderColor: statusColor },
+                          ]}
                         >
-                          <Ionicons name="refresh-outline" size={moderateScale(14)} color="#EA580C" />
-                          <Text style={{ color: "#EA580C", fontFamily: "Poppins_600SemiBold", fontSize: moderateScale(11) }}>
-                            Edit & Reapply
+                          <Text style={[styles.permitNoticeTitle, { color: statusColor }]}>
+                            {statusLabel}
                           </Text>
-                        </TouchableOpacity>
-                      )}
+                          {isRejected && rejectionReason.length > 0 && (
+                            <Text style={styles.permitNoticeReason}>
+                              Reason: {rejectionReason}
+                            </Text>
+                          )}
+                          <Text style={[styles.permitNoticeText, { color: colors.textSecondary }]}>
+                            {isRejected
+                              ? hasReapplyRemaining
+                                ? `This ${listingType} remains hidden from Home. You have one reapply attempt left after this decline.`
+                                : `This ${listingType} remains hidden from Home. Your one allowed reapply attempt has already been used.`
+                              : `This ${listingType} remains hidden from Home until permit approval is completed in Admin > Permits.`}
+                          </Text>
+                        </View>
+
+                        <View
+                          style={[
+                            styles.cardFooter,
+                            { borderColor: colors.border, marginTop: moderateScale(12) },
+                          ]}
+                        >
+                          <View style={styles.statusContainer}>
+                            <Ionicons
+                              name={isRejected ? "alert-circle-outline" : "time-outline"}
+                              size={moderateScale(14)}
+                              color={statusColor}
+                            />
+                            <Text style={[styles.statusText, { color: statusColor }]}>
+                              {isRejected
+                                ? hasReapplyRemaining
+                                  ? "One reapply attempt available"
+                                  : "Reapply attempt already used"
+                                : "Awaiting admin permit review"}
+                            </Text>
+                          </View>
+
+                          {isRejected && hasReapplyRemaining && (
+                            <TouchableOpacity
+                              activeOpacity={1}
+                              onPress={() =>
+                                router.push({
+                                  pathname: listingType === "gig" ? "/edit_gig" : "/edit_studio",
+                                  params: { id: listing.id, reapply: "1" },
+                                } as any)
+                              }
+                              style={[
+                                styles.outlineButton,
+                                {
+                                  borderColor: "#F97316",
+                                  backgroundColor: isDark
+                                    ? "rgba(249,115,22,0.12)"
+                                    : "#FFF7ED",
+                                  paddingHorizontal: scale(12),
+                                  paddingVertical: moderateScale(7),
+                                },
+                              ]}
+                            >
+                              <View style={styles.detailsButtonLabelContainer}>
+                                <Ionicons
+                                  name="refresh-outline"
+                                  size={moderateScale(14)}
+                                  color="#EA580C"
+                                />
+                                <Text
+                                  style={[
+                                    styles.outlineButtonText,
+                                    {
+                                      color: "#EA580C",
+                                      fontFamily: "Poppins_600SemiBold",
+                                    },
+                                  ]}
+                                >
+                                  Edit & Reapply
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
                     </View>
                   );
                 })}
@@ -2610,8 +2710,17 @@ export default function BookingsScreen() {
                       : activeTab === "Review"
                         ? "No completed gigs"
                         : "No items"
-                  : `No ${activeTab.toLowerCase()} bookings`}
+                    : userRole === "studio-owner" && activeTab === "Pending" && pendingPermitStudios.length > 0
+                      ? "No pending booking requests below"
+                      : `No ${activeTab.toLowerCase()} bookings`}
               </Text>
+                {userRole === "studio-owner" && activeTab === "Pending" && pendingPermitStudios.length > 0 && (
+                  <Text
+                    style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
+                  >
+                    Permit review items are listed above. New booking requests will appear here.
+                  </Text>
+                )}
               {userRole === "venue-owner" && activeTab === "Applicants" && (
                 <Text
                   style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
@@ -3645,17 +3754,53 @@ export default function BookingsScreen() {
                               parsedSongCount > 0
                                 ? parsedSongCount
                                 : null;
-                            const parsedMinHoursPerSong = Number(
+                            const parsedLegacyMinHoursPerSong = Number(
                               item.modifiers_applied?.recording_session
                                 ?.min_hours_per_song ??
                                 item.modifiers_applied?.min_hours_per_song ??
                                 0,
                             );
-                            const minHoursPerSong =
-                              Number.isFinite(parsedMinHoursPerSong) &&
-                              parsedMinHoursPerSong > 0
-                                ? parsedMinHoursPerSong
+                            const legacyMinHoursPerSong =
+                              Number.isFinite(parsedLegacyMinHoursPerSong) &&
+                              parsedLegacyMinHoursPerSong > 0
+                                ? parsedLegacyMinHoursPerSong
                                 : null;
+                            const recordingRule = resolveRecordingRule({
+                              ...(typeof item.modifiers_applied === "object" &&
+                              item.modifiers_applied
+                                ? item.modifiers_applied
+                                : {}),
+                              ...(typeof item.modifiers_applied?.recording_session ===
+                                "object" && item.modifiers_applied?.recording_session
+                                ? item.modifiers_applied.recording_session
+                                : {}),
+                              ...(legacyMinHoursPerSong
+                                ? {
+                                    recording_songs_per_block: 1,
+                                    recording_hours_per_block:
+                                      legacyMinHoursPerSong,
+                                  }
+                                : {}),
+                            });
+                            const recordingRuleLabel = formatRecordingRuleShort(
+                              recordingRule,
+                            );
+                            const parsedRequiredBlocks = Number(
+                              item.modifiers_applied?.recording_session
+                                ?.required_blocks ??
+                                item.modifiers_applied?.required_blocks ??
+                                0,
+                            );
+                            const requiredBlocks =
+                              Number.isFinite(parsedRequiredBlocks) &&
+                              parsedRequiredBlocks > 0
+                                ? parsedRequiredBlocks
+                                : recordingSongCount
+                                  ? getRecordingRequiredBlocks(
+                                      recordingSongCount,
+                                      recordingRule,
+                                    )
+                                  : null;
                             const parsedRequiredTotalHours = Number(
                               item.modifiers_applied?.recording_session
                                 ?.required_total_hours ??
@@ -3666,8 +3811,11 @@ export default function BookingsScreen() {
                               Number.isFinite(parsedRequiredTotalHours) &&
                               parsedRequiredTotalHours > 0
                                 ? parsedRequiredTotalHours
-                                : recordingSongCount && minHoursPerSong
-                                  ? recordingSongCount * minHoursPerSong
+                                : recordingSongCount
+                                  ? getRecordingRequiredHours(
+                                      recordingSongCount,
+                                      recordingRule,
+                                    )
                                   : null;
                             const parsedSelectedTotalHours = Number(
                               item.modifiers_applied?.recording_session
@@ -3685,7 +3833,7 @@ export default function BookingsScreen() {
                             const showRecordingMeta =
                               Boolean(recordingSongCount) ||
                               Boolean(requiredTotalHours) ||
-                              Boolean(minHoursPerSong);
+                              Boolean(recordingRuleLabel);
                             const recordingDurationColor =
                               selectedTotalHours &&
                               requiredTotalHours &&
@@ -3729,6 +3877,23 @@ export default function BookingsScreen() {
                                         </Text>
                                       </View>
                                     ) : null}
+                                    {recordingRuleLabel ? (
+                                      <View style={styles.cardDetailRow}>
+                                        <Ionicons
+                                          name="layers-outline"
+                                          size={14}
+                                          color={colors.textSecondary}
+                                        />
+                                        <Text
+                                          style={[
+                                            styles.cardDetailText,
+                                            { color: colors.textSecondary },
+                                          ]}
+                                        >
+                                          Rule • {recordingRuleLabel}
+                                        </Text>
+                                      </View>
+                                    ) : null}
                                     {requiredTotalHours ? (
                                       <View style={styles.cardDetailRow}>
                                         <Ionicons
@@ -3742,9 +3907,12 @@ export default function BookingsScreen() {
                                             { color: recordingDurationColor },
                                           ]}
                                         >
-                                          Min {requiredTotalHours.toFixed(1)}h
+                                          {requiredBlocks
+                                            ? `Need ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""} • `
+                                            : ""}
+                                          Min {formatRecordingHours(requiredTotalHours)}h
                                           {selectedTotalHours
-                                            ? ` • Selected ${selectedTotalHours.toFixed(1)}h`
+                                            ? ` • Selected ${formatRecordingHours(selectedTotalHours)}h`
                                             : ""}
                                         </Text>
                                       </View>
@@ -5217,6 +5385,40 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(12),
     marginLeft: scale(6),
     fontFamily: "Poppins_500Medium",
+  },
+  permitStatusChip: {
+    borderWidth: 1,
+    borderRadius: moderateScale(999),
+    paddingHorizontal: scale(10),
+    paddingVertical: moderateScale(5),
+    marginLeft: scale(8),
+  },
+  permitStatusChipText: {
+    fontSize: moderateScale(10),
+    fontFamily: "Poppins_600SemiBold",
+    textTransform: "uppercase",
+  },
+  permitNoticeBox: {
+    borderWidth: 1,
+    borderRadius: moderateScale(12),
+    paddingHorizontal: scale(10),
+    paddingVertical: moderateScale(9),
+    marginTop: moderateScale(4),
+  },
+  permitNoticeTitle: {
+    fontSize: moderateScale(12),
+    fontFamily: "Poppins_600SemiBold",
+  },
+  permitNoticeReason: {
+    marginTop: moderateScale(4),
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_500Medium",
+    color: "#DC2626",
+  },
+  permitNoticeText: {
+    marginTop: moderateScale(4),
+    fontSize: moderateScale(11),
+    fontFamily: "Poppins_400Regular",
   },
   customerInfoContainer: {
     flexDirection: "row",

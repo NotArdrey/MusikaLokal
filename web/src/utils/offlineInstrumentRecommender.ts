@@ -1,6 +1,8 @@
 import {
   ExperienceLevel,
   InstrumentCategory,
+  InstrumentSuggestion,
+  SuggestionPurpose,
 } from "../types/instruments";
 
 export interface LocalInstrumentProfile {
@@ -431,7 +433,7 @@ export const getOfflineInstrumentSuggestions = ({
         description: item.description,
         relatedInstruments: item.relatedInstruments,
         aiPowered: false,
-        aiProvider: "On-Device Local Ranker",
+        aiProvider: "Local Ranker",
       } as InstrumentSuggestion;
     })
     .sort((a, b) => b.score - a.score);

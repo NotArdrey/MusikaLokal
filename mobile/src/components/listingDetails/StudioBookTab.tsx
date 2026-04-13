@@ -9,6 +9,13 @@ import {
     View,
 } from "react-native";
 import styles from "../ListingDetailsSheet.styles";
+import {
+  formatRecordingHours,
+  formatRecordingRuleShort,
+  getRecordingRequiredBlocks,
+  getRecordingRequiredHours,
+  resolveRecordingRule,
+} from "../../utils/recordingRule";
 import { isRecordingStudioMode } from "./availability";
 
 const debugLog = (...args: unknown[]) => {
@@ -171,17 +178,49 @@ const StudioBookTab = ({
     return whole > 0 ? whole : null;
   };
 
-  const parsePositiveDecimal = (value: unknown): number | null => {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) return null;
-    return parsed;
-  };
-
   const getRecordingSongCount = (): number | null =>
     parsePositiveInteger(recordingSongCountInput);
+  const recordingRule = resolveRecordingRule(group?.settings);
+  const recordingRuleShort = formatRecordingRuleShort(recordingRule);
 
-  const getRecordingMinHoursPerSong = (): number =>
-    parsePositiveDecimal(group?.settings?.min_booking_duration_hours) || 3;
+  const getRecordingRequiredTotalHours = (songCount: number): number =>
+    getRecordingRequiredHours(songCount, recordingRule);
+
+  const getRecordingRequiredBlockCount = (songCount: number): number =>
+    getRecordingRequiredBlocks(songCount, recordingRule);
+
+  const buildRecordingPricingModifiers = (
+    songCount: number,
+    selectedTotalHours: number,
+    promotion?: any,
+  ) => {
+    const requiredBlocks = getRecordingRequiredBlockCount(songCount);
+    const requiredTotalHours = getRecordingRequiredTotalHours(songCount);
+    const modifiers: Record<string, any> = {
+      rate_model: "per_song",
+      song_count: songCount,
+      songs_per_block: recordingRule.songsPerBlock,
+      hours_per_block: recordingRule.hoursPerBlock,
+      required_blocks: requiredBlocks,
+      required_total_hours: requiredTotalHours,
+      selected_total_hours: selectedTotalHours,
+      recording_session: {
+        rate_model: "per_song",
+        song_count: songCount,
+        songs_per_block: recordingRule.songsPerBlock,
+        hours_per_block: recordingRule.hoursPerBlock,
+        required_blocks: requiredBlocks,
+        required_total_hours: requiredTotalHours,
+        selected_total_hours: selectedTotalHours,
+      },
+    };
+
+    if (promotion) {
+      modifiers.promotion = promotion;
+    }
+
+    return modifiers;
+  };
 
   const getRecordingRatePerSong = (): number => {
     const fromGroup = Number(group?.recording_rate || 0);
@@ -192,28 +231,6 @@ const StudioBookTab = ({
 
     return 0;
   };
-
-  const getRecordingSongLimitForDate = (bookingDate: string): number | null => {
-    if (!bookingDate) return null;
-
-    const dateOverrides = Array.isArray(group?.dateOverrides)
-      ? group.dateOverrides
-      : [];
-    const matchingOverride = dateOverrides.find(
-      (entry: any) => entry?.override_date === bookingDate,
-    );
-    const overrideLimit = parsePositiveInteger(
-      matchingOverride?.max_recording_songs_per_day,
-    );
-    if (overrideLimit) return overrideLimit;
-
-    return parsePositiveInteger(group?.settings?.max_recording_songs_per_day);
-  };
-
-  const recordingSongLimitForSelectedDate = selectedDate
-    ? getRecordingSongLimitForDate(selectedDate)
-    : parsePositiveInteger(group?.settings?.max_recording_songs_per_day);
-  const recordingMinHoursPerSong = getRecordingMinHoursPerSong();
 
   const getSlotDurationHours = (start: string, end: string): number => {
     const startMinutes = toTimeMinutes(start);
@@ -1075,9 +1092,13 @@ const StudioBookTab = ({
                 />
               </View>
               <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 6 }}>
-                {recordingSongLimitForSelectedDate
-                  ? `Recording sessions are priced per song. Max ${recordingSongLimitForSelectedDate} song${recordingSongLimitForSelectedDate > 1 ? "s" : ""} for this date. Minimum hours required: songs × ${recordingMinHoursPerSong}.`
-                  : `Recording sessions are priced per song. Minimum hours required: songs × ${recordingMinHoursPerSong}.`}
+                {(() => {
+                  const enteredSongCount = getRecordingSongCount();
+                  const previewSongCount = enteredSongCount || recordingRule.songsPerBlock;
+                  const requiredHours = getRecordingRequiredTotalHours(previewSongCount);
+                  const requiredBlocks = getRecordingRequiredBlockCount(previewSongCount);
+                  return `Recording sessions are priced per song. Time rule: ${recordingRuleShort}. ${previewSongCount} song${previewSongCount > 1 ? "s" : ""} requires ${formatRecordingHours(requiredHours)} hr${requiredHours === 1 ? "" : "s"} across ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""}.`;
+                })()}
               </Text>
             </View>
           )}
@@ -1127,17 +1148,6 @@ const StudioBookTab = ({
                       return;
                     }
 
-                    const recordingSongLimit = getRecordingSongLimitForDate(bookingDate);
-                    if (recordingSongLimit && recordingSongCount > recordingSongLimit) {
-                      showAlert(
-                        "warning",
-                        "Song Limit Exceeded",
-                        `This studio allows up to ${recordingSongLimit} song${recordingSongLimit > 1 ? "s" : ""} on ${new Date(`${bookingDate}T00:00:00`).toLocaleDateString()}.`,
-                      );
-                      setIsCheckingAvailability(false);
-                      return;
-                    }
-
                     recordingRate = getRecordingRatePerSong();
                     if (recordingRate <= 0) {
                       showAlert(
@@ -1177,27 +1187,17 @@ const StudioBookTab = ({
                     const songCount = recordingSongCount || 1;
                     const currentSlotHours = getSlotDurationHours(startTime, endTime2);
                     const baseRecordingPrice = recordingRate * songCount;
-                    const requiredTotalHours = songCount * recordingMinHoursPerSong;
+                    const requiredTotalHours = getRecordingRequiredTotalHours(songCount);
 
                     finalPricing = {
                       base_rate: recordingRate,
                       hours: currentSlotHours,
                       total_hours: currentSlotHours,
                       subtotal: baseRecordingPrice,
-                      modifiers: {
-                        rate_model: "per_song",
-                        song_count: songCount,
-                        min_hours_per_song: recordingMinHoursPerSong,
-                        required_total_hours: requiredTotalHours,
-                        selected_total_hours: currentSlotHours,
-                        recording_session: {
-                          rate_model: "per_song",
-                          song_count: songCount,
-                          min_hours_per_song: recordingMinHoursPerSong,
-                          required_total_hours: requiredTotalHours,
-                          selected_total_hours: currentSlotHours,
-                        },
-                      },
+                      modifiers: buildRecordingPricingModifiers(
+                        songCount,
+                        currentSlotHours,
+                      ),
                       final_price: baseRecordingPrice,
                     };
 
@@ -1290,7 +1290,7 @@ const StudioBookTab = ({
                     if (isRecordingMode) {
                       const songCount = recordingSongCount || 1;
                       const totalHours = getTotalSlotDurationHours(mergedSlots);
-                      const requiredTotalHours = songCount * recordingMinHoursPerSong;
+                      const requiredTotalHours = getRecordingRequiredTotalHours(songCount);
                       const updatedStart = new Date(`${bookingDate}T${mergedSlots[0].start}`);
                       const updatedEnd = new Date(`${bookingDate}T${mergedSlots[mergedSlots.length - 1].end}`);
 
@@ -1306,22 +1306,11 @@ const StudioBookTab = ({
                           total_hours: totalHours,
                           subtotal: recordingRate * songCount,
                           final_price: finalPricing?.final_price || recordingRate * songCount,
-                          modifiers: {
-                            ...(finalPricing?.modifiers || {}),
-                            rate_model: "per_song",
-                            song_count: songCount,
-                            min_hours_per_song: recordingMinHoursPerSong,
-                            required_total_hours: requiredTotalHours,
-                            selected_total_hours: totalHours,
-                            recording_session: {
-                              ...(finalPricing?.modifiers?.recording_session || {}),
-                              rate_model: "per_song",
-                              song_count: songCount,
-                              min_hours_per_song: recordingMinHoursPerSong,
-                              required_total_hours: requiredTotalHours,
-                              selected_total_hours: totalHours,
-                            },
-                          },
+                          modifiers: buildRecordingPricingModifiers(
+                            songCount,
+                            totalHours,
+                            finalPricing?.modifiers?.promotion,
+                          ),
                         },
                       };
 
@@ -1329,7 +1318,7 @@ const StudioBookTab = ({
                       showAlert(
                         "success",
                         "Recording Session Updated",
-                        `Added time slot for ${new Date(`${bookingDate}T00:00:00`).toLocaleDateString()}. Total selected time: ${totalHours.toFixed(1)}h (minimum required: ${requiredTotalHours.toFixed(1)}h).`,
+                        `Added time slot for ${new Date(`${bookingDate}T00:00:00`).toLocaleDateString()}. Total selected time: ${formatRecordingHours(totalHours)}h (minimum required: ${formatRecordingHours(requiredTotalHours)}h based on ${recordingRuleShort}).`,
                       );
                     } else {
                       const existingPrice = existingBooking.pricing?.final_price || 0;
@@ -1356,7 +1345,7 @@ const StudioBookTab = ({
                     if (isRecordingMode) {
                       const songCount = recordingSongCount || 1;
                       const totalHours = getSlotDurationHours(startTime, endTime2);
-                      const requiredTotalHours = songCount * recordingMinHoursPerSong;
+                      const requiredTotalHours = getRecordingRequiredTotalHours(songCount);
 
                       setBookings([
                         ...bookings,
@@ -1370,18 +1359,11 @@ const StudioBookTab = ({
                             ...(finalPricing || {}),
                             hours: totalHours,
                             total_hours: totalHours,
-                            modifiers: {
-                              ...(finalPricing?.modifiers || {}),
-                              min_hours_per_song: recordingMinHoursPerSong,
-                              required_total_hours: requiredTotalHours,
-                              selected_total_hours: totalHours,
-                              recording_session: {
-                                ...(finalPricing?.modifiers?.recording_session || {}),
-                                min_hours_per_song: recordingMinHoursPerSong,
-                                required_total_hours: requiredTotalHours,
-                                selected_total_hours: totalHours,
-                              },
-                            },
+                            modifiers: buildRecordingPricingModifiers(
+                              songCount,
+                              totalHours,
+                              finalPricing?.modifiers?.promotion,
+                            ),
                           },
                         },
                       ]);
@@ -1656,13 +1638,13 @@ const StudioBookTab = ({
                         if (sessionType === "recording" && bookingSongCount) {
                           const totalSelectedHours = getTotalSlotDurationHours(sortedByStart);
                           const requiredHours =
-                            bookingSongCount * recordingMinHoursPerSong;
+                            getRecordingRequiredTotalHours(bookingSongCount);
 
                           if (totalSelectedHours + 1e-9 < requiredHours) {
                             errors.push({
                               booking,
                               error: {
-                                message: `Recording booking requires at least ${requiredHours.toFixed(1)} hour(s) for ${bookingSongCount} song(s), but only ${totalSelectedHours.toFixed(1)} hour(s) are selected.`,
+                                message: `Recording booking requires at least ${formatRecordingHours(requiredHours)} hour(s) for ${bookingSongCount} song(s) based on ${recordingRuleShort}, but only ${formatRecordingHours(totalSelectedHours)} hour(s) are selected.`,
                                 serverError: null,
                               },
                             });
@@ -1901,7 +1883,7 @@ const StudioBookTab = ({
                 },
                 isRecordingMode ? "Confirm Recording Booking" : "Confirm Session Booking",
                 isRecordingMode
-                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. Minimum selected hours must meet songs × ${recordingMinHoursPerSong}. The studio owner will review and approve your booking request.`
+                  ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. Time rule: ${recordingRuleShort}. The studio owner will review and approve your booking request.`
                   : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
                 { requireTerms: true },
               )

@@ -11,11 +11,11 @@ import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useRef, useState } from "react";
-import { AppState, LogBox, View } from "react-native";
+import { LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
+import { supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
-import { startBackgroundPreparation } from "../src/services/musikaLlmAdapter";
 import { showTopToast, TopToastProvider } from "../src/context/TopToastContext";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 import SubscriptionRequiredScreen from "./subscription_required";
@@ -73,23 +73,63 @@ function RootContent() {
     useAuth();
   const segments = useSegments();
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
+  const shownNotificationToastIdsRef = useRef<Set<string>>(new Set());
 
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
 
-  // Keep model preparation eager across app launches and foreground resumes.
   useEffect(() => {
-    startBackgroundPreparation();
+    const activeUserId = session?.user?.id;
+    if (!activeUserId) return;
 
-    const appStateSubscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active") {
-        startBackgroundPreparation();
-      }
-    });
+    const notificationChannel = supabase
+      .channel(`root-notification-toast:${activeUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${activeUserId}`,
+        },
+        (payload) => {
+          const nextNotification = (payload as any)?.new || {};
+          const notificationId = String(nextNotification?.id || "").trim();
+          if (!notificationId) return;
+          if (shownNotificationToastIdsRef.current.has(notificationId)) return;
+
+          shownNotificationToastIdsRef.current.add(notificationId);
+          if (shownNotificationToastIdsRef.current.size > 120) {
+            const oldestId = shownNotificationToastIdsRef.current.values().next().value;
+            if (oldestId) {
+              shownNotificationToastIdsRef.current.delete(oldestId);
+            }
+          }
+
+          const message = String(nextNotification?.message || "").trim();
+          if (!message) return;
+
+          const normalizedType = String(nextNotification?.type || "info").toLowerCase();
+          const toastType =
+            normalizedType === "success" ||
+            normalizedType === "error" ||
+            normalizedType === "warning" ||
+            normalizedType === "info"
+              ? normalizedType
+              : "info";
+
+          showTopToast({
+            type: toastType,
+            title: String(nextNotification?.title || "").trim() || "Notification",
+            message,
+          });
+        },
+      )
+      .subscribe();
 
     return () => {
-      appStateSubscription.remove();
+      supabase.removeChannel(notificationChannel);
     };
-  }, []);
+  }, [session?.user?.id]);
 
   // Handle global identity/subscription gates
   useEffect(() => {

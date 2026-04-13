@@ -1,20 +1,71 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
-import type { InstrumentSuggestion } from "../types/instruments";
-import { getOfflineInstrumentSuggestions } from "../utils/offlineInstrumentRecommender";
 import type {
-  EnhanceOfflineSuggestionsResult,
-  GenerateOfflineSuggestionsWithLlmInput,
-  RerankHomeFeedInput,
-  RerankHomeFeedResult,
-} from "./offlineLlmEnhancer";
+  ExperienceLevel,
+  InstrumentSuggestion,
+  SuggestionPurpose,
+} from "../types/instruments";
+import { getOfflineInstrumentSuggestions } from "../utils/offlineInstrumentRecommender";
+
+interface GenerateOfflineSuggestionsWithLlmInput {
+  genres: string[];
+  currentInstruments: string[];
+  userRoles: string[];
+  experienceLevel: ExperienceLevel;
+  purpose: SuggestionPurpose;
+  limit: number;
+}
+
+interface HomeFeedProfileSignals {
+  skills: string[];
+  genres: string[];
+}
+
+interface RerankHomeFeedInput {
+  candidates: any[];
+  profileSignals: HomeFeedProfileSignals;
+  limit: number;
+}
+
+interface RerankHomeFeedResult {
+  recommendations: any[];
+  aiPowered: boolean;
+  aiProvider: string;
+  message: string;
+}
+
+interface EnhanceOfflineSuggestionsResult {
+  suggestions: InstrumentSuggestion[];
+  aiPowered: boolean;
+  aiProvider: string;
+  message: string;
+}
+
+interface InstrumentSuggestionFollowupInput {
+  question: string;
+  suggestions: InstrumentSuggestion[];
+  selectedGenres?: string[];
+  userRoles?: string[];
+  experienceLevel?: ExperienceLevel;
+  purpose?: SuggestionPurpose;
+}
+
+interface InstrumentSuggestionFollowupResult {
+  answer: string;
+  aiPowered: boolean;
+  aiProvider: string;
+  blocked: boolean;
+}
 
 const SUGGESTION_CACHE_PREFIX = "groq_suggestions:";
 const HOME_CACHE_PREFIX = "groq_home:";
+const FOLLOWUP_CHAT_CACHE_PREFIX = "groq_followup_chat:";
 const SUGGESTION_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
 const HOME_CACHE_TTL_MS = 1000 * 60 * 10;
+const FOLLOWUP_CHAT_CACHE_TTL_MS = 1000 * 60 * 30;
 const SUGGESTION_TIMEOUT_MS = 20000;
 const HOME_TIMEOUT_MS = 16000;
+const FOLLOWUP_CHAT_TIMEOUT_MS = 12000;
 const MAX_SUGGESTION_CANDIDATES = 12;
 const MAX_HOME_CANDIDATES = 12;
 const MAX_HOME_TARGET_COUNT = 6;
@@ -112,6 +163,76 @@ const compactText = (value: unknown, maxLength: number) => {
   }
 
   return `${normalizedValue.slice(0, Math.max(0, maxLength - 1)).trim()}~`;
+};
+
+const normalizeWhitespace = (value: string) => value.replace(/\s+/g, " ").trim();
+
+const INSTRUMENT_SCOPE_KEYWORDS = [
+  "instrument",
+  "guitar",
+  "bass",
+  "drum",
+  "piano",
+  "keyboard",
+  "ukulele",
+  "violin",
+  "sax",
+  "trumpet",
+  "practice",
+  "chord",
+  "scale",
+  "technique",
+  "genre",
+  "tone",
+  "amp",
+  "recording",
+  "mix",
+  "microphone",
+  "learn",
+  "beginner",
+  "intermediate",
+  "advanced",
+  "songwriting",
+  "performance",
+  "setup",
+];
+
+const isFollowupQuestionInScope = (question: string, suggestions: InstrumentSuggestion[]) => {
+  const normalizedQuestion = normalizeWhitespace(question).toLowerCase();
+  if (!normalizedQuestion) {
+    return false;
+  }
+
+  const mentionsSuggestedInstrument = suggestions.some((item) => {
+    const name = normalizeWhitespace(item.name).toLowerCase();
+    if (!name) return false;
+
+    return normalizedQuestion.includes(name);
+  });
+
+  if (mentionsSuggestedInstrument) {
+    return true;
+  }
+
+  return INSTRUMENT_SCOPE_KEYWORDS.some((keyword) => normalizedQuestion.includes(keyword));
+};
+
+const buildFollowupChatCacheKey = (input: InstrumentSuggestionFollowupInput) => {
+  const payload = {
+    provider: getGroqModelLabel(getConfiguredGroqModelId()),
+    question: normalizeWhitespace(input.question).toLowerCase(),
+    suggestions: input.suggestions
+      .slice(0, 12)
+      .map((item) => normalizeWhitespace(item.name).toLowerCase())
+      .filter(Boolean)
+      .sort(),
+    genres: (input.selectedGenres || []).map(normalize).sort(),
+    roles: (input.userRoles || []).map(normalize).sort(),
+    experienceLevel: input.experienceLevel || "",
+    purpose: input.purpose || "",
+  };
+
+  return `${FOLLOWUP_CHAT_CACHE_PREFIX}${hashString(JSON.stringify(payload))}`;
 };
 
 const extractJsonObject = (raw: string) => {
@@ -774,11 +895,11 @@ const applySuggestionEnhancements = (
 const buildHomePrompt = (input: RerankHomeFeedInput, candidates: any[], targetCount: number) => {
   const compactSkills = input.profileSignals.skills
     .slice(0, 4)
-    .map((value) => compactText(value, 20))
+    .map((value: string) => compactText(value, 20))
     .filter(Boolean);
   const compactGenres = input.profileSignals.genres
     .slice(0, 4)
-    .map((value) => compactText(value, 20))
+    .map((value: string) => compactText(value, 20))
     .filter(Boolean);
 
   const compactCandidates = candidates.map((item: any, idx: number) => ({
@@ -1065,6 +1186,133 @@ export const rerankHomeFeedWithGroq = async (
   }
 };
 
+export const askInstrumentSuggestionFollowupWithGroq = async (
+  input: InstrumentSuggestionFollowupInput,
+): Promise<InstrumentSuggestionFollowupResult> => {
+  const preferredProviderLabel = getGroqModelLabel(getConfiguredGroqModelId());
+  const normalizedQuestion = normalizeWhitespace(input.question || "");
+  const scopedSuggestions = Array.isArray(input.suggestions)
+    ? input.suggestions.slice(0, MAX_SUGGESTION_CANDIDATES)
+    : [];
+
+  if (!normalizedQuestion) {
+    return {
+      answer: "Ask about any suggested instrument and I can help with learning, setup, and next steps.",
+      aiPowered: false,
+      aiProvider: "Scoped Assistant",
+      blocked: true,
+    };
+  }
+
+  if (scopedSuggestions.length === 0) {
+    return {
+      answer: "I can only answer based on your current suggested instruments. Generate suggestions first.",
+      aiPowered: false,
+      aiProvider: "Scoped Assistant",
+      blocked: true,
+    };
+  }
+
+  if (!isFollowupQuestionInScope(normalizedQuestion, scopedSuggestions)) {
+    return {
+      answer:
+        "I can only help with your suggested instruments and related music guidance.",
+      aiPowered: false,
+      aiProvider: "Scoped Assistant",
+      blocked: true,
+    };
+  }
+
+  if (!isGroqConfigured()) {
+    return {
+      answer:
+        `${preferredProviderLabel} is unavailable right now. I can only answer instrument follow-up questions when AI is configured.`,
+      aiPowered: false,
+      aiProvider: "Scoped Assistant",
+      blocked: true,
+    };
+  }
+
+  const cacheKey = buildFollowupChatCacheKey({
+    ...input,
+    question: normalizedQuestion,
+    suggestions: scopedSuggestions,
+  });
+  const cached = await getCachedValue<InstrumentSuggestionFollowupResult>(
+    cacheKey,
+    FOLLOWUP_CHAT_CACHE_TTL_MS,
+  );
+  if (cached?.answer) {
+    return cached;
+  }
+
+  const compactSuggestions = scopedSuggestions.map((item) => ({
+    name: item.name,
+    category: item.category,
+    difficulty: item.difficulty,
+    perfectFor: compactText(item.perfectFor, 24),
+    reason: compactText(item.matchReason, 110),
+  }));
+
+  const systemPrompt = [
+    "You are MusikaLokal Suggestion Assistant.",
+    "You must only answer questions about the provided suggested instruments and closely related music guidance.",
+    "Allowed scope: instrument comparison, genre fit, role fit, learning plan, practice advice, setup basics, budgeting, and next steps.",
+    "If a question is outside this scope, respond exactly: I can only help with your suggested instruments and related music guidance.",
+    "Do not provide answers outside scope.",
+    "Keep the response concise, practical, and under 6 sentences.",
+  ].join(" ");
+
+  const userPrompt = [
+    `Suggested instruments: ${JSON.stringify(compactSuggestions)}`,
+    `User roles: ${(input.userRoles || []).join(", ") || "none"}`,
+    `Selected genres: ${(input.selectedGenres || []).join(", ") || "none"}`,
+    `Experience level: ${input.experienceLevel || "unknown"}`,
+    `Purpose: ${input.purpose || "unknown"}`,
+    `Question: ${normalizedQuestion}`,
+    "Answer with direct guidance only.",
+  ].join("\n");
+
+  try {
+    const result = await requestGroqJson({
+      systemPrompt,
+      userPrompt,
+      timeoutMs: FOLLOWUP_CHAT_TIMEOUT_MS,
+      maxOutputTokens: 260,
+      temperature: 0.2,
+    });
+
+    const resolvedProviderLabel = getGroqModelLabel(result.modelId);
+    const answer = normalizeWhitespace(result.text || "");
+
+    if (!answer) {
+      return {
+        answer: "I can only help with your suggested instruments and related music guidance.",
+        aiPowered: false,
+        aiProvider: "Scoped Assistant",
+        blocked: true,
+      };
+    }
+
+    const payload: InstrumentSuggestionFollowupResult = {
+      answer,
+      aiPowered: true,
+      aiProvider: resolvedProviderLabel,
+      blocked: false,
+    };
+
+    await setCachedValue(cacheKey, payload);
+    return payload;
+  } catch {
+    return {
+      answer: "I can only help with your suggested instruments and related music guidance.",
+      aiPowered: false,
+      aiProvider: "Scoped Assistant",
+      blocked: true,
+    };
+  }
+};
+
 // Legacy aliases so existing screens can switch providers without refactoring symbol names.
 export const GEMINI_FLASH_LITE_MODEL_ID = GROQ_PRIMARY_MODEL_ID;
 export const GEMINI_FLASH_LITE_LABEL = GROQ_PRIMARY_LABEL;
@@ -1072,3 +1320,4 @@ export const getGeminiFlashLiteInfo = getGroqModelInfo;
 export const isGeminiFlashLiteConfigured = isGroqConfigured;
 export const generateInstrumentSuggestionsWithGeminiFlashLite = generateInstrumentSuggestionsWithGroq;
 export const rerankHomeFeedWithGeminiFlashLite = rerankHomeFeedWithGroq;
+export const askInstrumentSuggestionFollowupWithGeminiFlashLite = askInstrumentSuggestionFollowupWithGroq;

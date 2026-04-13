@@ -1,13 +1,45 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
-import type { InstrumentSuggestion } from "../types/instruments";
-import { getOfflineInstrumentSuggestions } from "../utils/offlineInstrumentRecommender";
 import type {
-  EnhanceOfflineSuggestionsResult,
-  GenerateOfflineSuggestionsWithLlmInput,
-  RerankHomeFeedInput,
-  RerankHomeFeedResult,
-} from "./offlineLlmEnhancer";
+  ExperienceLevel,
+  InstrumentSuggestion,
+  SuggestionPurpose,
+} from "../types/instruments";
+import { getOfflineInstrumentSuggestions } from "../utils/offlineInstrumentRecommender";
+
+interface GenerateOfflineSuggestionsWithLlmInput {
+  genres: string[];
+  currentInstruments: string[];
+  userRoles: string[];
+  experienceLevel: ExperienceLevel;
+  purpose: SuggestionPurpose;
+  limit: number;
+}
+
+interface HomeFeedProfileSignals {
+  skills: string[];
+  genres: string[];
+}
+
+interface RerankHomeFeedInput {
+  candidates: any[];
+  profileSignals: HomeFeedProfileSignals;
+  limit: number;
+}
+
+interface RerankHomeFeedResult {
+  recommendations: any[];
+  aiPowered: boolean;
+  aiProvider: string;
+  message: string;
+}
+
+interface EnhanceOfflineSuggestionsResult {
+  suggestions: InstrumentSuggestion[];
+  aiPowered: boolean;
+  aiProvider: string;
+  message: string;
+}
 
 const SUGGESTION_CACHE_PREFIX = "gemini_flash_lite_suggestions:";
 const HOME_CACHE_PREFIX = "gemini_flash_lite_home:";

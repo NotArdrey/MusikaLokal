@@ -149,6 +149,8 @@ export default function EditGroupScreen() {
     avatar_url?: string;
   }
   const [members, setMembers] = useState<MemberDetail[]>([]);
+  const [isLeaderInstrumentFinalized, setIsLeaderInstrumentFinalized] = useState(true);
+  const [memberInstrumentFinalization, setMemberInstrumentFinalization] = useState<Record<number, boolean>>({});
   const [newMemberInstrument, setNewMemberInstrument] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -496,6 +498,16 @@ export default function EditGroupScreen() {
           }));
 
       setMembers(combinedMembers);
+      const loadedLeader = combinedMembers.find((member) =>
+        isGroupLeaderMember(member, data.owner_id || null),
+      );
+      setIsLeaderInstrumentFinalized(Boolean(loadedLeader?.instrument?.trim()));
+      setMemberInstrumentFinalization(
+        combinedMembers.reduce<Record<number, boolean>>((acc, member, memberIndex) => {
+          acc[memberIndex] = Boolean(member.instrument?.trim());
+          return acc;
+        }, {}),
+      );
       setInitialMemberUserIds(
         (membersFromDb.length > 0 ? membersFromDb : combinedMembers)
           .map((member) => member.user_id)
@@ -552,6 +564,37 @@ export default function EditGroupScreen() {
         "error",
         "Leader Instrument Required",
         "Please enter your instrument/role as the group leader.",
+      );
+      return false;
+    }
+    if (!isLeaderInstrumentFinalized) {
+      showAlert(
+        "error",
+        "Leader Instrument Not Finalized",
+        "Tap the check icon beside the leader instrument to finalize it before saving.",
+      );
+      return false;
+    }
+    const memberWithoutInstrument = members.find((member) => !member.instrument?.trim());
+    if (memberWithoutInstrument) {
+      showAlert(
+        "error",
+        "Missing Instrument",
+        `Please enter an instrument for ${memberWithoutInstrument.name || "a member"}.`,
+      );
+      return false;
+    }
+    const unfinalizedMember = members.find(
+      (member, index) =>
+        !isGroupLeaderMember(member, groupOwnerId) &&
+        Boolean(member.instrument?.trim()) &&
+        !memberInstrumentFinalization[index],
+    );
+    if (unfinalizedMember) {
+      showAlert(
+        "error",
+        "Member Instrument Not Finalized",
+        `Tap the check icon beside ${unfinalizedMember.name || "this member"}'s instrument before saving.`,
       );
       return false;
     }
@@ -812,6 +855,26 @@ export default function EditGroupScreen() {
       return;
     }
 
+    const normalizeMemberName = (value?: string | null) =>
+      (value || "").trim().toLowerCase();
+
+    const isMusicianAlreadyAdded = (musician: {
+      id?: string | null;
+      full_name?: string | null;
+    }) => {
+      const musicianName = normalizeMemberName(musician.full_name);
+      return members.some((member) => {
+        const sameId = Boolean(
+          member.user_id && musician.id && member.user_id === musician.id,
+        );
+        const sameName = Boolean(
+          musicianName &&
+            normalizeMemberName(member.name) === musicianName,
+        );
+        return sameId || sameName;
+      });
+    };
+
     setIsSearching(true);
     try {
       const { data, error } = await supabase
@@ -822,7 +885,10 @@ export default function EditGroupScreen() {
         .limit(5);
 
       if (error) throw error;
-      setSearchResults(data || []);
+      const filteredResults = (data || []).filter(
+        (musician) => !isMusicianAlreadyAdded(musician),
+      );
+      setSearchResults(filteredResults);
     } catch (error) {
       console.error("Error searching musicians:", error);
     } finally {
@@ -833,9 +899,17 @@ export default function EditGroupScreen() {
   const selectMember = (musician: any) => {
     // Check if already added
     if (
-      members.some(
-        (m) => m.user_id === musician.id || m.name === musician.full_name,
-      )
+      members.some((m) => {
+        const normalizedMusicianName = (musician.full_name || "")
+          .trim()
+          .toLowerCase();
+        const normalizedMemberName = (m.name || "").trim().toLowerCase();
+        return (
+          (m.user_id && musician.id && m.user_id === musician.id) ||
+          (normalizedMusicianName &&
+            normalizedMemberName === normalizedMusicianName)
+        );
+      })
     ) {
       showAlert(
         "warning",
@@ -859,7 +933,14 @@ export default function EditGroupScreen() {
         user_id: pendingMember.id,
         avatar_url: pendingMember.avatar_url,
       };
-      setMembers([...members, newMember]);
+      setMembers((prev) => {
+        const nextMembers = [...prev, newMember];
+        setMemberInstrumentFinalization((prevFinalization) => ({
+          ...prevFinalization,
+          [nextMembers.length - 1]: true,
+        }));
+        return nextMembers;
+      });
       setPendingMember(null);
       setNewMemberInstrument("");
     }
@@ -893,18 +974,82 @@ export default function EditGroupScreen() {
         {
           text: "Remove",
           style: "destructive",
-          onPress: () => setMembers(members.filter((_, i) => i !== index)),
+          onPress: () => {
+            setMembers((prev) => prev.filter((_, i) => i !== index));
+            setMemberInstrumentFinalization((prev) => {
+              const next: Record<number, boolean> = {};
+              Object.entries(prev).forEach(([rawIndex, isFinalized]) => {
+                const memberIndex = Number(rawIndex);
+                if (memberIndex < index) {
+                  next[memberIndex] = isFinalized;
+                  return;
+                }
+                if (memberIndex > index) {
+                  next[memberIndex - 1] = isFinalized;
+                }
+              });
+              return next;
+            });
+          },
         },
       ],
     );
   };
 
   const updateMemberInstrument = (index: number, instrument: string) => {
-    setMembers((prev) =>
-      prev.map((member, memberIndex) =>
+    setMemberInstrumentFinalization((prev) => ({
+      ...prev,
+      [index]: false,
+    }));
+
+    setMembers((prev) => {
+      const updated = prev.map((member, memberIndex) =>
         memberIndex === index ? { ...member, instrument } : member,
-      ),
-    );
+      );
+
+      if (isGroupLeaderMember(updated[index], groupOwnerId)) {
+        setIsLeaderInstrumentFinalized(false);
+      }
+
+      return updated;
+    });
+  };
+
+  const finalizeMemberInstrument = (index: number) => {
+    const value = members[index]?.instrument?.trim() || "";
+    const isLeader = isGroupLeaderMember(members[index], groupOwnerId);
+
+    if (!value) {
+      showAlert(
+        "warning",
+        isLeader ? "Leader Instrument Required" : "Member Instrument Required",
+        isLeader
+          ? "Please enter the leader instrument before finalizing."
+          : "Please enter the member instrument before finalizing.",
+      );
+      return;
+    }
+
+    updateMemberInstrument(index, value);
+    setMemberInstrumentFinalization((prev) => ({
+      ...prev,
+      [index]: true,
+    }));
+    if (isLeader) {
+      setIsLeaderInstrumentFinalized(true);
+    }
+    Keyboard.dismiss();
+  };
+
+  const enableMemberInstrumentEdit = (index: number) => {
+    const isLeader = isGroupLeaderMember(members[index], groupOwnerId);
+    setMemberInstrumentFinalization((prev) => ({
+      ...prev,
+      [index]: false,
+    }));
+    if (isLeader) {
+      setIsLeaderInstrumentFinalized(false);
+    }
   };
 
   const handleGroupTypeChange = (nextType: string) => {
@@ -1131,11 +1276,19 @@ export default function EditGroupScreen() {
       : normalizedLabel.includes("name") || normalizedLabel.includes("title")
         ? TITLE_MAX_LENGTH
         : undefined;
+    const isRequiredLabel =
+      normalizedLabel.includes("name") ||
+      normalizedLabel.includes("title") ||
+      normalizedLabel.includes("description") ||
+      normalizedLabel.includes("payout");
 
     return (
       <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
+        {isRequiredLabel ? (
+          <Text style={{ color: "#EF4444" }}> *</Text>
+        ) : null}
       </Text>
       <View
         style={[
@@ -1160,6 +1313,7 @@ export default function EditGroupScreen() {
               height: multiline ? 120 : "auto",
               textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
+              paddingVertical: multiline ? 12 : 16,
             },
           ]}
         />
@@ -1167,6 +1321,28 @@ export default function EditGroupScreen() {
       </View>
     );
   };
+
+  const membersMissingInstrumentCount = members.filter(
+    (member) => !member.instrument?.trim(),
+  ).length;
+  const leaderIndexForSave = getLeaderIndex();
+  const leaderNeedsFinalization =
+    leaderIndexForSave >= 0 &&
+    Boolean(members[leaderIndexForSave]?.instrument?.trim()) &&
+    !isLeaderInstrumentFinalized;
+  const nonLeaderNeedsFinalizationCount = members.reduce((count, member, index) => {
+    if (isGroupLeaderMember(member, groupOwnerId)) {
+      return count;
+    }
+    if (!member.instrument?.trim()) {
+      return count;
+    }
+    return memberInstrumentFinalization[index] ? count : count + 1;
+  }, 0);
+  const disableSaveForMissingInstruments =
+    membersMissingInstrumentCount > 0 ||
+    leaderNeedsFinalization ||
+    nonLeaderNeedsFinalizationCount > 0;
 
   // Show loading while checking authorization
   if (checkingAuth) {
@@ -1585,7 +1761,12 @@ export default function EditGroupScreen() {
             {members.map((member, index) => {
               const isLeader = isGroupLeaderMember(member, groupOwnerId);
               const currentInstrument = member.instrument || "";
-              const needsInstrument = isLeader && !currentInstrument.trim();
+              const needsInstrument = !currentInstrument.trim();
+              const isInstrumentFinalized = isLeader
+                ? isLeaderInstrumentFinalized
+                : Boolean(memberInstrumentFinalization[index]);
+              const needsMemberFinalization =
+                Boolean(currentInstrument.trim()) && !isInstrumentFinalized;
               return (
                 <View
                   key={index}
@@ -1593,7 +1774,7 @@ export default function EditGroupScreen() {
                     styles.memberItem,
                     {
                       backgroundColor: isDark ? "#1F2937" : "#F9FAFB",
-                      borderColor: needsInstrument
+                      borderColor: needsInstrument || needsMemberFinalization
                         ? "#F59E0B"
                         : isDark
                           ? "#374151"
@@ -1641,7 +1822,48 @@ export default function EditGroupScreen() {
                       >
                         {member.name || "Unnamed"}
                       </Text>
-                      {isLeader ? (
+                      {isInstrumentFinalized ? (
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            gap: 8,
+                            marginTop: 6,
+                            alignItems: "center",
+                          }}
+                        >
+                          <View
+                            style={{
+                              flex: 1,
+                              backgroundColor: colors.inputBackground,
+                              borderRadius: 8,
+                              height: 40,
+                              paddingHorizontal: 12,
+                              justifyContent: "center",
+                              borderWidth: 1,
+                              borderColor: "#10B981",
+                            }}
+                          >
+                            <Text style={{ color: colors.text, fontSize: 14 }}>
+                              {currentInstrument}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => enableMemberInstrumentEdit(index)}
+                            style={[
+                              styles.addMemberButton,
+                              {
+                                width: 40,
+                                height: 40,
+                                borderRadius: 8,
+                                backgroundColor: "#0EA5E9",
+                              },
+                            ]}
+                          >
+                            <Ionicons name="create-outline" size={18} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
                         <View
                           style={{
                             flexDirection: "row",
@@ -1657,6 +1879,12 @@ export default function EditGroupScreen() {
                             onChangeText={(text) =>
                               updateMemberInstrument(index, text)
                             }
+                            onEndEditing={(event) =>
+                              updateMemberInstrument(
+                                index,
+                                event.nativeEvent.text.trim(),
+                              )
+                            }
                             style={[
                               styles.input,
                               {
@@ -1669,15 +1897,17 @@ export default function EditGroupScreen() {
                                 textAlign: "left",
                                 color: colors.text,
                                 borderWidth: 1,
-                                borderColor: isDark ? "#374151" : "#E5E7EB",
+                                borderColor: needsInstrument || needsMemberFinalization
+                                  ? "#F59E0B"
+                                  : isDark
+                                    ? "#374151"
+                                    : "#E5E7EB",
                               },
                             ]}
                           />
-                          <TouchableOpacity activeOpacity={1}
-                            onPress={() => {
-                              updateMemberInstrument(index, currentInstrument.trim());
-                              Keyboard.dismiss();
-                            }}
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => finalizeMemberInstrument(index)}
                             disabled={!currentInstrument.trim()}
                             style={[
                               styles.addMemberButton,
@@ -1694,42 +1924,62 @@ export default function EditGroupScreen() {
                             <Ionicons name="checkmark" size={20} color="#fff" />
                           </TouchableOpacity>
                         </View>
-                      ) : (
-                        <TextInput
-                          placeholder="Enter instrument (e.g., Vocals, Guitar)"
-                          placeholderTextColor={colors.textSecondary}
-                          value={currentInstrument}
-                          onChangeText={(text) =>
-                            updateMemberInstrument(index, text)
-                          }
-                          style={[
-                            styles.input,
-                            {
-                              marginTop: 6,
-                              backgroundColor: colors.inputBackground,
-                              borderRadius: 8,
-                              height: 40,
-                              paddingHorizontal: 12,
-                              paddingVertical: 0,
-                              textAlign: "left",
-                              color: colors.text,
-                              borderWidth: 1,
-                              borderColor: isDark ? "#374151" : "#E5E7EB",
-                            },
-                          ]}
-                        />
                       )}
-                      {isLeader && (
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          color: needsInstrument || needsMemberFinalization
+                            ? "#F59E0B"
+                            : colors.textSecondary,
+                          marginTop: 4,
+                        }}
+                      >
+                        {needsInstrument
+                          ? isLeader
+                            ? "Leader (required before saving)"
+                            : "Member (required before saving)"
+                          : needsMemberFinalization
+                            ? isLeader
+                              ? "Leader (tap check icon to finalize)"
+                              : "Member (tap check icon to finalize)"
+                            : isLeader
+                              ? "Leader (confirmed)"
+                              : "Member (confirmed)"}
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          marginTop: 4,
+                        }}
+                      >
+                        <Ionicons
+                          name={
+                            needsInstrument || needsMemberFinalization
+                              ? "alert-circle-outline"
+                              : "checkmark-circle"
+                          }
+                          size={12}
+                          color={
+                            needsInstrument || needsMemberFinalization
+                              ? "#F59E0B"
+                              : "#10B981"
+                          }
+                        />
                         <Text
                           style={{
                             fontSize: 10,
-                            color: colors.textSecondary,
-                            marginTop: 4,
+                            marginLeft: 4,
+                            color: needsInstrument || needsMemberFinalization
+                              ? "#F59E0B"
+                              : "#10B981",
                           }}
                         >
-                          Leader
+                          {needsInstrument || needsMemberFinalization
+                            ? `${isLeader ? "Leader" : "Member"} instrument not confirmed`
+                            : `${isLeader ? "Leader" : "Member"} instrument confirmed`}
                         </Text>
-                      )}
+                      </View>
                     </View>
                   </View>
                   {!isLeader && (
@@ -1828,18 +2078,36 @@ export default function EditGroupScreen() {
           </Text>
 
           <View style={styles.footerActions}>
+            {disableSaveForMissingInstruments && (
+              <Text
+                style={{
+                  width: "100%",
+                  textAlign: "center",
+                  marginBottom: 8,
+                  color: "#F59E0B",
+                  fontFamily: "Poppins_500Medium",
+                  fontSize: 12,
+                }}
+              >
+                {leaderNeedsFinalization
+                  ? "Tap the check icon to finalize the leader instrument before saving."
+                  : nonLeaderNeedsFinalizationCount > 0
+                    ? "Tap each check icon to finalize member instruments before saving."
+                    : "Add instruments for all members before saving."}
+              </Text>
+            )}
             <TouchableOpacity
               style={[
                 styles.saveButton,
                 {
-                  backgroundColor: saving
+                  backgroundColor: saving || disableSaveForMissingInstruments
                     ? colors.textSecondary
                     : colors.primary,
                   shadowColor: colors.primary,
                 },
               ]}
               onPress={handleSave}
-              disabled={saving}
+              disabled={saving || disableSaveForMissingInstruments}
               activeOpacity={1}
             >
               {saving ? (

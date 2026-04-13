@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
@@ -10,6 +10,16 @@ import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+
+const normalizePermitStatus = (permitStatus: string | null | undefined) => {
+    const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
+    if (!normalizedPermitStatus) return 'approved';
+    if (['approved', 'approved_by_admin', 'verified'].includes(normalizedPermitStatus)) return 'approved';
+    if (['pending', 'pending_review', 'in_review', 'under_review'].includes(normalizedPermitStatus)) return 'pending_review';
+    if (['resubmitted', 'resubmit', 'reapplied'].includes(normalizedPermitStatus)) return 'resubmitted';
+    if (['rejected', 'declined'].includes(normalizedPermitStatus)) return 'rejected';
+    return normalizedPermitStatus;
+};
 
 export default function MyStudioScreen() {
     const { colors, isDark } = useTheme();
@@ -41,7 +51,7 @@ export default function MyStudioScreen() {
         setAlertVisible(true);
     };
 
-    const fetchStudios = async () => {
+    const fetchStudios = useCallback(async () => {
         if (!userId) return;
         try {
             const { data: baseStudios, error: baseError } = await supabase
@@ -99,7 +109,7 @@ export default function MyStudioScreen() {
                 const reviewStats = reviewsByStudioId[studio.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
-                const normalizedPermitStatus = String(studio.permit_status || 'pending_review').toLowerCase();
+                const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
 
                 return {
                     ...studio,
@@ -117,7 +127,7 @@ export default function MyStudioScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [userId]);
 
     useFocusEffect(
         useCallback(() => {
@@ -131,8 +141,27 @@ export default function MyStudioScreen() {
             return () => {
                 clearInterval(refreshInterval);
             };
-        }, [isAuthenticated, userId, refreshKey])
+        }, [isAuthenticated, userId, refreshKey, fetchStudios])
     );
+
+    useEffect(() => {
+        if (!isAuthenticated || !userId) return;
+
+        const channel = supabase
+            .channel(`my-studio-listings:${userId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'studios', filter: `owner_id=eq.${userId}` },
+                () => {
+                    fetchStudios();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [isAuthenticated, userId, fetchStudios]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -263,14 +292,14 @@ export default function MyStudioScreen() {
                                 ]}
                             >
                                 {(() => {
-                                    const normalizedPermitStatus = String(studio.permit_status || 'pending_review').toLowerCase();
+                                    const normalizedPermitStatus = normalizePermitStatus(studio.permit_status);
                                     const isRejected = normalizedPermitStatus === 'rejected';
                                     const isApproved = normalizedPermitStatus === 'approved';
                                     const isResubmitted = normalizedPermitStatus === 'resubmitted';
 
                                     const permitStatusLabel =
                                         isApproved
-                                            ? 'Approved'
+                                            ? 'Approved by Admin'
                                             : isRejected
                                                 ? 'Rejected'
                                                 : isResubmitted

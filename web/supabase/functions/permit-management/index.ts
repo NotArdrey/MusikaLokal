@@ -424,6 +424,69 @@ function applyPermitStatusFilter(query: any, permitStatus: string) {
   return query;
 }
 
+function isNotificationTypeConstraintError(error: any) {
+  const message = String(error?.message || "").toLowerCase();
+  const details = String(error?.details || "").toLowerCase();
+  const constraint = String(error?.constraint || "").toLowerCase();
+
+  return (
+    message.includes("check constraint") ||
+    message.includes("violates check") ||
+    details.includes("check constraint") ||
+    constraint.includes("type")
+  );
+}
+
+async function insertNotificationWithFallback(
+  client: any,
+  payload: {
+    user_id: string;
+    type: string;
+    title: string;
+    message: string;
+    read?: boolean;
+    image?: string | null;
+    meta?: Record<string, unknown>;
+  },
+) {
+  const tryInsert = async (attemptPayload: Record<string, unknown>) =>
+    client.from("notifications").insert(attemptPayload);
+
+  // Primary insert: full modern payload.
+  const { error: primaryError } = await tryInsert(payload);
+  if (!primaryError) return null;
+
+  // Fallback 1: some environments may enforce a stricter type enum.
+  if (isNotificationTypeConstraintError(primaryError)) {
+    const { error: typeFallbackError } = await tryInsert({
+      ...payload,
+      type: "info",
+    });
+    if (!typeFallbackError) return null;
+
+    if (!isMissingSchemaError(typeFallbackError)) {
+      return typeFallbackError;
+    }
+  } else if (!isMissingSchemaError(primaryError)) {
+    return primaryError;
+  }
+
+  // Fallback 2: legacy schema variant without `meta`.
+  const { meta, ...withoutMeta } = payload;
+  const { error: noMetaError } = await tryInsert(withoutMeta);
+  if (!noMetaError) return null;
+
+  // Fallback 3: legacy schema variant without both `meta` and `read`.
+  if (isMissingSchemaError(noMetaError)) {
+    const { read, ...minimalPayload } = withoutMeta;
+    const { error: minimalError } = await tryInsert(minimalPayload);
+    if (!minimalError) return null;
+    return minimalError;
+  }
+
+  return noMetaError;
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -667,7 +730,9 @@ serve(async (req: Request) => {
         if (legacyAuditError) throw legacyAuditError;
       }
 
-      const ownerId = String((currentItem as any)?.[ownerField] || "").trim();
+      const ownerId = String(
+        (currentItem as any)?.[ownerField] || (updatedItem as any)?.[ownerField] || "",
+      ).trim();
       if (ownerId) {
         const isApproved = reviewAction === "approve";
         const listingLabel = entityType === "studio" ? "studio" : "gig";
@@ -676,28 +741,32 @@ serve(async (req: Request) => {
           ? `Your ${listingLabel} "${currentItem.name}" is now approved and visible in Home.`
           : `Your ${listingLabel} "${currentItem.name}" was rejected.${rejectionReason ? ` Reason: ${rejectionReason}` : " Update details and reapply to continue review."}`;
 
-        const { error: notificationError } = await client
-          .from("notifications")
-          .insert({
-            user_id: ownerId,
-            type: isApproved ? "success" : "warning",
-            title: notificationTitle,
-            message: notificationMessage,
-            read: false,
-            meta: {
-              event_type: "permit_review",
-              entity_type: entityType,
-              entity_id: entityId,
-              permit_status: nextStatus,
-              reviewed_by: userId,
-              reviewed_at: updatePayload.permit_reviewed_at,
-              rejection_reason: reviewAction === "reject" ? rejectionReason : null,
-            },
-          });
+        const notificationError = await insertNotificationWithFallback(client, {
+          user_id: ownerId,
+          type: isApproved ? "success" : "warning",
+          title: notificationTitle,
+          message: notificationMessage,
+          read: false,
+          meta: {
+            event_type: "permit_review",
+            entity_type: entityType,
+            entity_id: entityId,
+            permit_status: nextStatus,
+            reviewed_by: userId,
+            reviewed_at: updatePayload.permit_reviewed_at,
+            rejection_reason: reviewAction === "reject" ? rejectionReason : null,
+          },
+        });
 
         if (notificationError) {
           console.error("permit-management notification insert error:", notificationError);
         }
+      } else {
+        console.warn("permit-management missing owner id for permit review notification", {
+          entityType,
+          entityId,
+          reviewAction,
+        });
       }
 
       clearMetricsCache();

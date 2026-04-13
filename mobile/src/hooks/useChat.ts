@@ -948,7 +948,7 @@ export function useChat(conversationId: string | null, currentUserId: string | n
 
         const { error: markReadError } = await supabase
             .from('messages')
-            .update({ read_at })
+            .update({ read_at: readAt })
             .eq('conversation_id', conversationId)
             .neq('sender_id', currentUserId)
             .is('read_at', null);

@@ -5,6 +5,12 @@ import {
   hasNavigationDestination,
   openNavigationDirections,
 } from "../../utils/navigation";
+import {
+  formatRecordingHours,
+  formatRecordingRuleSentence,
+  formatRecordingRuleShort,
+  resolveRecordingRule,
+} from "../../utils/recordingRule";
 import CachedImage from "../CachedImage";
 import ListingMediaCarousel from "./ListingMediaCarousel";
 
@@ -58,19 +64,18 @@ const StudioGigVenueAboutTab = ({
   const supportsRecordingPricing =
     Boolean(recordingRate) || normalizedStudioType.includes("recording");
   const supportsRecording = group.type === "Studio" && supportsRecordingPricing;
-  const parsedSongCap = Number.parseInt(
-    String(group?.settings?.max_recording_songs_per_day ?? "").trim(),
-    10,
-  );
-  const globalRecordingSongCap =
-    Number.isFinite(parsedSongCap) && parsedSongCap > 0 ? parsedSongCap : null;
-  const parsedMinHoursPerSong = Number.parseFloat(
-    String(group?.settings?.min_booking_duration_hours ?? "").trim(),
-  );
-  const recordingMinHoursPerSong =
-    Number.isFinite(parsedMinHoursPerSong) && parsedMinHoursPerSong > 0
-      ? parsedMinHoursPerSong
-      : null;
+  const recordingRule = supportsRecording
+    ? resolveRecordingRule(group?.settings)
+    : null;
+  const recordingRuleSummary = recordingRule
+    ? formatRecordingRuleShort(recordingRule)
+    : null;
+  const recordingRuleSentence = recordingRule
+    ? formatRecordingRuleSentence(recordingRule)
+    : null;
+  const recordingRuleScaling = recordingRule
+    ? `+${formatRecordingHours(recordingRule.hoursPerBlock)} hr${recordingRule.hoursPerBlock === 1 ? "" : "s"} for every ${recordingRule.songsPerBlock} song${recordingRule.songsPerBlock === 1 ? "" : "s"}`
+    : null;
   const isMediaCarouselType =
     group.type === "Studio" || group.type === "Venue" || group.type === "Gig";
   const mediaItems = useMemo(() => {
@@ -390,22 +395,8 @@ const StudioGigVenueAboutTab = ({
         )}
 
         {supportsRecording && (
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <View
-              style={[
-                styles.statCard,
-                { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
-              ]}
-            >
-              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-                Song Cap / Day
-              </Text>
-              <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
-                {globalRecordingSongCap ? `${globalRecordingSongCap} songs` : "No limit"}
-              </Text>
-            </View>
-
-            {recordingMinHoursPerSong && (
+          <>
+            <View style={{ flexDirection: "row", gap: 12 }}>
               <View
                 style={[
                   styles.statCard,
@@ -413,14 +404,36 @@ const StudioGigVenueAboutTab = ({
                 ]}
               >
                 <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-                  Est. Hours / Song
+                  Recording Rule
                 </Text>
                 <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
-                  {recordingMinHoursPerSong} hrs
+                  {recordingRuleSummary}
                 </Text>
               </View>
-            )}
-          </View>
+
+              <View
+                style={[
+                  styles.statCard,
+                  { backgroundColor: isDark ? "#1F2937" : "#F3F4F6", flex: 1 },
+                ]}
+              >
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+                  How Time Scales
+                </Text>
+                <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={2}>
+                  {recordingRuleScaling}
+                </Text>
+              </View>
+            </View>
+            <Text
+              style={[
+                styles.description,
+                { color: colors.textSecondary, marginTop: 10, marginBottom: 0 },
+              ]}
+            >
+              {recordingRuleSentence}. Musicians can split the required hours across any available dates and time slots.
+            </Text>
+          </>
         )}
       </View>
     )}

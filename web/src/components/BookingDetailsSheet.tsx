@@ -13,6 +13,13 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
+import {
+  formatRecordingHours,
+  formatRecordingRuleShort,
+  getRecordingRequiredBlocks,
+  getRecordingRequiredHours,
+  resolveRecordingRule,
+} from "../utils/recordingRule";
 import CachedImage from "./CachedImage";
 
 const debugLog = (..._args: unknown[]) => { };
@@ -254,17 +261,54 @@ const BookingDetailsSheet = forwardRef<
   const effectiveDurationHours = Number(
     booking.duration_hours || booking?.modifiers_applied?.hours || 4,
   );
-  const parsedMinHoursPerSong = Number(
+  const parsedLegacyMinHoursPerSong = Number(
     booking?.modifiers_applied?.recording_session?.min_hours_per_song ??
       booking?.modifiers_applied?.min_hours_per_song ??
-      booking?.studio_settings?.min_booking_duration_hours ??
-      studioDetails?.settings?.min_booking_duration_hours ??
       "",
   );
-  const recordingMinHoursPerSong =
-    Number.isFinite(parsedMinHoursPerSong) && parsedMinHoursPerSong > 0
-      ? parsedMinHoursPerSong
+  const legacyMinHoursPerSong =
+    Number.isFinite(parsedLegacyMinHoursPerSong) &&
+    parsedLegacyMinHoursPerSong > 0
+      ? parsedLegacyMinHoursPerSong
       : null;
+  const recordingRuleSource = {
+    ...(typeof studioDetails?.settings === "object" && studioDetails?.settings
+      ? studioDetails.settings
+      : {}),
+    ...(typeof booking?.studio_settings === "object" && booking?.studio_settings
+      ? booking.studio_settings
+      : {}),
+    ...(typeof booking?.modifiers_applied === "object" && booking?.modifiers_applied
+      ? booking.modifiers_applied
+      : {}),
+    ...(typeof booking?.modifiers_applied?.recording_session === "object" &&
+    booking?.modifiers_applied?.recording_session
+      ? booking.modifiers_applied.recording_session
+      : {}),
+    ...(legacyMinHoursPerSong
+      ? {
+          recording_songs_per_block: 1,
+          recording_hours_per_block: legacyMinHoursPerSong,
+        }
+      : {}),
+  };
+  const recordingRule = isRecordingSession
+    ? resolveRecordingRule(recordingRuleSource)
+    : null;
+  const recordingRuleLabel = recordingRule
+    ? formatRecordingRuleShort(recordingRule)
+    : null;
+  const parsedRequiredBlocks = Number(
+    booking?.modifiers_applied?.recording_session?.required_blocks ??
+      booking?.modifiers_applied?.required_blocks ??
+      "",
+  );
+  const requiredRecordingBlocks =
+    Number.isFinite(parsedRequiredBlocks) && parsedRequiredBlocks > 0
+      ? parsedRequiredBlocks
+      : effectiveSongCount && recordingRule
+        ? getRecordingRequiredBlocks(effectiveSongCount, recordingRule)
+        : null;
   const parsedRequiredRecordingHours = Number(
     booking?.modifiers_applied?.recording_session?.required_total_hours ??
       booking?.modifiers_applied?.required_total_hours ??
@@ -274,8 +318,8 @@ const BookingDetailsSheet = forwardRef<
     Number.isFinite(parsedRequiredRecordingHours) &&
     parsedRequiredRecordingHours > 0
       ? parsedRequiredRecordingHours
-      : effectiveSongCount && recordingMinHoursPerSong
-        ? effectiveSongCount * recordingMinHoursPerSong
+      : effectiveSongCount && recordingRule
+        ? getRecordingRequiredHours(effectiveSongCount, recordingRule)
         : null;
   const parsedSelectedRecordingHours = Number(
     booking?.modifiers_applied?.recording_session?.selected_total_hours ??
@@ -895,7 +939,7 @@ const BookingDetailsSheet = forwardRef<
                     </View>
                   )}
 
-                  {isStudio && isRecordingSession && recordingMinHoursPerSong && (
+                  {isStudio && isRecordingSession && recordingRuleLabel && (
                     <View style={styles.detailItem}>
                       <Text
                         style={[
@@ -903,12 +947,31 @@ const BookingDetailsSheet = forwardRef<
                           { color: colors.textSecondary },
                         ]}
                       >
-                        Estimated Hours / Song
+                        Recording Rule
                       </Text>
                       <Text
                         style={[styles.detailValue, { color: colors.text }]}
                       >
-                        {recordingMinHoursPerSong} hr/song
+                        {recordingRuleLabel}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && requiredRecordingBlocks && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Time Blocks
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {requiredRecordingBlocks} block
+                        {requiredRecordingBlocks > 1 ? "s" : ""}
                       </Text>
                     </View>
                   )}
@@ -926,7 +989,7 @@ const BookingDetailsSheet = forwardRef<
                       <Text
                         style={[styles.detailValue, { color: colors.text }]}
                       >
-                        {requiredRecordingHours.toFixed(1)} hours
+                        {formatRecordingHours(requiredRecordingHours)} hours
                       </Text>
                     </View>
                   )}
@@ -955,7 +1018,7 @@ const BookingDetailsSheet = forwardRef<
                             },
                           ]}
                         >
-                          {selectedRecordingHours.toFixed(1)} hours
+                          {formatRecordingHours(selectedRecordingHours)} hours
                         </Text>
                       </View>
                     )}

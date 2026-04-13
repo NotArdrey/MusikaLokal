@@ -1,11 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, usePathname } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Animated, { interpolateColor, useAnimatedProps, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+
+const AnimatedIcon = Animated.createAnimatedComponent(Ionicons);
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 interface HeaderProps {
     title: string;
@@ -43,7 +47,6 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
 
     const backVisible = !!onBackPress || !(isMainNavPath || isSettingsOrProfile || isMyListingPath || isManageDetailPath);
     const notifVisible = isMainNavPath && !isGuest;
-    const notifVisibleOnWebOnly = Platform.OS === 'web' && notifVisible;
     const addbtnvisible = isMyListingPath;
 
     const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group'>(() => {
@@ -162,20 +165,60 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
         };
     }, [userId, isGuest, checkUnreadNotifications, checkUnreadChats]);
 
+    const isTransparent = useSharedValue(transparent ? 1 : 0);
+
+    useEffect(() => {
+        isTransparent.value = withTiming(transparent ? 1 : 0, { duration: 300 });
+    }, [transparent]);
+
+    const containerAnimatedStyle = useAnimatedStyle(() => ({
+        backgroundColor: interpolateColor(
+            isTransparent.value,
+            [0, 1],
+            [colors.background, 'transparent']
+        )
+    }));
+
+    const titleAnimatedStyle = useAnimatedStyle(() => ({
+        color: interpolateColor(
+            isTransparent.value,
+            [0, 1],
+            [colors.text, '#FFFFFF']
+        ),
+        textShadowColor: 'rgba(0,0,0,0.6)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: isTransparent.value * 6,
+    }));
+
+    const buttonAnimatedStyle = useAnimatedStyle(() => ({
+        backgroundColor: interpolateColor(
+            isTransparent.value,
+            [0, 1],
+            [isDark ? colors.surface : '#F3F4F6', 'rgba(0,0,0,0.3)']
+        )
+    }));
+
+    const iconAnimatedProps = useAnimatedProps(() => ({
+        color: interpolateColor(
+            isTransparent.value,
+            [0, 1],
+            [colors.text, '#FFFFFF']
+        ) as any
+    }));
+
     return (
-        <View style={[styles.container, {
-            backgroundColor: transparent ? 'transparent' : colors.background,
+        <Animated.View style={[styles.container, containerAnimatedStyle, {
             paddingTop: insets.top + 8
         }]}>
             {/* Left Container - Only for Back Button */}
             {backVisible && (
                 <View style={styles.leftContainer}>
-                    <TouchableOpacity activeOpacity={1}
+                    <AnimatedTouchableOpacity activeOpacity={1}
                         onPress={() => (onBackPress ? onBackPress() : router.back())}
-                        style={[styles.backButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}
+                        style={[styles.backButton, buttonAnimatedStyle]}
                     >
-                        <Ionicons name="arrow-back" size={20} color={colors.text} />
-                    </TouchableOpacity>
+                        <AnimatedIcon name="arrow-back" size={20} animatedProps={iconAnimatedProps} />
+                    </AnimatedTouchableOpacity>
                 </View>
             )}
 
@@ -184,44 +227,44 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
                 styles.titleContainer,
                 !backVisible && styles.mainTitleContainer
             ]}>
-                <Text style={[
+                <Animated.Text style={[
                     styles.title,
-                    { color: colors.text },
-                    !backVisible && styles.mainTitle
+                    !backVisible && styles.mainTitle,
+                    titleAnimatedStyle
                 ]}>
                     {title}
-                </Text>
+                </Animated.Text>
             </View>
 
             {/* Action Buttons */}
             <View style={styles.rightContainer}>
-                {notifVisibleOnWebOnly ? (
+                {notifVisible ? (
                     <View style={styles.iconRow}>
                         {/* Chat Button */}
-                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>
-                            <Ionicons name="chatbubbles" size={24} color={colors.text} />
+                        <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, buttonAnimatedStyle]}>
+                            <AnimatedIcon name="chatbubbles" size={24} animatedProps={iconAnimatedProps} />
                             {hasUnreadChats && (
-                                <View style={styles.badge} />
+                                <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
                             )}
-                        </TouchableOpacity>
+                        </AnimatedTouchableOpacity>
                         {/* Notifications Button */}
-                        <TouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}>
-                            <Ionicons name="notifications" size={24} color={colors.text} />
+                        <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/notifications')} style={[styles.iconButton, buttonAnimatedStyle]}>
+                            <AnimatedIcon name="notifications" size={24} animatedProps={iconAnimatedProps} />
                             {hasUnread && (
-                                <View style={styles.badge} />
+                                <View style={[styles.badge, transparent && { borderColor: 'rgba(0,0,0,0.3)' }]} />
                             )}
-                        </TouchableOpacity>
+                        </AnimatedTouchableOpacity>
                     </View>
                 ) : addbtnvisible ? (
-                    <TouchableOpacity activeOpacity={1}
+                    <AnimatedTouchableOpacity activeOpacity={1}
                         onPress={() => router.push(btn)}
-                        style={[styles.addButton, { backgroundColor: isDark ? colors.surface : '#F3F4F6' }]}
+                        style={[styles.addButton, buttonAnimatedStyle]}
                     >
-                        <Ionicons name="add" size={24} color={colors.text} />
-                    </TouchableOpacity>
+                        <AnimatedIcon name="add" size={24} animatedProps={iconAnimatedProps} />
+                    </AnimatedTouchableOpacity>
                 ) : null}
             </View>
-        </View>
+        </Animated.View>
     );
 }
 

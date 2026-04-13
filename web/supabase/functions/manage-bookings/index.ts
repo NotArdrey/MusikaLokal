@@ -64,6 +64,116 @@ function toManilaDateTime(dateValue: string, timeValue: string): Date | null {
   return parsed;
 }
 
+function toPositiveInteger(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function toPositiveNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(String(value).trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function formatHoursValue(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value)
+    ? String(value)
+    : value.toFixed(1).replace(/\.0$/, "");
+}
+
+function getRecordingRule(source: any) {
+  const songsPerBlock = toPositiveInteger(source?.recording_songs_per_block) ?? 1;
+  const hoursPerBlock =
+    toPositiveNumber(source?.recording_hours_per_block) ??
+    toPositiveNumber(source?.min_booking_duration_hours) ??
+    3;
+
+  return {
+    songsPerBlock,
+    hoursPerBlock,
+  };
+}
+
+function getRequiredRecordingBlocks(
+  songCount: number,
+  rule: { songsPerBlock: number },
+): number {
+  if (!Number.isFinite(songCount) || songCount <= 0) return 0;
+  return Math.ceil(songCount / Math.max(1, rule.songsPerBlock));
+}
+
+function getRequiredRecordingHours(
+  songCount: number,
+  rule: { songsPerBlock: number; hoursPerBlock: number },
+): number {
+  const requiredBlocks = getRequiredRecordingBlocks(songCount, rule);
+  return requiredBlocks * Math.max(rule.hoursPerBlock, 0);
+}
+
+function buildRecordingPricingModifiers(
+  songCount: number,
+  selectedTotalHours: number,
+  rule: { songsPerBlock: number; hoursPerBlock: number },
+) {
+  const requiredBlocks = getRequiredRecordingBlocks(songCount, rule);
+  const requiredTotalHours = getRequiredRecordingHours(songCount, rule);
+
+  return {
+    rate_model: "per_song",
+    song_count: songCount,
+    songs_per_block: rule.songsPerBlock,
+    hours_per_block: rule.hoursPerBlock,
+    required_blocks: requiredBlocks,
+    required_total_hours: requiredTotalHours,
+    selected_total_hours: selectedTotalHours,
+    recording_session: {
+      rate_model: "per_song",
+      song_count: songCount,
+      songs_per_block: rule.songsPerBlock,
+      hours_per_block: rule.hoursPerBlock,
+      required_blocks: requiredBlocks,
+      required_total_hours: requiredTotalHours,
+      selected_total_hours: selectedTotalHours,
+    },
+  };
+}
+
+type DateOverrideSessionType = "rehearsal" | "recording" | "both";
+
+function parseDateOverrideSessionType(
+  reason: unknown,
+): DateOverrideSessionType {
+  const text = String(reason || "");
+  const match = text.match(/session_type:(rehearsal|recording|both)/i);
+  if (!match) return "both";
+
+  const normalized = match[1].toLowerCase();
+  if (
+    normalized === "rehearsal" ||
+    normalized === "recording" ||
+    normalized === "both"
+  ) {
+    return normalized;
+  }
+
+  return "both";
+}
+
+function isSessionAllowedByDateOverride(
+  overrideReason: unknown,
+  requestedSessionType: "rehearsal" | "recording",
+): boolean {
+  const overrideSessionType = parseDateOverrideSessionType(overrideReason);
+  return (
+    overrideSessionType === "both" ||
+    overrideSessionType === requestedSessionType
+  );
+}
+
 async function insertNotificationIfMissing(
   supabaseAdmin: any,
   payload: {
@@ -372,6 +482,31 @@ serve(async (req: Request) => {
 
         if (bookingError) throw bookingError;
 
+        const openIncidentBookingIds = new Set<string>();
+        const musicianBookingIds = (bookings || [])
+          .map((booking: any) => booking.id)
+          .filter(Boolean);
+
+        if (musicianBookingIds.length > 0) {
+          const { data: openIncidents, error: incidentError } = await supabaseClient
+            .from("booking_incidents")
+            .select("booking_id")
+            .in("booking_id", musicianBookingIds)
+            .in("status", ["open", "responded", "manual_review"]);
+
+          if (incidentError) {
+            if (!isMissingTableError(incidentError, "booking_incidents")) {
+              console.log("Error fetching open booking incidents:", incidentError);
+            }
+          } else {
+            (openIncidents || []).forEach((incident: any) => {
+              if (incident?.booking_id) {
+                openIncidentBookingIds.add(incident.booking_id);
+              }
+            });
+          }
+        }
+
         // Process Studio Bookings
         // @ts-ignore
         bookings?.forEach((b: any) => {
@@ -438,6 +573,7 @@ serve(async (req: Request) => {
             reviewed_by_customer: b.reviewed_by_customer || false,
             reviewed_by_owner: b.reviewed_by_owner || false,
             proof_url: b.proof_url,
+            has_open_incident: openIncidentBookingIds.has(b.id),
             // Payment-related fields for musician to see payment status
             payment_status: b.payment_status || "unpaid",
             payment_amount: b.payment_amount || b.final_price,
@@ -512,6 +648,7 @@ serve(async (req: Request) => {
           if (bookingError) throw bookingError;
 
           const lateReportByBooking = new Map<string, { count: number; latestAt: string | null }>();
+          const openIncidentBookingIds = new Set<string>();
           const bookingIds = (bookings || []).map((booking: any) => booking.id).filter(Boolean);
 
           if (bookingIds.length > 0) {
@@ -537,6 +674,24 @@ serve(async (req: Request) => {
                     count: 1,
                     latestAt: event.created_at || null,
                   });
+                }
+              });
+            }
+
+            const { data: openIncidents, error: incidentError } = await supabaseClient
+              .from("booking_incidents")
+              .select("booking_id")
+              .in("booking_id", bookingIds)
+              .in("status", ["open", "responded", "manual_review"]);
+
+            if (incidentError) {
+              if (!isMissingTableError(incidentError, "booking_incidents")) {
+                console.log("Error fetching open booking incidents for studio owner:", incidentError);
+              }
+            } else {
+              (openIncidents || []).forEach((incident: any) => {
+                if (incident?.booking_id) {
+                  openIncidentBookingIds.add(incident.booking_id);
                 }
               });
             }
@@ -623,6 +778,7 @@ serve(async (req: Request) => {
               relocation_proposed_date: b.relocation_proposed_date,
               relocation_proposed_start_time: b.relocation_proposed_start_time,
               relocation_proposed_end_time: b.relocation_proposed_end_time,
+              has_open_incident: openIncidentBookingIds.has(b.id),
               has_late_report: Boolean(lateReportMeta),
               late_report_count: lateReportMeta?.count || 0,
               late_reported_at: lateReportMeta?.latestAt || null,
@@ -684,6 +840,7 @@ serve(async (req: Request) => {
         // Process Gig Applications
         // @ts-ignore
         gigApps?.forEach((g: any) => {
+          const normalizedStatus = (g.status || "").toLowerCase();
           const gig = g.gig;
           const dateStr =
             gig?.event_date || g.created_at?.split("T")[0] || "TBA";
@@ -713,24 +870,31 @@ serve(async (req: Request) => {
               gig?.organizer?.avatar_url ||
               "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&h=200&fit=crop",
             status:
-              g.status === "pending"
+              normalizedStatus === "pending"
                 ? "Applied"
-                : g.status === "accepted"
+                : normalizedStatus === "accepted"
                   ? "Accepted"
-                  : g.status === "rejected"
-                    ? "Declined"
-                    : g.status,
+                  : normalizedStatus === "completed"
+                    ? "Completed"
+                    : normalizedStatus === "rejected" ||
+                        normalizedStatus === "cancelled" ||
+                        normalizedStatus === "fired"
+                      ? "Fired"
+                      : g.status,
             type: g.group_id ? "Group Application" : "Solo Application",
-            isCancelled: g.status === "cancelled" || g.status === "rejected",
-            action: g.status === "accepted" ? "View Details" : "Details",
+            isCancelled:
+              normalizedStatus === "cancelled" ||
+              normalizedStatus === "rejected" ||
+              normalizedStatus === "fired",
+            action: normalizedStatus === "accepted" ? "View Details" : "Details",
             location: gig?.location,
             reviewed_by_applicant: g.reviewed_by_applicant || false,
           };
 
-          if (g.status === "pending") {
+          if (normalizedStatus === "pending") {
             // @ts-ignore
             categorized.Pending.push(item);
-          } else if (g.status === "accepted") {
+          } else if (normalizedStatus === "accepted") {
             // Time-based categorization for accepted gigs
             if (eventDate) {
               const eventStart = new Date(gig.event_date);
@@ -756,8 +920,16 @@ serve(async (req: Request) => {
               // @ts-ignore
               categorized.Upcoming.push(item);
             }
-          } else if (g.status === "rejected" || g.status === "cancelled") {
-            // Declined applications - skip from main view
+          } else if (
+            normalizedStatus === "rejected" ||
+            normalizedStatus === "cancelled" ||
+            normalizedStatus === "fired"
+          ) {
+            // @ts-ignore
+            categorized.Review.push({ ...item, status: "Fired" });
+          } else if (normalizedStatus === "completed") {
+            // @ts-ignore
+            categorized.Review.push({ ...item, status: "Completed" });
           }
         });
 
@@ -1051,6 +1223,122 @@ serve(async (req: Request) => {
         );
       }
 
+      const { data: dateOverride, error: dateOverrideError } =
+        await supabaseClient
+          .from("studio_date_overrides")
+          .select("is_open, reason")
+          .eq("studio_id", studio_id)
+          .eq("override_date", date)
+          .maybeSingle();
+
+      if (dateOverrideError) {
+        console.error("❌ Failed to load studio date override:", dateOverrideError);
+        return new Response(
+          JSON.stringify({
+            error: "Failed to validate date availability. Please try again.",
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      if (
+        dateOverride?.is_open &&
+        !isSessionAllowedByDateOverride(
+          dateOverride.reason,
+          normalizedSessionType,
+        )
+      ) {
+        const restrictedType = parseDateOverrideSessionType(dateOverride.reason);
+        const restrictedLabel =
+          restrictedType === "recording"
+            ? "recording only"
+            : restrictedType === "rehearsal"
+              ? "rehearsal only"
+              : "the selected session type";
+
+        return new Response(
+          JSON.stringify({
+            error: `This date is configured for ${restrictedLabel}. Please choose a different date or switch session type.`,
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      if (!dateOverride) {
+        const bookingWeekDate = new Date(`${date}T00:00:00Z`);
+        if (Number.isNaN(bookingWeekDate.getTime())) {
+          return new Response(
+            JSON.stringify({
+              error: "Invalid booking date.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 400,
+            },
+          );
+        }
+
+        const bookingDayOfWeek = bookingWeekDate.getUTCDay();
+        const { data: weeklyOperatingHours, error: weeklyHoursError } =
+          await supabaseAdmin
+            .from("studio_operating_hours")
+            .select("reason")
+            .eq("studio_id", studio_id)
+            .eq("day_of_week", bookingDayOfWeek)
+            .eq("is_open", true)
+            .order("slot_order", { ascending: true });
+
+        if (weeklyHoursError) {
+          console.error(
+            "❌ Failed to load weekly studio operating hours:",
+            weeklyHoursError,
+          );
+          return new Response(
+            JSON.stringify({
+              error: "Failed to validate weekly availability. Please try again.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 400,
+            },
+          );
+        }
+
+        if (weeklyOperatingHours && weeklyOperatingHours.length > 0) {
+          const weeklyAllowsSession = weeklyOperatingHours.some((row: any) =>
+            isSessionAllowedByDateOverride(row.reason, normalizedSessionType),
+          );
+
+          if (!weeklyAllowsSession) {
+            const restrictedType = parseDateOverrideSessionType(
+              weeklyOperatingHours[0]?.reason,
+            );
+            const restrictedLabel =
+              restrictedType === "recording"
+                ? "recording only"
+                : restrictedType === "rehearsal"
+                  ? "rehearsal only"
+                  : "the selected session type";
+
+            return new Response(
+              JSON.stringify({
+                error: `This day's weekly schedule is configured for ${restrictedLabel}. Please choose a different date or switch session type.`,
+              }),
+              {
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+                status: 409,
+              },
+            );
+          }
+        }
+      }
+
       const bookingDateStartUtc = toManilaDateTime(date, "00:00:00");
       const nowUtc = new Date();
 
@@ -1081,11 +1369,32 @@ serve(async (req: Request) => {
         );
       }
 
-      const { data: studioSettingsData, error: studioSettingsError } = await supabaseClient
+      const extendedStudioSettingsSelect =
+        "lead_time_hours, booking_horizon_days, min_booking_duration_hours, recording_songs_per_block, recording_hours_per_block";
+      const legacyStudioSettingsSelect =
+        "lead_time_hours, booking_horizon_days, min_booking_duration_hours";
+
+      let studioSettingsResult = await supabaseClient
         .from("studio_settings")
-        .select("lead_time_hours, booking_horizon_days, min_booking_duration_hours")
+        .select(extendedStudioSettingsSelect)
         .eq("studio_id", studio_id)
         .maybeSingle();
+
+      if (
+        studioSettingsResult.error &&
+        String(studioSettingsResult.error.message || "").includes(
+          "recording_songs_per_block",
+        )
+      ) {
+        studioSettingsResult = await supabaseClient
+          .from("studio_settings")
+          .select(legacyStudioSettingsSelect)
+          .eq("studio_id", studio_id)
+          .maybeSingle();
+      }
+
+      const { data: studioSettingsData, error: studioSettingsError } =
+        studioSettingsResult;
 
       if (studioSettingsError) {
         console.warn("⚠️ Could not load studio settings, using defaults:", studioSettingsError);
@@ -1093,18 +1402,7 @@ serve(async (req: Request) => {
 
       const leadTimeHours = Math.max(0, Number(studioSettingsData?.lead_time_hours ?? 24));
       const bookingHorizonDays = Math.max(1, Number(studioSettingsData?.booking_horizon_days ?? 90));
-      const configuredMinBookingDurationHours = Number(
-        studioSettingsData?.min_booking_duration_hours ?? 0,
-      );
-      const normalizedConfiguredMinBookingDurationHours = Number.isFinite(
-        configuredMinBookingDurationHours,
-      )
-        ? Math.max(0, configuredMinBookingDurationHours)
-        : 0;
-      const recordingMinHoursPerSong =
-        normalizedConfiguredMinBookingDurationHours > 0
-          ? normalizedConfiguredMinBookingDurationHours
-          : 3;
+      const recordingRule = getRecordingRule(studioSettingsData);
       const minSlotDurationHours = 1;
 
       const dayDiff = Math.floor(
@@ -1196,21 +1494,27 @@ serve(async (req: Request) => {
         }
       }
 
-      if (isRecordingSession) {
-        const totalSelectedHours = slots.reduce(
-          (total, slot) => total + toHours(slot.start, slot.end),
-          0,
-        );
-        const requiredRecordingHours =
-          requestedSongCount * recordingMinHoursPerSong;
+      const totalSelectedHours = slots.reduce(
+        (total, slot) => total + toHours(slot.start, slot.end),
+        0,
+      );
+      const requiredRecordingBlocks = isRecordingSession
+        ? getRequiredRecordingBlocks(requestedSongCount, recordingRule)
+        : 0;
+      const requiredRecordingHours = isRecordingSession
+        ? getRequiredRecordingHours(requestedSongCount, recordingRule)
+        : 0;
 
+      if (isRecordingSession) {
         if (totalSelectedHours + 1e-9 < requiredRecordingHours) {
           return new Response(
             JSON.stringify({
-              error: `Recording booking requires at least ${requiredRecordingHours.toFixed(1)} hour(s) for ${requestedSongCount} song(s), but only ${totalSelectedHours.toFixed(1)} hour(s) were selected.`,
+              error: `Recording booking requires at least ${formatHoursValue(requiredRecordingHours)} hour(s) across ${requiredRecordingBlocks} block(s) for ${requestedSongCount} song(s), but only ${formatHoursValue(totalSelectedHours)} hour(s) were selected.`,
               debug: {
                 requested_song_count: requestedSongCount,
-                min_hours_per_song: recordingMinHoursPerSong,
+                songs_per_block: recordingRule.songsPerBlock,
+                hours_per_block: recordingRule.hoursPerBlock,
+                required_blocks: requiredRecordingBlocks,
                 required_total_hours: requiredRecordingHours,
                 selected_total_hours: totalSelectedHours,
               },
@@ -1402,35 +1706,19 @@ serve(async (req: Request) => {
       let pricingData: any = null;
 
       if (isRecordingSession) {
-        let totalHours = 0;
-        for (const slot of slots) {
-          totalHours += toHours(slot.start, slot.end);
-        }
-
         const recordingRate = Number(studioData.recording_rate || 0);
         const recordingSubtotal = recordingRate * requestedSongCount;
-        const requiredRecordingHours =
-          requestedSongCount * recordingMinHoursPerSong;
 
         pricingData = {
           base_rate: recordingRate,
-          hours: totalHours,
-          total_hours: totalHours,
+          hours: totalSelectedHours,
+          total_hours: totalSelectedHours,
           subtotal: recordingSubtotal,
-          modifiers: {
-            rate_model: "per_song",
-            song_count: requestedSongCount,
-            min_hours_per_song: recordingMinHoursPerSong,
-            required_total_hours: requiredRecordingHours,
-            selected_total_hours: totalHours,
-            recording_session: {
-              rate_model: "per_song",
-              song_count: requestedSongCount,
-              min_hours_per_song: recordingMinHoursPerSong,
-              required_total_hours: requiredRecordingHours,
-              selected_total_hours: totalHours,
-            },
-          },
+          modifiers: buildRecordingPricingModifiers(
+            requestedSongCount,
+            totalSelectedHours,
+            recordingRule,
+          ),
           final_price: recordingSubtotal,
         };
       }
@@ -1502,49 +1790,28 @@ serve(async (req: Request) => {
         console.error(
           "❌ No pricing data returned, falling back to manual calculation",
         );
-        // Fallback: Calculate manually using studio's hourly rate
-        let totalHours = 0;
-        for (const slot of slots) {
-          const startParts = slot.start.split(":").map(Number);
-          const endParts = slot.end.split(":").map(Number);
-          const startMinutes = startParts[0] * 60 + startParts[1];
-          const endMinutes = endParts[0] * 60 + endParts[1];
-          totalHours += (endMinutes - startMinutes) / 60;
-        }
-
         if (isRecordingSession) {
           const recordingRate = Number(studioData.recording_rate || 0);
-          const requiredRecordingHours =
-            requestedSongCount * recordingMinHoursPerSong;
           pricingData = {
             base_rate: recordingRate,
-            hours: totalHours,
-            total_hours: totalHours,
+            hours: totalSelectedHours,
+            total_hours: totalSelectedHours,
             subtotal: recordingRate * requestedSongCount,
-            modifiers: {
-              rate_model: "per_song",
-              song_count: requestedSongCount,
-              min_hours_per_song: recordingMinHoursPerSong,
-              required_total_hours: requiredRecordingHours,
-              selected_total_hours: totalHours,
-              recording_session: {
-                rate_model: "per_song",
-                song_count: requestedSongCount,
-                min_hours_per_song: recordingMinHoursPerSong,
-                required_total_hours: requiredRecordingHours,
-                selected_total_hours: totalHours,
-              },
-            },
+            modifiers: buildRecordingPricingModifiers(
+              requestedSongCount,
+              totalSelectedHours,
+              recordingRule,
+            ),
             final_price: recordingRate * requestedSongCount,
           };
         } else {
           pricingData = {
             base_rate: studioData.hourly_rate,
-            hours: totalHours,
-            total_hours: totalHours,
-            subtotal: studioData.hourly_rate * totalHours,
+            hours: totalSelectedHours,
+            total_hours: totalSelectedHours,
+            subtotal: studioData.hourly_rate * totalSelectedHours,
             modifiers: {},
-            final_price: studioData.hourly_rate * totalHours,
+            final_price: studioData.hourly_rate * totalSelectedHours,
           };
         }
         console.log("📊 Manual pricing fallback:", pricingData);
@@ -1659,15 +1926,14 @@ serve(async (req: Request) => {
       finalModifiers.session_type = normalizedSessionType;
 
       if (isRecordingSession) {
-        finalModifiers.rate_model = "per_song";
-        finalModifiers.song_count = requestedSongCount;
-        finalModifiers.recording_session = {
-          ...(typeof finalModifiers.recording_session === "object" && finalModifiers.recording_session
-            ? finalModifiers.recording_session
-            : {}),
-          rate_model: "per_song",
-          song_count: requestedSongCount,
-        };
+        Object.assign(
+          finalModifiers,
+          buildRecordingPricingModifiers(
+            requestedSongCount,
+            Number(finalHours || 0),
+            recordingRule,
+          ),
+        );
       }
 
       const bookingInsertPayload: Record<string, any> = {
@@ -1828,6 +2094,46 @@ serve(async (req: Request) => {
 
       const updateData: any = { status: new_status };
 
+      if (table === "gig_applications") {
+        const { data: targetApplication, error: targetError } = await supabaseAdmin
+          .from("gig_applications")
+          .select("id, applicant_id, gig_id")
+          .eq("id", booking_id)
+          .maybeSingle();
+
+        if (targetError) throw targetError;
+
+        if (!targetApplication) {
+          return new Response(JSON.stringify({ error: "Application not found" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 404,
+          });
+        }
+
+        const { data: targetGig, error: targetGigError } = await supabaseAdmin
+          .from("gigs")
+          .select("id, organizer_id")
+          .eq("id", targetApplication.gig_id)
+          .maybeSingle();
+
+        if (targetGigError) throw targetGigError;
+
+        const isOrganizer = targetGig?.organizer_id === authUser.id;
+        const isApplicant = targetApplication.applicant_id === authUser.id;
+        const organizerAllowedStatuses = ["accepted", "rejected", "completed", "cancelled"];
+        const applicantAllowedStatuses = ["cancelled"];
+
+        if (
+          !(isOrganizer && organizerAllowedStatuses.includes(new_status)) &&
+          !(isApplicant && applicantAllowedStatuses.includes(new_status))
+        ) {
+          return new Response(JSON.stringify({ error: "Forbidden" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          });
+        }
+      }
+
       // Add cancellation_reason if status is cancelled/rejected and reason is provided
       if (
         (new_status === "cancelled" || new_status === "rejected") &&
@@ -1838,19 +2144,29 @@ serve(async (req: Request) => {
 
       console.log("📝 Update data:", updateData);
 
-      const { data, error } = await supabaseClient
+      const updateClient = table === "gig_applications" ? supabaseAdmin : supabaseClient;
+
+      const { data, error } = await updateClient
         .from(table)
         .update(updateData)
         .eq("id", booking_id)
-        .select();
+        .select()
+        .maybeSingle();
 
       console.log("📝 Update result:", { data, error });
 
       if (error) throw error;
 
+      if (!data) {
+        return new Response(JSON.stringify({ error: "No matching record updated" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
       // NOTIFICATION LOGIC
       if (
-        ["cancelled", "rejected", "confirmed", "accepted"].includes(new_status)
+        ["cancelled", "rejected", "confirmed", "accepted", "completed"].includes(new_status)
       ) {
         try {
           const notificationEventType = `${table}_${new_status}`;
@@ -1906,23 +2222,45 @@ serve(async (req: Request) => {
             }
           } else if (table === "gig_applications") {
             // For Gig Applications
-            const { data: gigInfo } = await supabaseClient
+            const { data: applicationInfo, error: applicationInfoError } = await supabaseAdmin
               .from("gig_applications")
-              .select("applicant_id, gig:gigs(name)")
+              .select("applicant_id, gig_id")
               .eq("id", booking_id)
-              .single();
+              .maybeSingle();
 
-            if (gigInfo) {
-              notificationImage = null;
+            if (applicationInfoError) throw applicationInfoError;
+
+            let gigMeta: { name?: string; images?: string[] | null } | null = null;
+            if (applicationInfo?.gig_id) {
+              const { data: gigRow, error: gigRowError } = await supabaseAdmin
+                .from("gigs")
+                .select("name, images")
+                .eq("id", applicationInfo.gig_id)
+                .maybeSingle();
+
+              if (gigRowError) throw gigRowError;
+              gigMeta = gigRow as any;
+            }
+
+            if (applicationInfo) {
+              notificationImage = Array.isArray(gigMeta?.images)
+                ? gigMeta.images[0] || null
+                : null;
+
               if (new_status === "rejected") {
-                targetUserId = gigInfo.applicant_id;
+                targetUserId = applicationInfo.applicant_id;
                 notificationTitle = "Application Declined";
-                notificationMessage = `Your application for ${gigInfo.gig.name} has been declined.`;
+                notificationMessage = `Your application for ${gigMeta?.name || "this gig"} has been declined.`;
                 notificationType = "error";
               } else if (new_status === "accepted") {
-                targetUserId = gigInfo.applicant_id;
+                targetUserId = applicationInfo.applicant_id;
                 notificationTitle = "Application Accepted!";
-                notificationMessage = `Your application for ${gigInfo.gig.name} has been accepted!`;
+                notificationMessage = `Your application for ${gigMeta?.name || "this gig"} has been accepted!`;
+                notificationType = "success";
+              } else if (new_status === "completed") {
+                targetUserId = applicationInfo.applicant_id;
+                notificationTitle = "Gig Completed";
+                notificationMessage = `Your contract for ${gigMeta?.name || "this gig"} has been marked as completed.`;
                 notificationType = "success";
               }
             }
@@ -1960,7 +2298,208 @@ serve(async (req: Request) => {
       });
     }
 
-    // 3A. PARTIAL SLOT APPROVAL (Studio Owner)
+    // 3A. CREATE INCIDENT REPORT (Musician/Owner)
+    if (action === "create_incident") {
+      const { booking_id, issue_type, notes, userId } = params;
+
+      if (!booking_id || !issue_type) {
+        return new Response(
+          JSON.stringify({ error: "booking_id and issue_type are required." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 400,
+          },
+        );
+      }
+
+      const reporterUserId = userId || authUser.id;
+
+      if (reporterUserId !== authUser.id) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 403,
+        });
+      }
+
+      const { data: bookingDetails, error: bookingError } = await supabaseClient
+        .from("studio_bookings")
+        .select("id, user_id, studio_id, status, booking_date, start_time, studio:studios(name, owner_id)")
+        .eq("id", booking_id)
+        .maybeSingle();
+
+      if (bookingError) throw bookingError;
+
+      if (!bookingDetails) {
+        return new Response(JSON.stringify({ error: "Booking not found." }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 404,
+        });
+      }
+
+      if (["cancelled", "completed"].includes(bookingDetails.status)) {
+        return new Response(
+          JSON.stringify({ error: "This booking can no longer be reported." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const musicianId = bookingDetails.user_id;
+      const studioOwnerId = bookingDetails.studio?.owner_id || null;
+
+      const isMusicianReporter = reporterUserId === musicianId;
+      const isOwnerReporter = Boolean(studioOwnerId && reporterUserId === studioOwnerId);
+
+      if (!isMusicianReporter && !isOwnerReporter) {
+        return new Response(
+          JSON.stringify({ error: "You are not allowed to report this booking." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 403,
+          },
+        );
+      }
+
+      const counterpartyUserId = isMusicianReporter ? studioOwnerId : musicianId;
+
+      if (!counterpartyUserId) {
+        return new Response(
+          JSON.stringify({ error: "Unable to identify the other participant for this booking." }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const { data: existingIncident, error: existingIncidentError } = await supabaseClient
+        .from("booking_incidents")
+        .select("id, status")
+        .eq("booking_id", booking_id)
+        .in("status", ["open", "responded", "manual_review"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingIncidentError) {
+        if (isMissingTableError(existingIncidentError, "booking_incidents")) {
+          return new Response(
+            JSON.stringify({
+              error:
+                "Incident reporting is not available yet. Please apply the latest database migrations.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 503,
+            },
+          );
+        }
+        throw existingIncidentError;
+      }
+
+      if (existingIncident) {
+        return new Response(
+          JSON.stringify({
+            error: "There is already an active incident report for this booking.",
+            incident_id: existingIncident.id,
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 409,
+          },
+        );
+      }
+
+      const incidentDetails =
+        typeof notes === "string" && notes.trim() ? notes.trim() : null;
+
+      const { data: incidentRow, error: insertIncidentError } = await supabaseAdmin
+        .from("booking_incidents")
+        .insert({
+          booking_id,
+          issue_type,
+          status: "open",
+          reporter_user_id: reporterUserId,
+          counterparty_user_id: counterpartyUserId,
+          reporter_notes: incidentDetails,
+          response_deadline_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        })
+        .select("*")
+        .single();
+
+      if (insertIncidentError) {
+        if (isMissingTableError(insertIncidentError, "booking_incidents")) {
+          return new Response(
+            JSON.stringify({
+              error:
+                "Incident reporting is not available yet. Please apply the latest database migrations.",
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 503,
+            },
+          );
+        }
+        throw insertIncidentError;
+      }
+
+      const { error: holdPayoutError } = await supabaseAdmin.rpc("hold_booking_payout", {
+        p_booking_id: booking_id,
+        p_reason: `${issue_type} reported`,
+        p_reverse_existing: true,
+      });
+
+      if (
+        holdPayoutError &&
+        holdPayoutError.code !== "42883" &&
+        holdPayoutError.code !== "PGRST202"
+      ) {
+        console.error("Failed to hold payout for incident:", holdPayoutError);
+      }
+
+      const studioName = bookingDetails.studio?.name || "the studio";
+      const issueLabel = String(issue_type).replaceAll("_", " ");
+
+      await insertNotificationIfMissing(supabaseAdmin, {
+        user_id: counterpartyUserId,
+        type: "warning",
+        title: "Booking Incident Reported",
+        message: `A booking issue was reported for ${studioName} (${bookingDetails.booking_date} ${bookingDetails.start_time}). Issue: ${issueLabel}.`,
+        image: null,
+        meta: {
+          booking_id,
+          incident_id: incidentRow.id,
+          issue_type,
+          event_type: "booking_incident_created",
+        },
+      });
+
+      await insertNotificationIfMissing(supabaseAdmin, {
+        user_id: reporterUserId,
+        type: "info",
+        title: "Incident Report Submitted",
+        message: `Your report for the booking at ${studioName} was submitted. We will keep payout on hold while this is reviewed.`,
+        image: null,
+        meta: {
+          booking_id,
+          incident_id: incidentRow.id,
+          issue_type,
+          event_type: "booking_incident_acknowledged",
+        },
+      });
+
+      return new Response(
+        JSON.stringify({ success: true, incident: incidentRow }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 201,
+        },
+      );
+    }
+
+    // 3B. PARTIAL SLOT APPROVAL (Studio Owner)
     if (action === "partial_slot_approval") {
       const {
         booking_id,
@@ -2191,15 +2730,85 @@ serve(async (req: Request) => {
         content,
         studioId,
         gigId,
+        groupId,
         targetUserId, // For reviewing a user (musician or owner)
         bookingId,
         bookingType, // 'studio_booking' or 'gig_application'
         reviewerRole, // 'customer' or 'owner' / 'applicant' or 'organizer'
       } = params;
 
-      // Check for duplicate review
+      // Enforce role ownership against the booking to avoid mis-targeted reviews.
+      if (bookingId && bookingType === "studio_booking") {
+        const { data: bookingAuth, error: bookingAuthError } = await supabaseClient
+          .from("studio_bookings")
+          .select("id, user_id, studio:studios(owner_id)")
+          .eq("id", bookingId)
+          .single();
+
+        if (bookingAuthError || !bookingAuth) {
+          return new Response(
+            JSON.stringify({ error: "Studio booking not found." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 },
+          );
+        }
+
+        const isStudioOwnerReviewer = reviewerRole === "owner" && bookingAuth.studio?.owner_id === userId;
+        const isCustomerReviewer = reviewerRole === "customer" && bookingAuth.user_id === userId;
+
+        if (!isStudioOwnerReviewer && !isCustomerReviewer) {
+          return new Response(
+            JSON.stringify({ error: "You are not allowed to submit this studio review." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
+          );
+        }
+      }
+
+      if (bookingId && bookingType === "gig_application") {
+        const { data: appAuth, error: appAuthError } = await supabaseClient
+          .from("gig_applications")
+          .select("id, applicant_id, group_id, gig:gig_id(organizer_id)")
+          .eq("id", bookingId)
+          .single();
+
+        if (appAuthError || !appAuth) {
+          return new Response(
+            JSON.stringify({ error: "Gig application not found." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 },
+          );
+        }
+
+        const isOrganizerReviewer = reviewerRole === "organizer" && appAuth.gig?.organizer_id === userId;
+        const isApplicantReviewer = reviewerRole === "applicant" && appAuth.applicant_id === userId;
+
+        if (!isOrganizerReviewer && !isApplicantReviewer) {
+          return new Response(
+            JSON.stringify({ error: "You are not allowed to submit this gig review." }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 },
+          );
+        }
+      }
+
+      // Check for duplicate review.
+      // Prefer booking-level duplicate detection so users can review the same entity
+      // across different bookings/applications.
       let existingReview = null;
-      if (studioId) {
+      if (bookingId && bookingType === "studio_booking") {
+        const { data } = await supabaseClient
+          .from("reviews")
+          .select("id")
+          .eq("author_id", userId)
+          .eq("studio_booking_id", bookingId)
+          .maybeSingle();
+        existingReview = data;
+      } else if (bookingId && bookingType === "gig_application") {
+        const { data } = await supabaseClient
+          .from("reviews")
+          .select("id")
+          .eq("author_id", userId)
+          .eq("gig_application_id", bookingId)
+          .maybeSingle();
+        existingReview = data;
+      } else if (studioId) {
         const { data } = await supabaseClient
           .from("reviews")
           .select("id")
@@ -2213,6 +2822,14 @@ serve(async (req: Request) => {
           .select("id")
           .eq("author_id", userId)
           .eq("gig_id", gigId)
+          .maybeSingle();
+        existingReview = data;
+      } else if (groupId) {
+        const { data } = await supabaseClient
+          .from("reviews")
+          .select("id")
+          .eq("author_id", userId)
+          .eq("group_id", groupId)
           .maybeSingle();
         existingReview = data;
       } else if (targetUserId) {
@@ -2246,6 +2863,7 @@ serve(async (req: Request) => {
 
       if (studioId) reviewData.studio_id = studioId;
       if (gigId) reviewData.gig_id = gigId;
+      if (groupId) reviewData.group_id = groupId;
       if (targetUserId) reviewData.user_id = targetUserId;
       if (bookingId && bookingType === "studio_booking")
         reviewData.studio_booking_id = bookingId;
@@ -3117,7 +3735,7 @@ serve(async (req: Request) => {
       const whenLabel = [incident?.booking?.booking_date, incident?.booking?.start_time]
         .filter(Boolean)
         .join(" ");
-      const resolutionLabel = String(resolution).replaceAll("_", " ");
+      const resolutionLabel = String(resolution).replace(/_/g, " ");
 
       const notifyTargets = [
         incident.reporter_user_id,
