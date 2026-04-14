@@ -108,7 +108,7 @@ const ListingDetailsSheet = forwardRef<
   ListingDetailsSheetProps
 >(function ListingDetailsSheet({ listingId, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
-  const { userId, isSystemLocked, showLockAlert } = useAuth();
+  const { userId, isGuest, isSystemLocked, showLockAlert } = useAuth();
   const { isProfileComplete } = useProfileCompletion();
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
@@ -536,6 +536,10 @@ const ListingDetailsSheet = forwardRef<
   };
 
   const handleReport = () => {
+    if (isGuest) {
+      return;
+    }
+
     if (!group?.id) {
       showSheetAlert("error", "Unable to Report", "Missing listing details.");
       return;
@@ -1880,7 +1884,7 @@ const ListingDetailsSheet = forwardRef<
     ? group?.id || null
     : group?.owner_id || group?.organizer_id || null;
   const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
-  const showReportButton = !!group && !isOwnListing;
+  const showReportButton = !!group && !isOwnListing && !isGuest;
 
   const renderTabs = () => (
     <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>
