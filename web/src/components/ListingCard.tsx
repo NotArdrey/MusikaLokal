@@ -361,8 +361,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   nestedScrollEnabled
                   directionalLockEnabled
                   scrollEnabled
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
                   onMomentumScrollEnd={(e) => {
                     const newIndex = Math.round(
                       e.nativeEvent.contentOffset.x / cardWidth,
@@ -772,8 +770,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   nestedScrollEnabled
                   directionalLockEnabled
                   scrollEnabled
-                  onStartShouldSetResponder={() => true}
-                  onMoveShouldSetResponder={() => true}
                   onMomentumScrollEnd={(e) => {
                     const containerWidth =
                       e.nativeEvent.layoutMeasurement.width;

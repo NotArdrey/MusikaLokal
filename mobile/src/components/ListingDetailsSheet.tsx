@@ -149,7 +149,7 @@ const ListingDetailsSheet = forwardRef<
   ListingDetailsSheetProps
 >(function ListingDetailsSheet({ listingId, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
-  const { userId, userRole, isSystemLocked, showLockAlert } = useAuth();
+  const { userId, userRole, isGuest, isSystemLocked, showLockAlert } = useAuth();
   const { isProfileComplete } = useProfileCompletion();
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
@@ -597,7 +597,7 @@ const ListingDetailsSheet = forwardRef<
     group?.organizer_id ||
     (normalizedListingType === "artist" ? group?.id || null : null);
   const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
-  const showReportButton = !!group && !isOwnListing;
+  const showReportButton = !!group && !isOwnListing && !isGuest;
 
   const submitReport = async (reason: string, details?: string) => {
     if (!userId) {
@@ -632,6 +632,10 @@ const ListingDetailsSheet = forwardRef<
   };
 
   const handleReport = () => {
+    if (isGuest) {
+      return;
+    }
+
     if (!group?.id) {
       showSheetAlert("error", "Unable to Report", "Missing listing details.");
       return;

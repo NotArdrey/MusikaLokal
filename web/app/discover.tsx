@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,6 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import ListingCard from '../src/components/ListingCard';
+import ListingDetailsSheet from '../src/components/ListingDetailsSheet';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
@@ -51,19 +51,22 @@ const TYPE_OPTIONS = ['All', 'Musician', 'Studio', 'Gig'];
 const PAGE_SIZE = 10;
 
 export default function Discover() {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const { userRole, isGuest } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: winWidth } = useWindowDimensions();
-  const isWebDesktop = Platform.OS === 'web' && winWidth >= 768;
+  const [contentWidth, setContentWidth] = useState(0);
+  const effectiveWidth = contentWidth > 0 ? contentWidth : winWidth;
+  const isWebDesktop = Platform.OS === 'web' && effectiveWidth >= 768;
+  const gridColumns = Platform.OS === 'web' && effectiveWidth >= 1040 ? 2 : 1;
 
-  const accentColor = isWebDesktop ? (isDark ? '#22D3EE' : '#0369A1') : colors.primary;
-  const pageBackground = isWebDesktop ? (isDark ? '#0A1224' : '#E9EEF8') : colors.background;
-  const pageCardBackground = isWebDesktop ? (isDark ? '#0F172A' : '#FFFFFF') : (isDark ? '#1F2937' : '#FFFFFF');
-  const surfaceBackground = isWebDesktop ? (isDark ? '#13213A' : '#F4F7FE') : (isDark ? '#374151' : '#F3F4F6');
-  const borderSoft = isWebDesktop ? (isDark ? '#1E2C48' : '#D8E3F2') : colors.border;
-  const textPrimary = isWebDesktop ? (isDark ? '#E2E8F0' : '#0F172A') : colors.text;
-  const textSecondary = isWebDesktop ? (isDark ? '#94A3B8' : '#475569') : colors.textSecondary;
+  const accentColor = colors.primary;
+  const pageBackground = colors.background;
+  const pageCardBackground = colors.card;
+  const surfaceBackground = colors.inputBackground;
+  const borderSoft = colors.border;
+  const textPrimary = colors.text;
+  const textSecondary = colors.textSecondary;
 
   const [activeFilter, setActiveFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -82,6 +85,33 @@ export default function Discover() {
   const requestIdRef = useRef(0);
   const dataRef = useRef<any[]>([]);
   const spilloverRef = useRef<any[]>([]);
+  const detailsSheetRef = useRef<any>(null);
+  const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+
+  const presentModalWithRetry = useCallback((modalRef: { current: any }) => {
+    let attempts = 0;
+    const maxAttempts = 6;
+
+    const presentWhenReady = () => {
+      if (modalRef.current) {
+        modalRef.current.present();
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < maxAttempts) {
+        requestAnimationFrame(presentWhenReady);
+      }
+    };
+
+    requestAnimationFrame(presentWhenReady);
+  }, []);
+
+  const openListingDetails = useCallback((listingId: string) => {
+    if (!listingId) return;
+    setSelectedListingId(listingId);
+    presentModalWithRetry(detailsSheetRef);
+  }, [presentModalWithRetry]);
 
   useEffect(() => {
     dataRef.current = data;
@@ -281,21 +311,22 @@ export default function Discover() {
 
   const renderDiscoverItem = useCallback(({ item }: { item: any }) => {
     return (
-      <View style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
+      <View style={[styles.gridItem, gridColumns > 1 && styles.gridItemWeb]}>
         <ListingCard
           item={item}
           onPress={() => {
-            router.replace(`/home?reopenListingId=${encodeURIComponent(item.id)}`);
+            const listingId = item?.id != null ? String(item.id) : '';
+            openListingDetails(listingId);
           }}
           variant="vertical"
           cleanMode
           showGigSummary={false}
           verticalImageHeight={isWebDesktop ? 220 : 196}
-          style={{ width: '100%' }}
+          style={{ width: '100%', minWidth: 0, maxWidth: '100%' }}
         />
       </View>
     );
-  }, [isWebDesktop]);
+  }, [gridColumns, isWebDesktop, openListingDetails]);
 
   const listFooter = useMemo(() => {
     if (loadingMore) {
@@ -471,11 +502,19 @@ export default function Discover() {
 
   return (
     <View style={[styles.container, { backgroundColor: pageBackground }]}> 
-      <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+      <View
+        style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}
+        onLayout={(event) => {
+          const nextWidth = event.nativeEvent.layout.width;
+          if (nextWidth > 0 && Math.abs(nextWidth - contentWidth) > 1) {
+            setContentWidth(nextWidth);
+          }
+        }}
+      >
         <Header title="Discover" hideBackButton />
 
         <FlatList
-          key={isWebDesktop ? 'discover-web' : 'discover-mobile'}
+          key={gridColumns > 1 ? 'discover-grid-2' : 'discover-grid-1'}
           data={loading ? [] : data}
           renderItem={renderDiscoverItem}
           keyExtractor={(item: any, index) => `${item.type || 'item'}-${item.id || index}`}
@@ -502,14 +541,20 @@ export default function Discover() {
           ]}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.35}
-          numColumns={isWebDesktop ? 2 : 1}
-          columnWrapperStyle={isWebDesktop ? styles.gridRow : undefined}
+          numColumns={gridColumns}
+          columnWrapperStyle={gridColumns > 1 ? styles.gridRow : undefined}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         />
       </View>
 
       <Navbar />
+
+      <ListingDetailsSheet
+        ref={detailsSheetRef}
+        listingId={selectedListingId}
+        onDismiss={() => setSelectedListingId(null)}
+      />
     </View>
   );
 }
@@ -724,6 +769,7 @@ const styles = StyleSheet.create({
   },
   gridRow: {
     justifyContent: 'space-between',
+    alignItems: 'stretch',
     gap: 20,
   },
   gridItem: {
@@ -731,6 +777,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   gridItemWeb: {
-    width: '49%',
+    width: '48.8%',
+    minWidth: 0,
   },
 });

@@ -64,27 +64,13 @@ export default function AiSuggestionsScreen() {
     const refreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
     const { width: winWidth } = useWindowDimensions();
     const isWebDesktop = Platform.OS === 'web' && winWidth >= 768;
-    const accentColor = isWebDesktop
-        ? (isDark ? '#22D3EE' : '#0369A1')
-        : colors.primary;
-    const pageBackground = isWebDesktop
-        ? (isDark ? '#0A1224' : '#E9EEF8')
-        : colors.background;
-    const pageCardBackground = isWebDesktop
-        ? (isDark ? '#0F172A' : '#FFFFFF')
-        : (isDark ? '#1F2937' : '#FFFFFF');
-    const surfaceBackground = isWebDesktop
-        ? (isDark ? '#13213A' : '#F4F7FE')
-        : (isDark ? '#374151' : '#F3F4F6');
-    const borderSoft = isWebDesktop
-        ? (isDark ? '#1E2C48' : '#D8E3F2')
-        : colors.border;
-    const textPrimary = isWebDesktop
-        ? (isDark ? '#E2E8F0' : '#0F172A')
-        : colors.text;
-    const textSecondary = isWebDesktop
-        ? (isDark ? '#94A3B8' : '#475569')
-        : colors.textSecondary;
+    const accentColor = colors.primary;
+    const pageBackground = colors.background;
+    const pageCardBackground = colors.card;
+    const surfaceBackground = colors.inputBackground;
+    const borderSoft = colors.border;
+    const textPrimary = colors.text;
+    const textSecondary = colors.textSecondary;
 
     // State
     const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
@@ -817,11 +803,11 @@ export default function AiSuggestionsScreen() {
                 {/* Pro Tip */}
                 {suggestion.proTip && (
                     <View style={[styles.proTipContainer, { backgroundColor: isDark ? '#1D2A44' : '#ECF4FF' }]}>
-                        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                             <Ionicons name="bulb" size={16} color={isDark ? '#38BDF8' : '#0369A1'} />
                             <Text style={styles.proTipLabel}>Pro Tip</Text>
                         </View>
-                        <Text style={styles.proTipText}>{suggestion.proTip}</Text>
+                        <Text style={[styles.proTipText, { color: textPrimary }]}>{suggestion.proTip}</Text>
                     </View>
                 )}
 
@@ -906,7 +892,7 @@ export default function AiSuggestionsScreen() {
 
     // Render results step
     const renderResultsStep = () => {
-        const badgeColor = isAIPowered ? accentColor : '#0EA5E9';
+        const badgeColor = accentColor;
 
         return (
             <ScrollView
@@ -989,6 +975,13 @@ export default function AiSuggestionsScreen() {
                         ? `Instruments that complement your role as a ${userRoles[0]}`
                         : 'Curated just for you based on your musical profile'}
                 </Text>
+
+                {suggestionMessage && (
+                    <View style={[styles.fallbackInfoContainer, { backgroundColor: colors.primaryLight, borderColor: accentColor }]}>
+                        <Ionicons name="information-circle" size={16} color={accentColor} />
+                        <Text style={[styles.fallbackInfoText, { color: textPrimary }]}>{suggestionMessage}</Text>
+                    </View>
+                )}
 
                 {/* Suggestion Cards */}
                 {suggestions.map((suggestion, index) => renderSuggestionCard(suggestion, index))}

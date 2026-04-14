@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import Skeleton from '../src/components/Skeleton';
 import { useTheme } from '../src/context/ThemeContext';
 
 export default function AccountDetailsScreen() {
@@ -104,8 +105,40 @@ export default function AccountDetailsScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.textSecondary }}>Loading account details...</Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Account Details" />
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.scrollContent, styles.loadingSkeletonContent]}
+        >
+          <View style={styles.profileHeader}>
+            <Skeleton width={96} height={96} borderRadius={48} />
+            <Skeleton width={168} height={22} style={{ marginTop: 14 }} />
+            <Skeleton width={128} height={14} style={{ marginTop: 8 }} />
+          </View>
+
+          <View style={styles.loadingSectionContainer}>
+            <Skeleton width={140} height={14} style={{ marginBottom: 12, marginLeft: 4 }} />
+            <View style={[styles.card, { backgroundColor: colors.card, borderWidth: isDark ? 1 : 0, borderColor: colors.border }]}> 
+              <Skeleton width="100%" height={58} borderRadius={0} />
+              <Skeleton width="100%" height={58} borderRadius={0} style={{ marginTop: 1 }} />
+            </View>
+          </View>
+
+          <View style={styles.loadingSectionContainer}>
+            <Skeleton width={88} height={14} style={{ marginBottom: 12, marginLeft: 4 }} />
+            <View style={[styles.card, { backgroundColor: colors.card, borderWidth: isDark ? 1 : 0, borderColor: colors.border }]}> 
+              <Skeleton width="100%" height={58} borderRadius={0} />
+              <Skeleton width="100%" height={58} borderRadius={0} style={{ marginTop: 1 }} />
+              <Skeleton width="100%" height={58} borderRadius={0} style={{ marginTop: 1 }} />
+            </View>
+          </View>
+        </ScrollView>
+
+        <View style={styles.navbarContainer}>
+          <Navbar />
+        </View>
       </View>
     );
   }
@@ -195,6 +228,12 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  loadingSkeletonContent: {
+    paddingBottom: 120,
+  },
+  loadingSectionContainer: {
+    marginBottom: 24,
   },
   scrollContent: {
     paddingHorizontal: 24,

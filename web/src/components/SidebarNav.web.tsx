@@ -1,20 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-    ActivityIndicator,
-    Animated,
-    Image,
-    LayoutAnimation,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    UIManager,
-    View,
-} from 'react-native';
+import { ActivityIndicator, Animated, Image, LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import CustomAlert, { AlertType } from './CustomAlert';
 import { DEFAULT_AVATAR } from '../constants/Images';

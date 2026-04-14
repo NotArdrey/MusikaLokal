@@ -25,6 +25,7 @@ import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import Skeleton from "../src/components/Skeleton";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -2685,12 +2686,22 @@ export default function BookingsScreen() {
             )}
 
           {loading ? (
-            <View style={styles.centerContainer}>
-              <Text
-                style={[styles.loadingText, { color: colors.textSecondary }]}
-              >
-                Loading bookings...
-              </Text>
+            <View style={styles.bookingsSkeletonContainer}>
+              <Skeleton width="58%" height={18} style={{ marginBottom: 12 }} />
+              {[0, 1, 2].map((index) => (
+                <View
+                  key={`booking-skeleton-${index}`}
+                  style={[
+                    styles.bookingsSkeletonCard,
+                    { backgroundColor: colors.surface, borderColor: colors.border },
+                  ]}
+                >
+                  <Skeleton width="100%" height={160} borderRadius={12} />
+                  <Skeleton width="72%" height={20} style={{ marginTop: 12 }} />
+                  <Skeleton width="52%" height={14} style={{ marginTop: 8 }} />
+                  <Skeleton width="100%" height={14} style={{ marginTop: 12 }} />
+                </View>
+              ))}
             </View>
           ) : currentItems.length === 0 ? (
             <View style={styles.centerContainer}>
@@ -5255,6 +5266,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: verticalScale(80),
+  },
+  bookingsSkeletonContainer: {
+    gap: moderateScale(12),
+    paddingTop: moderateScale(4),
+    paddingBottom: moderateScale(8),
+  },
+  bookingsSkeletonCard: {
+    borderRadius: moderateScale(16),
+    borderWidth: 1,
+    padding: moderateScale(12),
   },
   loadingText: {
     fontSize: moderateScale(14),

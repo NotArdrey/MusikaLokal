@@ -108,7 +108,7 @@ const ListingDetailsSheet = forwardRef<
   ListingDetailsSheetProps
 >(function ListingDetailsSheet({ listingId, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
-  const { userId, isSystemLocked, showLockAlert } = useAuth();
+  const { userId, isGuest, isSystemLocked, showLockAlert } = useAuth();
   const { isProfileComplete } = useProfileCompletion();
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
@@ -586,6 +586,10 @@ const ListingDetailsSheet = forwardRef<
   };
 
   const handleReport = () => {
+    if (isGuest) {
+      return;
+    }
+
     if (!group?.id) {
       showSheetAlert("error", "Unable to Report", "Missing listing details.");
       return;
@@ -2024,7 +2028,7 @@ const ListingDetailsSheet = forwardRef<
     ? group?.id || null
     : group?.owner_id || group?.organizer_id || null;
   const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
-  const showReportButton = !!group && !isOwnListing;
+  const showReportButton = !!group && !isOwnListing && !isGuest;
 
   const renderTabs = () => (
     <View style={[styles.tabsContainer, { borderBottomColor: colors.border }]}>
@@ -2339,8 +2343,36 @@ const ListingDetailsSheet = forwardRef<
   );
 
   const sheetContent = loading ? (
-    <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-      <ActivityIndicator size="large" color={colors.primary} />
+    <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}> 
+      <View style={[styles.loadingShell, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+        <View style={[styles.loadingHeroSkeleton, { backgroundColor: colors.inputBackground }]}> 
+          <View style={[styles.loadingHeroBadge, { backgroundColor: isDark ? "rgba(255,255,255,0.12)" : "#E5E7EB" }]} />
+          <View style={styles.loadingHeroActionRow}>
+            <View style={[styles.loadingHeroAction, { backgroundColor: isDark ? "rgba(255,255,255,0.16)" : "#D1D5DB" }]} />
+            <View style={[styles.loadingHeroAction, { backgroundColor: isDark ? "rgba(255,255,255,0.16)" : "#D1D5DB" }]} />
+          </View>
+        </View>
+
+        <View style={styles.loadingBody}>
+          <View style={[styles.loadingChip, { backgroundColor: colors.primaryLight }]} />
+          <View style={[styles.loadingLineLg, { backgroundColor: colors.inputBackground }]} />
+          <View style={[styles.loadingLineMd, { backgroundColor: colors.inputBackground }]} />
+
+          <View style={styles.loadingTabRow}>
+            <View style={[styles.loadingTab, { backgroundColor: colors.inputBackground }]} />
+            <View style={[styles.loadingTab, { backgroundColor: colors.inputBackground }]} />
+            <View style={[styles.loadingTab, { backgroundColor: colors.inputBackground }]} />
+          </View>
+
+          <View style={[styles.loadingBlock, { backgroundColor: colors.inputBackground }]} />
+          <View style={[styles.loadingBlockShort, { backgroundColor: colors.inputBackground }]} />
+
+          <View style={styles.loadingFooterRow}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={[styles.loadingFooterText, { color: colors.textSecondary }]}>Loading listing details...</Text>
+          </View>
+        </View>
+      </View>
     </View>
   ) : group ? (
     <React.Fragment>
@@ -2709,10 +2741,93 @@ const ListingDetailsSheet = forwardRef<
 
 const styles = StyleSheet.create({
   loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
+    width: "100%",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
+  loadingShell: {
+    width: "100%",
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  loadingHeroSkeleton: {
+    height: 220,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  loadingHeroBadge: {
+    width: 104,
+    height: 28,
+    borderRadius: 14,
+  },
+  loadingHeroActionRow: {
+    flexDirection: "row",
     alignItems: "center",
-    height: 300,
+    gap: 10,
+  },
+  loadingHeroAction: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+  },
+  loadingBody: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 18,
+  },
+  loadingChip: {
+    width: 86,
+    height: 20,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  loadingLineLg: {
+    width: "82%",
+    height: 18,
+    borderRadius: 9,
+    marginBottom: 8,
+  },
+  loadingLineMd: {
+    width: "56%",
+    height: 14,
+    borderRadius: 7,
+    marginBottom: 14,
+  },
+  loadingTabRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 14,
+  },
+  loadingTab: {
+    flex: 1,
+    height: 36,
+    borderRadius: 12,
+  },
+  loadingBlock: {
+    width: "100%",
+    height: 80,
+    borderRadius: 14,
+    marginBottom: 10,
+  },
+  loadingBlockShort: {
+    width: "100%",
+    height: 54,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  loadingFooterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  loadingFooterText: {
+    fontSize: 12,
+    fontFamily: "Poppins_500Medium",
   },
   scrollContent: {
     paddingBottom: 100,

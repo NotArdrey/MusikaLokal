@@ -19,6 +19,13 @@ interface AlertState {
   buttons: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
 }
 
+const TEMP_LOGIN_PASSWORD = 'pass123';
+const TEMP_LOGIN_OPTIONS = [
+  { label: 'Login as Musician', email: 'musician@test.com' },
+  { label: 'Login as Studio', email: 'studio@test.com' },
+  { label: 'Login as Venue', email: 'venue2@test.com' },
+] as const;
+
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
   const { setGuestMode } = useAuth();
@@ -152,36 +159,17 @@ export default function LoginScreen() {
     }
   }, [verified, accountCreated, createdEmail]);
 
-  const handleLogin = async () => {
-    setErrors({}); // Clear previous errors
-    setLoginMessage(null);
-    const newErrors: { email?: string; password?: string } = {};
-
-    if (!email) {
-      newErrors.email = 'Email is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = 'Please enter a valid email address.';
-    }
-
-    if (!password) {
-      newErrors.password = 'Password is required.';
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
-
+  const signInWithCredentials = async (loginEmail: string, loginPassword: string) => {
     setLoading(true);
     try {
       // Clear any stale session first to prevent refresh token errors
       console.log('Clearing any existing session...');
       await supabase.auth.signOut({ scope: 'local' });
 
-      console.log('Attempting login for:', email);
+      console.log('Attempting login for:', loginEmail);
       const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: loginEmail,
+        password: loginPassword,
       });
 
       if (error) {
@@ -335,6 +323,38 @@ export default function LoginScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLogin = async () => {
+    setErrors({});
+    setLoginMessage(null);
+    const newErrors: { email?: string; password?: string } = {};
+
+    if (!email) {
+      newErrors.email = 'Email is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      newErrors.email = 'Please enter a valid email address.';
+    }
+
+    if (!password) {
+      newErrors.password = 'Password is required.';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    await signInWithCredentials(email, password);
+  };
+
+  const handleTemporaryLogin = async (tempEmail: string) => {
+    setEmail(tempEmail);
+    setPassword(TEMP_LOGIN_PASSWORD);
+    setErrors({});
+    setLoginMessage(null);
+
+    await signInWithCredentials(tempEmail, TEMP_LOGIN_PASSWORD);
   };
 
 
@@ -512,6 +532,30 @@ export default function LoginScreen() {
                 </Text>
               )}
             </TouchableOpacity>
+
+            <View style={styles.tempLoginSection}>
+              <Text style={[styles.tempLoginLabel, themeStyles.textSecondary]}>
+                Temporary test logins
+              </Text>
+              <View style={styles.tempLoginButtonList}>
+                {TEMP_LOGIN_OPTIONS.map((option) => (
+                  <TouchableOpacity
+                    key={option.email}
+                    onPress={() => handleTemporaryLogin(option.email)}
+                    disabled={loading}
+                    activeOpacity={1}
+                    style={[
+                      styles.tempLoginButton,
+                      { borderColor: colors.border, opacity: loading ? 0.6 : 1 },
+                    ]}
+                  >
+                    <Text style={[styles.tempLoginButtonText, themeStyles.primaryText]}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
 
             <TouchableOpacity
               onPress={handleContinueAsGuest}
@@ -701,6 +745,31 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_600SemiBold',
     color: 'white',
     fontSize: 18,
+  },
+  tempLoginSection: {
+    gap: 10,
+  },
+  tempLoginLabel: {
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 12,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  tempLoginButtonList: {
+    gap: 10,
+  },
+  tempLoginButton: {
+    minHeight: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    paddingHorizontal: 16,
+  },
+  tempLoginButtonText: {
+    fontFamily: 'Poppins_500Medium',
+    fontSize: 14,
   },
   guestButton: {
     height: 64,

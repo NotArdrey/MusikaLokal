@@ -134,6 +134,19 @@ export default function AiSuggestionsScreen() {
                 return;
             }
 
+            const conversation = [
+                ...followupMessages
+                    .map((message) => ({
+                        role: message.role,
+                        text: message.text,
+                    }))
+                    .slice(-8),
+                {
+                    role: 'user' as const,
+                    text: question,
+                },
+            ];
+
             setFollowupMessages((prev) => [
                 ...prev,
                 {
@@ -153,6 +166,7 @@ export default function AiSuggestionsScreen() {
                     userRoles,
                     experienceLevel,
                     purpose,
+                    conversation,
                 });
 
                 setFollowupMessages((prev) => [
@@ -181,6 +195,7 @@ export default function AiSuggestionsScreen() {
         [
             experienceLevel,
             followupLoading,
+            followupMessages,
             followupQuestion,
             purpose,
             selectedGenres,

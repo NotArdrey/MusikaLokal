@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets, type Edge } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
 import CustomAlert, { AlertType } from './CustomAlert';
@@ -56,6 +57,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     onBack,
 }) => {
     const { colors, isDark } = useTheme();
+    const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
     const { messages, loading, sending, sendMessage, markAsRead, addReaction, removeReaction } = useChat(conversationId, currentUserId);
     const { participants } = useGroupParticipants(isGroupChat ? conversationId : null);
@@ -164,6 +166,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
     const handleOpenReport = () => {
         setShowOptions(false);
+        if (isGuest) {
+            return;
+        }
         if (isGroupChat && !groupId) {
             showAlert('error', 'Unable to Report', 'Group information is missing.');
             return;
@@ -750,6 +755,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                         </TouchableOpacity>
                         )}
+                        {!isGuest && (
                         <TouchableOpacity activeOpacity={1}
                             style={[styles.optionRow, { borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}
                             onPress={handleOpenReport}
@@ -760,6 +766,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                             <Text style={[styles.optionLabel, { color: '#EF4444' }]}>Report</Text>
                             <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                         </TouchableOpacity>
+                        )}
                         <TouchableOpacity activeOpacity={1}
                             style={styles.optionCancelBtn}
                             onPress={() => setShowOptions(false)}

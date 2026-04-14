@@ -23,7 +23,7 @@ const looksLikeDisplayImage = (uri: string) => {
     if (lowered.startsWith('data:image/')) return true;
 
     if (
-        lowered.includes('/documents/') ||
+       lowered.includes('/documents/') ||
         lowered.includes('/contracts/') ||
         lowered.includes('business_permit') ||
         lowered.includes('application/pdf')

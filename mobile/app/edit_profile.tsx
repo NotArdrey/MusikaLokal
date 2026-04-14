@@ -21,6 +21,7 @@ import Header from "../src/components/header";
 import LeafletAddressPicker from "../src/components/LeafletAddressPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import Skeleton from "../src/components/Skeleton";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
 import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
@@ -554,11 +555,28 @@ export default function EditProfileScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          Loading...
-        </Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Edit Profile" onBackPress={handleAttemptLeave} />
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.editProfileSkeletonContent}>
+          <View style={styles.avatarContainer}>
+            <Skeleton width={110} height={110} borderRadius={55} />
+            <Skeleton width={132} height={14} style={{ marginTop: 12 }} />
+          </View>
+
+          <Skeleton width={94} height={12} style={{ marginBottom: 8 }} />
+          <Skeleton width="100%" height={52} borderRadius={10} style={{ marginBottom: 16 }} />
+
+          <Skeleton width={120} height={12} style={{ marginBottom: 8 }} />
+          <Skeleton width="100%" height={90} borderRadius={10} style={{ marginBottom: 16 }} />
+
+          <Skeleton width={110} height={12} style={{ marginBottom: 8 }} />
+          <Skeleton width="100%" height={52} borderRadius={10} style={{ marginBottom: 16 }} />
+
+          <Skeleton width="100%" height={48} borderRadius={12} style={{ marginTop: 8 }} />
+          <Skeleton width="100%" height={48} borderRadius={12} style={{ marginTop: 10 }} />
+        </ScrollView>
+
+        <Navbar />
       </View>
     );
   }
@@ -978,6 +996,7 @@ const styles = StyleSheet.create({
   },
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 150 },
+  editProfileSkeletonContent: { padding: 20, paddingBottom: 150 },
 
   avatarContainer: { alignItems: "center", marginBottom: 24 },
   avatarWrapper: { position: "relative" },

@@ -190,7 +190,20 @@ const ResponsiveList = ({ children, style, contentContainerStyle, snapToInterval
   const { width } = useWindowDimensions();
   if (Platform.OS === 'web' && width >= 768) {
     return (
-      <View style={[{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }, style, contentContainerStyle]}>
+      <View
+        style={[
+          {
+            width: '100%',
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'stretch',
+            justifyContent: 'flex-start',
+            gap: 16,
+          },
+          style,
+          contentContainerStyle,
+        ]}
+      >
         {children}
       </View>
     );
@@ -2878,6 +2891,8 @@ export default function HomeScreen() {
                       position: "absolute",
                       top: 12,
                       right: 12,
+                      flexDirection: "row",
+                      alignItems: "center",
                       paddingVertical: 4,
                       paddingHorizontal: 8,
                     },
@@ -3969,7 +3984,7 @@ const styles = StyleSheet.create({
     width: 280,
     borderRadius: 20,
     overflow: "hidden",
-    marginRight: 16,
+    marginRight: Platform.OS === "web" ? 0 : 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -4046,7 +4061,7 @@ const styles = StyleSheet.create({
     width: 280,
     borderRadius: 20,
     overflow: "hidden",
-    marginRight: 16,
+    marginRight: Platform.OS === "web" ? 0 : 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -4139,7 +4154,7 @@ const styles = StyleSheet.create({
     width: 240,
     borderRadius: 16,
     overflow: "hidden",
-    marginRight: 16,
+    marginRight: Platform.OS === "web" ? 0 : 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -4212,7 +4227,7 @@ const styles = StyleSheet.create({
     width: 280,
     borderRadius: 20,
     overflow: "hidden",
-    marginRight: 16,
+    marginRight: Platform.OS === "web" ? 0 : 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,

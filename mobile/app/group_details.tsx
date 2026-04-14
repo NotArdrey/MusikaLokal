@@ -33,7 +33,7 @@ const IMG_HEIGHT = height * 0.5;
 export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams();
   const { colors, isDark } = useTheme();
-  const { userId } = useAuth();
+  const { userId, isGuest } = useAuth();
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [group, setGroup] = useState<any>(null);
@@ -249,7 +249,7 @@ export default function GroupDetailsScreen() {
               <TouchableOpacity activeOpacity={1} style={styles.roundBtn} onPress={handleShare}>
                 <Ionicons name="share-outline" size={24} color="#000" />
               </TouchableOpacity>
-              {!isOwner && userId ? (
+              {!isOwner && userId && !isGuest ? (
                 <TouchableOpacity activeOpacity={1}
                   onPress={openReportModal}
                   style={styles.roundBtn}

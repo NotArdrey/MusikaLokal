@@ -1,10 +1,11 @@
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import GuestSignInGate from '../src/components/GuestSignInGate';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
+import Skeleton from '../src/components/Skeleton';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
@@ -92,11 +93,15 @@ export default function ManageScreen() {
 
     if (loading) {
         return (
-            <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={{ marginTop: 20, color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>
-                    Loading your dashboard...
-                </Text>
+            <View style={[styles.flex1, { backgroundColor: colors.background }]}> 
+                <Header title="Manage" />
+                <View style={styles.manageSkeletonContainer}>
+                    <Skeleton width="72%" height={26} borderRadius={8} />
+                    <Skeleton width="100%" height={84} borderRadius={14} style={{ marginTop: 16 }} />
+                    <Skeleton width="100%" height={84} borderRadius={14} style={{ marginTop: 12 }} />
+                    <Skeleton width="46%" height={16} style={{ marginTop: 24 }} />
+                </View>
+                <Navbar />
             </View>
         );
     }
@@ -146,6 +151,11 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    manageSkeletonContainer: {
+        flex: 1,
+        paddingHorizontal: 24,
+        paddingTop: 32,
     },
     scrollContent: {
         paddingBottom: 180,

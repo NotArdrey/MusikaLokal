@@ -66,6 +66,7 @@ const GENRES = [
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
+const IS_WEB = Platform.OS === "web";
 
 export default function AddGroupScreen() {
   const { colors, isDark } = useTheme();
@@ -853,8 +854,18 @@ export default function AddGroupScreen() {
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Create Group" />
 
+        <View style={styles.contentFrame}>
+
         {/* Enhanced Step Indicator (Fixed at top) */}
-        <View style={styles.stepIndicatorContainer}>
+        <View
+          style={[
+            styles.stepIndicatorContainer,
+            {
+              backgroundColor: isDark ? "#111827" : "#FFFFFF",
+              borderColor: isDark ? "#1F2937" : "#E5E7EB",
+            },
+          ]}
+        >
           <View style={styles.stepIndicatorContent}>
             {/* Progress Line Background */}
             <View
@@ -929,7 +940,13 @@ export default function AddGroupScreen() {
           keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
         >
           <ScrollView
-            style={styles.formContainer}
+            style={[
+              styles.formContainer,
+              {
+                backgroundColor: isDark ? "#111827" : "#FFFFFF",
+                borderColor: isDark ? "#1F2937" : "#E5E7EB",
+              },
+            ]}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[
               styles.scrollContent,
@@ -1814,6 +1831,7 @@ export default function AddGroupScreen() {
             )}
           </ScrollView>
         </KeyboardAvoidingView>
+        </View>
 
         {!isKeyboardVisible && <Navbar />}
       </View>
@@ -1929,28 +1947,45 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  contentFrame: {
+    flex: 1,
+    width: "100%",
+    maxWidth: IS_WEB ? 1080 : undefined,
+    alignSelf: "center",
+    paddingHorizontal: IS_WEB ? 24 : 0,
+    paddingTop: IS_WEB ? 16 : 0,
+  },
   stepIndicatorContainer: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 8,
+    paddingHorizontal: IS_WEB ? 22 : 24,
+    paddingTop: IS_WEB ? 18 : 24,
+    paddingBottom: IS_WEB ? 14 : 8,
+    borderRadius: IS_WEB ? 20 : 0,
+    borderWidth: IS_WEB ? 1 : 0,
+    marginBottom: IS_WEB ? 12 : 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: IS_WEB ? 0.08 : 0,
+    shadowRadius: IS_WEB ? 16 : 0,
+    elevation: IS_WEB ? 2 : 0,
   },
   stepIndicatorContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     position: "relative",
+    paddingHorizontal: IS_WEB ? 8 : 0,
   },
   progressLineBg: {
     position: "absolute",
-    left: 0,
-    right: 0,
+    left: IS_WEB ? 8 : 0,
+    right: IS_WEB ? 8 : 0,
     height: 4,
     top: 20,
     zIndex: 0,
   },
   activeProgressLine: {
     position: "absolute",
-    left: 0,
+    left: IS_WEB ? 8 : 0,
     height: 4,
     top: 20,
     zIndex: 0,
@@ -1958,54 +1993,63 @@ const styles = StyleSheet.create({
   stepItem: {
     alignItems: "center",
     zIndex: 10,
-    width: 80,
+    width: IS_WEB ? 96 : 80,
   },
   stepCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: IS_WEB ? 44 : 40,
+    height: IS_WEB ? 44 : 40,
+    borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 4,
   },
   stepText: {
-    fontSize: 12,
+    fontSize: IS_WEB ? 13 : 12,
     marginTop: 8,
     textAlign: "center",
   },
   formContainer: {
     flex: 1,
-    paddingHorizontal: 24,
-    marginTop: 16,
+    marginTop: IS_WEB ? 0 : 16,
+    borderRadius: IS_WEB ? 20 : 0,
+    borderWidth: IS_WEB ? 1 : 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: IS_WEB ? 0.08 : 0,
+    shadowRadius: IS_WEB ? 22 : 0,
+    elevation: IS_WEB ? 3 : 0,
   },
   scrollContent: {
-    paddingBottom: 150,
+    paddingHorizontal: IS_WEB ? 28 : 24,
+    paddingTop: IS_WEB ? 26 : 0,
+    paddingBottom: IS_WEB ? 170 : 150,
   },
   sectionTitle: {
-    fontSize: 20,
-    marginBottom: 24,
-    textAlign: "center",
+    fontSize: IS_WEB ? 24 : 20,
+    marginBottom: IS_WEB ? 22 : 24,
+    textAlign: IS_WEB ? "left" : "center",
     fontFamily: "Poppins_600SemiBold",
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: IS_WEB ? 18 : 16,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
     fontFamily: "Poppins_600SemiBold",
   },
   inputWrapper: {
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     overflow: "hidden",
   },
   textInput: {
     paddingHorizontal: 16,
-    paddingVertical: 16, // added explicit vertical padding here too just in case
+    paddingVertical: IS_WEB ? 14 : 16,
     fontFamily: "Poppins_400Regular",
+    fontSize: 14,
     textAlign: "left",
     textAlignVertical: "center",
   },
@@ -2015,8 +2059,8 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   addBtn: {
-    width: 48,
-    height: 48,
+    width: IS_WEB ? 44 : 48,
+    height: IS_WEB ? 44 : 48,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
@@ -2104,9 +2148,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   navigationButtons: {
-    marginTop: 32,
+    marginTop: IS_WEB ? 30 : 32,
     flexDirection: "row",
-    gap: 16,
+    gap: 12,
     marginBottom: 16,
   },
   backBtn: {
@@ -2123,6 +2167,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   nextBtn: {
+    flex: 1,
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 12,

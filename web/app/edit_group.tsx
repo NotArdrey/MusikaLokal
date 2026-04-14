@@ -7,6 +7,7 @@ import {
     Image,
     Keyboard,
     Modal as RNModal,
+  Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -71,6 +72,7 @@ const GENRES = [
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
+const IS_WEB = Platform.OS === "web";
 
 export default function EditGroupScreen() {
   const { colors, isDark } = useTheme();
@@ -1402,10 +1404,18 @@ export default function EditGroupScreen() {
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="Edit Group" onBackPress={handleAttemptLeave} />
 
+        <View style={styles.contentFrame}>
+
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
-          style={styles.flex1}
+          style={[
+            styles.formContainer,
+            {
+              backgroundColor: isDark ? "#111827" : "#FFFFFF",
+              borderColor: isDark ? "#1F2937" : "#E5E7EB",
+            },
+          ]}
         >
           {renderSectionHeader("Group Details", "people")}
 
@@ -2132,6 +2142,7 @@ export default function EditGroupScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
+        </View>
 
         <Navbar />
       </View>
@@ -2414,9 +2425,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  contentFrame: {
+    flex: 1,
+    width: "100%",
+    maxWidth: IS_WEB ? 1080 : undefined,
+    alignSelf: "center",
+    paddingHorizontal: IS_WEB ? 24 : 0,
+    paddingTop: IS_WEB ? 16 : 0,
+  },
+  formContainer: {
+    flex: 1,
+    marginTop: IS_WEB ? 0 : 16,
+    borderRadius: IS_WEB ? 20 : 0,
+    borderWidth: IS_WEB ? 1 : 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: IS_WEB ? 0.08 : 0,
+    shadowRadius: IS_WEB ? 22 : 0,
+    elevation: IS_WEB ? 3 : 0,
+  },
   scrollContent: {
-    paddingBottom: 160,
-    paddingHorizontal: 24,
+    paddingHorizontal: IS_WEB ? 28 : 24,
+    paddingTop: IS_WEB ? 26 : 16,
+    paddingBottom: IS_WEB ? 170 : 160,
   },
   sectionHeader: {
     flexDirection: "row",
@@ -2429,22 +2460,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: IS_WEB ? 18 : 16,
   },
   inputLabel: {
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
     fontFamily: "Poppins_600SemiBold",
   },
   inputWrapper: {
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     overflow: "hidden",
   },
   input: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: IS_WEB ? 14 : 16,
+    fontSize: 14,
     textAlign: "left",
     textAlignVertical: "center",
   },

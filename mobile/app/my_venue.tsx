@@ -8,6 +8,7 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import Modal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import Skeleton from '../src/components/Skeleton';
 import { useRequireAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
 
@@ -265,7 +266,24 @@ export default function MyVenueScreen() {
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 >
                     {loading ? (
-                        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading gigs...</Text>
+                        <View style={styles.skeletonList}>
+                            {[0, 1, 2].map((index) => (
+                                <View
+                                    key={`gig-skeleton-${index}`}
+                                    style={[styles.skeletonCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                                >
+                                    <Skeleton width="100%" height={192} borderRadius={18} />
+                                    <Skeleton width="66%" height={22} style={{ marginTop: 14 }} />
+                                    <Skeleton width="74%" height={14} style={{ marginTop: 10 }} />
+                                    <Skeleton width="100%" height={14} style={{ marginTop: 8 }} />
+                                    <View style={styles.skeletonActionRow}>
+                                        <Skeleton width={124} height={40} borderRadius={12} />
+                                        <Skeleton width={40} height={40} borderRadius={12} />
+                                        <Skeleton width={40} height={40} borderRadius={12} />
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
                     ) : gigs.length === 0 ? (
                         <View style={styles.emptyState}>
                             <Ionicons name="musical-notes-outline" size={48} color={colors.textSecondary} />
@@ -456,6 +474,19 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginTop: 20,
         fontFamily: 'Poppins_400Regular',
+    },
+    skeletonList: {
+        gap: 16,
+    },
+    skeletonCard: {
+        borderRadius: 24,
+        borderWidth: 1,
+        padding: 16,
+    },
+    skeletonActionRow: {
+        marginTop: 16,
+        flexDirection: 'row',
+        gap: 10,
     },
     emptyState: {
         alignItems: 'center',
