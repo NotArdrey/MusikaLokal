@@ -133,6 +133,58 @@ const parsePositiveDecimal = (value: unknown): number | null => {
   return parsed;
 };
 
+const PROMOTION_CRITERIA_PREFIX = "How to get promo:";
+const PROMOTION_MIN_HOURS_PREFIX = "Minimum booking hours:";
+const PROMOTION_MIN_SPEND_PREFIX = "Minimum spend:";
+
+const parsePromotionDescription = (value: unknown) => {
+  const raw = typeof value === "string" ? value : "";
+  if (!raw.trim()) {
+    return {
+      description: "",
+      criteria: "",
+      minimum_booking_hours: "",
+      minimum_spend: "",
+    };
+  }
+
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const remaining: string[] = [];
+  let criteria = "";
+  let minimum_booking_hours = "";
+  let minimum_spend = "";
+
+  lines.forEach((line) => {
+    const lowerLine = line.toLowerCase();
+    if (lowerLine.startsWith(PROMOTION_CRITERIA_PREFIX.toLowerCase())) {
+      criteria = line.slice(PROMOTION_CRITERIA_PREFIX.length).trim();
+      return;
+    }
+    if (lowerLine.startsWith(PROMOTION_MIN_HOURS_PREFIX.toLowerCase())) {
+      minimum_booking_hours = line.slice(PROMOTION_MIN_HOURS_PREFIX.length).trim();
+      return;
+    }
+    if (lowerLine.startsWith(PROMOTION_MIN_SPEND_PREFIX.toLowerCase())) {
+      minimum_spend = line.slice(PROMOTION_MIN_SPEND_PREFIX.length).trim();
+      return;
+    }
+    remaining.push(line);
+  });
+
+  return {
+    description: remaining.join("\n"),
+    criteria,
+    minimum_booking_hours,
+    minimum_spend,
+  };
+};
+
+const buildPromotionDescription = (
+  description: string,
+): string => {
+  return description.trim();
+};
+
 const getAllowedPromotionTargets = (
   type: "Rehearsal" | "Recording" | "Both",
 ): Array<"rehearsal" | "recording" | "both"> => {
@@ -265,6 +317,9 @@ export default function EditStudioScreen() {
     id: string;
     name: string;
     description: string;
+    criteria: string;
+    minimum_booking_hours: string;
+    minimum_spend: string;
     discount_type: "percentage" | "fixed_amount";
     discount_value: string;
     is_permanent: boolean;
@@ -278,6 +333,9 @@ export default function EditStudioScreen() {
   const [promotionForm, setPromotionForm] = useState({
     name: "",
     description: "",
+    criteria: "",
+    minimum_booking_hours: "",
+    minimum_spend: "",
     discount_type: "percentage" as "percentage" | "fixed_amount",
     discount_value: "",
     is_permanent: true,
@@ -706,6 +764,9 @@ export default function EditStudioScreen() {
     setPromotionForm({
       name: "",
       description: "",
+      criteria: "",
+      minimum_booking_hours: "",
+      minimum_spend: "",
       discount_type: "percentage",
       discount_value: "",
       is_permanent: true,
@@ -717,7 +778,19 @@ export default function EditStudioScreen() {
   };
 
   const handleSavePromotion = () => {
-    const { name, discount_type, discount_value, is_permanent, start_date, end_date, applies_to, description } = promotionForm;
+    const {
+      name,
+      discount_type,
+      discount_value,
+      is_permanent,
+      start_date,
+      end_date,
+      applies_to,
+      description,
+      criteria,
+      minimum_booking_hours,
+      minimum_spend,
+    } = promotionForm;
     if (!name.trim()) {
       showAlert("error", "Required", "Please enter a promotion name.");
       return;
@@ -740,12 +813,41 @@ export default function EditStudioScreen() {
       return;
     }
 
+    const minimumHoursValue = minimum_booking_hours.trim();
+    if (minimumHoursValue) {
+      const parsedHours = Number.parseFloat(minimumHoursValue);
+      if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
+        showAlert(
+          "error",
+          "Invalid Criteria",
+          "Minimum booking hours must be greater than 0.",
+        );
+        return;
+      }
+    }
+
+    const minimumSpendValue = minimum_spend.trim();
+    if (minimumSpendValue) {
+      const parsedSpend = Number.parseFloat(minimumSpendValue);
+      if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
+        showAlert(
+          "error",
+          "Invalid Criteria",
+          "Minimum spend must be greater than 0.",
+        );
+        return;
+      }
+    }
+
     const normalizedAppliesTo = normalizePromotionTarget(applies_to, studioType);
 
     const promoItem: PromotionItem = {
       id: editingPromotion?.id || Date.now().toString(),
       name: name.trim(),
       description: description.trim(),
+      criteria: criteria.trim(),
+      minimum_booking_hours: minimumHoursValue,
+      minimum_spend: minimumSpendValue,
       discount_type,
       discount_value,
       is_permanent,
@@ -768,6 +870,9 @@ export default function EditStudioScreen() {
     setPromotionForm({
       name: promo.name,
       description: promo.description,
+      criteria: promo.criteria,
+      minimum_booking_hours: promo.minimum_booking_hours,
+      minimum_spend: promo.minimum_spend,
       discount_type: promo.discount_type,
       discount_value: promo.discount_value,
       is_permanent: promo.is_permanent,
@@ -1380,9 +1485,30 @@ export default function EditStudioScreen() {
       // Load promotions
       if (!studioPromotionsError && studioPromotionsData && studioPromotionsData.length > 0) {
         const loadedPromos: PromotionItem[] = studioPromotionsData.map((p: any) => ({
+          ...(() => {
+            const parsedLegacyDescription = parsePromotionDescription(p.description);
+            const criteriaFromColumn =
+              typeof p.criteria === "string" ? p.criteria.trim() : "";
+            const minimumHoursFromColumn =
+              p.minimum_booking_hours !== null && p.minimum_booking_hours !== undefined
+                ? String(p.minimum_booking_hours)
+                : "";
+            const minimumSpendFromColumn =
+              p.minimum_spend !== null && p.minimum_spend !== undefined
+                ? String(p.minimum_spend)
+                : "";
+
+            return {
+              description: parsedLegacyDescription.description,
+              criteria: criteriaFromColumn || parsedLegacyDescription.criteria,
+              minimum_booking_hours:
+                minimumHoursFromColumn || parsedLegacyDescription.minimum_booking_hours,
+              minimum_spend:
+                minimumSpendFromColumn || parsedLegacyDescription.minimum_spend,
+            };
+          })(),
           id: p.id,
           name: p.name || "",
-          description: p.description || "",
           discount_type: p.discount_type || "percentage",
           discount_value: String(p.discount_value || ""),
           is_permanent: p.is_permanent ?? true,
@@ -1783,6 +1909,32 @@ export default function EditStudioScreen() {
         }
         if (promo.end_date < promo.start_date) {
           showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" end date must be on or after start date.`);
+          return false;
+        }
+      }
+
+      const minimumHoursValue = promo.minimum_booking_hours?.trim();
+      if (minimumHoursValue) {
+        const parsedHours = Number.parseFloat(minimumHoursValue);
+        if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
+          showAlert(
+            "error",
+            "Invalid Promotion",
+            `Promotion "${promo.name}" minimum booking hours must be greater than 0.`,
+          );
+          return false;
+        }
+      }
+
+      const minimumSpendValue = promo.minimum_spend?.trim();
+      if (minimumSpendValue) {
+        const parsedSpend = Number.parseFloat(minimumSpendValue);
+        if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
+          showAlert(
+            "error",
+            "Invalid Promotion",
+            `Promotion "${promo.name}" minimum spend must be greater than 0.`,
+          );
           return false;
         }
       }
@@ -2804,7 +2956,12 @@ export default function EditStudioScreen() {
             promotions.map((promo) => ({
               studio_id: studioId,
               name: promo.name,
-              description: promo.description || null,
+              description: buildPromotionDescription(promo.description) || null,
+              criteria: promo.criteria.trim() || null,
+              minimum_booking_hours: parsePositiveDecimal(
+                promo.minimum_booking_hours,
+              ),
+              minimum_spend: parsePositiveDecimal(promo.minimum_spend),
               discount_type: promo.discount_type,
               discount_value: parseFloat(promo.discount_value),
               is_permanent: promo.is_permanent,
@@ -3048,6 +3205,9 @@ export default function EditStudioScreen() {
             id: `autofill-permanent-${studioType.toLowerCase()}`,
             name: "Weekday Creator Deal",
             description: "Test promo for daytime bookings and promo UI coverage.",
+            criteria: "Book at least one weekday slot before 5 PM.",
+            minimum_booking_hours: "2",
+            minimum_spend: "",
             discount_type: "percentage",
             discount_value: "15",
             is_permanent: true,
@@ -3059,6 +3219,9 @@ export default function EditStudioScreen() {
             id: `autofill-seasonal-${studioType.toLowerCase()}`,
             name: "Weekend Session Saver",
             description: "Time-limited sample promo used for booking regression checks.",
+            criteria: "Complete booking and payment in one checkout.",
+            minimum_booking_hours: "",
+            minimum_spend: "3000",
             discount_type: "fixed_amount",
             discount_value: "200",
             is_permanent: false,
@@ -3647,7 +3810,7 @@ export default function EditStudioScreen() {
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Studio Type
             </Text>
-            <View style={{ flexDirection: "row", gap: 12 }}>
+            <View style={{ flexDirection: "row", gap: 12 , flexWrap: "wrap", minWidth: "100%" }}>
               {(["Rehearsal", "Recording", "Both"] as const).map((type) => (
                 <TouchableOpacity activeOpacity={1}
                   key={type}
@@ -3702,7 +3865,7 @@ export default function EditStudioScreen() {
               ]}
             >
               <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}
               >
                 <Ionicons
                   name="location-outline"
@@ -3754,7 +3917,7 @@ export default function EditStudioScreen() {
                       alignItems: "center",
                       gap: 8,
                       flex: 1,
-                    }}
+                    minWidth: 150 }}
                   >
                     <Ionicons
                       name="musical-notes"
@@ -3829,7 +3992,7 @@ export default function EditStudioScreen() {
                       alignItems: "center",
                       gap: 8,
                       flex: 1,
-                    }}
+                    minWidth: 150 }}
                   >
                     <Ionicons name="mic" size={20} color="#EF4444" />
                     <Text
@@ -4062,8 +4225,8 @@ export default function EditStudioScreen() {
                 }}
               >
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <View style={{ flex: 1, minWidth: 150, marginRight: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
                       <Ionicons name="pricetag-outline" size={14} color={colors.primary} />
                       <Text style={{ fontFamily: "Poppins_600SemiBold", color: colors.text, fontSize: 14 }}>
                         {promo.name}
@@ -4073,13 +4236,24 @@ export default function EditStudioScreen() {
                       {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                       {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                     </Text>
+                    {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) && (
+                      <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                        {[
+                          promo.criteria ? `How to get promo: ${promo.criteria}` : null,
+                          promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr(s)` : null,
+                          promo.minimum_spend ? `Min spend ₱${promo.minimum_spend}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </Text>
+                    )}
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                       {promo.is_permanent
                         ? "Always available"
                         : `${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
                     </Text>
                   </View>
-                  <View style={{ flexDirection: "row", gap: 8 }}>
+                  <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                     <TouchableOpacity activeOpacity={0.8} onPress={() => handleEditPromotion(promo)}>
                       <Ionicons name="create-outline" size={18} color={colors.primary} />
                     </TouchableOpacity>
@@ -4160,11 +4334,89 @@ export default function EditStudioScreen() {
                   }}
                 />
 
+                <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                  How to Get This Promo (Optional)
+                </Text>
+                <TextInput
+                  value={promotionForm.criteria}
+                  onChangeText={(t) => setPromotionForm((p) => ({ ...p, criteria: t }))}
+                  placeholder="e.g. Minimum 2-hour booking and full payment"
+                  placeholderTextColor={colors.textSecondary}
+                  style={{
+                    backgroundColor: isDark ? "#111827" : "#FFF",
+                    borderWidth: 1,
+                    borderColor: isDark ? "#374151" : "#E5E7EB",
+                    borderRadius: 10,
+                    padding: 12,
+                    color: colors.text,
+                    fontFamily: "Poppins_500Medium",
+                    fontSize: 14,
+                    marginBottom: 12,
+                  }}
+                />
+
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                      Min Hours (Optional)
+                    </Text>
+                    <TextInput
+                      value={promotionForm.minimum_booking_hours}
+                      onChangeText={(t) =>
+                        setPromotionForm((p) => ({
+                          ...p,
+                          minimum_booking_hours: t.replace(/[^0-9.]/g, ""),
+                        }))
+                      }
+                      placeholder="e.g. 2"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="numeric"
+                      style={{
+                        backgroundColor: isDark ? "#111827" : "#FFF",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        borderRadius: 10,
+                        padding: 12,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 14,
+                      }}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+                      Min Spend (Optional)
+                    </Text>
+                    <TextInput
+                      value={promotionForm.minimum_spend}
+                      onChangeText={(t) =>
+                        setPromotionForm((p) => ({
+                          ...p,
+                          minimum_spend: t.replace(/[^0-9.]/g, ""),
+                        }))
+                      }
+                      placeholder="e.g. 3000"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="numeric"
+                      style={{
+                        backgroundColor: isDark ? "#111827" : "#FFF",
+                        borderWidth: 1,
+                        borderColor: isDark ? "#374151" : "#E5E7EB",
+                        borderRadius: 10,
+                        padding: 12,
+                        color: colors.text,
+                        fontFamily: "Poppins_500Medium",
+                        fontSize: 14,
+                      }}
+                    />
+                  </View>
+                </View>
+
                 {/* Discount Type Toggle */}
                 <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                   Discount Type
                 </Text>
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                   {(["percentage", "fixed_amount"] as const).map((dt) => (
                     <TouchableOpacity
                       key={dt}
@@ -4238,7 +4490,7 @@ export default function EditStudioScreen() {
                 <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                   Duration
                 </Text>
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                   {([
                     { key: true, label: "Regular (Always)" },
                     { key: false, label: "Time-Limited" },
@@ -4273,7 +4525,7 @@ export default function EditStudioScreen() {
                 {/* Date pickers for time-limited */}
                 {!promotionForm.is_permanent && (
                   <View style={{ marginBottom: 12 }}>
-                    <View style={{ flexDirection: "row", gap: 8 }}>
+                    <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                       <TouchableOpacity
                         activeOpacity={0.8}
                         onPress={() => { setShowPromoStartCalendar(!showPromoStartCalendar); setShowPromoEndCalendar(false); }}
@@ -4370,7 +4622,7 @@ export default function EditStudioScreen() {
                 <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
                   Applies To
                 </Text>
-                <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
                   {allowedPromotionTargets.map((at) => (
                     <TouchableOpacity
                       key={at}
@@ -4400,7 +4652,7 @@ export default function EditStudioScreen() {
                 </View>
 
                 {/* Save / Cancel */}
-                <View style={{ flexDirection: "row", gap: 10 }}>
+                <View style={{ flexDirection: "row", gap: 10 , flexWrap: "wrap", minWidth: "100%" }}>
                   <TouchableOpacity
                     activeOpacity={0.8}
                     onPress={() => { resetPromotionForm(); setShowPromotionForm(false); }}
@@ -4513,7 +4765,7 @@ export default function EditStudioScreen() {
                     alignItems: "center",
                     gap: 12,
                     flex: 1,
-                  }}
+                  minWidth: 150 }}
                 >
                   <View
                     style={[
@@ -4637,7 +4889,7 @@ export default function EditStudioScreen() {
                     alignItems: "center",
                     gap: 12,
                     flex: 1,
-                  }}
+                  minWidth: 150 }}
                 >
                   <View
                     style={[
@@ -4823,7 +5075,7 @@ export default function EditStudioScreen() {
                     },
                   ]}
                 >
-                  <View style={{ flexDirection: "row", gap: 12 }}>
+                  <View style={{ flexDirection: "row", gap: 12 , flexWrap: "wrap", minWidth: "100%" }}>
                     {item.image ? (
                       <Image
                         source={{ uri: item.image }}
@@ -4876,7 +5128,7 @@ export default function EditStudioScreen() {
                         </Text>
                       )}
                     </View>
-                    <View style={{ flexDirection: "row", gap: 8 }}>
+                    <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                       <TouchableOpacity activeOpacity={1}
                         onPress={() => {
                           setEditingEquipment(item);

@@ -154,6 +154,7 @@ const ListingDetailsSheet = forwardRef<
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
   const [isFavorited, setIsFavorited] = useState(false);
+  const [favoriteCount, setFavoriteCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
   const [bookingNotes, setBookingNotes] = useState("");
 
@@ -541,6 +542,55 @@ const ListingDetailsSheet = forwardRef<
     return normalized || "profile";
   };
 
+  const getFavoriteTargetType = (
+    listingType?: string,
+  ): "group" | "studio" | "gig" | null => {
+    const normalized = (listingType || "").toLowerCase();
+    if (normalized === "group") return "group";
+    if (normalized === "studio" || normalized === "venue") return "studio";
+    if (normalized === "gig") return "gig";
+    return null;
+  };
+
+  const syncFavoriteMetadata = useCallback(
+    async (
+      targetType: "group" | "studio" | "gig" | null,
+      targetId: string | null | undefined,
+      currentUserId?: string | null,
+    ) => {
+      if (!targetType || !targetId) {
+        setIsFavorited(false);
+        setFavoriteCount(0);
+        return;
+      }
+
+      const totalFavoritePromise = supabase
+        .from("favorites")
+        .select("id", { count: "exact", head: true })
+        .eq(`${targetType}_id`, targetId);
+
+      const userFavoritePromise = currentUserId
+        ? supabase
+          .from("favorites")
+          .select("id", { count: "exact", head: true })
+          .eq(`${targetType}_id`, targetId)
+          .eq("user_id", currentUserId)
+        : Promise.resolve({ count: 0, error: null } as any);
+
+      const [totalFavoriteResult, userFavoriteResult] = await Promise.all([
+        totalFavoritePromise,
+        userFavoritePromise,
+      ]);
+
+      if (totalFavoriteResult.error) throw totalFavoriteResult.error;
+      if (userFavoriteResult.error) throw userFavoriteResult.error;
+
+      setFavoriteCount(totalFavoriteResult.count || 0);
+      setIsFavorited((userFavoriteResult.count || 0) > 0);
+    },
+    [],
+  );
+
   const normalizedListingType = String(group?.type || "").toLowerCase();
   const listingOwnerId =
     group?.owner_id ||
@@ -595,12 +645,39 @@ const ListingDetailsSheet = forwardRef<
     setShowListingReportModal(true);
   };
 
+  const buildListingShareUrl = () => {
+    if (!group?.id) return ExpoLinking.createURL("/home");
+
+    const normalizedType = String(group?.type || "").toLowerCase();
+
+    if (normalizedType === "group") {
+      return ExpoLinking.createURL("/group_details", {
+        queryParams: { id: group.id },
+      });
+    }
+
+    if (normalizedType === "artist") {
+      return ExpoLinking.createURL("/profile", {
+        queryParams: { userId: group.id },
+      });
+    }
+
+    return ExpoLinking.createURL("/home", {
+      queryParams: {
+        listingId: group.id,
+        listingType: normalizedType || "listing",
+      },
+    });
+  };
+
   const handleShare = async () => {
     try {
       const name = group?.name || 'this listing';
       const type = group?.type || 'Listing';
+      const shareUrl = buildListingShareUrl();
       await Share.share({
-        message: `Check out ${name} (${type}) on MusikaLokal!`,
+        message: `Check out ${name} (${type}) on MusikaLokal!\n${shareUrl}`,
+        url: shareUrl,
       });
     } catch {
       // user cancelled or share failed — no action needed
@@ -1503,6 +1580,18 @@ const ListingDetailsSheet = forwardRef<
         debugLog("Setting group data:", normalizedData);
         setGroup(normalizedData);
 
+        try {
+          await syncFavoriteMetadata(
+            getFavoriteTargetType(type),
+            data.id,
+            user?.id,
+          );
+        } catch (favoriteMetaError) {
+          debugLog("Failed to sync favorite metadata:", favoriteMetaError);
+          setIsFavorited(false);
+          setFavoriteCount(0);
+        }
+
         if (type === "Studio" || type === "Venue") {
           // Fetch existing bookings for availability calculation
           const fetchedBookings = await fetchStudioBookings(data.id);
@@ -1951,26 +2040,81 @@ const ListingDetailsSheet = forwardRef<
   };
 
   const toggleFavorite = async () => {
-    const nextState = !isFavorited;
-    setIsFavorited(nextState);
+    const targetType = getFavoriteTargetType(group?.type);
+    if (!targetType || !group?.id) {
+      showSheetAlert(
+        "info",
+        "Bookmark Unavailable",
+        "Bookmarking is currently available for groups, studios, and gigs.",
+      );
+      return;
+    }
 
-    // AI LEARNING: If favoriting, update user interest profile
-    if (nextState && group && group.embedding) {
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (user) {
+    if (!userId) {
+      showSheetAlert(
+        "warning",
+        "Login Required",
+        "Please sign in to bookmark listings.",
+      );
+      return;
+    }
+
+    const previousState = isFavorited;
+    const previousCount = favoriteCount;
+    const optimisticState = !previousState;
+    const optimisticCount = Math.max(
+      0,
+      previousCount + (optimisticState ? 1 : -1),
+    );
+
+    setIsFavorited(optimisticState);
+    setFavoriteCount(optimisticCount);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-details", {
+        body: {
+          action: "toggle_favorite",
+          type: targetType,
+          id: group.id,
+          userId,
+        },
+      });
+
+      if (error) throw error;
+
+      const resolvedFavorited =
+        typeof data?.is_favorited === "boolean"
+          ? data.is_favorited
+          : optimisticState;
+
+      setIsFavorited(resolvedFavorited);
+
+      if (typeof data?.favorites_count === "number") {
+        setFavoriteCount(Math.max(0, data.favorites_count));
+      } else {
+        await syncFavoriteMetadata(targetType, group.id, userId);
+      }
+
+      // AI LEARNING: If favoriting, update user interest profile
+      if (resolvedFavorited && !previousState && group.embedding) {
+        try {
           await supabase.rpc("update_user_interest", {
-            p_user_id: user.id,
+            p_user_id: userId,
             p_item_vector: group.embedding,
             p_weight: 0.3, // Strong learning signal for explicit favorite
           });
-          // debugLog('AI Learned from Favorite!');
+        } catch (e) {
+          debugLog("Error updating interest:", e);
         }
-      } catch (e) {
-        debugLog("Error updating interest:", e);
       }
+    } catch (e: any) {
+      setIsFavorited(previousState);
+      setFavoriteCount(previousCount);
+      showSheetAlert(
+        "error",
+        "Bookmark Failed",
+        e?.message || "Unable to update bookmark right now.",
+      );
     }
   };
 
@@ -2491,6 +2635,7 @@ const ListingDetailsSheet = forwardRef<
               colors={colors}
               styles={styles}
               isFavorited={isFavorited}
+              favoriteCount={favoriteCount}
               showReportButton={showReportButton}
               onClose={() => (ref as any)?.current?.dismiss()}
               onToggleFavorite={toggleFavorite}

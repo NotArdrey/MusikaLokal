@@ -14,6 +14,10 @@ import {
 import CachedImage from "../CachedImage";
 import ListingMediaCarousel from "./ListingMediaCarousel";
 
+const PROMOTION_CRITERIA_PREFIX = "how to get promo:";
+const PROMOTION_MIN_HOURS_PREFIX = "minimum booking hours:";
+const PROMOTION_MIN_SPEND_PREFIX = "minimum spend:";
+
 interface StudioGigVenueAboutTabProps {
   group: any;
   colors: any;
@@ -90,6 +94,70 @@ const StudioGigVenueAboutTab = ({
       return p.start_date <= today && p.end_date >= today;
     });
   }, [promotions]);
+
+  const parsePositivePromotionNumber = (value: unknown): number | null => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+  };
+
+  const formatPromotionNumber = (value: number): string => {
+    if (Number.isInteger(value)) return String(value);
+    return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+  };
+
+  const extractPromotionMetadata = (promo: any) => {
+    const rawDescription: string =
+      typeof promo?.description === "string" ? promo.description : "";
+    const lines = rawDescription
+      .split(/\r?\n/)
+      .map((line: string) => line.trim())
+      .filter(Boolean);
+
+    const remainingLines: string[] = [];
+    let fallbackCriteria = "";
+    let fallbackMinimumHours: number | null = null;
+    let fallbackMinimumSpend: number | null = null;
+
+    lines.forEach((line: string) => {
+      const normalizedLine = line.toLowerCase();
+
+      if (normalizedLine.startsWith(PROMOTION_CRITERIA_PREFIX)) {
+        fallbackCriteria = line.slice(PROMOTION_CRITERIA_PREFIX.length).trim();
+        return;
+      }
+
+      if (normalizedLine.startsWith(PROMOTION_MIN_HOURS_PREFIX)) {
+        const parsed = parsePositivePromotionNumber(
+          line.slice(PROMOTION_MIN_HOURS_PREFIX.length).trim(),
+        );
+        if (parsed !== null) fallbackMinimumHours = parsed;
+        return;
+      }
+
+      if (normalizedLine.startsWith(PROMOTION_MIN_SPEND_PREFIX)) {
+        const parsed = parsePositivePromotionNumber(
+          line.slice(PROMOTION_MIN_SPEND_PREFIX.length).trim(),
+        );
+        if (parsed !== null) fallbackMinimumSpend = parsed;
+        return;
+      }
+
+      remainingLines.push(line);
+    });
+
+    return {
+      description: remainingLines.join("\n"),
+      criteria:
+        (typeof promo?.criteria === "string" ? promo.criteria.trim() : "") ||
+        fallbackCriteria,
+      minimumBookingHours:
+        parsePositivePromotionNumber(promo?.minimum_booking_hours) ??
+        fallbackMinimumHours,
+      minimumSpend:
+        parsePositivePromotionNumber(promo?.minimum_spend) ?? fallbackMinimumSpend,
+    };
+  };
   const mediaItems = useMemo(() => {
     if (!isMediaCarouselType) return [];
 
@@ -451,68 +519,99 @@ const StudioGigVenueAboutTab = ({
         <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 10 }]}>
           Active Promotions
         </Text>
-        {activePromotions.map((promo: any) => (
-          <View
-            key={promo.id}
-            style={{
-              backgroundColor: isDark ? "#1e1b4b" : "#EEF2FF",
-              borderWidth: 1,
-              borderColor: isDark ? "#4338ca" : colors.primary + "40",
-              borderRadius: 12,
-              padding: 14,
-              marginBottom: 8,
-            }}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
-              <Text
-                style={{
-                  fontFamily: "Poppins_600SemiBold",
-                  color: isDark ? "#c7d2fe" : "#3730a3",
-                  fontSize: 14,
-                }}
-              >
-                {promo.name}
-              </Text>
-            </View>
-            <Text
+        {activePromotions.map((promo: any) => {
+          const metadata = extractPromotionMetadata(promo);
+          const conditionLabels: string[] = [];
+
+          if (metadata.criteria) {
+            conditionLabels.push(`How to get promo: ${metadata.criteria}`);
+          }
+          if (metadata.minimumBookingHours !== null) {
+            conditionLabels.push(
+              `Min ${formatPromotionNumber(metadata.minimumBookingHours)} hr${
+                metadata.minimumBookingHours === 1 ? "" : "s"
+              }`,
+            );
+          }
+          if (metadata.minimumSpend !== null) {
+            conditionLabels.push(`Min spend PHP ${metadata.minimumSpend.toLocaleString()}`);
+          }
+
+          return (
+            <View
+              key={promo.id}
               style={{
-                fontFamily: "Poppins_500Medium",
-                color: isDark ? "#a5b4fc" : "#4338ca",
-                fontSize: 13,
+                backgroundColor: isDark ? "#1e1b4b" : "#EEF2FF",
+                borderWidth: 1,
+                borderColor: isDark ? "#4338ca" : colors.primary + "40",
+                borderRadius: 12,
+                padding: 14,
+                marginBottom: 8,
               }}
             >
-              {promo.discount_type === "percentage"
-                ? `${promo.discount_value}% off`
-                : `₱${promo.discount_value}/hr off`}
-              {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
-            </Text>
-            {promo.description ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
+                <Text
+                  style={{
+                    fontFamily: "Poppins_600SemiBold",
+                    color: isDark ? "#c7d2fe" : "#3730a3",
+                    fontSize: 14,
+                  }}
+                >
+                  {promo.name}
+                </Text>
+              </View>
+              {conditionLabels.length > 0 ? (
+                <Text
+                  style={{
+                    fontFamily: "Poppins_400Regular",
+                    color: isDark ? "#a5b4fc" : "#4338ca",
+                    fontSize: 11,
+                    marginBottom: 2,
+                  }}
+                >
+                  {conditionLabels.join(" • ")}
+                </Text>
+              ) : null}
+              <Text
+                style={{
+                  fontFamily: "Poppins_500Medium",
+                  color: isDark ? "#a5b4fc" : "#4338ca",
+                  fontSize: 13,
+                }}
+              >
+                {promo.discount_type === "percentage"
+                  ? `${promo.discount_value}% off`
+                  : `₱${promo.discount_value}/hr off`}
+                {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
+              </Text>
+              {metadata.description ? (
+                <Text
+                  style={{
+                    fontFamily: "Poppins_400Regular",
+                    color: isDark ? "#a5b4fc" : "#4338ca",
+                    fontSize: 12,
+                    marginTop: 2,
+                  }}
+                >
+                  {metadata.description}
+                </Text>
+              ) : null}
               <Text
                 style={{
                   fontFamily: "Poppins_400Regular",
-                  color: isDark ? "#a5b4fc" : "#4338ca",
-                  fontSize: 12,
-                  marginTop: 2,
+                  color: isDark ? "#818cf8" : "#6366f1",
+                  fontSize: 11,
+                  marginTop: 4,
                 }}
               >
-                {promo.description}
+                {promo.is_permanent
+                  ? "Always available"
+                  : `Valid: ${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
               </Text>
-            ) : null}
-            <Text
-              style={{
-                fontFamily: "Poppins_400Regular",
-                color: isDark ? "#818cf8" : "#6366f1",
-                fontSize: 11,
-                marginTop: 4,
-              }}
-            >
-              {promo.is_permanent
-                ? "Always available"
-                : `Valid: ${new Date(promo.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date(promo.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`}
-            </Text>
-          </View>
-        ))}
+            </View>
+          );
+        })}
       </View>
     )}
 

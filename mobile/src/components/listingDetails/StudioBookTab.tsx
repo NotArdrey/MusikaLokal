@@ -30,6 +30,10 @@ const warnLog = (...args: unknown[]) => {
   }
 };
 
+const PROMOTION_CRITERIA_PREFIX = "how to get promo:";
+const PROMOTION_MIN_HOURS_PREFIX = "minimum booking hours:";
+const PROMOTION_MIN_SPEND_PREFIX = "minimum spend:";
+
 const supabaseUrl =
   Constants.expoConfig?.extra?.supabaseUrl ||
   process.env.EXPO_PUBLIC_SUPABASE_URL ||
@@ -352,7 +356,7 @@ const StudioBookTab = ({
     if (discountType === "percentage") {
       return `${discountValue}% off`;
     }
-    return `PHP ${discountValue} off`;
+    return `PHP ${discountValue} / hr off`;
   };
 
   const formatPromotionWindow = (promo: any) => {
@@ -362,6 +366,94 @@ const StudioBookTab = ({
     return `Valid ${new Date(`${promo.start_date}T00:00:00`).toLocaleDateString()} - ${new Date(
       `${promo.end_date}T00:00:00`,
     ).toLocaleDateString()}`;
+  };
+
+  const parsePositivePromoNumber = (value: unknown): number | null => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
+  };
+
+  const formatPromoNumber = (value: number): string => {
+    if (Number.isInteger(value)) return String(value);
+    return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+  };
+
+  const extractPromotionMetadata = (promo: any) => {
+    const rawDescription: string =
+      typeof promo?.description === "string" ? promo.description : "";
+    const lines = rawDescription
+      .split(/\r?\n/)
+      .map((line: string) => line.trim())
+      .filter(Boolean);
+
+    const remainingLines: string[] = [];
+    let fallbackCriteria = "";
+    let fallbackMinimumHours: number | null = null;
+    let fallbackMinimumSpend: number | null = null;
+
+    lines.forEach((line: string) => {
+      const normalizedLine = line.toLowerCase();
+
+      if (normalizedLine.startsWith(PROMOTION_CRITERIA_PREFIX)) {
+        fallbackCriteria = line.slice(PROMOTION_CRITERIA_PREFIX.length).trim();
+        return;
+      }
+
+      if (normalizedLine.startsWith(PROMOTION_MIN_HOURS_PREFIX)) {
+        const parsed = parsePositivePromoNumber(
+          line.slice(PROMOTION_MIN_HOURS_PREFIX.length).trim(),
+        );
+        if (parsed !== null) fallbackMinimumHours = parsed;
+        return;
+      }
+
+      if (normalizedLine.startsWith(PROMOTION_MIN_SPEND_PREFIX)) {
+        const parsed = parsePositivePromoNumber(
+          line.slice(PROMOTION_MIN_SPEND_PREFIX.length).trim(),
+        );
+        if (parsed !== null) fallbackMinimumSpend = parsed;
+        return;
+      }
+
+      remainingLines.push(line);
+    });
+
+    const criteria =
+      (typeof promo?.criteria === "string" ? promo.criteria.trim() : "") ||
+      fallbackCriteria;
+    const minimumBookingHours =
+      parsePositivePromoNumber(promo?.minimum_booking_hours) ?? fallbackMinimumHours;
+    const minimumSpend =
+      parsePositivePromoNumber(promo?.minimum_spend) ?? fallbackMinimumSpend;
+
+    return {
+      description: remainingLines.join("\n"),
+      criteria,
+      minimumBookingHours,
+      minimumSpend,
+    };
+  };
+
+  const formatPromotionConditions = (promo: any): string | null => {
+    const metadata = extractPromotionMetadata(promo);
+    const conditionLabels: string[] = [];
+
+    if (metadata.criteria) {
+      conditionLabels.push(`How to get promo: ${metadata.criteria}`);
+    }
+    if (metadata.minimumBookingHours !== null) {
+      conditionLabels.push(
+        `Min ${formatPromoNumber(metadata.minimumBookingHours)} hr${
+          metadata.minimumBookingHours === 1 ? "" : "s"
+        }`,
+      );
+    }
+    if (metadata.minimumSpend !== null) {
+      conditionLabels.push(`Min spend PHP ${metadata.minimumSpend.toLocaleString()}`);
+    }
+
+    return conditionLabels.length > 0 ? conditionLabels.join(" • ") : null;
   };
 
   const getLeadTimeViolationMessage = (
@@ -863,6 +955,7 @@ const StudioBookTab = ({
                 : appliesTo === "recording"
                   ? "Recording"
                   : "All sessions";
+            const conditionText = formatPromotionConditions(promo);
 
             return (
               <View key={String(promo.id || promo.name || index)}>
@@ -895,6 +988,18 @@ const StudioBookTab = ({
                 >
                   {formatPromotionWindow(promo)}
                 </Text>
+                {conditionText ? (
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      fontFamily: "Poppins_400Regular",
+                      fontSize: 10,
+                      marginTop: 1,
+                    }}
+                  >
+                    {conditionText}
+                  </Text>
+                ) : null}
               </View>
             );
           })}
@@ -919,7 +1024,7 @@ const StudioBookTab = ({
               (usesRecordingWholeDayMode && bookingSongCount
                 ? getRecordingRatePerSong() * bookingSongCount
                 : parseInt(displayRate.replace(/,/g, "")) * hours);
-            const hasModifiers = booking.pricing?.modifiers && Object.keys(booking.pricing.modifiers).length > 0;
+            const appliedPromotion = booking.pricing?.modifiers?.promotion;
             const slots = booking.timeSlots || [
               {
                 start: toTimeLabel(booking.startTime),
@@ -1028,7 +1133,7 @@ const StudioBookTab = ({
                         ? `${bookingSongCount} song${bookingSongCount > 1 ? "s" : ""}`
                         : `(${booking.pricing?.hours?.toFixed(1) || hours.toFixed(1)}h total)`}
                     </Text>
-                    {hasModifiers && (
+                    {appliedPromotion && (
                       <View
                         style={{
                           marginLeft: 8,
@@ -1039,7 +1144,11 @@ const StudioBookTab = ({
                         }}
                       >
                         <Text style={{ color: colors.primary, fontSize: 10 }}>
-                          {booking.pricing?.modifiers?.promotion?.name || "Promo Applied"}
+                          {`${appliedPromotion?.name || "Promo Applied"}${
+                            Number(appliedPromotion?.discount_amount || 0) > 0
+                              ? ` • -PHP ${Number(appliedPromotion.discount_amount).toLocaleString()}`
+                              : ""
+                          }`}
                         </Text>
                       </View>
                     )}
@@ -1207,7 +1316,9 @@ const StudioBookTab = ({
                         p_booking_date: bookingDate,
                         p_session_type: selectedSessionType?.toLowerCase() || "recording",
                         p_base_price: finalPricing.final_price || 0,
-                        p_hours: songCount,
+                        p_hours: Number(
+                          finalPricing.total_hours || finalPricing.hours || currentSlotHours || 0,
+                        ),
                       });
                       if (promoResult) {
                         finalPricing = {

@@ -317,7 +317,6 @@ const GigApplyTab = ({
                       <TouchableOpacity activeOpacity={1}
                         key={g.id}
                         onPress={() => setSelectedGroupId(g.id)}
-                        activeOpacity={1}
                         style={{
                           flexDirection: "row",
                           alignItems: "center",
@@ -390,7 +389,6 @@ const GigApplyTab = ({
                       <TouchableOpacity activeOpacity={1}
                         key={opt.id ?? "__solo__"}
                         onPress={() => setSelectedGroupId(opt.id)}
-                        activeOpacity={1}
                         style={{
                           flexDirection: "row",
                           alignItems: "center",
@@ -487,7 +485,6 @@ const GigApplyTab = ({
             alignItems: "center",
             marginBottom: 24,
           }}
-          activeOpacity={1}
         >
           <Ionicons name="document-text-outline" size={18} color={colors.primary} />
           <Text
@@ -571,7 +568,6 @@ const GigApplyTab = ({
           groupAlreadyApplied ||
           (group.requirements?.musician_type === "group" && !selectedGroupId)
         }
-        activeOpacity={1}
       >
         {isSubmittingApplication ? (
           <ActivityIndicator color="#fff" />

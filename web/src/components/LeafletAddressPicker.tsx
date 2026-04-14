@@ -184,7 +184,6 @@ export default function LeafletAddressPicker({
                     },
                 ]}
                 onPress={() => setModalVisible(true)}
-                activeOpacity={1}
             >
                 <Ionicons
                     name="location-outline"

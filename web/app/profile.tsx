@@ -37,6 +37,12 @@ const ITEM_SIZE = Math.floor(
   NUM_COLUMNS
 );
 
+const EMPTY_BOOKMARKS = {
+  studios: [] as any[],
+  gigs: [] as any[],
+  musicians: [] as any[],
+};
+
 export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
   const { width: winWidth } = useWindowDimensions();
@@ -79,6 +85,8 @@ export default function ProfileScreen() {
     upcoming: any[];
     done: any[];
   }>({ active: [], upcoming: [], done: [] });
+  const [bookmarkedListings, setBookmarkedListings] = useState(EMPTY_BOOKMARKS);
+  const [loadingBookmarks, setLoadingBookmarks] = useState(false);
   const [gigSearchQuery, setGigSearchQuery] = useState("");
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
@@ -103,6 +111,140 @@ export default function ProfileScreen() {
       done: gigTimeline.done.filter(match),
     };
   }, [gigSearchQuery, gigTimeline]);
+
+  const resolveBookmarkImage = (entry: any): string | null => {
+    if (Array.isArray(entry?.images) && typeof entry.images[0] === "string") {
+      return entry.images[0];
+    }
+
+    if (typeof entry?.image === "string" && entry.image.trim().length > 0) {
+      return entry.image;
+    }
+
+    if (typeof entry?.avatar_url === "string" && entry.avatar_url.trim().length > 0) {
+      return entry.avatar_url;
+    }
+
+    return null;
+  };
+
+  const fetchBookmarkedListings = async (
+    viewerId: string,
+    shouldLoad: boolean,
+  ) => {
+    if (!shouldLoad) {
+      setBookmarkedListings(EMPTY_BOOKMARKS);
+      setLoadingBookmarks(false);
+      return;
+    }
+
+    setLoadingBookmarks(true);
+
+    try {
+      const { data: favoritesData, error: favoritesError } = await supabase
+        .from("favorites")
+        .select("group_id, studio_id, gig_id, created_at")
+        .eq("user_id", viewerId)
+        .order("created_at", { ascending: false });
+
+      if (favoritesError) throw favoritesError;
+
+      const favorites = favoritesData || [];
+      const groupIds = favorites
+        .map((entry: any) => entry.group_id)
+        .filter((value: any): value is string => typeof value === "string");
+      const studioIds = favorites
+        .map((entry: any) => entry.studio_id)
+        .filter((value: any): value is string => typeof value === "string");
+      const gigIds = favorites
+        .map((entry: any) => entry.gig_id)
+        .filter((value: any): value is string => typeof value === "string");
+
+      const [groupsResult, studiosResult, gigsResult] = await Promise.all([
+        groupIds.length > 0
+          ? supabase
+            .from("groups_with_stats")
+            .select("id, name, location, images, image, genre")
+            .in("id", groupIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        studioIds.length > 0
+          ? supabase
+            .from("studios_with_stats")
+            .select("id, name, address, images, image")
+            .in("id", studioIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        gigIds.length > 0
+          ? supabase
+            .from("gigs_with_stats")
+            .select("id, name, location, event_date, image, images")
+            .in("id", gigIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
+
+      if (groupsResult.error) throw groupsResult.error;
+      if (studiosResult.error) throw studiosResult.error;
+      if (gigsResult.error) throw gigsResult.error;
+
+      const groupById = new Map((groupsResult.data || []).map((entry: any) => [entry.id, entry]));
+      const studioById = new Map((studiosResult.data || []).map((entry: any) => [entry.id, entry]));
+      const gigById = new Map((gigsResult.data || []).map((entry: any) => [entry.id, entry]));
+
+      const musicians = favorites
+        .filter((entry: any) => !!entry.group_id)
+        .map((entry: any) => groupById.get(entry.group_id))
+        .filter(Boolean)
+        .map((entry: any) => ({
+          id: entry.id,
+          name: entry.name || "Unnamed Musician",
+          subtitle: entry.location || entry.genre || "Musician",
+          image: resolveBookmarkImage(entry),
+          type: "Musician",
+        }));
+
+      const studios = favorites
+        .filter((entry: any) => !!entry.studio_id)
+        .map((entry: any) => studioById.get(entry.studio_id))
+        .filter(Boolean)
+        .map((entry: any) => ({
+          id: entry.id,
+          name: entry.name || "Unnamed Studio",
+          subtitle: entry.address || "Studio",
+          image: resolveBookmarkImage(entry),
+          type: "Studio",
+        }));
+
+      const gigs = favorites
+        .filter((entry: any) => !!entry.gig_id)
+        .map((entry: any) => gigById.get(entry.gig_id))
+        .filter(Boolean)
+        .map((entry: any) => ({
+          id: entry.id,
+          name: entry.name || "Unnamed Gig",
+          subtitle:
+            entry.location ||
+            (entry.event_date
+              ? new Date(entry.event_date).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+              : "Gig"),
+          image: resolveBookmarkImage(entry),
+          type: "Gig",
+        }));
+
+      setBookmarkedListings({
+        studios: studios.slice(0, 8),
+        gigs: gigs.slice(0, 8),
+        musicians: musicians.slice(0, 8),
+      });
+    } catch (bookmarkError) {
+      console.log("Error fetching bookmarks:", bookmarkError);
+      setBookmarkedListings(EMPTY_BOOKMARKS);
+    } finally {
+      setLoadingBookmarks(false);
+    }
+  };
 
   // Refresh profile data every time the screen comes into focus
   useFocusEffect(
@@ -146,6 +288,8 @@ export default function ProfileScreen() {
           setIsOwner(false);
           setGigStats({ active: 0, upcoming: 0, done: 0 });
           setGigTimeline({ active: [], upcoming: [], done: [] });
+          setBookmarkedListings(EMPTY_BOOKMARKS);
+          setLoadingBookmarks(false);
           setProfile({
             full_name: "Guest User",
             role: null,
@@ -309,6 +453,8 @@ export default function ProfileScreen() {
           .map((row: any) => row.portfolio_url)
           .filter(Boolean),
       });
+
+      await fetchBookmarkedListings(targetId, !!ownership && !isGuest);
     } catch (e) {
       console.log("Error fetching profile:", e);
     } finally {
@@ -401,6 +547,18 @@ export default function ProfileScreen() {
 
     router.back();
   }, [params.returnListingId, params.returnToHome]);
+
+  const openBookmarkedListing = async (itemId: string) => {
+    if (!itemId) return;
+
+    try {
+      await AsyncStorage.setItem("pending_reopen_listing_id", itemId);
+    } catch {
+      // Continue navigation even if cache write fails.
+    }
+
+    router.push("/home");
+  };
 
   const submitProfileReport = async (reason: string, details?: string) => {
     if (!currentUserId) {
@@ -822,6 +980,69 @@ export default function ProfileScreen() {
 
             {profile?.role === "musician" && profile?.show_gig_statuses === false && isOwner && (
               <Text style={[styles.gigHiddenText, { color: colors.textSecondary }]}>Gig status is hidden from other users.</Text>
+            )}
+
+            {isOwner && !isGuest && (
+              <View style={styles.bookmarkSection}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Bookmarks</Text>
+
+                {loadingBookmarks ? (
+                  <View style={[styles.bookmarkEmptyState, { borderColor: borderSoft, backgroundColor: surfaceBackground }]}>
+                    <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>Loading saved bookmarks...</Text>
+                  </View>
+                ) : (
+                  ([
+                    { key: "studios", title: "Studios", items: bookmarkedListings.studios, icon: "business-outline" },
+                    { key: "gigs", title: "Gigs", items: bookmarkedListings.gigs, icon: "mic-outline" },
+                    { key: "musicians", title: "Musicians", items: bookmarkedListings.musicians, icon: "people-outline" },
+                  ] as const).map((section) => (
+                    <View key={section.key} style={styles.bookmarkBlock}>
+                      <Text style={[styles.bookmarkBlockTitle, { color: colors.text }]}> 
+                        {section.title} ({section.items.length})
+                      </Text>
+
+                      {section.items.length > 0 ? (
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.bookmarkHorizontalList}
+                        >
+                          {section.items.map((item) => (
+                            <TouchableOpacity
+                              key={`${section.key}-${item.id}`}
+                              activeOpacity={1}
+                              onPress={() => openBookmarkedListing(item.id)}
+                              style={[
+                                styles.bookmarkCard,
+                                { backgroundColor: pageCardBackground, borderColor: borderSoft },
+                              ]}
+                            >
+                              {item.image ? (
+                                <Image source={{ uri: item.image }} style={styles.bookmarkCardImage} />
+                              ) : (
+                                <View style={[styles.bookmarkCardImageFallback, { backgroundColor: surfaceBackground }]}>
+                                  <Ionicons name={section.icon as any} size={20} color={colors.textSecondary} />
+                                </View>
+                              )}
+
+                              <Text numberOfLines={1} style={[styles.bookmarkCardTitle, { color: colors.text }]}>
+                                {item.name}
+                              </Text>
+                              <Text numberOfLines={1} style={[styles.bookmarkCardSubtitle, { color: colors.textSecondary }]}>
+                                {item.subtitle}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      ) : (
+                        <View style={[styles.bookmarkEmptyState, { borderColor: borderSoft, backgroundColor: surfaceBackground }]}>
+                          <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>No saved {section.title.toLowerCase()} yet.</Text>
+                        </View>
+                      )}
+                    </View>
+                  ))
+                )}
+              </View>
             )}
 
           </View>
@@ -1299,6 +1520,61 @@ const styles = StyleSheet.create({
   },
   gigHiddenText: {
     marginTop: 10,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+  },
+  bookmarkSection: {
+    width: "100%",
+    marginTop: 18,
+    gap: 14,
+  },
+  bookmarkBlock: {
+    gap: 8,
+  },
+  bookmarkBlockTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
+  bookmarkHorizontalList: {
+    paddingRight: 8,
+    gap: 10,
+  },
+  bookmarkCard: {
+    width: 170,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 8,
+    gap: 6,
+  },
+  bookmarkCardImage: {
+    width: "100%",
+    height: 88,
+    borderRadius: 10,
+    backgroundColor: "#111827",
+  },
+  bookmarkCardImageFallback: {
+    width: "100%",
+    height: 88,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bookmarkCardTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 13,
+  },
+  bookmarkCardSubtitle: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+  },
+  bookmarkEmptyState: {
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  bookmarkEmptyText: {
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
   },

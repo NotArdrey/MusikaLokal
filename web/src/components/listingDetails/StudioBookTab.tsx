@@ -1506,7 +1506,6 @@ const StudioBookTab = ({
               },
             ]}
             disabled={bookings.length === 0 || loading}
-            activeOpacity={1}
             onPress={() =>
               bookings.length > 0 &&
               handleConfirm(

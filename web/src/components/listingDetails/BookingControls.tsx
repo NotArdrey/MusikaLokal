@@ -442,14 +442,14 @@ const BookingControls = ({
                           color: colors.text,
                         }}
                       >
-                        {formatTime12(recordingDaySlot.start)} - {formatTime12(recordingDaySlot.end)}
+                        {formatTime12(recordingDaySlot!.start)} - {formatTime12(recordingDaySlot!.end)}
                       </Text>
                     </View>
                   </View>
 
                   {(() => {
-                    const startParts = recordingDaySlot.start.split(":").map(Number);
-                    const endParts = recordingDaySlot.end.split(":").map(Number);
+                    const startParts = recordingDaySlot!.start.split(":").map(Number);
+                    const endParts = recordingDaySlot!.end.split(":").map(Number);
                     const startMinutes = startParts[0] * 60 + startParts[1];
                     const endMinutes = endParts[0] * 60 + endParts[1];
                     const durationHours = (endMinutes - startMinutes) / 60;

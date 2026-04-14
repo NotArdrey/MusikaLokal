@@ -47,6 +47,20 @@ const normalizeOptionalText = (rawValue: unknown, maxLength: number): string | n
     return value.slice(0, maxLength)
 }
 
+const getFavoritesCount = async (
+    client: any,
+    type: 'group' | 'studio' | 'gig',
+    id: string,
+): Promise<number> => {
+    const { count, error } = await client
+        .from('favorites')
+        .select('id', { count: 'exact', head: true })
+        .eq(type + '_id', id)
+
+    if (error) throw error
+    return count || 0
+}
+
 const assertReportTargetExists = async (
     client: any,
     targetType: NormalizedReportTargetType,
@@ -128,14 +142,20 @@ serve(async (req: Request) => {
                 isOwner = entity.owner_id === userId
             }
 
-            // Check if Favorited
-            const { count } = await supabaseClient
-                .from('favorites')
-                .select('*', { count: 'exact', head: true })
-                .eq('user_id', userId)
-                .eq(type + '_id', id)
+            // Check if Favorited for current viewer
+            let isFavorited = false
+            if (userId) {
+                const { count, error: favoriteCheckError } = await supabaseClient
+                    .from('favorites')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('user_id', userId)
+                    .eq(type + '_id', id)
 
-            const isFavorited = count ? count > 0 : false
+                if (favoriteCheckError) throw favoriteCheckError
+                isFavorited = (count || 0) > 0
+            }
+
+            const favoritesCount = await getFavoritesCount(supabaseClient, type, id)
 
             // Fetch Reviews with computed likes count (using view)
             const { data: reviews } = await supabaseClient
@@ -157,6 +177,7 @@ serve(async (req: Request) => {
                 review_count: entity.computed_review_count || 0,
                 is_owner: isOwner,
                 is_favorited: isFavorited,
+                favorites_count: favoritesCount,
                 reviews: mappedReviews
             }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -167,24 +188,38 @@ serve(async (req: Request) => {
         // 2. TOGGLE FAVORITE
         if (action === 'toggle_favorite') {
             // Check if exists
-            const { data: existing } = await supabaseClient
+            const { data: existing, error: existingError } = await supabaseClient
                 .from('favorites')
                 .select('id')
                 .eq('user_id', userId)
                 .eq(type + '_id', id)
-                .single()
+                .maybeSingle()
+
+            if (existingError) throw existingError
 
             if (existing) {
                 // Remove
-                await supabaseClient.from('favorites').delete().eq('id', existing.id)
-                return new Response(JSON.stringify({ is_favorited: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+                const { error: deleteError } = await supabaseClient.from('favorites').delete().eq('id', existing.id)
+                if (deleteError) throw deleteError
+
+                const favoritesCount = await getFavoritesCount(supabaseClient, type, id)
+                return new Response(
+                    JSON.stringify({ is_favorited: false, favorites_count: favoritesCount }),
+                    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+                )
             } else {
                 // Add
                 const payload: any = { user_id: userId }
                 payload[type + '_id'] = id
 
-                await supabaseClient.from('favorites').insert(payload)
-                return new Response(JSON.stringify({ is_favorited: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+                const { error: insertError } = await supabaseClient.from('favorites').insert(payload)
+                if (insertError) throw insertError
+
+                const favoritesCount = await getFavoritesCount(supabaseClient, type, id)
+                return new Response(
+                    JSON.stringify({ is_favorited: true, favorites_count: favoritesCount }),
+                    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+                )
             }
         }
 

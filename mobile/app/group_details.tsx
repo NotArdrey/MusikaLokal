@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ExpoLinking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -7,6 +8,7 @@ import {
     Dimensions,
     Image,
     ScrollView,
+  Share,
     StatusBar,
     StyleSheet,
     Text,
@@ -36,6 +38,7 @@ export default function GroupDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [group, setGroup] = useState<any>(null);
   const [isFavorited, setIsFavorited] = useState(false);
+  const [favoriteCount, setFavoriteCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
   const [alertVisible, setAlertVisible] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -69,7 +72,8 @@ export default function GroupDetailsScreen() {
 
       if (error) throw error;
       setGroup(data);
-      setIsFavorited(data.is_favorited);
+      setIsFavorited(Boolean(data?.is_favorited));
+      setFavoriteCount(Number(data?.favorites_count || 0));
     } catch (e) {
       console.log('Error fetching group:', e);
     } finally {
@@ -77,7 +81,71 @@ export default function GroupDetailsScreen() {
     }
   };
 
-  const toggleFavorite = () => setIsFavorited(!isFavorited);
+  const buildShareUrl = () => {
+    if (!group?.id) {
+      return ExpoLinking.createURL('/home');
+    }
+
+    return ExpoLinking.createURL('/group_details', {
+      queryParams: { id: group.id },
+    });
+  };
+
+  const handleShare = async () => {
+    try {
+      const shareUrl = buildShareUrl();
+      await Share.share({
+        message: `Check out ${group?.name || 'this group'} on MusikaLokal!\n${shareUrl}`,
+        url: shareUrl,
+      });
+    } catch {
+      // No-op if cancelled
+    }
+  };
+
+  const toggleFavorite = async () => {
+    if (!userId) {
+      showAlert('warning', 'Login Required', 'Please sign in to bookmark this listing.');
+      return;
+    }
+
+    if (!group?.id) {
+      showAlert('error', 'Bookmark Unavailable', 'Missing group details.');
+      return;
+    }
+
+    const previousState = isFavorited;
+    const previousCount = favoriteCount;
+    const optimisticState = !previousState;
+    const optimisticCount = Math.max(0, previousCount + (optimisticState ? 1 : -1));
+
+    setIsFavorited(optimisticState);
+    setFavoriteCount(optimisticCount);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('manage-details', {
+        body: {
+          action: 'toggle_favorite',
+          type: 'group',
+          id: group.id,
+          userId,
+        },
+      });
+
+      if (error) throw error;
+
+      if (typeof data?.is_favorited === 'boolean') {
+        setIsFavorited(data.is_favorited);
+      }
+      if (typeof data?.favorites_count === 'number') {
+        setFavoriteCount(Math.max(0, data.favorites_count));
+      }
+    } catch (e: any) {
+      setIsFavorited(previousState);
+      setFavoriteCount(previousCount);
+      showAlert('error', 'Bookmark Failed', e?.message || 'Unable to update bookmark right now.');
+    }
+  };
 
   const showAlert = (type: AlertType, title: string, message: string, buttons?: any[]) => {
     setAlertConfig({ type, title, message, buttons });
@@ -178,7 +246,7 @@ export default function GroupDetailsScreen() {
             </TouchableOpacity>
 
             <View style={styles.rightActions}>
-              <TouchableOpacity activeOpacity={1} style={styles.roundBtn}>
+              <TouchableOpacity activeOpacity={1} style={styles.roundBtn} onPress={handleShare}>
                 <Ionicons name="share-outline" size={24} color="#000" />
               </TouchableOpacity>
               {!isOwner && userId ? (
@@ -193,7 +261,7 @@ export default function GroupDetailsScreen() {
                 onPress={toggleFavorite}
                 style={styles.roundBtn}
               >
-                <Ionicons name={isFavorited ? "heart" : "heart-outline"} size={24} color={isFavorited ? "#EF4444" : "#000"} />
+                <Ionicons name={isFavorited ? "bookmark" : "bookmark-outline"} size={24} color={isFavorited ? colors.primary : "#000"} />
               </TouchableOpacity>
             </View>
           </View>
@@ -212,6 +280,9 @@ export default function GroupDetailsScreen() {
             </View>
             <Text style={[styles.locationText, { color: colors.textSecondary }]}>
               {group.location || 'Manila, Philippines'}
+            </Text>
+            <Text style={[styles.locationText, { color: colors.textSecondary, marginTop: 4 }]}>
+              {favoriteCount} bookmarked
             </Text>
             {hasValidCoordinates(group?.latitude, group?.longitude) && (
               <TouchableOpacity

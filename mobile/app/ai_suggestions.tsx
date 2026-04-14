@@ -821,7 +821,7 @@ export default function AiSuggestionsScreen() {
                 {/* Pro Tip */}
                 {suggestion.proTip && (
                     <View style={[styles.proTipContainer, { backgroundColor: '#FEF3C7' }]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: 'center', gap: 6, marginBottom: 4 }}>
                             <Ionicons name="bulb" size={16} color="#D97706" />
                             <Text style={styles.proTipLabel}>Pro Tip</Text>
                         </View>
@@ -1293,7 +1293,7 @@ const styles = StyleSheet.create({
         marginTop: 8,
     },
     purposeCard: {
-        width: (SCREEN_WIDTH - 48) / 2 - 4,
+        width: "48%",
         padding: 16,
         borderRadius: 12,
         borderWidth: 1.5,
@@ -1840,3 +1840,5 @@ const styles = StyleSheet.create({
         fontFamily: 'Poppins_600SemiBold',
     },
 });
+
+

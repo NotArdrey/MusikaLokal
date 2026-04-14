@@ -1497,7 +1497,7 @@ export default function AddGigScreen() {
                       },
                     ]}
                   >
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
                       <View style={{
                         backgroundColor: colors.primary,
                         borderRadius: 20,
@@ -1852,7 +1852,7 @@ export default function AddGigScreen() {
                         key={`${item.date}-${item.start_time}-${item.end_time}-${index}`}
                         style={[styles.dayCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: colors.border, padding: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
                       >
-                        <View style={{ flex: 1, paddingRight: 8 }}>
+                        <View style={{ flex: 1, minWidth: 150, paddingRight: 8 }}>
                           <Text style={{ color: colors.text, fontFamily: "Poppins_600SemiBold", fontSize: 12 }}>
                             {new Date(item.date).toLocaleDateString("en-US", {
                               weekday: "short",
@@ -1905,7 +1905,7 @@ export default function AddGigScreen() {
                         alignItems: "center",
                         gap: 12,
                         flex: 1,
-                      }}
+                      minWidth: 150 }}
                     >
                       <View
                         style={[
@@ -2026,7 +2026,7 @@ export default function AddGigScreen() {
                         alignItems: "center",
                         gap: 12,
                         flex: 1,
-                      }}
+                      minWidth: 150 }}
                     >
                       <View
                         style={[
@@ -2322,7 +2322,7 @@ export default function AddGigScreen() {
 
                 <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                   <View style={styles.slotHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                       <Ionicons name="person" size={20} color="#EC4899" />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Solo Artists</Text>
                     </View>
@@ -2504,7 +2504,7 @@ export default function AddGigScreen() {
                 {/* Duo Slots */}
                 <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
                   <View style={styles.slotHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                       <Ionicons name="people" size={20} color="#8B5CF6" />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Duos (2 members)</Text>
                     </View>
@@ -2686,7 +2686,7 @@ export default function AddGigScreen() {
                 {/* Preferred Group Type Slots */}
                 <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB", marginTop: 12 }]}>
                   <View style={styles.slotHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                       <Ionicons name="musical-notes" size={20} color="#3B82F6" />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Preferred Group Type</Text>
                     </View>
@@ -2742,7 +2742,7 @@ export default function AddGigScreen() {
                               {type.label}
                             </Text>
                             {typeCount > 0 && (
-                              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                              <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
                                 <View
                                   style={{
                                     minWidth: 20,
@@ -2967,7 +2967,7 @@ export default function AddGigScreen() {
                 </Text>
                 <View style={[styles.slotCard, { backgroundColor: isDark ? "#1F2937" : "#F9FAFB", borderColor: isDark ? "#374151" : "#E5E7EB" }]}>
                   <View style={styles.slotHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                       <Ionicons name="time-outline" size={20} color={colors.primary} />
                       <Text style={[styles.slotTitle, { color: colors.text }]}>Cooldown Period</Text>
                     </View>
@@ -3145,7 +3145,7 @@ export default function AddGigScreen() {
                       <Text style={styles.reviewLabel}>Looking For</Text>
                       <View style={{ gap: 8 }}>
                         {soloSlotsNeeded > 0 && (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                             <Ionicons name="person" size={16} color="#EC4899" />
                             <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
                               {soloSlotsNeeded} Solo Artist{soloSlotsNeeded > 1 ? "s" : ""}
@@ -3161,7 +3161,7 @@ export default function AddGigScreen() {
                           </Text>
                         )}
                         {duoSlotsNeeded > 0 && (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                             <Ionicons name="people" size={16} color="#8B5CF6" />
                             <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
                               {duoSlotsNeeded} Duo{duoSlotsNeeded > 1 ? "s" : ""}
@@ -3177,7 +3177,7 @@ export default function AddGigScreen() {
                           </Text>
                         )}
                         {bandSlotsNeeded > 0 && (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
                             <Ionicons name="people-circle" size={16} color="#3B82F6" />
                             <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>
                               {bandSlotsNeeded} Group{bandSlotsNeeded > 1 ? "s" : ""}

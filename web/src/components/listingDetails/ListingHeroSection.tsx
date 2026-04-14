@@ -9,6 +9,7 @@ interface ListingHeroSectionProps {
   colors: any;
   styles: any;
   isFavorited: boolean;
+  favoriteCount?: number;
   showReportButton?: boolean;
   onClose: () => void;
   onToggleFavorite: () => void;
@@ -21,6 +22,7 @@ const ListingHeroSection = ({
   colors,
   styles,
   isFavorited,
+  favoriteCount = 0,
   showReportButton = false,
   onClose,
   onToggleFavorite,
@@ -72,9 +74,9 @@ const ListingHeroSection = ({
         ) : null}
         <TouchableOpacity activeOpacity={1} onPress={onToggleFavorite} style={styles.roundBtn}>
           <Ionicons
-            name={isFavorited ? "heart" : "heart-outline"}
+            name={isFavorited ? "bookmark" : "bookmark-outline"}
             size={22}
-            color={isFavorited ? "#EF4444" : "#000"}
+            color={isFavorited ? colors.primary : "#000"}
             style={actionIconStyle}
           />
         </TouchableOpacity>
@@ -94,6 +96,18 @@ const ListingHeroSection = ({
         <Ionicons name="location" size={14} color="#FFF" />
         <Text style={styles.heroLocation}>{group.location || "Manila"}</Text>
         <Text style={[styles.heroLocation, { marginLeft: 12 }]}>• {group.genre || "Music"}</Text>
+      </View>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          marginTop: 4,
+        }}
+      >
+        <Ionicons name="bookmark" size={13} color="#FFF" />
+        <Text style={[styles.heroLocation, { marginLeft: 6 }]}> 
+          {favoriteCount} bookmarked
+        </Text>
       </View>
     </View>
   </View>

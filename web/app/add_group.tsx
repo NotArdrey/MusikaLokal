@@ -1338,7 +1338,7 @@ export default function AddGroupScreen() {
                           {pendingMember.full_name}
                         </Text>
                       </View>
-                      <View style={{ flexDirection: "row", gap: 8 }}>
+                      <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                         <TextInput
                           value={newMemberInstrument}
                           onChangeText={setNewMemberInstrument}
@@ -1856,7 +1856,7 @@ export default function AddGroupScreen() {
       {groupTypeModalVisible && (
         <View style={StyleSheet.absoluteFillObject}>
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
+            style={{ flex: 1, minWidth: 150, backgroundColor: "rgba(0,0,0,0.5)" }}
             activeOpacity={1}
             onPress={() => setGroupTypeModalVisible(false)}
           />

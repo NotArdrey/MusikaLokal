@@ -275,7 +275,6 @@ export default function ImageUploader({
             style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: isDark ? colors.card : '#F3F4F6' }]}
             onPress={pickAndUploadImages}
             disabled={uploading || images.length >= maxImages}
-            activeOpacity={1}
           >
             {uploading ? (
               <ActivityIndicator size="small" color={colors.primary} />

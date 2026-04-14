@@ -1467,7 +1467,7 @@ export default function EditGroupScreen() {
               ]}
             >
               <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}
               >
                 <Ionicons
                   name="location-outline"
@@ -1694,7 +1694,7 @@ export default function EditGroupScreen() {
                     {pendingMember.full_name}
                   </Text>
                 </View>
-                <View style={{ flexDirection: "row", gap: 8 }}>
+                <View style={{ flexDirection: "row", gap: 8 , flexWrap: "wrap", minWidth: "100%" }}>
                   <TextInput
                     value={newMemberInstrument}
                     onChangeText={setNewMemberInstrument}
@@ -2015,7 +2015,7 @@ export default function EditGroupScreen() {
                   alignItems: "center",
                   gap: 8,
                   flex: 1,
-                }}
+                minWidth: 150 }}
               >
                 <Ionicons name="time-outline" size={20} color="#F59E0B" />
                 <View style={{ flex: 1 }}>
@@ -2291,7 +2291,7 @@ export default function EditGroupScreen() {
             )}
 
             {/* Actions */}
-            <View style={{ flexDirection: "row", gap: 12, marginTop: 16 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 16 }}>
               <TouchableOpacity activeOpacity={1}
                 style={[
                   styles.cancelButton,
@@ -2344,7 +2344,7 @@ export default function EditGroupScreen() {
       {groupTypeModalVisible && (
         <View style={StyleSheet.absoluteFillObject}>
           <TouchableOpacity
-            style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
+            style={{ flex: 1, minWidth: 150, backgroundColor: "rgba(0,0,0,0.5)" }}
             activeOpacity={1}
             onPress={() => setGroupTypeModalVisible(false)}
           />

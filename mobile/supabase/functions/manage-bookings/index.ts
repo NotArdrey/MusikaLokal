@@ -1819,9 +1819,7 @@ serve(async (req: Request) => {
 
       // Apply active promotions server-side to keep saved booking totals aligned with listing pricing.
       try {
-        const promoHoursInput = isRecordingSession
-          ? requestedSongCount
-          : Number(pricingData.total_hours || pricingData.hours || 0);
+        const promoHoursInput = Number(pricingData.total_hours || pricingData.hours || 0);
         const promoBasePrice = Number(
           pricingData.final_price || pricingData.subtotal || 0,
         );

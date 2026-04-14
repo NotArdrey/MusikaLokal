@@ -398,7 +398,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                                     <TouchableOpacity activeOpacity={1}
                                         style={[styles.fileBubble, { borderColor: isMe ? 'rgba(255,255,255,0.3)' : colors.border }]}
                                         onPress={() => Linking.openURL(item.attachment_url!)}
-                                        activeOpacity={1}
                                     >
                                         <Ionicons name="document-attach" size={28} color={isMe ? '#FFF' : colors.primary} />
                                         <View style={{ flex: 1, marginLeft: 8 }}>
