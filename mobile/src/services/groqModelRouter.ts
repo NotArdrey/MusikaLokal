@@ -41,6 +41,11 @@ interface EnhanceOfflineSuggestionsResult {
   message: string;
 }
 
+interface FollowupConversationTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 interface InstrumentSuggestionFollowupInput {
   question: string;
   suggestions: InstrumentSuggestion[];
@@ -48,6 +53,7 @@ interface InstrumentSuggestionFollowupInput {
   userRoles?: string[];
   experienceLevel?: ExperienceLevel;
   purpose?: SuggestionPurpose;
+  conversation?: FollowupConversationTurn[];
 }
 
 interface InstrumentSuggestionFollowupResult {
@@ -197,27 +203,97 @@ const INSTRUMENT_SCOPE_KEYWORDS = [
   "setup",
 ];
 
-const isFollowupQuestionInScope = (question: string, suggestions: InstrumentSuggestion[]) => {
+const FOLLOWUP_REFERENCE_REGEX =
+  /\b(it|that|this|those|these|same|also|instead|compare|versus|vs|which one|that one|first one|second one)\b|^(what about|how about|and|then)\b/i;
+
+const sanitizeFollowupConversation = (
+  conversation?: FollowupConversationTurn[],
+): FollowupConversationTurn[] => {
+  if (!Array.isArray(conversation)) {
+    return [];
+  }
+
+  return conversation
+    .filter(
+      (turn): turn is FollowupConversationTurn =>
+        (turn?.role === "user" || turn?.role === "assistant") &&
+        typeof turn?.text === "string" &&
+        normalizeWhitespace(turn.text).length > 0,
+    )
+    .map((turn) => ({
+      role: turn.role,
+      text: normalizeWhitespace(turn.text),
+    }))
+    .slice(-8);
+};
+
+const mentionsSuggestedInstrument = (
+  text: string,
+  suggestions: InstrumentSuggestion[],
+) => {
+  const normalizedText = normalizeWhitespace(text).toLowerCase();
+  if (!normalizedText) {
+    return false;
+  }
+
+  return suggestions.some((item) => {
+    const name = normalizeWhitespace(item.name).toLowerCase();
+    if (!name) return false;
+
+    return normalizedText.includes(name);
+  });
+};
+
+const hasInstrumentScopeKeyword = (text: string) => {
+  const normalizedText = normalizeWhitespace(text).toLowerCase();
+  if (!normalizedText) {
+    return false;
+  }
+
+  return INSTRUMENT_SCOPE_KEYWORDS.some((keyword) => normalizedText.includes(keyword));
+};
+
+const isFollowupQuestionInScope = (
+  question: string,
+  suggestions: InstrumentSuggestion[],
+  conversation: FollowupConversationTurn[] = [],
+) => {
   const normalizedQuestion = normalizeWhitespace(question).toLowerCase();
   if (!normalizedQuestion) {
     return false;
   }
 
-  const mentionsSuggestedInstrument = suggestions.some((item) => {
-    const name = normalizeWhitespace(item.name).toLowerCase();
-    if (!name) return false;
-
-    return normalizedQuestion.includes(name);
-  });
-
-  if (mentionsSuggestedInstrument) {
+  if (mentionsSuggestedInstrument(normalizedQuestion, suggestions)) {
     return true;
   }
 
-  return INSTRUMENT_SCOPE_KEYWORDS.some((keyword) => normalizedQuestion.includes(keyword));
+  if (hasInstrumentScopeKeyword(normalizedQuestion)) {
+    return true;
+  }
+
+  const hasInScopeConversation = conversation.some((turn) => {
+    return (
+      mentionsSuggestedInstrument(turn.text, suggestions) ||
+      hasInstrumentScopeKeyword(turn.text)
+    );
+  });
+
+  if (!hasInScopeConversation) {
+    return false;
+  }
+
+  if (FOLLOWUP_REFERENCE_REGEX.test(normalizedQuestion)) {
+    return true;
+  }
+
+  return normalizedQuestion.split(" ").filter(Boolean).length <= 7;
 };
 
 const buildFollowupChatCacheKey = (input: InstrumentSuggestionFollowupInput) => {
+  const compactConversation = sanitizeFollowupConversation(input.conversation).map((turn) =>
+    `${turn.role}:${normalizeWhitespace(turn.text).toLowerCase()}`,
+  );
+
   const payload = {
     provider: getGroqModelLabel(getConfiguredGroqModelId()),
     question: normalizeWhitespace(input.question).toLowerCase(),
@@ -230,6 +306,7 @@ const buildFollowupChatCacheKey = (input: InstrumentSuggestionFollowupInput) => 
     roles: (input.userRoles || []).map(normalize).sort(),
     experienceLevel: input.experienceLevel || "",
     purpose: input.purpose || "",
+    conversation: compactConversation,
   };
 
   return `${FOLLOWUP_CHAT_CACHE_PREFIX}${hashString(JSON.stringify(payload))}`;
@@ -1191,6 +1268,7 @@ export const askInstrumentSuggestionFollowupWithGroq = async (
 ): Promise<InstrumentSuggestionFollowupResult> => {
   const preferredProviderLabel = getGroqModelLabel(getConfiguredGroqModelId());
   const normalizedQuestion = normalizeWhitespace(input.question || "");
+  const normalizedConversation = sanitizeFollowupConversation(input.conversation);
   const scopedSuggestions = Array.isArray(input.suggestions)
     ? input.suggestions.slice(0, MAX_SUGGESTION_CANDIDATES)
     : [];
@@ -1213,7 +1291,7 @@ export const askInstrumentSuggestionFollowupWithGroq = async (
     };
   }
 
-  if (!isFollowupQuestionInScope(normalizedQuestion, scopedSuggestions)) {
+  if (!isFollowupQuestionInScope(normalizedQuestion, scopedSuggestions, normalizedConversation)) {
     return {
       answer:
         "I can only help with your suggested instruments and related music guidance.",
@@ -1254,23 +1332,32 @@ export const askInstrumentSuggestionFollowupWithGroq = async (
     reason: compactText(item.matchReason, 110),
   }));
 
+  const conversationPrompt = normalizedConversation.length
+    ? normalizedConversation
+      .map((turn, index) => `${index + 1}. ${turn.role.toUpperCase()}: ${compactText(turn.text, 180)}`)
+      .join("\n")
+    : "none";
+
   const systemPrompt = [
-    "You are MusikaLokal Suggestion Assistant.",
-    "You must only answer questions about the provided suggested instruments and closely related music guidance.",
+    "You are MusikaLokal Instrument AI Chat.",
+    "Answer ONLY using the provided suggested instruments and user profile signals.",
     "Allowed scope: instrument comparison, genre fit, role fit, learning plan, practice advice, setup basics, budgeting, and next steps.",
-    "If a question is outside this scope, respond exactly: I can only help with your suggested instruments and related music guidance.",
-    "Do not provide answers outside scope.",
-    "Keep the response concise, practical, and under 6 sentences.",
+    "If the question is outside this scope, respond exactly: I can only help with your suggested instruments and related music guidance.",
+    "Resolve short references like it/that/which one using recent conversation context.",
+    "Mention at least one suggested instrument name whenever possible.",
+    "Return plain text only (no markdown, no JSON).",
+    "Keep the response concise and actionable, 2 to 5 short sentences.",
   ].join(" ");
 
   const userPrompt = [
-    `Suggested instruments: ${JSON.stringify(compactSuggestions)}`,
+    `Suggested instruments (authoritative list): ${JSON.stringify(compactSuggestions)}`,
     `User roles: ${(input.userRoles || []).join(", ") || "none"}`,
     `Selected genres: ${(input.selectedGenres || []).join(", ") || "none"}`,
     `Experience level: ${input.experienceLevel || "unknown"}`,
     `Purpose: ${input.purpose || "unknown"}`,
-    `Question: ${normalizedQuestion}`,
-    "Answer with direct guidance only.",
+    `Recent conversation (oldest to newest):\n${conversationPrompt}`,
+    `Latest user question: ${normalizedQuestion}`,
+    "Answer the latest question directly with practical guidance.",
   ].join("\n");
 
   try {
