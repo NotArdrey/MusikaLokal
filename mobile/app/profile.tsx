@@ -21,6 +21,7 @@ import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import ReportModal from "../src/components/ReportModal";
 import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
+import Skeleton from "../src/components/Skeleton";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
@@ -354,6 +355,15 @@ export default function ProfileScreen() {
     }
   };
 
+  const navigateBackToPreviousOrHome = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace("/home");
+  }, []);
+
   const handleHeaderBack = useCallback(() => {
     const shouldReturnHome =
       (Array.isArray(params.returnToHome)
@@ -367,13 +377,13 @@ export default function ProfileScreen() {
       void AsyncStorage.setItem("pending_reopen_listing_id", returnListingId)
         .catch(() => { })
         .finally(() => {
-          router.back();
+          navigateBackToPreviousOrHome();
         });
       return;
     }
 
-    router.back();
-  }, [params.returnListingId, params.returnToHome]);
+    navigateBackToPreviousOrHome();
+  }, [navigateBackToPreviousOrHome, params.returnListingId, params.returnToHome]);
 
   const submitProfileReport = async (reason: string, details?: string) => {
     if (!currentUserId) {
@@ -545,10 +555,46 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <View
-        style={[styles.centerContainer, { backgroundColor: colors.background }]}
-      >
-        <Text style={{ color: colors.textSecondary }}>Loading profile...</Text>
+      <View style={[styles.flex1, { backgroundColor: colors.background }]}>
+        <Header title="Profile" />
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.profileSkeletonScrollContent}
+        >
+          <View style={styles.profileSkeletonHeader}>
+            <Skeleton width={112} height={112} borderRadius={56} />
+            <Skeleton width={180} height={24} style={{ marginTop: 16 }} />
+            <Skeleton width={220} height={16} style={{ marginTop: 8 }} />
+
+            <View style={styles.profileSkeletonTagRow}>
+              <Skeleton width={68} height={24} borderRadius={100} />
+              <Skeleton width={84} height={24} borderRadius={100} />
+              <Skeleton width={72} height={24} borderRadius={100} />
+            </View>
+
+            <View style={styles.profileSkeletonStatsRow}>
+              <Skeleton width="31%" height={56} borderRadius={14} />
+              <Skeleton width="31%" height={56} borderRadius={14} />
+              <Skeleton width="31%" height={56} borderRadius={14} />
+            </View>
+          </View>
+
+          <View style={styles.profileSkeletonSection}>
+            <Skeleton width="100%" height={72} borderRadius={16} />
+            <Skeleton width="100%" height={72} borderRadius={16} />
+            <Skeleton width="100%" height={72} borderRadius={16} />
+          </View>
+
+          <View style={styles.profileSkeletonMediaGrid}>
+            <Skeleton style={styles.profileSkeletonMediaItem} borderRadius={12} />
+            <Skeleton style={styles.profileSkeletonMediaItem} borderRadius={12} />
+            <Skeleton style={styles.profileSkeletonMediaItem} borderRadius={12} />
+            <Skeleton style={styles.profileSkeletonMediaItem} borderRadius={12} />
+            <Skeleton style={styles.profileSkeletonMediaItem} borderRadius={12} />
+            <Skeleton style={styles.profileSkeletonMediaItem} borderRadius={12} />
+          </View>
+        </ScrollView>
+        <Navbar />
       </View>
     );
   }
@@ -1041,6 +1087,41 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  profileSkeletonScrollContent: {
+    paddingBottom: 220,
+  },
+  profileSkeletonHeader: {
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    alignItems: "center",
+  },
+  profileSkeletonTagRow: {
+    marginTop: 16,
+    flexDirection: "row",
+    gap: 8,
+  },
+  profileSkeletonStatsRow: {
+    width: "100%",
+    marginTop: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  profileSkeletonSection: {
+    marginTop: 20,
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  profileSkeletonMediaGrid: {
+    marginTop: 24,
+    paddingHorizontal: GRID_PADDING,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: GRID_GAP,
+  },
+  profileSkeletonMediaItem: {
+    width: ITEM_SIZE,
+    height: ITEM_SIZE,
   },
   scrollContent: {
     paddingBottom: 220,

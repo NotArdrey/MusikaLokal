@@ -501,7 +501,7 @@ export const getOfflineInstrumentSuggestions = ({
         description: item.description,
         relatedInstruments: item.relatedInstruments,
         aiPowered: false,
-        aiProvider: "On-Device Local Ranker",
+        aiProvider: "Local Ranker",
       } satisfies InstrumentSuggestion;
     })
     .sort((a, b) => b.score - a.score);

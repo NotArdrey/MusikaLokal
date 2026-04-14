@@ -10,6 +10,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleShe
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 type OnboardingStep = 'role' | 'details' | 'verification' | 'email_verification';
@@ -63,17 +64,52 @@ export default function SignupScreen() {
         setAlertVisible(true);
     };
 
-    const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
-        const lowerTitle = (title || '').toLowerCase();
-        let type: AlertType = 'info';
+    const isSimpleTopToastButtons = (buttons?: any[]) => {
+        if (!buttons || buttons.length === 0) return true;
+        if (buttons.length !== 1) return false;
+
+        const onlyButton = buttons[0];
+        const normalizedText = String(onlyButton?.text ?? 'OK').trim().toLowerCase();
+        const hasNoCallback = !onlyButton?.onPress;
+        const isNeutralStyle =
+            !onlyButton?.style || onlyButton.style === 'default' || onlyButton.style === 'cancel';
+
+        return (
+            hasNoCallback &&
+            isNeutralStyle &&
+            (normalizedText === 'ok' || normalizedText === 'close' || normalizedText === 'got it')
+        );
+    };
+
+    const resolveAlertType = (title: string): AlertType => {
+        const lowerTitle = title.toLowerCase();
         if (lowerTitle.includes('error') || lowerTitle.includes('failed') || lowerTitle.includes('invalid') || lowerTitle.includes('timeout') || lowerTitle.includes('exists')) {
-            type = 'error';
-        } else if (lowerTitle.includes('success') || lowerTitle.includes('sent')) {
-            type = 'success';
-        } else if (lowerTitle.includes('pending') || lowerTitle.includes('processing') || lowerTitle.includes('required') || lowerTitle.includes('verification')) {
-            type = 'warning';
+            return 'error';
         }
-        showAlert(type, title || 'Notice', message || '', buttons);
+        if (lowerTitle.includes('success') || lowerTitle.includes('sent')) {
+            return 'success';
+        }
+        if (lowerTitle.includes('pending') || lowerTitle.includes('processing') || lowerTitle.includes('required') || lowerTitle.includes('verification')) {
+            return 'warning';
+        }
+        return 'info';
+    };
+
+    const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+        const normalizedTitle = title || 'Notice';
+        const normalizedMessage = message || '';
+        const type = resolveAlertType(normalizedTitle);
+
+        if (isSimpleTopToastButtons(buttons)) {
+            showTopToast({
+                type,
+                title: normalizedTitle,
+                message: normalizedMessage.trim() ? normalizedMessage : normalizedTitle,
+            });
+            return;
+        }
+
+        showAlert(type, normalizedTitle, normalizedMessage, buttons);
     };
 
     const Alert = { alert: showAlertNative };

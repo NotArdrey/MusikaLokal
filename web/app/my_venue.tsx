@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Platform, useWindowDimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CachedImage from '../src/components/CachedImage';
@@ -40,6 +40,16 @@ const resolveGigImage = (gig: any) => {
     const imageList = Array.isArray(gig?.images) ? gig.images.filter((item: any) => typeof item === 'string') : [];
     const best = imageList.find((img: string) => looksLikeDisplayImage(img));
     return best || imageList[0] || DEFAULT_GIG_IMAGE;
+};
+
+const normalizePermitStatus = (permitStatus: string | null | undefined) => {
+    const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
+    if (!normalizedPermitStatus) return 'approved';
+    if (['approved', 'approved_by_admin', 'verified'].includes(normalizedPermitStatus)) return 'approved';
+    if (['pending', 'pending_review', 'in_review', 'under_review'].includes(normalizedPermitStatus)) return 'pending_review';
+    if (['resubmitted', 'resubmit', 'reapplied'].includes(normalizedPermitStatus)) return 'resubmitted';
+    if (['rejected', 'declined'].includes(normalizedPermitStatus)) return 'rejected';
+    return normalizedPermitStatus;
 };
 
 export default function MyVenueScreen() {
@@ -89,7 +99,7 @@ export default function MyVenueScreen() {
         setAlertVisible(true);
     };
 
-    const fetchGigs = async () => {
+    const fetchGigs = useCallback(async () => {
         if (!userId) return;
         try {
             const { data: baseGigs, error: baseError } = await supabase
@@ -160,7 +170,7 @@ export default function MyVenueScreen() {
                 const reviewStats = reviewsByGigId[gig.id] || { sum: 0, count: 0 };
                 const reviewCount = reviewStats.count;
                 const rating = reviewCount > 0 ? reviewStats.sum / reviewCount : 0;
-                const normalizedPermitStatus = String(gig.permit_status || 'pending_review').toLowerCase();
+                const normalizedPermitStatus = normalizePermitStatus(gig.permit_status);
 
                 return {
                     ...gig,
@@ -179,7 +189,7 @@ export default function MyVenueScreen() {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [userId]);
 
     useFocusEffect(
         useCallback(() => {
@@ -193,8 +203,27 @@ export default function MyVenueScreen() {
             return () => {
                 clearInterval(refreshInterval);
             };
-        }, [isAuthenticated, userId, refreshKey])
+        }, [isAuthenticated, userId, refreshKey, fetchGigs])
     );
+
+    useEffect(() => {
+        if (!isAuthenticated || !userId) return;
+
+        const channel = supabase
+            .channel(`my-venue-listings:${userId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'gigs', filter: `organizer_id=eq.${userId}` },
+                () => {
+                    fetchGigs();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [isAuthenticated, userId, fetchGigs]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -293,7 +322,40 @@ export default function MyVenueScreen() {
                             </View>
                         ) : (
                             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
-                                {gigs.map((gig) => (
+                                {gigs.map((gig) => {
+                                    const normalizedPermitStatus = normalizePermitStatus(gig.permit_status);
+                                    const isRejected = normalizedPermitStatus === 'rejected';
+                                    const isApproved = normalizedPermitStatus === 'approved';
+                                    const isResubmitted = normalizedPermitStatus === 'resubmitted';
+
+                                    const permitStatusLabel =
+                                        isApproved
+                                            ? 'Approved by Admin'
+                                            : isRejected
+                                                ? 'Rejected'
+                                                : isResubmitted
+                                                    ? 'Resubmitted'
+                                                    : 'Pending Review';
+
+                                    const permitBadgeBackground =
+                                        isApproved
+                                            ? (isDark ? 'rgba(22,163,74,0.22)' : '#DCFCE7')
+                                            : isRejected
+                                                ? (isDark ? 'rgba(220,38,38,0.22)' : '#FEE2E2')
+                                                : isResubmitted
+                                                    ? (isDark ? 'rgba(37,99,235,0.22)' : '#DBEAFE')
+                                                    : (isDark ? 'rgba(245,158,11,0.22)' : '#FEF3C7');
+
+                                    const permitBadgeColor =
+                                        isApproved
+                                            ? '#16A34A'
+                                            : isRejected
+                                                ? '#DC2626'
+                                                : isResubmitted
+                                                    ? '#2563EB'
+                                                    : '#B45309';
+
+                                    return (
                                     <View key={gig.id} style={[styles.gridItem, isWebDesktop && styles.gridItemWeb]}>
                                         <View style={[styles.cardContainer, {
                                             backgroundColor: pageCardBackground,
@@ -330,6 +392,22 @@ export default function MyVenueScreen() {
                                                     {gig.description}
                                                 </Text>
 
+                                                <View style={[styles.permitStatusChip, { backgroundColor: permitBadgeBackground }]}>
+                                                    <Text style={[styles.permitStatusChipText, { color: permitBadgeColor }]}>Permit: {permitStatusLabel}</Text>
+                                                </View>
+
+                                                {isRejected && !!gig.permit_rejection_reason && (
+                                                    <Text style={styles.rejectionReasonText} numberOfLines={3}>
+                                                        Rejection reason: {gig.permit_rejection_reason}
+                                                    </Text>
+                                                )}
+
+                                                {(normalizedPermitStatus === 'pending_review' || normalizedPermitStatus === 'resubmitted') && (
+                                                    <Text style={[styles.permitHintText, { color: colors.textSecondary }]}> 
+                                                        Hidden from Home until admin permit approval is completed.
+                                                    </Text>
+                                                )}
+
                                                 <View style={[styles.actionRow, { borderColor: colors.border }]}>
                                                     <View style={styles.actionLeft}>
                                                         <TouchableOpacity activeOpacity={1}
@@ -358,7 +436,8 @@ export default function MyVenueScreen() {
                                             </View>
                                         </View>
                                     </View>
-                                ))}
+                                    );
+                                })}
                             </View>
                         )}
 

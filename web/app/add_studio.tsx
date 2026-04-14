@@ -5,15 +5,15 @@ import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Image,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Calendar } from "react-native-calendars";
 import { supabase } from "../lib/supabase";
@@ -25,6 +25,11 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
+import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
+import {
+  formatRecordingRuleSentence,
+  formatRecordingRuleShort,
+} from "../src/utils/recordingRule";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -116,6 +121,13 @@ const parsePositiveInteger = (value: unknown): number | null => {
   return parsed;
 };
 
+const parsePositiveDecimal = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  const parsed = Number.parseFloat(String(value).trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
 const getAllowedPromotionTargets = (
   type: "Rehearsal" | "Recording" | "Both",
 ): Array<"rehearsal" | "recording" | "both"> => {
@@ -137,6 +149,68 @@ const normalizePromotionTarget = (
       : "both";
 };
 
+type DateOverrideSessionType = "rehearsal" | "recording" | "both";
+type WeeklySessionType = DateOverrideSessionType;
+
+const getDefaultDateOverrideSessionType = (
+  type: "Rehearsal" | "Recording" | "Both",
+): DateOverrideSessionType => {
+  if (type === "Rehearsal") return "rehearsal";
+  if (type === "Recording") return "recording";
+  return "both";
+};
+
+const normalizeDateOverrideSessionType = (
+  value: unknown,
+  fallback: DateOverrideSessionType = "both",
+): DateOverrideSessionType => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (
+    normalized === "rehearsal" ||
+    normalized === "recording" ||
+    normalized === "both"
+  ) {
+    return normalized;
+  }
+  return fallback;
+};
+
+const parseDateOverrideSessionType = (
+  reason: unknown,
+  fallback: DateOverrideSessionType = "both",
+): DateOverrideSessionType => {
+  const text = String(reason || "");
+  const match = text.match(/session_type:(rehearsal|recording|both)/i);
+  if (!match) return fallback;
+  return normalizeDateOverrideSessionType(match[1], fallback);
+};
+
+const buildDateOverrideReason = (
+  sessionType: DateOverrideSessionType,
+  isOpen: boolean,
+): string => {
+  const baseReason = isOpen ? "Custom schedule" : "Closed override";
+  return `${baseReason} [session_type:${sessionType}]`;
+};
+
+const getDefaultWeeklySessionType = (
+  type: "Rehearsal" | "Recording" | "Both",
+): WeeklySessionType => getDefaultDateOverrideSessionType(type);
+
+const normalizeWeeklySessionType = (
+  value: unknown,
+  fallback: WeeklySessionType = "both",
+): WeeklySessionType => normalizeDateOverrideSessionType(value, fallback);
+
+const parseWeeklySessionType = (
+  reason: unknown,
+  fallback: WeeklySessionType = "both",
+): WeeklySessionType => parseDateOverrideSessionType(reason, fallback);
+
+const buildWeeklyScheduleReason = (
+  sessionType: WeeklySessionType,
+): string => `Weekly schedule [session_type:${sessionType}]`;
+
 export default function AddStudioScreen() {
   const { colors, isDark } = useTheme();
   const { isSystemLocked, showLockAlert } = useAuth();
@@ -155,7 +229,8 @@ export default function AddStudioScreen() {
   const [studioType, setStudioType] = useState<
     "Rehearsal" | "Recording" | "Both"
   >("Both");
-  const [maxRecordingSongsPerDay, setMaxRecordingSongsPerDay] = useState("");
+  const [recordingSongsPerBlock, setRecordingSongsPerBlock] = useState("");
+  const [recordingHoursPerBlock, setRecordingHoursPerBlock] = useState("");
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -252,7 +327,7 @@ export default function AddStudioScreen() {
     [date: string]: {
       selected: boolean;
       slots: { start: string; end: string }[];
-      maxRecordingSongsPerDay?: string;
+      sessionType?: DateOverrideSessionType;
     };
   }>({});
   const [currentMonth, setCurrentMonth] = useState(
@@ -372,8 +447,18 @@ export default function AddStudioScreen() {
     "Sunday",
   ];
   const [availability, setAvailability] = useState<
-    { day: string; slots: { start: string; end: string }[] }[]
-  >(daysOfWeek.map((day) => ({ day, slots: [] })));
+    {
+      day: string;
+      slots: { start: string; end: string }[];
+      sessionType?: WeeklySessionType;
+    }[]
+  >(
+    daysOfWeek.map((day) => ({
+      day,
+      slots: [],
+      sessionType: getDefaultWeeklySessionType("Both"),
+    })),
+  );
 
   const steps = [
     { id: 1, title: "Details", icon: "business" },
@@ -389,6 +474,26 @@ export default function AddStudioScreen() {
         ? "recording"
         : "both";
   const allowedPromotionTargets = getAllowedPromotionTargets(studioType);
+  const parsedRecordingSongsPerBlock = parsePositiveInteger(
+    recordingSongsPerBlock,
+  );
+  const parsedRecordingHoursPerBlock = parsePositiveDecimal(
+    recordingHoursPerBlock,
+  );
+  const hasRecordingRule =
+    parsedRecordingSongsPerBlock !== null && parsedRecordingHoursPerBlock !== null;
+  const currentRecordingRule = hasRecordingRule
+    ? {
+        songsPerBlock: parsedRecordingSongsPerBlock,
+        hoursPerBlock: parsedRecordingHoursPerBlock,
+      }
+    : null;
+  const recordingRulePreview = currentRecordingRule
+    ? formatRecordingRuleShort(currentRecordingRule)
+    : null;
+  const recordingRuleSentence = currentRecordingRule
+    ? formatRecordingRuleSentence(currentRecordingRule)
+    : null;
 
   // Role-based access control
   useEffect(() => {
@@ -396,9 +501,56 @@ export default function AddStudioScreen() {
   }, [refreshKey]);
 
   useEffect(() => {
-    if (studioType === "Rehearsal" && maxRecordingSongsPerDay) {
-      setMaxRecordingSongsPerDay("");
-    }
+    setAvailability((prev) => {
+      if (prev.length === 0) return prev;
+
+      const fallbackSessionType = getDefaultWeeklySessionType(studioType);
+      let changed = false;
+
+      const next = prev.map((day) => {
+        const normalizedCurrent = normalizeWeeklySessionType(
+          day.sessionType,
+          fallbackSessionType,
+        );
+        const nextSessionType =
+          studioType === "Both" ? normalizedCurrent : fallbackSessionType;
+
+        if (day.sessionType !== nextSessionType) changed = true;
+
+        return {
+          ...day,
+          sessionType: nextSessionType,
+        };
+      });
+
+      return changed ? next : prev;
+    });
+
+    setSelectedDates((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+
+      const fallbackSessionType = getDefaultDateOverrideSessionType(studioType);
+      let changed = false;
+      const next: typeof prev = {};
+
+      Object.entries(prev).forEach(([dateKey, dateValue]) => {
+        const normalizedCurrent = normalizeDateOverrideSessionType(
+          dateValue?.sessionType,
+          fallbackSessionType,
+        );
+        const nextSessionType =
+          studioType === "Both" ? normalizedCurrent : fallbackSessionType;
+
+        if (dateValue.sessionType !== nextSessionType) changed = true;
+
+        next[dateKey] = {
+          ...dateValue,
+          sessionType: nextSessionType,
+        };
+      });
+
+      return changed ? next : prev;
+    });
 
     setPromotionForm((prev) => {
       const nextAppliesTo = normalizePromotionTarget(prev.applies_to, studioType);
@@ -416,7 +568,7 @@ export default function AddStudioScreen() {
       });
       return changed ? next : prev;
     });
-  }, [studioType, maxRecordingSongsPerDay]);
+  }, [studioType]);
 
   const checkAuthorization = async () => {
     try {
@@ -592,13 +744,23 @@ export default function AddStudioScreen() {
       }
       if (
         (studioType === "Recording" || studioType === "Both") &&
-        maxRecordingSongsPerDay.trim() &&
-        !parsePositiveInteger(maxRecordingSongsPerDay)
+        !parsePositiveInteger(recordingSongsPerBlock)
       ) {
         showAlert(
           "error",
-          "Invalid Limit",
-          "Please enter a valid max songs per day value greater than 0.",
+          "Invalid Recording Rule",
+          "Please enter how many songs are included in each recording time block.",
+        );
+        return false;
+      }
+      if (
+        (studioType === "Recording" || studioType === "Both") &&
+        !parsePositiveDecimal(recordingHoursPerBlock)
+      ) {
+        showAlert(
+          "error",
+          "Invalid Recording Rule",
+          "Please enter how many hours each recording time block takes.",
         );
         return false;
       }
@@ -672,6 +834,122 @@ export default function AddStudioScreen() {
     else router.back();
   };
 
+  const handleAutoFillTestData = () => {
+    const dateKey = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+    const promoEndDate = new Date(Date.now() + 16 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+    const secondaryPromotionTarget =
+      allowedPromotionTargets[1] ?? allowedPromotionTargets[0];
+
+    setStudioName((prev) => prev.trim() || "Test Studio Space");
+    setDescription(
+      (prev) =>
+        prev.trim() ||
+        "QA test studio listing for booking and application workflow checks.",
+    );
+    setAddress((prev) => prev.trim() || "Pasig City, Metro Manila");
+    setLatitude((prev) => prev ?? 14.5764);
+    setLongitude((prev) => prev ?? 121.0851);
+
+    if (studioType === "Both" || studioType === "Rehearsal") {
+      setRehearsalRate((prev) => prev.trim() || "600");
+    }
+    if (studioType === "Both" || studioType === "Recording") {
+      setRecordingRate((prev) => prev.trim() || "1200");
+      setRecordingSongsPerBlock((prev) =>
+        parsePositiveInteger(prev) ? prev : "1",
+      );
+      setRecordingHoursPerBlock((prev) =>
+        parsePositiveDecimal(prev) ? prev : "3",
+      );
+    }
+
+    setPax((prev) => prev.trim() || "8");
+    setAmenities((prev) =>
+      prev.length > 0 ? prev : ["Air Conditioning", "WiFi", "Parking"],
+    );
+    setImages((prev) =>
+      prev.length > 0
+        ? prev
+        : [
+          "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=1200&h=900&fit=crop",
+        ],
+    );
+    setThumbnailIndex(0);
+    setSelectedInstruments((prev) =>
+      prev.length > 0 ? prev : INSTRUMENT_OPTIONS.slice(0, 3),
+    );
+    setAvailability((prev) => {
+      if (prev.some((day) => day.slots.length > 0)) return prev;
+      return prev.map((day) =>
+        day.day === "Saturday" || day.day === "Sunday"
+          ? {
+              ...day,
+              slots: [{ start: "10:00 AM", end: "08:00 PM" }],
+              sessionType: normalizeWeeklySessionType(
+                day.sessionType,
+                getDefaultWeeklySessionType(studioType),
+              ),
+            }
+          : {
+              ...day,
+              sessionType: normalizeWeeklySessionType(
+                day.sessionType,
+                getDefaultWeeklySessionType(studioType),
+              ),
+            },
+      );
+    });
+    setSelectedDates((prev) =>
+      Object.keys(prev).length > 0
+        ? prev
+        : {
+          [dateKey]: {
+            selected: true,
+            slots: [{ start: "10:00 AM", end: "06:00 PM" }],
+            sessionType: getDefaultDateOverrideSessionType(studioType),
+          },
+        },
+    );
+    setPromotions((prev) =>
+      prev.length > 0
+        ? prev
+        : [
+          {
+            id: `autofill-permanent-${studioType.toLowerCase()}`,
+            name: "Weekday Creator Deal",
+            description: "Test promo for daytime bookings and promo UI coverage.",
+            discount_type: "percentage",
+            discount_value: "15",
+            is_permanent: true,
+            start_date: "",
+            end_date: "",
+            applies_to: defaultPromotionAppliesTo,
+          },
+          {
+            id: `autofill-seasonal-${studioType.toLowerCase()}`,
+            name: "Weekend Session Saver",
+            description: "Time-limited sample promo used for booking regression checks.",
+            discount_type: "fixed_amount",
+            discount_value: "200",
+            is_permanent: false,
+            start_date: dateKey,
+            end_date: promoEndDate,
+            applies_to: secondaryPromotionTarget,
+          },
+        ],
+    );
+
+    showAlert(
+      "success",
+      "Test Autofill Applied",
+      "Sample studio values were filled for testing.",
+    );
+  };
+
   const toggleCalendarDate = (dateStr: string) => {
     setSelectedDates((prev) => {
       const next = { ...prev };
@@ -681,7 +959,7 @@ export default function AddStudioScreen() {
         next[dateStr] = {
           selected: true,
           slots: [{ start: "09:00 AM", end: "05:00 PM" }],
-          maxRecordingSongsPerDay: "",
+          sessionType: getDefaultDateOverrideSessionType(studioType),
         };
       }
       return next;
@@ -722,9 +1000,13 @@ export default function AddStudioScreen() {
         .filter(([_, data]) => data.selected && data.slots.length > 0)
         .map(([date, data]) => ({
           date,
-          max_recording_songs_per_day: parsePositiveInteger(
-            data.maxRecordingSongsPerDay,
-          ),
+          session_type:
+            studioType === "Both"
+              ? normalizeDateOverrideSessionType(
+                data.sessionType,
+                getDefaultDateOverrideSessionType(studioType),
+              )
+              : getDefaultDateOverrideSessionType(studioType),
           slots: data.slots.map((slot) => ({
             start: convertTo24Hour(slot.start),
             end: convertTo24Hour(slot.end),
@@ -735,7 +1017,14 @@ export default function AddStudioScreen() {
       const weeklyAvailability = availability
         .filter((day) => day.slots.length > 0)
         .map((day) => ({
-          ...day,
+          day: day.day,
+          session_type:
+            studioType === "Both"
+              ? normalizeWeeklySessionType(
+                  day.sessionType,
+                  getDefaultWeeklySessionType(studioType),
+                )
+              : getDefaultWeeklySessionType(studioType),
           slots: day.slots.map((slot) => ({
             start: convertTo24Hour(slot.start),
             end: convertTo24Hour(slot.end),
@@ -799,9 +1088,14 @@ export default function AddStudioScreen() {
           peak_season_dates: [],
           off_peak_multiplier: 1.0,
           off_peak_dates: [],
-          max_recording_songs_per_day: parsePositiveInteger(
-            maxRecordingSongsPerDay,
-          ),
+          min_booking_duration_hours:
+            studioType === "Recording" || studioType === "Both"
+              ? parsePositiveDecimal(recordingHoursPerBlock) || 3
+              : 2,
+          recording_songs_per_block:
+            parsePositiveInteger(recordingSongsPerBlock) || 1,
+          recording_hours_per_block:
+            parsePositiveDecimal(recordingHoursPerBlock) || 3,
         },
       };
 
@@ -945,14 +1239,20 @@ export default function AddStudioScreen() {
         buffer_minutes: 30,
         bulk_discount_threshold_hours: 10,
         bulk_discount_percentage: 0,
+        min_booking_duration_hours:
+          Number(bookingSettings.min_booking_duration_hours) || 2,
+        recording_songs_per_block:
+          parsePositiveInteger(bookingSettings.recording_songs_per_block) || 1,
+        recording_hours_per_block:
+          parsePositiveDecimal(bookingSettings.recording_hours_per_block) ||
+          Number(bookingSettings.min_booking_duration_hours) ||
+          3,
         lead_time_hours: Number(bookingSettings.lead_time_hours) || 24,
         weekend_multiplier: Number(bookingSettings.weekend_multiplier) || 1.0,
         peak_season_multiplier: Number(bookingSettings.peak_season_multiplier) || 1.0,
         peak_season_dates: bookingSettings.peak_season_dates || [],
         off_peak_multiplier: Number(bookingSettings.off_peak_multiplier) || 1.0,
         off_peak_dates: bookingSettings.off_peak_dates || [],
-        max_recording_songs_per_day:
-          parsePositiveInteger(bookingSettings.max_recording_songs_per_day),
       });
 
       // Insert promotions
@@ -988,6 +1288,10 @@ export default function AddStudioScreen() {
         for (const daySchedule of payload.availability) {
           const dayIndex = dayMap[daySchedule.day];
           if (dayIndex !== undefined && daySchedule.slots && daySchedule.slots.length > 0) {
+            const weeklySessionType = parseWeeklySessionType(
+              daySchedule.session_type,
+              getDefaultWeeklySessionType(studioType),
+            );
             daySchedule.slots.forEach((slot: any, slotIndex: number) => {
               operatingHours.push({
                 studio_id: studioId,
@@ -995,7 +1299,8 @@ export default function AddStudioScreen() {
                 is_open: true,
                 open_time: slot.start,
                 close_time: slot.end,
-                slot_order: slotIndex
+                slot_order: slotIndex,
+                reason: buildWeeklyScheduleReason(weeklySessionType),
               });
             });
           }
@@ -1016,9 +1321,13 @@ export default function AddStudioScreen() {
             is_open: true,
             open_time: entry.slots[0].start,
             close_time: entry.slots[0].end,
-            reason: 'Custom schedule',
-            max_recording_songs_per_day:
-              parsePositiveInteger(entry.max_recording_songs_per_day),
+            reason: buildDateOverrideReason(
+              parseDateOverrideSessionType(
+                entry.session_type,
+                getDefaultDateOverrideSessionType(studioType),
+              ),
+              true,
+            ),
           }));
 
         if (dateOverrides.length > 0) {
@@ -1349,6 +1658,17 @@ export default function AddStudioScreen() {
       const fileName = file.name;
       const fileUri = file.uri;
 
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: fileName,
+          mimeType: "application/pdf",
+          size: typeof (file as any)?.size === "number" ? (file as any).size : undefined,
+          uri: fileUri,
+          kind: "document",
+        },
+        "add_studio_contract",
+      );
+
       // Get current user session
       const {
         data: { session },
@@ -1427,6 +1747,20 @@ export default function AddStudioScreen() {
       const file = result.assets[0];
       const fileName = file.name;
       const fileUri = file.uri;
+      const isPdf = fileName.toLowerCase().endsWith('.pdf');
+
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: fileName,
+          mimeType: isPdf
+            ? "application/pdf"
+            : (typeof (file as any)?.mimeType === "string" ? (file as any).mimeType : undefined),
+          size: typeof (file as any)?.size === "number" ? (file as any).size : undefined,
+          uri: fileUri,
+          kind: isPdf ? "document" : "photo",
+        },
+        "add_studio_business_permit",
+      );
 
       const {
         data: { session },
@@ -1499,6 +1833,16 @@ export default function AddStudioScreen() {
         ? 'application/pdf'
         : file.type || 'image/jpeg';
 
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: fileName,
+          mimeType: contentType,
+          size: typeof file?.size === "number" ? file.size : undefined,
+          kind: contentType === "application/pdf" ? "document" : "photo",
+        },
+        "add_studio_business_permit_web",
+      );
+
       const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
         .from("documents")
@@ -1564,6 +1908,17 @@ export default function AddStudioScreen() {
       const fileExt = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
       const fileName = `${session.user.id}/equipment/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: fileName,
+          mimeType: `image/${fileExt === "jpg" ? "jpeg" : fileExt}`,
+          size: typeof (asset as any)?.fileSize === "number" ? (asset as any).fileSize : undefined,
+          uri: asset.uri,
+          kind: "photo",
+        },
+        "add_studio_equipment_image",
+      );
+
       const base64 = await FileSystem.readAsStringAsync(asset.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
@@ -1608,6 +1963,16 @@ export default function AddStudioScreen() {
         setUploadingContract(false);
         return;
       }
+
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: fileName,
+          mimeType: "application/pdf",
+          size: typeof file?.size === "number" ? file.size : undefined,
+          kind: "document",
+        },
+        "add_studio_contract_web",
+      );
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
@@ -1655,11 +2020,19 @@ export default function AddStudioScreen() {
       : normalizedLabel.includes("name") || normalizedLabel.includes("title")
         ? TITLE_MAX_LENGTH
         : undefined;
+    const isRequiredLabel =
+      normalizedLabel.includes("name") ||
+      normalizedLabel.includes("title") ||
+      normalizedLabel.includes("description") ||
+      normalizedLabel.includes("payout");
 
     return (
       <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
+        {isRequiredLabel ? (
+          <Text style={{ color: "#EF4444" }}> *</Text>
+        ) : null}
       </Text>
       <View
         style={[
@@ -1686,6 +2059,7 @@ export default function AddStudioScreen() {
               height: multiline ? 120 : "auto",
               textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
+              paddingVertical: multiline ? 12 : 16,
             },
           ]}
         />
@@ -1716,6 +2090,35 @@ export default function AddStudioScreen() {
       )}
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="List Studio" />
+
+        <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+          <TouchableOpacity activeOpacity={1}
+            onPress={handleAutoFillTestData}
+            style={{
+              alignSelf: "flex-start",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              backgroundColor: isDark ? "rgba(59, 130, 246, 0.16)" : "#DBEAFE",
+              borderWidth: 1,
+              borderColor: isDark ? "rgba(96, 165, 250, 0.5)" : "#93C5FD",
+              borderRadius: 999,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+            }}
+          >
+            <Ionicons name="flask-outline" size={15} color={colors.primary} />
+            <Text
+              style={{
+                color: colors.primary,
+                fontFamily: "Poppins_600SemiBold",
+                fontSize: 12,
+              }}
+            >
+              Auto Fill Test Data
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Enhanced Step Indicator (Fixed at top) */}
         <View style={styles.stepIndicatorContainer}>
@@ -2224,7 +2627,7 @@ export default function AddStudioScreen() {
                           marginBottom: 6,
                         }}
                       >
-                        Max Songs Per Day (Optional)
+                        Songs Per Time Block
                       </Text>
                       <View
                         style={[
@@ -2245,13 +2648,13 @@ export default function AddStudioScreen() {
                           style={{ marginRight: 10 }}
                         />
                         <TextInput
-                          value={maxRecordingSongsPerDay}
+                          value={recordingSongsPerBlock}
                           onChangeText={(text) =>
-                            setMaxRecordingSongsPerDay(
+                            setRecordingSongsPerBlock(
                               text.replace(/[^0-9]/g, ""),
                             )
                           }
-                          placeholder="e.g. 12"
+                          placeholder="e.g. 5"
                           placeholderTextColor={colors.textSecondary}
                           keyboardType="numeric"
                           style={{
@@ -2262,6 +2665,78 @@ export default function AddStudioScreen() {
                             paddingVertical: 14,
                           }}
                         />
+                        <Text
+                          style={{
+                            color: colors.textSecondary,
+                            fontFamily: "Poppins_400Regular",
+                          }}
+                        >
+                          songs
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={{ marginTop: 10 }}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontFamily: "Poppins_500Medium",
+                          fontSize: 12,
+                          marginBottom: 6,
+                        }}
+                      >
+                        Hours Per Time Block
+                      </Text>
+                      <View
+                        style={[
+                          styles.inputWrapper,
+                          {
+                            backgroundColor: colors.inputBackground,
+                            borderColor: isDark ? "#374151" : "#E5E7EB",
+                            flexDirection: "row",
+                            alignItems: "center",
+                            paddingHorizontal: 16,
+                          },
+                        ]}
+                      >
+                        <Ionicons
+                          name="time-outline"
+                          size={20}
+                          color="#EF4444"
+                          style={{ marginRight: 10 }}
+                        />
+                        <TextInput
+                          value={recordingHoursPerBlock}
+                          onChangeText={(text) => {
+                            const sanitized = text.replace(/[^0-9.]/g, "");
+                            const firstDot = sanitized.indexOf(".");
+                            const normalized =
+                              firstDot === -1
+                                ? sanitized
+                                : `${sanitized.slice(0, firstDot + 1)}${sanitized
+                                  .slice(firstDot + 1)
+                                  .replace(/\./g, "")}`;
+                            setRecordingHoursPerBlock(normalized);
+                          }}
+                          placeholder="e.g. 2"
+                          placeholderTextColor={colors.textSecondary}
+                          keyboardType="decimal-pad"
+                          style={{
+                            flex: 1,
+                            color: colors.text,
+                            fontFamily: "Poppins_500Medium",
+                            fontSize: 15,
+                            paddingVertical: 14,
+                          }}
+                        />
+                        <Text
+                          style={{
+                            color: colors.textSecondary,
+                            fontFamily: "Poppins_400Regular",
+                          }}
+                        >
+                          hrs
+                        </Text>
                       </View>
                       <Text
                         style={{
@@ -2271,7 +2746,9 @@ export default function AddStudioScreen() {
                           marginTop: 6,
                         }}
                       >
-                        Applies to recording bookings unless a specific date override is set.
+                        {recordingRulePreview && recordingRuleSentence
+                          ? `Example: ${recordingRulePreview}. ${recordingRuleSentence}. Musicians can still split the required hours across available dates and time slots.`
+                          : "Set songs and hours per time block to define your recording minimum. Musicians can still split the required hours across available dates and time slots."}
                       </Text>
                     </View>
                   </View>
@@ -3626,6 +4103,81 @@ export default function AddStudioScreen() {
                                 </TouchableOpacity>
                               </View>
 
+                              {studioType === "Both" && (
+                                <View style={{ marginTop: 10 }}>
+                                  <Text
+                                    style={{
+                                      color: colors.textSecondary,
+                                      fontSize: 11,
+                                      marginBottom: 6,
+                                      fontFamily: "Poppins_600SemiBold",
+                                    }}
+                                  >
+                                    SESSION TYPE FOR THIS DATE
+                                  </Text>
+                                  <View
+                                    style={{
+                                      flexDirection: "row",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    {([
+                                      { value: "both", label: "Both" },
+                                      { value: "rehearsal", label: "Rehearsal" },
+                                      { value: "recording", label: "Recording" },
+                                    ] as const).map((option) => {
+                                      const selectedSessionType =
+                                        normalizeDateOverrideSessionType(
+                                          data.sessionType,
+                                          "both",
+                                        );
+                                      const isSelected =
+                                        selectedSessionType === option.value;
+
+                                      return (
+                                        <TouchableOpacity
+                                          key={option.value}
+                                          activeOpacity={1}
+                                          onPress={() => {
+                                            setSelectedDates((prev) => ({
+                                              ...prev,
+                                              [dateStr]: {
+                                                ...prev[dateStr],
+                                                sessionType: option.value,
+                                              },
+                                            }));
+                                          }}
+                                          style={{
+                                            paddingHorizontal: 10,
+                                            paddingVertical: 6,
+                                            borderRadius: 999,
+                                            borderWidth: 1,
+                                            borderColor: isSelected
+                                              ? colors.primary
+                                              : colors.border,
+                                            backgroundColor: isSelected
+                                              ? `${colors.primary}20`
+                                              : "transparent",
+                                          }}
+                                        >
+                                          <Text
+                                            style={{
+                                              color: isSelected
+                                                ? colors.primary
+                                                : colors.textSecondary,
+                                              fontSize: 11,
+                                              fontFamily: "Poppins_500Medium",
+                                            }}
+                                          >
+                                            {option.label}
+                                          </Text>
+                                        </TouchableOpacity>
+                                      );
+                                    })}
+                                  </View>
+                                </View>
+                              )}
+
                               {/* Editable Time Slots for Specific Date */}
                               {data.slots.map((slot, slotIndex) => (
                                 <View
@@ -3811,61 +4363,6 @@ export default function AddStudioScreen() {
                                 </View>
                               ))}
 
-                              {(studioType === "Recording" || studioType === "Both") && (
-                                <View style={{ marginTop: 12 }}>
-                                  <Text
-                                    style={{
-                                      color: colors.textSecondary,
-                                      fontSize: 11,
-                                      marginBottom: 4,
-                                      fontFamily: "Poppins_600SemiBold",
-                                    }}
-                                  >
-                                    MAX SONGS / DAY (OPTIONAL)
-                                  </Text>
-                                  <View
-                                    style={{
-                                      flexDirection: "row",
-                                      alignItems: "center",
-                                      gap: 8,
-                                      backgroundColor: isDark ? "#1F2937" : "white",
-                                      borderWidth: 1,
-                                      borderColor: colors.border,
-                                      borderRadius: 10,
-                                      paddingHorizontal: 12,
-                                      paddingVertical: 6,
-                                    }}
-                                  >
-                                    <Ionicons
-                                      name="musical-notes-outline"
-                                      size={16}
-                                      color={colors.primary}
-                                    />
-                                    <TextInput
-                                      value={data.maxRecordingSongsPerDay || ""}
-                                      onChangeText={(text) => {
-                                        const newDates = { ...selectedDates };
-                                        newDates[dateStr] = {
-                                          ...newDates[dateStr],
-                                          maxRecordingSongsPerDay: text.replace(/[^0-9]/g, ""),
-                                        };
-                                        setSelectedDates(newDates);
-                                      }}
-                                      placeholder="No limit"
-                                      placeholderTextColor={colors.textSecondary}
-                                      keyboardType="numeric"
-                                      style={{
-                                        flex: 1,
-                                        color: colors.text,
-                                        fontFamily: "Poppins_500Medium",
-                                        fontSize: 13,
-                                        paddingVertical: 4,
-                                      }}
-                                    />
-                                  </View>
-                                </View>
-                              )}
-
                               {/* Add Slot Button for Specific Date */}
                               {data.slots.length < 3 && (
                                 <TouchableOpacity activeOpacity={1}
@@ -3978,6 +4475,11 @@ export default function AddStudioScreen() {
                             start: "09:00 AM",
                             end: "05:00 PM",
                           });
+                          newAvailability[dayIndex].sessionType =
+                            normalizeWeeklySessionType(
+                              newAvailability[dayIndex].sessionType,
+                              getDefaultWeeklySessionType(studioType),
+                            );
                         } else {
                           newAvailability[dayIndex].slots = [];
                         }
@@ -4009,6 +4511,81 @@ export default function AddStudioScreen() {
                       </Text>
                     </TouchableOpacity>
                   </View>
+
+                  {studioType === "Both" && daySchedule.slots.length > 0 && (
+                    <View style={{ marginBottom: 8 }}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 11,
+                          marginBottom: 6,
+                          fontFamily: "Poppins_600SemiBold",
+                        }}
+                      >
+                        SESSION TYPE FOR THIS DAY
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          gap: 8,
+                        }}
+                      >
+                        {([
+                          { value: "both", label: "Both" },
+                          { value: "rehearsal", label: "Rehearsal" },
+                          { value: "recording", label: "Recording" },
+                        ] as const).map((option) => {
+                          const selectedWeeklySessionType =
+                            normalizeWeeklySessionType(
+                              daySchedule.sessionType,
+                              "both",
+                            );
+                          const isSelected =
+                            selectedWeeklySessionType === option.value;
+
+                          return (
+                            <TouchableOpacity
+                              key={option.value}
+                              activeOpacity={1}
+                              onPress={() => {
+                                setAvailability((prev) =>
+                                  prev.map((day, index) =>
+                                    index === dayIndex
+                                      ? { ...day, sessionType: option.value }
+                                      : day,
+                                  ),
+                                );
+                              }}
+                              style={{
+                                paddingHorizontal: 10,
+                                paddingVertical: 6,
+                                borderRadius: 999,
+                                borderWidth: 1,
+                                borderColor: isSelected
+                                  ? colors.primary
+                                  : colors.border,
+                                backgroundColor: isSelected
+                                  ? `${colors.primary}20`
+                                  : "transparent",
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: isSelected
+                                    ? colors.primary
+                                    : colors.textSecondary,
+                                  fontSize: 11,
+                                  fontFamily: "Poppins_500Medium",
+                                }}
+                              >
+                                {option.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
 
                   {daySchedule.slots.map((slot, slotIndex) => {
                     const toggleAmPm = (timeStr: string) => {
@@ -4310,6 +4887,28 @@ export default function AddStudioScreen() {
                         }}
                       >
                         Recording: ₱{recordingRate || "0"}/song
+                      </Text>
+                    </View>
+                  )}
+                  {(studioType === "Recording" || studioType === "Both") && (
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        marginTop: 4,
+                      }}
+                    >
+                      <Ionicons name="time-outline" size={14} color="#EF4444" />
+                      <Text
+                        style={{
+                          color: colors.text,
+                          fontFamily: "Poppins_500Medium",
+                        }}
+                      >
+                        Recording Rule: {recordingRulePreview
+                          ? `${recordingRulePreview} minimum block`
+                          : "Not set"}
                       </Text>
                     </View>
                   )}

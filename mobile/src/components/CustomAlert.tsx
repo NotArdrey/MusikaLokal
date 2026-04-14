@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import React from "react";
+import React, { useEffect, useMemo } from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useTopToast } from "../context/TopToastContext";
 import { useTheme } from "../context/ThemeContext";
 
 export type AlertType = "error" | "success" | "warning" | "info";
@@ -57,7 +58,36 @@ export default function CustomAlert({
   onClose,
 }: CustomAlertProps) {
   const { colors, isDark } = useTheme();
+  const { showToast } = useTopToast();
   const config = alertConfig[type];
+
+  const shouldUseTopToast = useMemo(() => {
+    const firstButton = buttons[0];
+    const hasSingleButton = buttons.length === 1;
+    const isDefaultOkButton =
+      !!firstButton &&
+      firstButton.text.trim().toLowerCase() === "ok" &&
+      !firstButton.onPress &&
+      (!firstButton.style || firstButton.style === "default");
+
+    return hasSingleButton && isDefaultOkButton;
+  }, [buttons]);
+
+  useEffect(() => {
+    if (!visible || !shouldUseTopToast) return;
+
+    showToast({
+      type,
+      title,
+      message,
+    });
+
+    onClose();
+  }, [message, onClose, shouldUseTopToast, showToast, title, type, visible]);
+
+  if (shouldUseTopToast) {
+    return null;
+  }
 
   const handleButtonPress = (button: AlertButton) => {
     // Call the onPress callback first, then close the alert

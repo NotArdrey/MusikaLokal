@@ -22,6 +22,7 @@ import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import { PH_MUSIC_GROUP_TYPES } from "../src/constants/groupTypes";
 import { useTheme } from "../src/context/ThemeContext";
+import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
 const base64ToUint8Array = (base64: string): Uint8Array => {
@@ -1122,11 +1123,19 @@ export default function EditGigScreen() {
       : normalizedLabel.includes("name") || normalizedLabel.includes("title")
         ? TITLE_MAX_LENGTH
         : undefined;
+    const isRequiredLabel =
+      normalizedLabel.includes("name") ||
+      normalizedLabel.includes("title") ||
+      normalizedLabel.includes("description") ||
+      normalizedLabel.includes("payout");
 
     return (
       <View style={styles.inputContainer}>
       <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
         {label}
+        {isRequiredLabel ? (
+          <Text style={{ color: "#EF4444" }}> *</Text>
+        ) : null}
       </Text>
       <View
         style={[
@@ -1153,6 +1162,7 @@ export default function EditGigScreen() {
               height: multiline ? 120 : "auto",
               textAlign: "left",
               textAlignVertical: multiline ? "top" : "center",
+              paddingVertical: multiline ? 12 : 16,
             },
           ]}
         />
@@ -1188,6 +1198,17 @@ export default function EditGigScreen() {
       const file = result.assets[0];
       const fileName = file.name;
       const fileUri = file.uri;
+
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: fileName,
+          mimeType: "application/pdf",
+          size: typeof (file as any)?.size === "number" ? (file as any).size : undefined,
+          uri: fileUri,
+          kind: "document",
+        },
+        "edit_gig_contract",
+      );
 
       const {
         data: { session },
@@ -1263,6 +1284,20 @@ export default function EditGigScreen() {
       const file = result.assets[0];
       const fileName = file.name;
       const fileUri = file.uri;
+      const isPdf = fileName.toLowerCase().endsWith('.pdf');
+
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: fileName,
+          mimeType: isPdf
+            ? "application/pdf"
+            : (typeof (file as any)?.mimeType === "string" ? (file as any).mimeType : undefined),
+          size: typeof (file as any)?.size === "number" ? (file as any).size : undefined,
+          uri: fileUri,
+          kind: isPdf ? "document" : "photo",
+        },
+        "edit_gig_business_permit",
+      );
 
       const {
         data: { session },
@@ -1335,6 +1370,16 @@ export default function EditGigScreen() {
         ? 'application/pdf'
         : file.type || 'image/jpeg';
 
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: fileName,
+          mimeType: contentType,
+          size: typeof file?.size === "number" ? file.size : undefined,
+          kind: contentType === "application/pdf" ? "document" : "photo",
+        },
+        "edit_gig_business_permit_web",
+      );
+
       const filePath = `business-permits/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage
         .from("documents")
@@ -1379,6 +1424,16 @@ export default function EditGigScreen() {
         setUploadingContract(false);
         return;
       }
+
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: fileName,
+          mimeType: "application/pdf",
+          size: typeof file?.size === "number" ? file.size : undefined,
+          kind: "document",
+        },
+        "edit_gig_contract_web",
+      );
 
       const filePath = `contracts/${session.user.id}/${Date.now()}_${fileName}`;
       const { data, error } = await supabase.storage

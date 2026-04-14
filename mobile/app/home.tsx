@@ -25,10 +25,13 @@ import Navbar from "../src/components/navbar";
 import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBanner";
 import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
+import Skeleton from "../src/components/Skeleton";
 import { useTheme } from "../src/context/ThemeContext";
-import { rerankHomeFeedWithLocalLLM } from "../src/services/offlineLlmEnhancer";
-import { startBackgroundPreparation, isModelPreparing, onModelReady } from "../src/services/musikaLlmAdapter";
-import { getScreenCacheKey, readScreenCache, writeScreenCache } from "../src/utils/screenCache";
+import {
+  getGeminiFlashLiteInfo,
+  rerankHomeFeedWithGeminiFlashLite,
+} from "../src/services/groqModelRouter";
+import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../src/utils/screenCache";
 
 const { width, height } = Dimensions.get("window");
 
@@ -113,6 +116,13 @@ const buildOnDeviceReason = (
     return "Trending opportunity with strong current engagement.";
   }
   return "Strong overall quality and relevance right now.";
+};
+
+const isGroqQuotaExhaustedMessage = (message: string | null | undefined) => {
+  if (!message) return false;
+  return /out of api calls|rate limit|too many requests|insufficient[_ -]?quota|quota|credits|\b429\b/i.test(
+    message,
+  );
 };
 
 const rankForYouOnDevice = (
@@ -263,6 +273,7 @@ const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) 
 
 const HOME_CACHE_TTL_MS = 60_000;
 const HOME_FOCUS_REFRESH_COOLDOWN_MS = 20_000;
+const HOME_AI_RERANK_COOLDOWN_MS = 5 * 60 * 1000;
 const HOME_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 const VIEWED_NEW_ARRIVALS_STORAGE_KEY = "viewed_new_arrivals";
 const RECENTLY_VIEWED_STORAGE_KEY = "recently_viewed_items";
@@ -276,6 +287,7 @@ type HomeFeedCachePayload = {
   aiRecommendations: any[];
   aiFeedProvider: string;
   aiFeedMessage: string;
+  aiRerankAt?: number;
 };
 
 type HomeProfileCachePayload = {
@@ -343,71 +355,122 @@ const AutoCardImage = ({
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
-  const { userRole, userId, isGuest } = useAuth();
+  const { userRole, userId, isGuest, roleResolved } = useAuth();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
-  const [loading, setLoading] = useState(true);
+
+  const homeCacheBaseParams = useMemo(
+    () => ({
+      userId: userId || "guest",
+      isGuest,
+    }),
+    [userId, isGuest],
+  );
+
+  const homeCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-feed", {
+      ...homeCacheBaseParams,
+      userRole: userRole || "guest",
+    }),
+    [homeCacheBaseParams, userRole],
+  );
+
+  const homeFallbackCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-feed", homeCacheBaseParams),
+    [homeCacheBaseParams],
+  );
+
+  const homeProfileCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-profile", {
+      userId: userId || "guest",
+      isGuest,
+    }),
+    [userId, isGuest],
+  );
+
+  const initialHomeFeedSnapshot = useMemo(
+    () =>
+      peekScreenCache<HomeFeedCachePayload>(homeCacheKey, HOME_CACHE_TTL_MS) ??
+      peekScreenCache<HomeFeedCachePayload>(homeFallbackCacheKey, HOME_CACHE_TTL_MS),
+    [homeCacheKey, homeFallbackCacheKey],
+  );
+
+  const initialHomeProfileSnapshot = useMemo(
+    () => peekScreenCache<HomeProfileCachePayload>(homeProfileCacheKey, HOME_PROFILE_CACHE_TTL_MS),
+    [homeProfileCacheKey],
+  );
+
+  const [loading, setLoading] = useState(() => initialHomeFeedSnapshot == null);
   const [refreshing, setRefreshing] = useState(false);
-  const [featured, setFeatured] = useState<any[]>([]);
-  const [discover, setDiscover] = useState<any[]>([]);
-  const [newArrivals, setNewArrivals] = useState<any[]>([]); // New Arrivals State
+  const [featured, setFeatured] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.featured) ? initialHomeFeedSnapshot.featured : [],
+  );
+  const [discover, setDiscover] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.discover) ? initialHomeFeedSnapshot.discover : [],
+  );
+  const [newArrivals, setNewArrivals] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.newArrivals) ? initialHomeFeedSnapshot.newArrivals : [],
+  ); // New Arrivals State
   const [viewedNewArrivals, setViewedNewArrivals] = useState<Set<string>>(new Set());
   const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
-  const [userName, setUserName] = useState("Guest");
+  const [userName, setUserName] = useState(() => initialHomeProfileSnapshot?.userName || "Guest");
   const [timeGreeting, setTimeGreeting] = useState("Hey");
+  const geminiInfo = getGeminiFlashLiteInfo();
+  const geminiModelLabel = geminiInfo.modelLabel;
+  const geminiConfigured = geminiInfo.configured;
+  const geminiModelSource = geminiInfo.modelSource;
+  const geminiApiKeySource = geminiInfo.apiKeySource;
+  const geminiApiKeySignature = geminiInfo.apiKeySignature;
 
   // AI Recommendation Mode
   const aiModeEnabled = true;
   const strictLlmModeForAiPages = true;
   const showForYouAiCard = false;
-  const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
-  const [randomRecommendations, setRandomRecommendations] = useState<any[]>([]);
-  const [aiFeedProvider, setAiFeedProvider] = useState("On-Device LLM (Required)");
-  const [aiFeedMessage, setAiFeedMessage] = useState("");
-  const [isOnDeviceLlmReady, setIsOnDeviceLlmReady] = useState(false);
+  const [aiRecommendations, setAiRecommendations] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.aiRecommendations) ? initialHomeFeedSnapshot.aiRecommendations : [],
+  );
+  const [randomRecommendations, setRandomRecommendations] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.randomRecommendations) ? initialHomeFeedSnapshot.randomRecommendations : [],
+  );
+  const [aiFeedProvider, setAiFeedProvider] = useState(
+    () => initialHomeFeedSnapshot?.aiFeedProvider || geminiModelLabel,
+  );
+  const [aiFeedMessage, setAiFeedMessage] = useState(
+    () => initialHomeFeedSnapshot?.aiFeedMessage || "",
+  );
   const [isHomeLlmRerankPending, setIsHomeLlmRerankPending] = useState(false);
 
   const homeAiStatusLabel = useMemo(() => {
     if (!userId) return "AI status: Sign in required";
 
-    const providerText = aiFeedProvider || "On-Device LLM (Required)";
+    const providerText = aiFeedProvider || geminiModelLabel;
     const hasResults = aiRecommendations.length > 0;
-    const providerUsesLlm = providerText.toLowerCase().includes("llm");
-    const llmActive = providerUsesLlm && hasResults;
 
-    if (llmActive) {
-      return `AI status: Working (${providerText})`;
-    }
-
-    if (isModelPreparing()) {
-      return "AI status: Downloading LLM model...";
-    }
-
-    if (isOnDeviceLlmReady && hasResults) {
-      return providerUsesLlm
-        ? `AI status: Working (${providerText})`
-        : `AI status: On-device LLM ready (${providerText} feed active)`;
-    }
-
-    if (isOnDeviceLlmReady) {
-      return "AI status: On-device LLM ready";
-    }
-
-    if (aiFeedMessage && aiFeedMessage.trim().length > 0) {
-      return `AI status: ${aiFeedMessage}`;
+    if (isHomeLlmRerankPending) {
+      return `AI status: Fetching ${geminiModelLabel} picks...`;
     }
 
     if (hasResults) {
       return `AI status: Working (${providerText})`;
     }
 
+    if (!geminiConfigured) {
+      return "AI status: Groq API key not configured";
+    }
+
+    if (aiFeedMessage && aiFeedMessage.trim().length > 0) {
+      return `AI status: ${aiFeedMessage}`;
+    }
+
     return "AI status: Initializing...";
   }, [
-    userId,
     aiFeedProvider,
     aiFeedMessage,
     aiRecommendations.length,
-    isOnDeviceLlmReady,
+    geminiConfigured,
+    geminiModelLabel,
+    isHomeLlmRerankPending,
+    userId,
   ]);
 
   // ... refs ...
@@ -421,11 +484,12 @@ export default function HomeScreen() {
   const homeRealtimeRefreshTimerRef =
     React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeDataFetchInFlightRef = React.useRef(false);
-  const hasHydratedHomeCacheRef = React.useRef(false);
+  const hasHydratedHomeCacheRef = React.useRef(Boolean(initialHomeFeedSnapshot));
   const homeLlmRequestIdRef = React.useRef(0);
   const homeLlmRerankInFlightRef = React.useRef(false);
-  const lastHomeRefreshAtRef = React.useRef(0);
-  const lastProfileRefreshAtRef = React.useRef(0);
+  const lastHomeAiRerankAtRef = React.useRef(initialHomeFeedSnapshot?.aiRerankAt || 0);
+  const lastHomeRefreshAtRef = React.useRef(initialHomeFeedSnapshot?.fetchedAt || 0);
+  const lastProfileRefreshAtRef = React.useRef(initialHomeProfileSnapshot?.fetchedAt || 0);
   const viewedNewArrivalsLoadedRef = React.useRef(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
@@ -446,34 +510,18 @@ export default function HomeScreen() {
   // Scroll State for Sticky Header
   const [isScrolled, setIsScrolled] = useState(false);
 
-  const homeCacheKey = useMemo(
-    () => getScreenCacheKey("mobile-home-feed", {
-      userId: userId || "guest",
-      userRole: userRole || "guest",
-      isGuest,
-    }),
-    [userId, userRole, isGuest],
-  );
-
-  const homeProfileCacheKey = useMemo(
-    () => getScreenCacheKey("mobile-home-profile", {
-      userId: userId || "guest",
-      isGuest,
-    }),
-    [userId, isGuest],
-  );
-
   const applyHomeFeedSnapshot = useCallback((snapshot: HomeFeedCachePayload) => {
     setFeatured(Array.isArray(snapshot.featured) ? snapshot.featured : []);
     setDiscover(Array.isArray(snapshot.discover) ? snapshot.discover : []);
     setNewArrivals(Array.isArray(snapshot.newArrivals) ? snapshot.newArrivals : []);
     setRandomRecommendations(Array.isArray(snapshot.randomRecommendations) ? snapshot.randomRecommendations : []);
     setAiRecommendations(Array.isArray(snapshot.aiRecommendations) ? snapshot.aiRecommendations : []);
-    setAiFeedProvider(snapshot.aiFeedProvider || "On-Device LLM (Required)");
+    setAiFeedProvider(snapshot.aiFeedProvider || geminiModelLabel);
     setAiFeedMessage(snapshot.aiFeedMessage || "");
+    lastHomeAiRerankAtRef.current = snapshot.aiRerankAt || 0;
     lastHomeRefreshAtRef.current = snapshot.fetchedAt || Date.now();
     hasHydratedHomeCacheRef.current = true;
-  }, []);
+  }, [geminiModelLabel]);
 
   const loadViewedNewArrivals = useCallback(async () => {
     if (viewedNewArrivalsLoadedRef.current) {
@@ -608,54 +656,69 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!userId) return;
 
-    const providerText = aiFeedProvider || "On-Device LLM (Required)";
-    const providerUsesLlm = providerText.toLowerCase().includes("llm");
-    const llmFeedActive = providerUsesLlm && aiRecommendations.length > 0;
-    const llmActive = isOnDeviceLlmReady || llmFeedActive;
+    const providerText = aiFeedProvider || geminiModelLabel;
+    const aiFeedActive = aiRecommendations.length > 0;
 
     console.log("[HOME_AI_STATUS]", {
       provider: providerText,
       picks: aiRecommendations.length,
-      llmActive,
-      llmFeedActive,
-      llmFeedPending: isHomeLlmRerankPending,
-      llmReady: isOnDeviceLlmReady,
+      aiActive: aiFeedActive,
+      aiFeedPending: isHomeLlmRerankPending,
+      configured: geminiConfigured,
+      modelSource: geminiModelSource,
+      apiKeySource: geminiApiKeySource,
+      apiKeySignature: geminiApiKeySignature,
       message: aiFeedMessage || "",
     });
   }, [
-    userId,
     aiFeedProvider,
     aiFeedMessage,
     aiRecommendations.length,
+    geminiApiKeySignature,
+    geminiApiKeySource,
+    geminiConfigured,
+    geminiModelLabel,
+    geminiModelSource,
     isHomeLlmRerankPending,
-    isOnDeviceLlmReady,
+    userId,
   ]);
-
-  // Kick off LLM model download + initialization in background as early
-  // as possible so it's ready by the time AI features are needed.
-  useEffect(() => {
-    startBackgroundPreparation();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
-    hasHydratedHomeCacheRef.current = false;
-    lastHomeRefreshAtRef.current = 0;
-    lastProfileRefreshAtRef.current = 0;
+    if (initialHomeFeedSnapshot) {
+      applyHomeFeedSnapshot(initialHomeFeedSnapshot);
+      setLoading(false);
+    }
+
+    if (initialHomeProfileSnapshot) {
+      setUserName(initialHomeProfileSnapshot.userName || "Guest");
+      setHasGroups(Boolean(initialHomeProfileSnapshot.hasGroups));
+      lastProfileRefreshAtRef.current = initialHomeProfileSnapshot.fetchedAt || Date.now();
+    } else if (isGuest) {
+      setUserName("Guest");
+      setHasGroups(false);
+    }
+
+    hasHydratedHomeCacheRef.current = Boolean(initialHomeFeedSnapshot);
+    lastHomeAiRerankAtRef.current = initialHomeFeedSnapshot?.aiRerankAt || 0;
+    lastHomeRefreshAtRef.current = initialHomeFeedSnapshot?.fetchedAt || 0;
+    lastProfileRefreshAtRef.current = initialHomeProfileSnapshot?.fetchedAt || lastProfileRefreshAtRef.current;
 
     void (async () => {
-      const [cachedHomeFeed, cachedProfile] = await Promise.all([
+      const [cachedHomeFeed, cachedFallbackHomeFeed, cachedProfile] = await Promise.all([
         readScreenCache<HomeFeedCachePayload>(homeCacheKey, HOME_CACHE_TTL_MS),
+        readScreenCache<HomeFeedCachePayload>(homeFallbackCacheKey, HOME_CACHE_TTL_MS),
         readScreenCache<HomeProfileCachePayload>(homeProfileCacheKey, HOME_PROFILE_CACHE_TTL_MS),
       ]);
+      const resolvedHomeFeed = cachedHomeFeed ?? cachedFallbackHomeFeed;
 
       if (cancelled) {
         return;
       }
 
-      if (cachedHomeFeed) {
-        applyHomeFeedSnapshot(cachedHomeFeed);
+      if (resolvedHomeFeed) {
+        applyHomeFeedSnapshot(resolvedHomeFeed);
         setLoading(false);
       }
 
@@ -672,7 +735,15 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [applyHomeFeedSnapshot, homeCacheKey, homeProfileCacheKey, isGuest]);
+  }, [
+    applyHomeFeedSnapshot,
+    homeCacheKey,
+    homeFallbackCacheKey,
+    homeProfileCacheKey,
+    initialHomeFeedSnapshot,
+    initialHomeProfileSnapshot,
+    isGuest,
+  ]);
 
   useEffect(() => {
     if (
@@ -694,9 +765,13 @@ export default function HomeScreen() {
       aiRecommendations,
       aiFeedProvider,
       aiFeedMessage,
+      aiRerankAt: lastHomeAiRerankAtRef.current || 0,
     };
 
-    void writeScreenCache(homeCacheKey, payload);
+    void Promise.all([
+      writeScreenCache(homeCacheKey, payload),
+      writeScreenCache(homeFallbackCacheKey, payload),
+    ]);
   }, [
     aiFeedMessage,
     aiFeedProvider,
@@ -704,20 +779,10 @@ export default function HomeScreen() {
     discover,
     featured,
     homeCacheKey,
+    homeFallbackCacheKey,
     newArrivals,
     randomRecommendations,
   ]);
-
-  // Re-fetch home feed AI recommendations once the on-device LLM becomes ready.
-  const fetchHomeDataRef = React.useRef<((showLoading?: boolean, options?: { bypassCooldown?: boolean }) => Promise<void>) | null>(null);
-  useEffect(() => {
-    return onModelReady(() => {
-      setIsOnDeviceLlmReady(true);
-      if (!homeDataFetchInFlightRef.current) {
-        fetchHomeDataRef.current?.(false, { bypassCooldown: true });
-      }
-    });
-  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -777,7 +842,7 @@ export default function HomeScreen() {
       };
 
       void restorePendingReopen();
-    }, [discover.length, featured.length, isGuest, loadViewedNewArrivals, params.reopenListingId, userId, userRole]),
+    }, [discover.length, featured.length, isGuest, loadViewedNewArrivals, params.reopenListingId, roleResolved, userId, userRole]),
   );
 
   // Handler for realtime updates - defined before useEffect that uses it
@@ -790,7 +855,7 @@ export default function HomeScreen() {
       // Silent refresh to keep UI stable during realtime bursts.
       void fetchHomeData(false, { bypassCooldown: true });
     }, 450);
-  }, [userRole, userId]);
+  }, [roleResolved, userId, userRole]);
 
   // Realtime Updates
   useEffect(() => {
@@ -844,7 +909,7 @@ export default function HomeScreen() {
       fetchRecentlyViewed(),
     ]);
     setRefreshing(false);
-  }, [userRole, userId, isGuest]);
+  }, [isGuest, roleResolved, userId, userRole]);
 
   const setTimeBasedGreeting = () => {
     const hour = new Date().getHours();
@@ -853,7 +918,7 @@ export default function HomeScreen() {
     else setTimeGreeting("Good evening");
   };
 
-  const [hasGroups, setHasGroups] = useState(false);
+  const [hasGroups, setHasGroups] = useState(() => Boolean(initialHomeProfileSnapshot?.hasGroups));
 
   const topItems = useMemo(() => {
     const combined = [...featured, ...discover];
@@ -951,6 +1016,11 @@ export default function HomeScreen() {
     options?: { bypassCooldown?: boolean },
   ) => {
     debugLog("fetchHomeData called, showLoading:", showLoading);
+    if (Boolean(userId) && !isGuest && !roleResolved) {
+      debugLog("Skipping home fetch while user role is still resolving");
+      return;
+    }
+
     if (homeDataFetchInFlightRef.current) {
       return;
     }
@@ -965,7 +1035,14 @@ export default function HomeScreen() {
     }
 
     homeDataFetchInFlightRef.current = true;
-    if (showLoading) setLoading(true);
+    const hasVisibleFeed =
+      featured.length > 0 ||
+      discover.length > 0 ||
+      newArrivals.length > 0 ||
+      randomRecommendations.length > 0 ||
+      aiRecommendations.length > 0;
+
+    if (showLoading && !hasVisibleFeed) setLoading(true);
     try {
       // Fetch based on Role
       // If Owner, ONLY fetch groups (musicians)
@@ -1313,10 +1390,19 @@ export default function HomeScreen() {
       const diversifiedRandomItems = takeItemsWithTypeVariety(shuffled, 20);
       setRandomRecommendations(diversifiedRandomItems);
 
-      // === AI RECOMMENDATIONS - Prefer on-device LLM, fallback to on-device CPU ranking ===
+      // === AI RECOMMENDATIONS - Prefer Groq reranking, fallback to local ranking ===
       if (userId) {
         try {
-          debugLog("Building on-device For You recommendations for user:", userId);
+          const hasExistingAiFeed =
+            aiRecommendations.length > 0 &&
+            !/(local ranker|local matching)/i.test(aiFeedProvider || "");
+          const hasRecentQuotaMessage = isGroqQuotaExhaustedMessage(aiFeedMessage);
+          const hasFreshAiFeed =
+            (hasExistingAiFeed || hasRecentQuotaMessage) &&
+            lastHomeAiRerankAtRef.current > 0 &&
+            Date.now() - lastHomeAiRerankAtRef.current < HOME_AI_RERANK_COOLDOWN_MS;
+
+          debugLog("Building Groq For You recommendations for user:", userId);
           const [skillsResult, genresResult] = await Promise.all([
             supabase.from("profile_skills").select("skill").eq("profile_id", userId),
             supabase.from("profile_genres").select("genre").eq("profile_id", userId),
@@ -1338,84 +1424,126 @@ export default function HomeScreen() {
           const hasProfileSignals =
             profileSignals.skills.length > 0 || profileSignals.genres.length > 0;
 
-          setAiRecommendations([]);
-          setAiFeedProvider("On-Device LLM (Required)");
-          if (localRankedItems.length === 0) {
-            setAiFeedMessage("No listings available for LLM feed ranking yet.");
-          } else if (homeLlmRerankInFlightRef.current) {
-            setAiFeedMessage("On-device LLM rerank is already running for Home feed.");
-          } else if (isOnDeviceLlmReady) {
-            setAiFeedMessage("On-device LLM rerank is running for Home feed.");
-          } else if (hasProfileSignals) {
-            setAiFeedMessage("Preparing on-device LLM feed for your profile.");
-          } else {
-            setAiFeedMessage("Preparing on-device LLM feed.");
+          if (hasFreshAiFeed) {
+            setAiFeedMessage((currentMessage) => {
+              if (currentMessage && currentMessage.trim().length > 0) {
+                return currentMessage;
+              }
+
+              return `Using cached ${aiFeedProvider || geminiModelLabel} Home feed.`;
+            });
+          } else if (!hasExistingAiFeed) {
+            setAiRecommendations([]);
+            setAiFeedProvider(geminiModelLabel);
+
+            if (localRankedItems.length === 0) {
+              setAiFeedMessage("No listings available for AI feed ranking yet.");
+            } else if (homeLlmRerankInFlightRef.current) {
+              setAiFeedMessage(`${geminiModelLabel} rerank is already running for Home feed.`);
+            } else if (hasProfileSignals) {
+              setAiFeedMessage(`Preparing ${geminiModelLabel} feed for your profile.`);
+            } else {
+              setAiFeedMessage(`Preparing ${geminiModelLabel} feed.`);
+            }
           }
 
-          if (homeLlmRerankInFlightRef.current) {
+          if (hasFreshAiFeed) {
+            debugLog("Skipping Home rerank because cached AI feed is still fresh.");
+          } else if (homeLlmRerankInFlightRef.current) {
+            setAiFeedMessage(`${geminiModelLabel} rerank is already running for Home feed.`);
+          } else {
+            const llmRequestId = ++homeLlmRequestIdRef.current;
+            homeLlmRerankInFlightRef.current = true;
+            setIsHomeLlmRerankPending(true);
+
+            void (async () => {
+              try {
+                const llmResult = await rerankHomeFeedWithGeminiFlashLite({
+                  candidates: localRankedItems,
+                  profileSignals,
+                  limit: 20,
+                });
+
+                if (llmRequestId !== homeLlmRequestIdRef.current) {
+                  return;
+                }
+
+                if (isGroqQuotaExhaustedMessage(llmResult.message)) {
+                  lastHomeAiRerankAtRef.current = Date.now();
+                  setAiRecommendations([]);
+                  setAiFeedProvider("Normal Feed");
+                  setAiFeedMessage("Groq free-tier limit reached. Showing normal Home feed.");
+                  return;
+                }
+
+                if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
+                  lastHomeAiRerankAtRef.current = Date.now();
+                  setAiRecommendations(llmResult.recommendations);
+                  setAiFeedProvider(llmResult.aiProvider || geminiModelLabel);
+                  setAiFeedMessage(
+                    llmResult.message ||
+                    `Realtime For You feed reranked by ${geminiModelLabel}.`,
+                  );
+                  return;
+                }
+
+                if (strictLlmModeForAiPages) {
+                  if (!hasExistingAiFeed) {
+                    setAiRecommendations([]);
+                    setAiFeedProvider(geminiModelLabel);
+                  }
+                  setAiFeedMessage(
+                    llmResult.message ||
+                    (hasExistingAiFeed
+                      ? `Keeping the previous ${geminiModelLabel} feed while Home refresh retries.`
+                      : `${geminiModelLabel} is required for Home AI mode on this build.`),
+                  );
+                  return;
+                }
+
+                if (llmResult.message && llmResult.message.trim().length > 0) {
+                  setAiFeedMessage(llmResult.message);
+                }
+              } finally {
+                if (llmRequestId === homeLlmRequestIdRef.current) {
+                  homeLlmRerankInFlightRef.current = false;
+                  setIsHomeLlmRerankPending(false);
+                }
+              }
+            })();
+          }
+        } catch (aiErr) {
+          debugLog("Groq ranking error:", aiErr);
+          const errorMessage = aiErr instanceof Error ? aiErr.message : String(aiErr);
+          if (isGroqQuotaExhaustedMessage(errorMessage)) {
+            lastHomeAiRerankAtRef.current = Date.now();
+            setAiRecommendations([]);
+            setAiFeedProvider("Normal Feed");
+            setAiFeedMessage("Groq free-tier limit reached. Showing normal Home feed.");
             return;
           }
 
-          const llmRequestId = ++homeLlmRequestIdRef.current;
-          homeLlmRerankInFlightRef.current = true;
-          setIsHomeLlmRerankPending(true);
+          const hasExistingAiFeed =
+            aiRecommendations.length > 0 &&
+            !/(local ranker|local matching)/i.test(aiFeedProvider || "");
 
-          void (async () => {
-            try {
-              const llmResult = await rerankHomeFeedWithLocalLLM({
-                candidates: localRankedItems,
-                profileSignals,
-                limit: 20,
-              });
-
-              if (llmRequestId !== homeLlmRequestIdRef.current) {
-                return;
-              }
-
-              if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
-                setAiRecommendations(llmResult.recommendations);
-                setAiFeedProvider(llmResult.aiProvider || "On-Device LLM");
-                setAiFeedMessage(
-                  llmResult.message ||
-                  "Realtime For You feed reranked by on-device LLM.",
-                );
-                return;
-              }
-
-              if (strictLlmModeForAiPages) {
-                setAiRecommendations([]);
-                setAiFeedProvider("On-Device LLM (Required)");
-                setAiFeedMessage(
-                  llmResult.message ||
-                  "On-device LLM is required for Home AI mode on this build.",
-                );
-                return;
-              }
-
-              if (llmResult.message && llmResult.message.trim().length > 0) {
-                setAiFeedMessage(llmResult.message);
-              }
-            } finally {
-              if (llmRequestId === homeLlmRequestIdRef.current) {
-                homeLlmRerankInFlightRef.current = false;
-                setIsHomeLlmRerankPending(false);
-              }
-            }
-          })();
-        } catch (aiErr) {
-          debugLog("On-device ranking error:", aiErr);
-          setAiRecommendations([]);
-          setAiFeedProvider("On-Device LLM (Required)");
+          if (!hasExistingAiFeed) {
+            setAiRecommendations([]);
+            setAiFeedProvider(geminiModelLabel);
+          }
           setAiFeedMessage(
             strictLlmModeForAiPages
-              ? "Home AI mode requires on-device LLM runtime/model on this build."
+              ? hasExistingAiFeed
+                ? `Keeping the previous ${geminiModelLabel} feed while Home refresh retries.`
+                : `${geminiModelLabel} is unavailable for Home AI mode right now.`
               : "Local personalization is temporarily unavailable. Showing general picks.",
           );
         }
       } else {
         debugLog("No user logged in - skipping AI recommendations");
+        lastHomeAiRerankAtRef.current = 0;
         setAiRecommendations([]);
-        setAiFeedProvider("On-Device LLM (Required)");
+        setAiFeedProvider(geminiModelLabel);
         setAiFeedMessage("");
       }
 
@@ -1433,7 +1561,6 @@ export default function HomeScreen() {
       setLoading(false);
     }
   };
-  fetchHomeDataRef.current = fetchHomeData;
 
   const handleCardPress = async (item: any) => {
     debugLog("=== handleCardPress called ===");
@@ -1632,10 +1759,10 @@ export default function HomeScreen() {
 
   // 1. Immersive Hero Section
   const renderHero = () => {
-    // Modern System Background (Abstract Dark/Purple)
-    // Using a high-quality abstract gradient/mesh that matches the app's "premium" feel
+    // Musician / Live Performance Hero Image
+    // Using a moody, neon-lit stage/guitar image to match the music vibe
     const heroImage =
-      "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop";
+      "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=2564&auto=format&fit=crop";
 
     // Dynamic Search Text
     // Musicians -> looking for studios/gigs
@@ -1676,25 +1803,32 @@ export default function HomeScreen() {
             <Text style={styles.heroGreeting}>Welcome, {userName}!</Text>
           </View>
 
-          {/* Glassmorphism Search Pill */}
-          <BlurView intensity={60} tint="light" style={styles.searchPill}>
-            <TouchableOpacity activeOpacity={1}
+          {/* Music-Styled Glassmorphism Search Pill */}
+          <BlurView intensity={80} tint="dark" style={styles.searchPill}>
+            <TouchableOpacity 
+              activeOpacity={0.8}
               style={styles.searchTouch}
               onPress={openSearchSheet}
             >
-              <Ionicons
-                name="search"
-                size={20}
-                color="#FFF"
-                style={{ marginRight: 8 }}
-              />
+              <View style={styles.searchIconContainer}>
+                <Ionicons
+                  name="search"
+                  size={moderateScale(22)}
+                  color="#A78BFA"
+                />
+              </View>
+              
               <View style={styles.searchTexts}>
-                <Text style={styles.searchPlaceholder}>
+                <Text style={styles.searchPlaceholder} numberOfLines={1}>
                   {searchPlaceholder}
                 </Text>
-                <Text style={styles.searchSubPlaceholder}>
+                <Text style={styles.searchSubPlaceholder} numberOfLines={1}>
                   {searchSubPlaceholder}
                 </Text>
+              </View>
+
+              <View style={styles.searchFilterBox}>
+                <Ionicons name="options" size={moderateScale(20)} color="#FFF" />
               </View>
             </TouchableOpacity>
           </BlurView>
@@ -2595,13 +2729,64 @@ export default function HomeScreen() {
 
   if (loading) {
     return (
-      <View
-        style={[
-          styles.loadingContainer,
-          { backgroundColor: colors.background },
-        ]}
-      >
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <StatusBar
+          barStyle="light-content"
+          translucent
+          backgroundColor="transparent"
+        />
+        
+        {/* Mock Header space */}
+        <View style={{ position: "absolute", top: insets.top + 8, left: 16, zIndex: 100 }}>
+           <Skeleton width={180} height={32} borderRadius={8} />
+        </View>
+
+        <View>
+          {/* Hero Skeleton */}
+          <Skeleton 
+             width="100%" 
+             height={height < 700 ? Math.max(height * 0.45, 340) : height * 0.42} 
+             borderRadius={0} 
+          />
+          {/* Overlay elements mock inside hero */}
+          <View style={{ position: 'absolute', bottom: 24, left: 24, right: 24 }}>
+             <Skeleton width="60%" height={36} style={{ marginBottom: 20 }} />
+             <Skeleton width="100%" height={56} borderRadius={100} />
+          </View>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+          {/* Highlight/Featured Mocks */}
+          <View style={{ marginTop: 32, paddingHorizontal: 24 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+               <Skeleton width={120} height={24} />
+               <Skeleton width={60} height={20} />
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {[1, 2, 3].map((_, i) => (
+                <View key={i} style={{ marginRight: 20 }}>
+                  <Skeleton width={width * 0.7} height={moderateScale(320)} borderRadius={24} />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+          
+          {/* Another row Mock */}
+          <View style={{ marginTop: 32, paddingHorizontal: 24 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+               <Skeleton width={140} height={24} />
+               <Skeleton width={60} height={20} />
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {[1, 2, 3].map((_, i) => (
+                <View key={i} style={{ marginRight: 20 }}>
+                  <Skeleton width={width * 0.65} height={moderateScale(240)} borderRadius={20} />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </ScrollView>
+        <Navbar />
       </View>
     );
   }
@@ -3130,33 +3315,53 @@ const styles = StyleSheet.create({
   searchPill: {
     borderRadius: 100,
     overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(17, 24, 39, 0.4)", // Darker glass to contrast glowing icons
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
-    shadowColor: "#000",
+    borderColor: "rgba(167, 139, 250, 0.2)", // Subtle purple border (music theme)
+    shadowColor: "#A78BFA",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 6,
+    marginTop: height < 700 ? 8 : 12,
   },
   searchTouch: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: height < 700 ? 16 : 20, // Slightly cleaner fixed padding
-    paddingVertical: height < 700 ? moderateScale(12) : moderateScale(16),
+    paddingHorizontal: height < 700 ? 12 : 16,
+    paddingVertical: height < 700 ? moderateScale(10) : moderateScale(14),
+  },
+  searchIconContainer: {
+    width: moderateScale(40),
+    height: moderateScale(40),
+    borderRadius: 20,
+    backgroundColor: "rgba(167, 139, 250, 0.15)", // Glowing circle behind search icon
+    alignItems: "center",
+    justifyContent: "center",
   },
   searchTexts: {
-    marginLeft: 8,
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 12,
   },
   searchPlaceholder: {
     color: "#FFF",
     fontFamily: "Poppins_600SemiBold",
     fontSize: moderateScale(15),
+    letterSpacing: 0.2, // slightly spaced for stylistic music feel
   },
   searchSubPlaceholder: {
-    color: "rgba(255,255,255,0.9)",
+    color: "rgba(167, 139, 250, 0.8)", // Purple tint on the subtitle for contrast
     fontFamily: "Poppins_400Regular",
     fontSize: moderateScale(12),
+  },
+  searchFilterBox: {
+    width: moderateScale(36),
+    height: moderateScale(36),
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.1)", // Glass button for filter/equalizer icon
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // Section Commons

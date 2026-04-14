@@ -120,10 +120,6 @@ const BookingControls = ({
     setEndTime(null);
     setDate(new Date(chosenDate));
 
-    if (isRecordingMode) {
-      return;
-    }
-
     const firstSlot = chosenSlots[0];
     if (!firstSlot) return;
 
@@ -324,34 +320,9 @@ const BookingControls = ({
         >
           {!hasSelectedSessionType && supportsSessionTypeSelection
             ? "Choose Session Type"
-            : isRecordingMode
-              ? "Select Recording Date"
-              : "Select Date & Time"}
+            : "Select Date & Time"}
         </Text>
-        {isRecordingMode ? (
-          <View
-            style={[
-              styles.durationBadge,
-              {
-                backgroundColor: isDark
-                  ? "rgba(124, 58, 237, 0.15)"
-                  : "rgba(124, 58, 237, 0.1)",
-              },
-            ]}
-          >
-            <Ionicons name="mic" size={14} color={colors.primary} />
-            <Text
-              style={{
-                fontFamily: "Poppins_600SemiBold",
-                color: colors.primary,
-                marginLeft: 4,
-                fontSize: 12,
-              }}
-            >
-              Whole Day
-            </Text>
-          </View>
-        ) : duration > 0 ? (
+        {duration > 0 ? (
           <View
             style={[
               styles.durationBadge,
@@ -453,7 +424,7 @@ const BookingControls = ({
                     flex: 1,
                   }}
                 >
-                  <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Recording</Text> — Whole-day booking for uninterrupted sessions
+                  <Text style={{ fontFamily: "Poppins_600SemiBold" }}>Recording</Text> — Pick time slots, priced per song
                 </Text>
               </View>
             </View>
@@ -570,7 +541,7 @@ const BookingControls = ({
             },
           ]}
         >
-          {isRecordingMode ? (
+          {false ? (
             <View>
               <Text
                 style={{
@@ -634,14 +605,17 @@ const BookingControls = ({
                           color: colors.text,
                         }}
                       >
-                        {formatTime12(recordingDaySlot.start)} - {formatTime12(recordingDaySlot.end)}
+                        {formatTime12(recordingDaySlot!.start)} - {formatTime12(recordingDaySlot!.end)}
                       </Text>
                     </View>
                   </View>
 
                   {(() => {
-                    const startParts = recordingDaySlot.start.split(":").map(Number);
-                    const endParts = recordingDaySlot.end.split(":").map(Number);
+                    const activeRecordingDaySlot = recordingDaySlot;
+                    if (!activeRecordingDaySlot) return null;
+
+                    const startParts = activeRecordingDaySlot!.start.split(":").map(Number);
+                    const endParts = activeRecordingDaySlot!.end.split(":").map(Number);
                     const startMinutes = startParts[0] * 60 + startParts[1];
                     const endMinutes = endParts[0] * 60 + endParts[1];
                     const durationHours = (endMinutes - startMinutes) / 60;

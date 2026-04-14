@@ -22,6 +22,22 @@ export const getScreenCacheKey = (scope: string, params?: unknown) => {
   return `${scope}:${JSON.stringify(params)}`;
 };
 
+export const peekScreenCache = <T>(key: string, maxAgeMs: number): T | null => {
+  const storageKey = getStorageKey(key);
+  const inMemory = memoryCache.get(storageKey);
+
+  if (!inMemory) {
+    return null;
+  }
+
+  if (!isFresh(inMemory.timestamp, maxAgeMs)) {
+    memoryCache.delete(storageKey);
+    return null;
+  }
+
+  return inMemory.data as T;
+};
+
 export const readScreenCache = async <T>(
   key: string,
   maxAgeMs: number,

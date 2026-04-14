@@ -14,7 +14,9 @@ import { useEffect, useRef, useState } from "react";
 import { LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
+import { supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
+import { showTopToast, TopToastProvider } from "../src/context/TopToastContext";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 import SubscriptionRequiredScreen from "./subscription_required";
 
@@ -46,11 +48,13 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
-        <AuthProvider>
-          <BottomSheetModalProvider>
-            <RootContent />
-          </BottomSheetModalProvider>
-        </AuthProvider>
+        <TopToastProvider>
+          <AuthProvider>
+            <BottomSheetModalProvider>
+              <RootContent />
+            </BottomSheetModalProvider>
+          </AuthProvider>
+        </TopToastProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );
@@ -69,8 +73,63 @@ function RootContent() {
     useAuth();
   const segments = useSegments();
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
+  const shownNotificationToastIdsRef = useRef<Set<string>>(new Set());
 
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+
+  useEffect(() => {
+    const activeUserId = session?.user?.id;
+    if (!activeUserId) return;
+
+    const notificationChannel = supabase
+      .channel(`root-notification-toast:${activeUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${activeUserId}`,
+        },
+        (payload) => {
+          const nextNotification = (payload as any)?.new || {};
+          const notificationId = String(nextNotification?.id || "").trim();
+          if (!notificationId) return;
+          if (shownNotificationToastIdsRef.current.has(notificationId)) return;
+
+          shownNotificationToastIdsRef.current.add(notificationId);
+          if (shownNotificationToastIdsRef.current.size > 120) {
+            const oldestId = shownNotificationToastIdsRef.current.values().next().value;
+            if (oldestId) {
+              shownNotificationToastIdsRef.current.delete(oldestId);
+            }
+          }
+
+          const message = String(nextNotification?.message || "").trim();
+          if (!message) return;
+
+          const normalizedType = String(nextNotification?.type || "info").toLowerCase();
+          const toastType =
+            normalizedType === "success" ||
+            normalizedType === "error" ||
+            normalizedType === "warning" ||
+            normalizedType === "info"
+              ? normalizedType
+              : "info";
+
+          showTopToast({
+            type: toastType,
+            title: String(nextNotification?.title || "").trim() || "Notification",
+            message,
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(notificationChannel);
+    };
+  }, [session?.user?.id]);
 
   // Handle global identity/subscription gates
   useEffect(() => {
@@ -209,6 +268,27 @@ function RootContent() {
         const bookingId = queryParams?.booking_id as string;
         const type = queryParams?.type as string;
         const planId = queryParams?.plan_id as string;
+
+        const normalizedStatus = String(status || "").toLowerCase();
+        if (normalizedStatus === "success" || normalizedStatus === "paid" || normalizedStatus === "completed") {
+          showTopToast({
+            type: "success",
+            title: "Payment Successful",
+            message: "Your payment was confirmed.",
+          });
+        } else if (normalizedStatus === "cancelled" || normalizedStatus === "canceled") {
+          showTopToast({
+            type: "warning",
+            title: "Payment Cancelled",
+            message: "The payment was cancelled before completion.",
+          });
+        } else if (normalizedStatus === "failed" || normalizedStatus === "error") {
+          showTopToast({
+            type: "error",
+            title: "Payment Failed",
+            message: "The payment did not go through. Please try again.",
+          });
+        }
 
         console.log("💳 Payment result deep link:", { status, bookingId, type, planId });
 

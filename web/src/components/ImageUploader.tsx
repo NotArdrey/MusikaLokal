@@ -3,6 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useState } from 'react';
 import { ActivityIndicator, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import { screenUploadsWithAi } from '../services/uploadSafetyScreen';
 import { useTheme } from '../context/ThemeContext';
 import CustomAlert, { AlertType } from './CustomAlert';
 
@@ -112,6 +113,40 @@ export default function ImageUploader({
       // Check if adding these images would exceed the limit
       if (images.length + result.assets.length > maxImages) {
         showAlert('error', 'Limit Reached', `You can only upload up to ${maxImages} images.`);
+        return;
+      }
+
+      const screeningSummary = await screenUploadsWithAi(
+        result.assets.map((asset) => {
+          const fallbackName = asset.uri.split('/').pop() || 'image-upload.jpg';
+          const fileName =
+            typeof (asset as any)?.fileName === 'string'
+              ? (asset as any).fileName
+              : fallbackName;
+
+          return {
+            name: fileName || fallbackName,
+            mimeType:
+              typeof (asset as any)?.mimeType === 'string'
+                ? (asset as any).mimeType
+                : undefined,
+            size:
+              typeof (asset as any)?.fileSize === 'number'
+                ? (asset as any).fileSize
+                : undefined,
+            uri: asset.uri,
+            kind: 'photo' as const,
+          };
+        }),
+        `image_uploader:${bucketName}:${folder}`,
+      );
+
+      if (!screeningSummary.allowed) {
+        showAlert(
+          'error',
+          'Upload Blocked',
+          screeningSummary.reason || 'One or more images did not pass safety screening.',
+        );
         return;
       }
 

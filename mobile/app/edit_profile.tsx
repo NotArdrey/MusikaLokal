@@ -21,8 +21,10 @@ import Header from "../src/components/header";
 import LeafletAddressPicker from "../src/components/LeafletAddressPicker";
 import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
+import Skeleton from "../src/components/Skeleton";
 import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useTheme } from "../src/context/ThemeContext";
+import { ensureUploadPassesSafetyScreening } from "../src/services/uploadSafetyScreen";
 
 
 
@@ -156,6 +158,16 @@ export default function EditProfileScreen() {
       genres: normalizeList(selectedGenres),
     }),
     [contactNumber, location, bio, selectedRoles, selectedGenres],
+  );
+
+  const hasIncompleteRequiredFields = useMemo(
+    () =>
+      !contactNumber.trim() ||
+      !location.trim() ||
+      selectedRoles.length === 0 ||
+      selectedGenres.length === 0 ||
+      !bio.trim(),
+    [contactNumber, location, selectedRoles, selectedGenres, bio],
   );
 
   const hasUnsavedChanges = useMemo(() => {
@@ -328,6 +340,16 @@ export default function EditProfileScreen() {
       }
 
       const ext = asset.uri.split(".").pop()?.toLowerCase() || "jpg";
+      await ensureUploadPassesSafetyScreening(
+        {
+          name: (asset as any)?.fileName || `profile-photo.${ext}`,
+          mimeType: `image/${ext === "jpg" ? "jpeg" : ext}`,
+          size: Math.floor((asset.base64.length * 3) / 4),
+          uri: asset.uri,
+          kind: "photo",
+        },
+        "edit_profile_avatar",
+      );
       setPendingAvatar({ base64: asset.base64, ext });
       setAvatarUrl(asset.uri);
       showAlert("info", "Photo selected", "Tap Save Profile to apply your new photo.");
@@ -533,11 +555,28 @@ export default function EditProfileScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          Loading...
-        </Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Edit Profile" onBackPress={handleAttemptLeave} />
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.editProfileSkeletonContent}>
+          <View style={styles.avatarContainer}>
+            <Skeleton width={110} height={110} borderRadius={55} />
+            <Skeleton width={132} height={14} style={{ marginTop: 12 }} />
+          </View>
+
+          <Skeleton width={94} height={12} style={{ marginBottom: 8 }} />
+          <Skeleton width="100%" height={52} borderRadius={10} style={{ marginBottom: 16 }} />
+
+          <Skeleton width={120} height={12} style={{ marginBottom: 8 }} />
+          <Skeleton width="100%" height={90} borderRadius={10} style={{ marginBottom: 16 }} />
+
+          <Skeleton width={110} height={12} style={{ marginBottom: 8 }} />
+          <Skeleton width="100%" height={52} borderRadius={10} style={{ marginBottom: 16 }} />
+
+          <Skeleton width="100%" height={48} borderRadius={12} style={{ marginTop: 8 }} />
+          <Skeleton width="100%" height={48} borderRadius={12} style={{ marginTop: 10 }} />
+        </ScrollView>
+
+        <Navbar />
       </View>
     );
   }
@@ -878,13 +917,31 @@ export default function EditProfileScreen() {
 
 
         {/* Buttons */}
+        {hasIncompleteRequiredFields && (
+          <Text
+            style={{
+              color: "#F59E0B",
+              fontFamily: "Poppins_500Medium",
+              fontSize: 12,
+              marginBottom: 10,
+              textAlign: "center",
+            }}
+          >
+            Complete required fields marked * before saving.
+          </Text>
+        )}
         <TouchableOpacity
           style={[
             styles.saveBtn,
-            { backgroundColor: saving ? colors.textSecondary : colors.primary },
+            {
+              backgroundColor:
+                saving || hasIncompleteRequiredFields
+                  ? colors.textSecondary
+                  : colors.primary,
+            },
           ]}
           onPress={handleSave}
-          disabled={saving}
+          disabled={saving || hasIncompleteRequiredFields}
           activeOpacity={1}
         >
           {saving ? (
@@ -939,6 +996,7 @@ const styles = StyleSheet.create({
   },
   scroll: { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 150 },
+  editProfileSkeletonContent: { padding: 20, paddingBottom: 150 },
 
   avatarContainer: { alignItems: "center", marginBottom: 24 },
   avatarWrapper: { position: "relative" },
@@ -981,6 +1039,7 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 15,
     fontFamily: "Poppins_400Regular",
+    textAlignVertical: "center",
   },
   disabledInput: { borderWidth: 1, borderRadius: 10, padding: 14 },
   disabledText: { fontSize: 15, fontFamily: "Poppins_500Medium" },
@@ -1029,6 +1088,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Poppins_400Regular",
     textAlign: "left",
+    textAlignVertical: "center",
   },
   moreText: {
     fontSize: 12,

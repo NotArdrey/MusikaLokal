@@ -346,8 +346,6 @@ export default function LoginScreen() {
     await signInWithCredentials(tempEmail, TEMP_LOGIN_PASSWORD);
   };
 
-
-
   const startVerification = async (userId: string) => {
     try {
       // Direct URL construction with unique reference to prevent stale sessions

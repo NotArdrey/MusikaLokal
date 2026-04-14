@@ -8,6 +8,7 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 // Payout Method Type
@@ -124,17 +125,52 @@ export default function WalletScreen() {
     setAlertVisible(true);
   };
 
-  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
-    const lowerTitle = (title || '').toLowerCase();
-    let type: AlertType = 'info';
+  const isSimpleTopToastButtons = (buttons?: any[]) => {
+    if (!buttons || buttons.length === 0) return true;
+    if (buttons.length !== 1) return false;
+
+    const onlyButton = buttons[0];
+    const normalizedText = String(onlyButton?.text ?? 'OK').trim().toLowerCase();
+    const hasNoCallback = !onlyButton?.onPress;
+    const isNeutralStyle =
+      !onlyButton?.style || onlyButton.style === 'default' || onlyButton.style === 'cancel';
+
+    return (
+      hasNoCallback &&
+      isNeutralStyle &&
+      (normalizedText === 'ok' || normalizedText === 'close' || normalizedText === 'got it')
+    );
+  };
+
+  const resolveAlertType = (title: string): AlertType => {
+    const lowerTitle = title.toLowerCase();
     if (lowerTitle.includes('error') || lowerTitle.includes('failed') || lowerTitle.includes('invalid') || lowerTitle.includes('missing') || lowerTitle.includes('insufficient')) {
-      type = 'error';
-    } else if (lowerTitle.includes('success')) {
-      type = 'success';
-    } else if (lowerTitle.includes('warning')) {
-      type = 'warning';
+      return 'error';
     }
-    showAlert(type, title || 'Notice', message || '', buttons);
+    if (lowerTitle.includes('success')) {
+      return 'success';
+    }
+    if (lowerTitle.includes('warning')) {
+      return 'warning';
+    }
+    return 'info';
+  };
+
+  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+    const normalizedTitle = title || 'Notice';
+    const normalizedMessage = message || '';
+    const type = resolveAlertType(normalizedTitle);
+
+    if (isSimpleTopToastButtons(buttons)) {
+      showTopToast({
+        type,
+        title: normalizedTitle,
+        message: normalizedMessage.trim() ? normalizedMessage : normalizedTitle,
+      });
+      return;
+    }
+
+    showAlert(type, normalizedTitle, normalizedMessage, buttons);
   };
 
   const Alert = { alert: showAlertNative };

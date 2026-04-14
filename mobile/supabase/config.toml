@@ -39,3 +39,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.gig-applications]
 verify_jwt = false
+[functions.upload-safety-screen]
+verify_jwt = false

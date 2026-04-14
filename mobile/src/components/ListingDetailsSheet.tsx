@@ -149,7 +149,7 @@ const ListingDetailsSheet = forwardRef<
   ListingDetailsSheetProps
 >(function ListingDetailsSheet({ listingId, onDismiss }, ref) {
   const { colors, isDark } = useTheme();
-  const { userId, userRole, isSystemLocked, showLockAlert } = useAuth();
+  const { userId, userRole, isGuest, isSystemLocked, showLockAlert } = useAuth();
   const { isProfileComplete } = useProfileCompletion();
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<any>(null);
@@ -547,7 +547,7 @@ const ListingDetailsSheet = forwardRef<
     group?.organizer_id ||
     (normalizedListingType === "artist" ? group?.id || null : null);
   const isOwnListing = !!userId && !!listingOwnerId && listingOwnerId === userId;
-  const showReportButton = !!group && !isOwnListing;
+  const showReportButton = !!group && !isOwnListing && !isGuest;
 
   const submitReport = async (reason: string, details?: string) => {
     if (!userId) {
@@ -582,6 +582,10 @@ const ListingDetailsSheet = forwardRef<
   };
 
   const handleReport = () => {
+    if (isGuest) {
+      return;
+    }
+
     if (!group?.id) {
       showSheetAlert("error", "Unable to Report", "Missing listing details.");
       return;
@@ -1664,40 +1668,6 @@ const ListingDetailsSheet = forwardRef<
           return b.booking_date === dateStr;
         });
 
-        // RECORDING STUDIO WHOLE-DAY LOGIC:
-        // For recording studios, if there are ANY bookings on this date, block the entire day
-        const usesRecordingWholeDayMode = isRecordingStudioMode(
-          group?.studio_type,
-          selectedSessionType,
-        );
-        if (usesRecordingWholeDayMode) {
-          // Also check cart bookings for recording studios
-          const cartBookingsForDate = (cartBookings || []).filter((b) => {
-            const cartDate = b?.date instanceof Date ? b.date : new Date(b?.date);
-            if (Number.isNaN(cartDate.getTime())) return false;
-            const cartDateStr = toLocalDateKey(cartDate);
-            return cartDateStr === dateStr;
-          });
-
-          if (dayDbBookings.length > 0 || cartBookingsForDate.length > 0) {
-            // Date has existing bookings - block entirely for recording studio
-            marked[dateStr] = {
-              disabled: true,
-              disableTouchEvent: true,
-              textColor: isDark ? "#4B5563" : "#D1D5DB",
-            };
-            continue; // Skip to next date
-          } else {
-            // No bookings - date is available for whole-day recording booking
-            marked[dateStr] = {
-              marked: true,
-              dotColor: daySchedule.isOverride ? "#F59E0B" : colors.primary,
-            };
-            continue; // Skip the normal slot-based logic
-          }
-        }
-
-
         const blockedTimes = new Set<string>();
 
 
@@ -1883,59 +1853,7 @@ const ListingDetailsSheet = forwardRef<
       })),
     );
 
-    // RECORDING STUDIO WHOLE-DAY LOGIC:
-    // For recording studios, the entire day is booked as one unit
-    const usesRecordingWholeDayMode = isRecordingStudioMode(
-      group?.studio_type,
-      selectedSessionType,
-    );
-    if (usesRecordingWholeDayMode) {
-      // Also check cart bookings for recording studios
-      const cartBookingsForDate = bookings.filter((b) => {
-        const cartDate = b?.date instanceof Date ? b.date : new Date(b?.date);
-        if (Number.isNaN(cartDate.getTime())) return false;
-        const cartDateStr = toLocalDateKey(cartDate);
-        return cartDateStr === dateStr;
-      });
-
-      if (dayBookings.length > 0 || cartBookingsForDate.length > 0) {
-        // Date has existing bookings - not available for recording studio
-        setIsRecordingWholeDayAvailable(false);
-        setRecordingDaySlot(null);
-        setAvailableSlots([]);
-        debugLog("🎙️ Recording studio: Date has bookings, blocking entire day");
-        return [];
-      } else {
-        // No bookings - date is available for whole-day recording booking
-        // Get the operating hours for this day
-        const operatingSlot = daySchedule.slots[0]; // Use first slot as operating hours
-
-        const leadTimeHours = Number(group?.settings?.lead_time_hours || 0);
-        const minBookingTime = new Date();
-        minBookingTime.setHours(minBookingTime.getHours() + leadTimeHours);
-        const recordingStart = new Date(`${dateStr}T${operatingSlot.start}`);
-
-        if (!Number.isNaN(recordingStart.getTime()) && recordingStart < minBookingTime) {
-          setIsRecordingWholeDayAvailable(false);
-          setRecordingDaySlot(null);
-          setAvailableSlots([]);
-          debugLog("🎙️ Recording studio: blocked by lead-time requirement", {
-            dateStr,
-            operatingStart: operatingSlot.start,
-            leadTimeHours,
-          });
-          return [];
-        }
-
-        setIsRecordingWholeDayAvailable(true);
-        setRecordingDaySlot({ start: operatingSlot.start, end: operatingSlot.end });
-        setAvailableSlots(["whole-day"]); // Special marker for whole-day booking
-        debugLog("🎙️ Recording studio: Date available for whole-day booking", operatingSlot);
-        return ["whole-day"];
-      }
-    }
-
-    // Reset recording studio state for non-recording studios
+    // Recording now uses the same slot-based flow as rehearsal.
     setIsRecordingWholeDayAvailable(false);
     setRecordingDaySlot(null);
 

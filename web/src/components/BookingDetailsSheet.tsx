@@ -13,6 +13,13 @@ import {
 } from "react-native";
 import { supabase } from "../../lib/supabase";
 import { useTheme } from "../context/ThemeContext";
+import {
+  formatRecordingHours,
+  formatRecordingRuleShort,
+  getRecordingRequiredBlocks,
+  getRecordingRequiredHours,
+  resolveRecordingRule,
+} from "../utils/recordingRule";
 import CachedImage from "./CachedImage";
 
 const debugLog = (..._args: unknown[]) => { };
@@ -254,6 +261,78 @@ const BookingDetailsSheet = forwardRef<
   const effectiveDurationHours = Number(
     booking.duration_hours || booking?.modifiers_applied?.hours || 4,
   );
+  const parsedLegacyMinHoursPerSong = Number(
+    booking?.modifiers_applied?.recording_session?.min_hours_per_song ??
+      booking?.modifiers_applied?.min_hours_per_song ??
+      "",
+  );
+  const legacyMinHoursPerSong =
+    Number.isFinite(parsedLegacyMinHoursPerSong) &&
+    parsedLegacyMinHoursPerSong > 0
+      ? parsedLegacyMinHoursPerSong
+      : null;
+  const recordingRuleSource = {
+    ...(typeof studioDetails?.settings === "object" && studioDetails?.settings
+      ? studioDetails.settings
+      : {}),
+    ...(typeof booking?.studio_settings === "object" && booking?.studio_settings
+      ? booking.studio_settings
+      : {}),
+    ...(typeof booking?.modifiers_applied === "object" && booking?.modifiers_applied
+      ? booking.modifiers_applied
+      : {}),
+    ...(typeof booking?.modifiers_applied?.recording_session === "object" &&
+    booking?.modifiers_applied?.recording_session
+      ? booking.modifiers_applied.recording_session
+      : {}),
+    ...(legacyMinHoursPerSong
+      ? {
+          recording_songs_per_block: 1,
+          recording_hours_per_block: legacyMinHoursPerSong,
+        }
+      : {}),
+  };
+  const recordingRule = isRecordingSession
+    ? resolveRecordingRule(recordingRuleSource)
+    : null;
+  const recordingRuleLabel = recordingRule
+    ? formatRecordingRuleShort(recordingRule)
+    : null;
+  const parsedRequiredBlocks = Number(
+    booking?.modifiers_applied?.recording_session?.required_blocks ??
+      booking?.modifiers_applied?.required_blocks ??
+      "",
+  );
+  const requiredRecordingBlocks =
+    Number.isFinite(parsedRequiredBlocks) && parsedRequiredBlocks > 0
+      ? parsedRequiredBlocks
+      : effectiveSongCount && recordingRule
+        ? getRecordingRequiredBlocks(effectiveSongCount, recordingRule)
+        : null;
+  const parsedRequiredRecordingHours = Number(
+    booking?.modifiers_applied?.recording_session?.required_total_hours ??
+      booking?.modifiers_applied?.required_total_hours ??
+      "",
+  );
+  const requiredRecordingHours =
+    Number.isFinite(parsedRequiredRecordingHours) &&
+    parsedRequiredRecordingHours > 0
+      ? parsedRequiredRecordingHours
+      : effectiveSongCount && recordingRule
+        ? getRecordingRequiredHours(effectiveSongCount, recordingRule)
+        : null;
+  const parsedSelectedRecordingHours = Number(
+    booking?.modifiers_applied?.recording_session?.selected_total_hours ??
+      booking?.modifiers_applied?.selected_total_hours ??
+      booking.duration_hours ??
+      booking?.modifiers_applied?.hours ??
+      "",
+  );
+  const selectedRecordingHours =
+    Number.isFinite(parsedSelectedRecordingHours) &&
+    parsedSelectedRecordingHours > 0
+      ? parsedSelectedRecordingHours
+      : null;
   const baseRateValue = Number(booking.base_rate || 0);
   const normalizedTotalCost = Number(booking.total_cost || 0);
 
@@ -859,6 +938,90 @@ const BookingDetailsSheet = forwardRef<
                       </Text>
                     </View>
                   )}
+
+                  {isStudio && isRecordingSession && recordingRuleLabel && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Recording Rule
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {recordingRuleLabel}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && requiredRecordingBlocks && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Time Blocks
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {requiredRecordingBlocks} block
+                        {requiredRecordingBlocks > 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio && isRecordingSession && requiredRecordingHours && (
+                    <View style={styles.detailItem}>
+                      <Text
+                        style={[
+                          styles.detailLabel,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        Minimum Required Time
+                      </Text>
+                      <Text
+                        style={[styles.detailValue, { color: colors.text }]}
+                      >
+                        {formatRecordingHours(requiredRecordingHours)} hours
+                      </Text>
+                    </View>
+                  )}
+
+                  {isStudio &&
+                    isRecordingSession &&
+                    selectedRecordingHours && (
+                      <View style={styles.detailItem}>
+                        <Text
+                          style={[
+                            styles.detailLabel,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          Selected Time
+                        </Text>
+                        <Text
+                          style={[
+                            styles.detailValue,
+                            {
+                              color:
+                                requiredRecordingHours &&
+                                selectedRecordingHours < requiredRecordingHours
+                                  ? "#F59E0B"
+                                  : colors.text,
+                            },
+                          ]}
+                        >
+                          {formatRecordingHours(selectedRecordingHours)} hours
+                        </Text>
+                      </View>
+                    )}
 
                   {/* Show studio operating hours for this day */}
                   {dateOverride && isStudio && (

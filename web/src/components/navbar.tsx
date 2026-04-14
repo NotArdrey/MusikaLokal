@@ -8,6 +8,10 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
+export const NAVBAR_BOTTOM_OFFSET = 24;
+export const NAVBAR_HEIGHT = 84;
+export const NAVBAR_CLEARANCE = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + 16;
+
 function Navbar() {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
@@ -99,7 +103,7 @@ function Navbar() {
     }
 
     return (
-        <View style={[styles.navbarWrapper, { bottom: 24 + insets.bottom }]}>
+        <View style={[styles.navbarWrapper, { bottom: NAVBAR_BOTTOM_OFFSET + insets.bottom }]}>
             <BlurView
                 intensity={Platform.OS === 'ios' ? 80 : 100}
                 tint={isDark ? "systemMaterialDark" : "systemMaterialLight"}
