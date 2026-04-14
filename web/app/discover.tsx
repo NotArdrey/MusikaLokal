@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,6 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import ListingCard from '../src/components/ListingCard';
+import ListingDetailsSheet from '../src/components/ListingDetailsSheet';
 import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
@@ -85,6 +85,33 @@ export default function Discover() {
   const requestIdRef = useRef(0);
   const dataRef = useRef<any[]>([]);
   const spilloverRef = useRef<any[]>([]);
+  const detailsSheetRef = useRef<any>(null);
+  const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+
+  const presentModalWithRetry = useCallback((modalRef: { current: any }) => {
+    let attempts = 0;
+    const maxAttempts = 6;
+
+    const presentWhenReady = () => {
+      if (modalRef.current) {
+        modalRef.current.present();
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < maxAttempts) {
+        requestAnimationFrame(presentWhenReady);
+      }
+    };
+
+    requestAnimationFrame(presentWhenReady);
+  }, []);
+
+  const openListingDetails = useCallback((listingId: string) => {
+    if (!listingId) return;
+    setSelectedListingId(listingId);
+    presentModalWithRetry(detailsSheetRef);
+  }, [presentModalWithRetry]);
 
   useEffect(() => {
     dataRef.current = data;
@@ -288,7 +315,8 @@ export default function Discover() {
         <ListingCard
           item={item}
           onPress={() => {
-            router.replace(`/home?reopenListingId=${encodeURIComponent(item.id)}`);
+            const listingId = item?.id != null ? String(item.id) : '';
+            openListingDetails(listingId);
           }}
           variant="vertical"
           cleanMode
@@ -298,7 +326,7 @@ export default function Discover() {
         />
       </View>
     );
-  }, [gridColumns, isWebDesktop]);
+  }, [gridColumns, isWebDesktop, openListingDetails]);
 
   const listFooter = useMemo(() => {
     if (loadingMore) {
@@ -521,6 +549,12 @@ export default function Discover() {
       </View>
 
       <Navbar />
+
+      <ListingDetailsSheet
+        ref={detailsSheetRef}
+        listingId={selectedListingId}
+        onDismiss={() => setSelectedListingId(null)}
+      />
     </View>
   );
 }
