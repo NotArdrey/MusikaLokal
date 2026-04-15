@@ -12,9 +12,11 @@ interface HeaderProps {
     transparent?: boolean;
     onBackPress?: () => void;
     hideBackButton?: boolean;
+    leftComponent?: React.ReactNode;
+    rightComponent?: React.ReactNode;
 }
 
-function Header({ title, transparent, onBackPress, hideBackButton = false }: HeaderProps) {
+function Header({ title, transparent, onBackPress, hideBackButton = false, leftComponent, rightComponent }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const { isGuest } = useAuth();
     const insets = useSafeAreaInsets();
@@ -96,25 +98,29 @@ function Header({ title, transparent, onBackPress, hideBackButton = false }: Hea
             borderRadius: transparent ? 0 : (isWebDesktop ? 18 : 14),
             overflow: 'hidden',
         }]}>
-            {/* Left Container - Only for Back Button */}
-            {backVisible && (
+            {/* Left Container - Only for Back Button or left component */}
+            {(backVisible || leftComponent) && (
                 <View style={styles.leftContainer}>
-                    <TouchableOpacity activeOpacity={1}
-                        onPress={() => (onBackPress ? onBackPress() : router.back())}
-                        style={[styles.backButton, {
-                            backgroundColor: isDark ? colors.surface : '#F3F4F6',
-                            padding: isWebDesktop ? 12 : 8,
-                        }]}
-                    >
-                        <Ionicons name="arrow-back" size={isWebDesktop ? 24 : 20} color={colors.text} />
-                    </TouchableOpacity>
+                    {leftComponent ? (
+                        leftComponent
+                    ) : (
+                        <TouchableOpacity activeOpacity={1}
+                            onPress={() => (onBackPress ? onBackPress() : router.back())}
+                            style={[styles.backButton, {
+                                backgroundColor: isDark ? colors.surface : '#F3F4F6',
+                                padding: isWebDesktop ? 12 : 8,
+                            }]}
+                        >
+                            <Ionicons name="arrow-back" size={isWebDesktop ? 24 : 20} color={colors.text} />
+                        </TouchableOpacity>
+                    )}
                 </View>
             )}
 
             {/* Title - Dynamic Alignment */}
             <View style={[
                 styles.titleContainer,
-                !backVisible && styles.mainTitleContainer
+                !(backVisible || leftComponent) && styles.mainTitleContainer
             ]}>
                 <Text style={[
                     styles.title,
@@ -127,7 +133,9 @@ function Header({ title, transparent, onBackPress, hideBackButton = false }: Hea
 
             {/* Action Buttons */}
             <View style={styles.rightContainer}>
-                {notifVisible ? (
+                {rightComponent ? (
+                    rightComponent
+                ) : notifVisible ? (
                     <View style={styles.iconRow}>
                         {/* Chat Button */}
                         <TouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, {

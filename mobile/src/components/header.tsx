@@ -15,9 +15,11 @@ interface HeaderProps {
     title: string;
     transparent?: boolean;
     onBackPress?: () => void;
+    leftComponent?: React.ReactNode;
+    rightComponent?: React.ReactNode;
 }
 
-function Header({ title, transparent, onBackPress }: HeaderProps) {
+function Header({ title, transparent, onBackPress, leftComponent, rightComponent }: HeaderProps) {
     const { colors, isDark } = useTheme();
     const { isGuest, userId } = useAuth();
     const insets = useSafeAreaInsets();
@@ -210,22 +212,26 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
         <Animated.View style={[styles.container, containerAnimatedStyle, {
             paddingTop: insets.top + 8
         }]}>
-            {/* Left Container - Only for Back Button */}
-            {backVisible && (
+            {/* Left Container - Only for Back Button or leftComponent */}
+            {(backVisible || leftComponent) && (
                 <View style={styles.leftContainer}>
-                    <AnimatedTouchableOpacity activeOpacity={1}
-                        onPress={() => (onBackPress ? onBackPress() : router.back())}
-                        style={[styles.backButton, buttonAnimatedStyle]}
-                    >
-                        <AnimatedIcon name="arrow-back" size={20} animatedProps={iconAnimatedProps} />
-                    </AnimatedTouchableOpacity>
+                    {leftComponent ? (
+                        leftComponent
+                    ) : (
+                        <AnimatedTouchableOpacity activeOpacity={1}
+                            onPress={() => (onBackPress ? onBackPress() : router.back())}
+                            style={[styles.backButton, buttonAnimatedStyle]}
+                        >
+                            <AnimatedIcon name="arrow-back" size={20} animatedProps={iconAnimatedProps} />
+                        </AnimatedTouchableOpacity>
+                    )}
                 </View>
             )}
 
             {/* Title - Dynamic Alignment */}
             <View style={[
                 styles.titleContainer,
-                !backVisible && styles.mainTitleContainer
+                !(backVisible || leftComponent) && styles.mainTitleContainer
             ]}>
                 <Animated.Text style={[
                     styles.title,
@@ -238,7 +244,9 @@ function Header({ title, transparent, onBackPress }: HeaderProps) {
 
             {/* Action Buttons */}
             <View style={styles.rightContainer}>
-                {notifVisible ? (
+                {rightComponent ? (
+                    rightComponent
+                ) : notifVisible ? (
                     <View style={styles.iconRow}>
                         {/* Chat Button */}
                         <AnimatedTouchableOpacity activeOpacity={1} onPress={() => router.push('/chat')} style={[styles.iconButton, buttonAnimatedStyle]}>

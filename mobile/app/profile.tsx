@@ -3,8 +3,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+    Animated,
     Dimensions,
     Image,
     Modal,
@@ -64,6 +65,28 @@ export default function ProfileScreen() {
   const [gigSearchQuery, setGigSearchQuery] = useState("");
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
+  const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks">("about");
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
+  const drawerAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
+
+  const openDrawer = useCallback(() => {
+    setIsMenuOpen(true);
+    Animated.spring(drawerAnim, {
+      toValue: 0,
+      useNativeDriver: true,
+      bounciness: 0,
+      speed: 20,
+    }).start();
+  }, [drawerAnim]);
+
+  const closeDrawer = useCallback(() => {
+    Animated.timing(drawerAnim, {
+      toValue: SCREEN_WIDTH,
+      duration: 220,
+      useNativeDriver: true,
+    }).start(() => setIsMenuOpen(false));
+  }, [drawerAnim]);
 
   const isMissingShowGigStatusesColumnError = (error: any) => {
     const message = String(error?.message || "").toLowerCase();
@@ -763,6 +786,15 @@ export default function ProfileScreen() {
         <Header
           title={isOwner ? "My Profile" : "User Profile"}
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
+          rightComponent={(isOwner || isGuest) ? (
+            <TouchableOpacity activeOpacity={0.7} onPress={openDrawer} style={styles.headerMenuBtn}>
+              <Ionicons name="menu-outline" size={26} color={colors.text} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity activeOpacity={0.7} onPress={openReportModal} style={styles.headerReportBtn}>
+              <Ionicons name="ellipsis-horizontal" size={24} color={colors.text} />
+            </TouchableOpacity>
+          )}
         />
 
         <ScrollView
@@ -912,7 +944,27 @@ export default function ProfileScreen() {
               </View>
             )}
 
-            {profile?.role === "musician" && profile?.show_gig_statuses !== false && (
+            {/* TAB NAVIGATION */}
+            <View style={[styles.tabContainer, { borderBottomColor: colors.border }]}>
+              <TouchableOpacity onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                <Ionicons name="grid-outline" size={24} color={activeTab === "about" ? colors.text : colors.textSecondary} />
+              </TouchableOpacity>
+              
+              {profile?.role === "musician" && profile?.show_gig_statuses !== false && (
+                <TouchableOpacity onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                  <Ionicons name="mic-outline" size={24} color={activeTab === "gigs" ? colors.text : colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+              
+              {isOwner && !isGuest && (
+                <TouchableOpacity onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                  <Ionicons name="bookmark-outline" size={24} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* TAB CONTENT: GIGS */}
+            {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses !== false && (
               <View style={styles.gigTimelineSection}>
                 <View
                   style={[
@@ -990,258 +1042,192 @@ export default function ProfileScreen() {
               </View>
             )}
 
-            {profile?.role === "musician" && profile?.show_gig_statuses === false && isOwner && (
-              <Text style={[styles.gigHiddenText, { color: colors.textSecondary }]}>Gig status is hidden from other users.</Text>
-            )}
-
-            {isOwner && !isGuest && (
+            {/* TAB CONTENT: BOOKMARKS */}
+            {activeTab === "bookmarks" && isOwner && !isGuest && (
               <View style={styles.bookmarkSection}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Bookmarks</Text>
-
                 {loadingBookmarks ? (
                   <View style={[styles.bookmarkEmptyState, { borderColor: colors.border, backgroundColor: isDark ? "#1F2937" : "#F9FAFB" }]}>
                     <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>Loading saved bookmarks...</Text>
                   </View>
                 ) : (
-                  ([
-                    { key: "studios", title: "Studios", items: bookmarkedListings.studios, icon: "business-outline" },
-                    { key: "gigs", title: "Gigs", items: bookmarkedListings.gigs, icon: "mic-outline" },
-                    { key: "musicians", title: "Musicians", items: bookmarkedListings.musicians, icon: "people-outline" },
-                  ] as const).map((section) => (
-                    <View key={section.key} style={styles.bookmarkBlock}>
-                      <Text style={[styles.bookmarkBlockTitle, { color: colors.text }]}> 
-                        {section.title} ({section.items.length})
-                      </Text>
-
-                      {section.items.length > 0 ? (
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={styles.bookmarkHorizontalList}
-                        >
-                          {section.items.map((item) => (
-                            <TouchableOpacity
-                              key={`${section.key}-${item.id}`}
-                              activeOpacity={1}
-                              onPress={() => openBookmarkedListing(item.id)}
-                              style={[
-                                styles.bookmarkCard,
-                                { backgroundColor: colors.surface, borderColor: colors.border },
-                              ]}
-                            >
-                              {item.image ? (
-                                <Image source={{ uri: item.image }} style={styles.bookmarkCardImage} />
-                              ) : (
-                                <View style={[styles.bookmarkCardImageFallback, { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" }]}>
-                                  <Ionicons name={section.icon as any} size={20} color={colors.textSecondary} />
-                                </View>
-                              )}
-
-                              <Text numberOfLines={1} style={[styles.bookmarkCardTitle, { color: colors.text }]}>
-                                {item.name}
-                              </Text>
-                              <Text numberOfLines={1} style={[styles.bookmarkCardSubtitle, { color: colors.textSecondary }]}>
-                                {item.subtitle}
-                              </Text>
+                  <>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8, gap: 12, flexGrow: 0 }} style={{ maxHeight: 60, marginBottom: 8 }}>
+                       {['all', 'studios', 'gigs', 'musicians'].map((key) => {
+                          const isActive = bookmarkFilter === key;
+                          return (
+                            <TouchableOpacity key={key} onPress={() => setBookmarkFilter(key as any)} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: isActive ? colors.primary : isDark ? "#1E293B" : "#F3F4F6", justifyContent: "center" }}>
+                               <Text style={{ color: isActive ? "#fff" : colors.textSecondary, fontFamily: "Poppins_500Medium" }}>{key.charAt(0).toUpperCase() + key.slice(1)}</Text>
                             </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      ) : (
-                        <View style={[styles.bookmarkEmptyState, { borderColor: colors.border, backgroundColor: isDark ? "#1F2937" : "#F9FAFB" }]}>
-                          <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>No saved {section.title.toLowerCase()} yet.</Text>
-                        </View>
+                          )
+                       })}
+                    </ScrollView>
+
+                    <View style={{ paddingHorizontal: 16, gap: 12, paddingBottom: 24 }}>
+                      {(() => {
+                         const filterToKey: any = { 'studios': 'studios', 'gigs': 'gigs', 'musicians': 'musicians' };
+                         let displayedItems: any[] = [];
+                         if (bookmarkFilter === "all") {
+                            displayedItems = [...bookmarkedListings.studios, ...bookmarkedListings.gigs, ...bookmarkedListings.musicians];
+                         } else {
+                            displayedItems = bookmarkedListings[filterToKey[bookmarkFilter]];
+                         }
+
+                         if (displayedItems.length === 0) {
+                            return (
+                               <View style={[styles.bookmarkEmptyState, { borderColor: colors.border, backgroundColor: isDark ? "#1F2937" : "#F9FAFB" }]}>
+                                 <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>No bookmarks found.</Text>
+                               </View>
+                            )
+                         }
+
+                         return displayedItems.map((item, index) => {
+                             let icon = item.type === "Studio" ? "business-outline" : item.type === "Gig" ? "mic-outline" : "people-outline";
+
+                             return (
+                                <TouchableOpacity
+                                  key={`${item.type}-${item.id}-${index}`}
+                                  activeOpacity={1}
+                                  onPress={() => openBookmarkedListing(item.id)}
+                                  style={[
+                                    styles.bookmarkCard,
+                                    { backgroundColor: colors.surface, borderColor: colors.border, width: "100%", flexDirection: "row", padding: 12, gap: 12 },
+                                  ]}
+                                >
+                                  {item.image ? (
+                                    <Image source={{ uri: item.image }} style={[styles.bookmarkCardImage, { width: 64, height: 64 }]} />
+                                  ) : (
+                                    <View style={[styles.bookmarkCardImageFallback, { backgroundColor: isDark ? "#1E293B" : "#F3F4F6", width: 64, height: 64 }]}>
+                                      <Ionicons name={icon as any} size={24} color={colors.textSecondary} />
+                                    </View>
+                                  )}
+
+                                  <View style={{ flex: 1, justifyContent: "center" }}>
+                                      <Text numberOfLines={1} style={[styles.bookmarkCardTitle, { color: colors.text, fontSize: 16 }]}>
+                                        {item.name}
+                                      </Text>
+                                      <Text numberOfLines={1} style={[styles.bookmarkCardSubtitle, { color: colors.textSecondary }]}>
+                                        {item.subtitle}
+                                      </Text>
+                                      <Text style={[styles.bookmarkCardTitle, { color: colors.primary, fontSize: 12, marginTop: 4, fontFamily: "Poppins_600SemiBold" }]}>
+                                        {item.type}
+                                      </Text>
+                                  </View>
+                                  <View style={{ justifyContent: "center" }}>
+                                       <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                                  </View>
+                                </TouchableOpacity>
+                             )
+                         })
+                      })()}
+                    </View>
+                  </>
+                )}
+              </View>
+            )}
+
+            {/* TAB CONTENT: ABOUT/MEDIA */}
+            {activeTab === "about" && (
+              <View>
+                {/* Media Section - Instagram Style Grid */}
+                <View style={styles.mediaSection}>
+                  <View style={styles.mediaSectionHeader}>
+                    {isOwner && profile?.portfolio_urls?.length > 0 && (
+                      <TouchableOpacity
+                        onPress={addMediaToPortfolio}
+                        disabled={uploading}
+                        activeOpacity={1}
+                        style={[
+                          styles.addMediaBtn,
+                          { backgroundColor: colors.primary },
+                        ]}
+                      >
+                        <Ionicons name="add" size={20} color="#fff" />
+                        <Text style={{ color: "#fff", marginLeft: 4, fontFamily: "Poppins_500Medium" }}>Upload Media</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {!profile?.portfolio_urls || profile.portfolio_urls.length === 0 ? (
+                    <View style={[styles.emptyMedia, { borderColor: colors.border }]}>
+                      <Ionicons
+                        name="images-outline"
+                        size={48}
+                        color={colors.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.emptyMediaText,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        No media yet
+                      </Text>
+                      <Text
+                        style={[styles.emptyMediaSubtext, { color: colors.muted }]}
+                      >
+                        {isOwner
+                          ? "Share your best work!"
+                          : "This musician hasn't added media yet"}
+                      </Text>
+                      {isOwner && (
+                        <TouchableOpacity
+                          onPress={addMediaToPortfolio}
+                          disabled={uploading}
+                          activeOpacity={1}
+                          style={[
+                            styles.uploadBtn,
+                            {
+                              backgroundColor: uploading
+                                ? colors.textSecondary
+                                : colors.primary,
+                            },
+                          ]}
+                        >
+                          <Ionicons
+                            name="cloud-upload-outline"
+                            size={18}
+                            color="#fff"
+                            style={{ marginRight: 8 }}
+                          />
+                          <Text style={styles.uploadBtnText}>
+                            {uploading ? "Uploading..." : "Add Photos & Videos"}
+                          </Text>
+                        </TouchableOpacity>
                       )}
                     </View>
-                  ))
-                )}
-              </View>
-            )}
-
-          </View>
-
-          {/* Menu Items (Owner Only) */}
-          {isOwner ? (
-            <View style={styles.menuContainer}>
-              {MENU_ITEMS.map((item) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={item.label}
-                  onPress={() => router.push(item.route as any)}
-                  style={[styles.menuItem, { backgroundColor: colors.surface }]}
-                >
-                  <View style={styles.menuLeft}>
-                    <View
-                      style={[
-                        styles.iconBox,
-                        { backgroundColor: isDark ? "#1E293B" : "#F9FAFB" },
-                      ]}
-                    >
-                      <Ionicons
-                        name={item.icon as any}
-                        size={20}
-                        color={colors.text}
-                      />
+                  ) : (
+                    <View style={styles.mediaGrid}>
+                      {profile.portfolio_urls.map((url: string, i: number) => (
+                        <TouchableOpacity
+                          key={i}
+                          style={styles.gridItem}
+                          onPress={() => openMediaViewer(url)}
+                          activeOpacity={1}
+                        >
+                          <Image
+                            source={{ uri: url }}
+                            style={styles.gridImage}
+                            resizeMode="cover"
+                          />
+                          {isVideo(url) && (
+                            <View style={styles.videoIndicator}>
+                              <Ionicons name="play" size={24} color="#fff" />
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      ))}
                     </View>
-                    <Text style={[styles.menuLabel, { color: colors.text }]}>
-                      {item.label}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={colors.textSecondary}
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : isGuest ? (
-            <View style={styles.menuContainer}>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => router.push("/settings")}
-                style={[styles.menuItem, { backgroundColor: colors.surface }]}
-              >
-                <View style={styles.menuLeft}>
-                  <View
-                    style={[
-                      styles.iconBox,
-                      { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" },
-                    ]}
-                  >
-                    <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
-                  </View>
-                  <View style={styles.menuTextBlock}>
-                    <Text style={[styles.menuLabel, { color: colors.text }]}>Settings</Text>
-                    <Text style={[styles.guestHintText, { color: colors.textSecondary }]}>Sign in first for wallet, edit profile, and other account actions.</Text>
-                  </View>
+                  )}
                 </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color={colors.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            /* Public View Actions */
-            <View style={styles.menuContainer}>
-              <TouchableOpacity activeOpacity={1}
-                onPress={openReportModal}
-                style={[styles.menuItem, { backgroundColor: colors.surface }]}
-              >
-                <View style={styles.menuLeft}>
-                  <View
-                    style={[
-                      styles.iconBox,
-                      { backgroundColor: isDark ? "#450a0a" : "#fef2f2" },
-                    ]}
-                  >
-                    <Ionicons name="flag-outline" size={20} color="#ef4444" />
-                  </View>
-                  <Text style={[styles.menuLabel, { color: "#ef4444" }]}>
-                    Report User
-                  </Text>
-                </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color={colors.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
-          )}
 
-          {/* Media Section - Instagram Style Grid */}
-          <View style={styles.mediaSection}>
-            <View style={styles.mediaSectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                Media
-              </Text>
-              {isOwner && profile?.portfolio_urls?.length > 0 && (
-                <TouchableOpacity
-                  onPress={addMediaToPortfolio}
-                  disabled={uploading}
-                  activeOpacity={1}
-                  style={[
-                    styles.addMediaBtn,
-                    { backgroundColor: colors.primary },
-                  ]}
-                >
-                  <Ionicons name="add" size={20} color="#fff" />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {!profile?.portfolio_urls || profile.portfolio_urls.length === 0 ? (
-              <View style={[styles.emptyMedia, { borderColor: colors.border }]}>
-                <Ionicons
-                  name="images-outline"
-                  size={48}
-                  color={colors.textSecondary}
-                />
-                <Text
-                  style={[
-                    styles.emptyMediaText,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  No media yet
-                </Text>
-                <Text
-                  style={[styles.emptyMediaSubtext, { color: colors.muted }]}
-                >
-                  {isOwner
-                    ? "Share your best work!"
-                    : "This musician hasn't added media yet"}
-                </Text>
-                {isOwner && (
-                  <TouchableOpacity
-                    onPress={addMediaToPortfolio}
-                    disabled={uploading}
-                    activeOpacity={1}
-                    style={[
-                      styles.uploadBtn,
-                      {
-                        backgroundColor: uploading
-                          ? colors.textSecondary
-                          : colors.primary,
-                      },
-                    ]}
-                  >
-                    <Ionicons
-                      name="cloud-upload-outline"
-                      size={18}
-                      color="#fff"
-                      style={{ marginRight: 8 }}
-                    />
-                    <Text style={styles.uploadBtnText}>
-                      {uploading ? "Uploading..." : "Add Photos & Videos"}
-                    </Text>
-                  </TouchableOpacity>
+                {/* hidden gig status text when gigs are hidden */}
+                {profile?.role === "musician" && profile?.show_gig_statuses === false && isOwner && (
+                  <Text style={[styles.gigHiddenText, { color: colors.textSecondary }]}>Gig status is hidden from other users.</Text>
                 )}
-              </View>
-            ) : (
-              <View style={styles.mediaGrid}>
-                {profile.portfolio_urls.map((url: string, i: number) => (
-                  <TouchableOpacity
-                    key={i}
-                    style={styles.gridItem}
-                    onPress={() => openMediaViewer(url)}
-                    activeOpacity={1}
-                  >
-                    <Image
-                      source={{ uri: url }}
-                      style={styles.gridImage}
-                      resizeMode="cover"
-                    />
-                    {isVideo(url) && (
-                      <View style={styles.videoIndicator}>
-                        <Ionicons name="play" size={24} color="#fff" />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                ))}
+
               </View>
             )}
+
           </View>
 
           {/* Media Viewer Modal */}
@@ -1280,6 +1266,82 @@ export default function ProfileScreen() {
         </ScrollView>
         <Navbar />
       </View>
+      <Modal
+        visible={isMenuOpen}
+        transparent={true}
+        animationType="none"
+        onRequestClose={closeDrawer}
+      >
+        <View style={styles.drawerOverlay}>
+          <TouchableOpacity activeOpacity={1} style={styles.drawerBackdrop} onPress={closeDrawer} />
+          <Animated.View
+            style={[
+              styles.drawerContent,
+              { backgroundColor: colors.surface },
+              { transform: [{ translateX: drawerAnim }] },
+            ]}
+          >
+            {/* Drawer top — avatar + name */}
+            <View style={[styles.drawerTop, { borderBottomColor: colors.border }]}>
+              <Image
+                source={profile?.avatar_url ? { uri: profile.avatar_url } : DEFAULT_AVATAR}
+                style={styles.drawerAvatar}
+              />
+              <View style={styles.drawerTopInfo}>
+                <Text style={[styles.drawerName, { color: colors.text }]} numberOfLines={1}>
+                  {profile?.full_name || profile?.name || "Profile"}
+                </Text>
+                <Text style={[styles.drawerRole, { color: colors.textSecondary }]}>
+                  {profile?.role ? profile.role.replace("-", " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) : ""}
+                </Text>
+              </View>
+              <TouchableOpacity activeOpacity={0.7} onPress={closeDrawer} style={styles.drawerCloseBtn}>
+                <Ionicons name="close" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+              <View style={styles.drawerMenuList}>
+                {isOwner ? (
+                  MENU_ITEMS.map((item) => (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      key={item.label}
+                      onPress={() => {
+                        closeDrawer();
+                        setTimeout(() => router.push(item.route as any), 250);
+                      }}
+                      style={[styles.drawerMenuItem, { borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)" }]}
+                    >
+                      <View style={[styles.drawerMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
+                        <Ionicons name={item.icon as any} size={19} color={colors.primary} />
+                      </View>
+                      <Text style={[styles.drawerMenuLabel, { color: colors.text }]}>{item.label}</Text>
+                      <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))
+                ) : isGuest ? (
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      closeDrawer();
+                      setTimeout(() => router.push("/settings"), 250);
+                    }}
+                    style={[styles.drawerMenuItem, { borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)" }]}
+                  >
+                    <View style={[styles.drawerMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
+                      <Ionicons name="settings-outline" size={19} color={colors.primary} />
+                    </View>
+                    <Text style={[styles.drawerMenuLabel, { color: colors.text }]}>Settings</Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </ScrollView>
+          </Animated.View>
+        </View>
+      </Modal>
+
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -1357,12 +1419,17 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   avatarContainer: {
-    width: 112,
-    height: 112,
-    borderRadius: 56,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     overflow: "hidden",
     marginBottom: 16,
     borderWidth: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 8,
   },
   avatarImage: {
     width: "100%",
@@ -1381,10 +1448,10 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   nameText: {
-    fontSize: 20,
+    fontSize: 24,
     marginBottom: 4,
     textAlign: "center",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: "Poppins_700Bold",
   },
   roleText: {
     fontSize: 14,
@@ -1397,16 +1464,18 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: "wrap",
     justifyContent: "center",
-    marginBottom: 24,
+    marginBottom: 28,
   },
   genreTag: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 100,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.05)",
   },
   genreText: {
-    fontSize: 12,
-    fontFamily: "Poppins_500Medium",
+    fontSize: 13,
+    fontFamily: "Poppins_600SemiBold",
   },
   gigVisibilityCard: {
     width: "100%",
@@ -1431,23 +1500,45 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     width: "100%",
     justifyContent: "space-between",
-    paddingHorizontal: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.02)",
+    marginBottom: 24,
   },
   statItem: {
     alignItems: "center",
     flex: 1,
+    paddingHorizontal: 8,
   },
   statValue: {
     fontFamily: "Poppins_700Bold",
-    fontSize: 18,
+    fontSize: 22,
   },
   statLabel: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
+    fontFamily: "Poppins_500Medium",
+    fontSize: 13,
+    marginTop: 4,
   },
   statDivider: {
     width: 1,
-    height: "100%",
+    height: "80%",
+    alignSelf: "center",
+  },
+  tabContainer: {
+    flexDirection: "row",
+    width: "100%",
+    borderBottomWidth: 1,
+    marginBottom: 16,
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  tabText: {
+    fontSize: 12,
+    marginTop: 4,
   },
   gigTimelineSection: {
     width: "100%",
@@ -1777,5 +1868,103 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Poppins_400Regular",
     marginTop: 2,
+  },
+  // Header button styles
+  headerMenuBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerReportBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // Drawer styles
+  drawerOverlay: {
+    flex: 1,
+    flexDirection: "row",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  drawerBackdrop: {
+    flex: 1,
+  },
+  drawerContent: {
+    width: SCREEN_WIDTH * 0.78,
+    maxWidth: 320,
+    height: "100%",
+    shadowColor: "#000",
+    shadowOffset: { width: -4, height: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 24,
+    borderTopLeftRadius: 24,
+    borderBottomLeftRadius: 24,
+    overflow: "hidden",
+  },
+  drawerTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    gap: 12,
+  },
+  drawerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#1E293B",
+  },
+  drawerTopInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  drawerName: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 15,
+  },
+  drawerRole: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    marginTop: 1,
+  },
+  drawerCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  drawerMenuList: {
+    paddingTop: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 32,
+    gap: 2,
+  },
+  drawerMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    gap: 14,
+  },
+  drawerMenuIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  drawerMenuLabel: {
+    flex: 1,
+    fontFamily: "Poppins_500Medium",
+    fontSize: 14,
   },
 });

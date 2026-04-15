@@ -90,6 +90,9 @@ export default function ProfileScreen() {
   const [gigSearchQuery, setGigSearchQuery] = useState("");
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
+  const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks">("about");
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
 
   const isMissingShowGigStatusesColumnError = (error: any) => {
     const message = String(error?.message || "").toLowerCase();
@@ -745,6 +748,16 @@ export default function ProfileScreen() {
         <Header
           title={isOwner ? "My Profile" : "User Profile"}
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
+          leftComponent={(isOwner || isGuest) ? (
+            <TouchableOpacity activeOpacity={1} onPress={() => setIsMenuOpen(true)}>
+              <Ionicons name="menu" size={28} color={colors.text} />
+            </TouchableOpacity>
+          ) : undefined}
+          rightComponent={(!isOwner && !isGuest) ? (
+            <TouchableOpacity activeOpacity={1} onPress={openReportModal}>
+              <Ionicons name="ellipsis-horizontal" size={24} color={colors.text} />
+            </TouchableOpacity>
+          ) : undefined}
         />
 
         <ScrollView
@@ -900,7 +913,27 @@ export default function ProfileScreen() {
               </View>
             )}
 
-            {profile?.role === "musician" && profile?.show_gig_statuses !== false && (
+            {/* TAB NAVIGATION */}
+            <View style={[styles.tabContainer, { borderBottomColor: borderSoft }]}>
+              <TouchableOpacity onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                <Ionicons name="grid-outline" size={24} color={activeTab === "about" ? colors.text : colors.textSecondary} />
+              </TouchableOpacity>
+              
+              {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses !== false && (
+                <TouchableOpacity onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                  <Ionicons name="mic-outline" size={24} color={activeTab === "gigs" ? colors.text : colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+              
+              {isOwner && !isGuest && (
+                <TouchableOpacity onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                  <Ionicons name="bookmark-outline" size={24} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+
+            {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses !== false && (
               <View style={styles.gigTimelineSection}>
                 <View
                   style={[
@@ -978,165 +1011,93 @@ export default function ProfileScreen() {
               </View>
             )}
 
-            {profile?.role === "musician" && profile?.show_gig_statuses === false && isOwner && (
+            {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses === false && isOwner && (
               <Text style={[styles.gigHiddenText, { color: colors.textSecondary }]}>Gig status is hidden from other users.</Text>
             )}
 
-            {isOwner && !isGuest && (
+            {activeTab === "bookmarks" && isOwner && !isGuest && (
               <View style={styles.bookmarkSection}>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Bookmarks</Text>
-
                 {loadingBookmarks ? (
                   <View style={[styles.bookmarkEmptyState, { borderColor: borderSoft, backgroundColor: surfaceBackground }]}>
                     <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>Loading saved bookmarks...</Text>
                   </View>
                 ) : (
-                  ([
-                    { key: "studios", title: "Studios", items: bookmarkedListings.studios, icon: "business-outline" },
-                    { key: "gigs", title: "Gigs", items: bookmarkedListings.gigs, icon: "mic-outline" },
-                    { key: "musicians", title: "Musicians", items: bookmarkedListings.musicians, icon: "people-outline" },
-                  ] as const).map((section) => (
-                    <View key={section.key} style={styles.bookmarkBlock}>
-                      <Text style={[styles.bookmarkBlockTitle, { color: colors.text }]}> 
-                        {section.title} ({section.items.length})
-                      </Text>
-
-                      {section.items.length > 0 ? (
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={styles.bookmarkHorizontalList}
-                        >
-                          {section.items.map((item) => (
-                            <TouchableOpacity
-                              key={`${section.key}-${item.id}`}
-                              activeOpacity={1}
-                              onPress={() => openBookmarkedListing(item.id)}
-                              style={[
-                                styles.bookmarkCard,
-                                { backgroundColor: pageCardBackground, borderColor: borderSoft },
-                              ]}
-                            >
-                              {item.image ? (
-                                <Image source={{ uri: item.image }} style={styles.bookmarkCardImage} />
-                              ) : (
-                                <View style={[styles.bookmarkCardImageFallback, { backgroundColor: surfaceBackground }]}>
-                                  <Ionicons name={section.icon as any} size={20} color={colors.textSecondary} />
-                                </View>
-                              )}
-
-                              <Text numberOfLines={1} style={[styles.bookmarkCardTitle, { color: colors.text }]}>
-                                {item.name}
-                              </Text>
-                              <Text numberOfLines={1} style={[styles.bookmarkCardSubtitle, { color: colors.textSecondary }]}>
-                                {item.subtitle}
-                              </Text>
+                  <>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8, gap: 12, flexGrow: 0 }} style={{ maxHeight: 60, marginBottom: 8 }}>
+                       {['all', 'studios', 'gigs', 'musicians'].map((key) => {
+                          const isActive = bookmarkFilter === key;
+                          return (
+                            <TouchableOpacity key={key} onPress={() => setBookmarkFilter(key as any)} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: isActive ? colors.primary : surfaceBackground, justifyContent: "center" }}>
+                               <Text style={{ color: isActive ? "#fff" : colors.textSecondary, fontFamily: "Poppins_500Medium" }}>{key.charAt(0).toUpperCase() + key.slice(1)}</Text>
                             </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      ) : (
-                        <View style={[styles.bookmarkEmptyState, { borderColor: borderSoft, backgroundColor: surfaceBackground }]}>
-                          <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>No saved {section.title.toLowerCase()} yet.</Text>
-                        </View>
-                      )}
+                          )
+                       })}
+                    </ScrollView>
+
+                    <View style={{ paddingHorizontal: 16, gap: 12, paddingBottom: 24 }}>
+                      {(() => {
+                         const filterToKey: any = { 'studios': 'studios', 'gigs': 'gigs', 'musicians': 'musicians' };
+                         let displayedItems: any[] = [];
+                         if (bookmarkFilter === "all") {
+                            displayedItems = [...bookmarkedListings.studios, ...bookmarkedListings.gigs, ...bookmarkedListings.musicians];
+                         } else {
+                            displayedItems = bookmarkedListings[filterToKey[bookmarkFilter]];
+                         }
+
+                         if (displayedItems.length === 0) {
+                            return (
+                               <View style={[styles.bookmarkEmptyState, { borderColor: borderSoft, backgroundColor: surfaceBackground }]}>
+                                 <Text style={[styles.bookmarkEmptyText, { color: colors.textSecondary }]}>No bookmarks found.</Text>
+                               </View>
+                            )
+                         }
+
+                         return displayedItems.map((item, index) => {
+                             let icon = item.type === "Studio" ? "business-outline" : item.type === "Gig" ? "mic-outline" : "people-outline";
+
+                             return (
+                                <TouchableOpacity
+                                  key={`${item.type}-${item.id}-${index}`}
+                                  activeOpacity={1}
+                                  onPress={() => openBookmarkedListing(item.id)}
+                                  style={[
+                                    styles.bookmarkCard,
+                                    { backgroundColor: pageCardBackground, borderColor: borderSoft, width: "100%", flexDirection: "row", padding: 12, gap: 12 },
+                                  ]}
+                                >
+                                  {item.image ? (
+                                    <Image source={{ uri: item.image }} style={[styles.bookmarkCardImage, { width: 64, height: 64 }]} />
+                                  ) : (
+                                    <View style={[styles.bookmarkCardImageFallback, { backgroundColor: surfaceBackground, width: 64, height: 64 }]}>
+                                      <Ionicons name={icon as any} size={24} color={colors.textSecondary} />
+                                    </View>
+                                  )}
+
+                                  <View style={{ flex: 1, justifyContent: "center" }}>
+                                      <Text numberOfLines={1} style={[styles.bookmarkCardTitle, { color: colors.text, fontSize: 16 }]}>
+                                        {item.name}
+                                      </Text>
+                                      <Text numberOfLines={1} style={[styles.bookmarkCardSubtitle, { color: colors.textSecondary }]}>
+                                        {item.subtitle}
+                                      </Text>
+                                      <Text style={[styles.bookmarkCardTitle, { color: colors.primary, fontSize: 12, marginTop: 4, fontFamily: "Poppins_600SemiBold" }]}>
+                                        {item.type}
+                                      </Text>
+                                  </View>
+                                  <View style={{ justifyContent: "center" }}>
+                                       <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                                  </View>
+                                </TouchableOpacity>
+                             )
+                         })
+                      })()}
                     </View>
-                  ))
+                  </>
                 )}
               </View>
             )}
 
           </View>
-
-          {/* Menu Items (Owner Only) */}
-          {isOwner ? (
-            <View style={styles.menuContainer}>
-              {MENU_ITEMS.map((item) => (
-                <TouchableOpacity activeOpacity={1}
-                  key={item.label}
-                  onPress={() => router.push(item.route as any)}
-                  style={[styles.menuItem, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}
-                >
-                  <View style={styles.menuLeft}>
-                    <View
-                      style={[
-                        styles.iconBox,
-                        { backgroundColor: surfaceBackground },
-                      ]}
-                    >
-                      <Ionicons
-                        name={item.icon as any}
-                        size={20}
-                        color={colors.text}
-                      />
-                    </View>
-                    <Text style={[styles.menuLabel, { color: colors.text }]}>
-                      {item.label}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={colors.textSecondary}
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : isGuest ? (
-            <View style={styles.menuContainer}>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPress={() => router.push("/settings")}
-                style={[styles.menuItem, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}
-              >
-                <View style={styles.menuLeft}>
-                  <View
-                    style={[
-                      styles.iconBox,
-                      { backgroundColor: surfaceBackground },
-                    ]}
-                  >
-                    <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
-                  </View>
-                  <View style={styles.menuTextBlock}>
-                    <Text style={[styles.menuLabel, { color: colors.text }]}>Settings</Text>
-                    <Text style={[styles.guestHintText, { color: colors.textSecondary }]}>Sign in first for wallet, edit profile, and other account actions.</Text>
-                  </View>
-                </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color={colors.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            /* Public View Actions */
-            <View style={styles.menuContainer}>
-              <TouchableOpacity activeOpacity={1}
-                onPress={openReportModal}
-                style={[styles.menuItem, { backgroundColor: pageCardBackground, borderColor: borderSoft }]}
-              >
-                <View style={styles.menuLeft}>
-                  <View
-                    style={[
-                      styles.iconBox,
-                      { backgroundColor: isDark ? "#450a0a" : "#fef2f2" },
-                    ]}
-                  >
-                    <Ionicons name="flag-outline" size={20} color="#ef4444" />
-                  </View>
-                  <Text style={[styles.menuLabel, { color: "#ef4444" }]}>
-                    Report User
-                  </Text>
-                </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color={colors.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
-          )}
 
           {/* Media Section - Instagram Style Grid */}
           <View style={styles.mediaSection}>
@@ -1269,6 +1230,64 @@ export default function ProfileScreen() {
         <Navbar />
         </View>
       </View>
+
+      <Modal
+        visible={isMenuOpen}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsMenuOpen(false)}
+      >
+        <View style={styles.drawerOverlay}>
+          <TouchableOpacity activeOpacity={1} style={styles.drawerBackdrop} onPress={() => setIsMenuOpen(false)} />
+          <View style={[styles.drawerContent, { backgroundColor: colors.background }]}>
+            <View style={styles.drawerHeader}>
+              <Text style={[styles.drawerTitle, { color: colors.text }]}>Menu</Text>
+              <TouchableOpacity activeOpacity={1} onPress={() => setIsMenuOpen(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {isOwner ? (
+                <View style={styles.drawerMenuList}>
+                  {MENU_ITEMS.map((item) => (
+                    <TouchableOpacity activeOpacity={1}
+                      key={item.label}
+                      onPress={() => {
+                        setIsMenuOpen(false);
+                        router.push(item.route as any);
+                      }}
+                      style={[styles.drawerMenuItem, { borderBottomColor: colors.border }]}
+                    >
+                      <View style={[styles.drawerMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" }]}>
+                        <Ionicons name={item.icon as any} size={20} color={colors.text} />
+                      </View>
+                      <Text style={[styles.drawerMenuLabel, { color: colors.text }]}>{item.label}</Text>
+                      <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : isGuest ? (
+                <View style={styles.drawerMenuList}>
+                  <TouchableOpacity activeOpacity={1}
+                    onPress={() => {
+                      setIsMenuOpen(false);
+                      router.push("/settings");
+                    }}
+                    style={[styles.drawerMenuItem, { borderBottomColor: colors.border }]}
+                  >
+                    <View style={[styles.drawerMenuIcon, { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" }]}>
+                      <Ionicons name="settings-outline" size={20} color={colors.text} />
+                    </View>
+                    <Text style={[styles.drawerMenuLabel, { color: colors.text }]}>Settings</Text>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <CustomAlert
         visible={alertVisible}
         type={alertConfig.type}
@@ -1290,6 +1309,21 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  tabContainer: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    borderBottomWidth: 1,
+    marginBottom: 16,
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+
   flex1: {
     flex: 1,
   },
@@ -1366,10 +1400,10 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   nameText: {
-    fontSize: 22,
+    fontSize: 24,
     marginBottom: 4,
     textAlign: "center",
-    fontFamily: "Poppins_600SemiBold",
+    fontFamily: "Poppins_700Bold",
   },
   roleText: {
     fontSize: 14,
@@ -1382,16 +1416,18 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: "wrap",
     justifyContent: "center",
-    marginBottom: 24,
+    marginBottom: 28,
   },
   genreTag: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 6,
-    borderRadius: 100,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.05)",
   },
   genreText: {
     fontSize: 13,
-    fontFamily: "Poppins_500Medium",
+    fontFamily: "Poppins_600SemiBold",
   },
   gigVisibilityCard: {
     width: "100%",
@@ -1416,23 +1452,30 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     width: "100%",
     justifyContent: "space-between",
-    paddingHorizontal: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.02)",
+    marginBottom: 24,
   },
   statItem: {
     alignItems: "center",
     flex: 1,
+    paddingHorizontal: 8,
   },
   statValue: {
     fontFamily: "Poppins_700Bold",
-    fontSize: 18,
+    fontSize: 22,
   },
   statLabel: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
+    fontFamily: "Poppins_500Medium",
+    fontSize: 13,
+    marginTop: 4,
   },
   statDivider: {
     width: 1,
-    height: "100%",
+    height: "80%",
+    alignSelf: "center",
   },
   gigTimelineSection: {
     width: "100%",
@@ -1763,5 +1806,67 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Poppins_400Regular",
     marginTop: 2,
+  },
+  // Drawer styles
+  drawerOverlay: {
+    flex: 1,
+    flexDirection: "row" as const,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  drawerBackdrop: {
+    flex: 1,
+  },
+  drawerContent: {
+    width: 320,
+    maxWidth: "80%" as any,
+    height: "100%" as any,
+    shadowColor: "#000",
+    shadowOffset: { width: -4, height: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 24,
+    borderTopLeftRadius: 24,
+    borderBottomLeftRadius: 24,
+    overflow: "hidden" as const,
+  },
+  drawerHeader: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    justifyContent: "space-between" as const,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.08)",
+  },
+  drawerTitle: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 18,
+  },
+  drawerMenuList: {
+    paddingTop: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 32,
+    gap: 2,
+  },
+  drawerMenuItem: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    gap: 14,
+  },
+  drawerMenuIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  drawerMenuLabel: {
+    flex: 1,
+    fontFamily: "Poppins_500Medium",
+    fontSize: 14,
   },
 });
