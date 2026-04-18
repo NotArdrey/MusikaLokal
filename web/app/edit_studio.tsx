@@ -548,6 +548,9 @@ export default function EditStudioScreen() {
         ? "recording"
         : "both";
   const allowedPromotionTargets = getAllowedPromotionTargets(studioType);
+  const effectiveAppliesTo = allowedPromotionTargets.includes(promotionForm.applies_to)
+    ? promotionForm.applies_to
+    : allowedPromotionTargets[0];
   const parsedRecordingSongsPerBlock = parsePositiveInteger(
     recordingSongsPerBlock,
   );
@@ -994,7 +997,7 @@ export default function EditStudioScreen() {
           .maybeSingle(),
         supabase
           .from('studio_operating_hours')
-          .select('day_of_week, is_open, open_time, close_time, slot_order, reason')
+          .select('day_of_week, is_open, open_time, close_time, slot_order')
           .eq('studio_id', studioId)
           .eq('is_open', true)
           .order('day_of_week', { ascending: true })
@@ -3001,7 +3004,6 @@ export default function EditStudioScreen() {
                 open_time: slot.start,
                 close_time: slot.end,
                 slot_order: slotIndex,
-                reason: buildWeeklyScheduleReason(weeklySessionType),
               });
             });
           }
@@ -3026,13 +3028,6 @@ export default function EditStudioScreen() {
               is_open: hasSlots,
               open_time: hasSlots ? entry.slots[0].start : null,
               close_time: hasSlots ? entry.slots[0].end : null,
-              reason: buildDateOverrideReason(
-                parseDateOverrideSessionType(
-                  entry.session_type,
-                  getDefaultDateOverrideSessionType(studioType),
-                ),
-                hasSlots,
-              ),
             };
           });
 
@@ -4642,8 +4637,8 @@ export default function EditStudioScreen() {
                         paddingVertical: 10,
                         borderRadius: 10,
                         borderWidth: 1.5,
-                        borderColor: promotionForm.applies_to === at ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
-                        backgroundColor: promotionForm.applies_to === at ? colors.primary + "15" : "transparent",
+                        borderColor: effectiveAppliesTo === at ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
+                        backgroundColor: effectiveAppliesTo === at ? colors.primary + "15" : "transparent",
                         alignItems: "center",
                       }}
                     >
@@ -4651,7 +4646,7 @@ export default function EditStudioScreen() {
                         style={{
                           fontFamily: "Poppins_600SemiBold",
                           fontSize: 11,
-                          color: promotionForm.applies_to === at ? colors.primary : colors.textSecondary,
+                          color: effectiveAppliesTo === at ? colors.primary : colors.textSecondary,
                         }}
                       >
                         {at === "both" ? "Both" : at === "rehearsal" ? "Rehearsal" : "Recording"}

@@ -61,12 +61,12 @@ export default function ForgetPasswordScreen() {
     setModalVisible(false);
 
     if (!email.trim()) {
-      showAlert("error", "Error", "Please enter your email address.");
+      showAlert("warning", "Email Required", "Please enter your email address.");
       return;
     }
 
     if (!validateEmail(email.trim())) {
-      showAlert("error", "Error", "Please enter a valid email address.");
+      showAlert("warning", "Invalid Email", "Please enter a valid email address.");
       return;
     }
 
@@ -85,8 +85,8 @@ export default function ForgetPasswordScreen() {
       if (error) {
         console.error("Password reset error:", error);
         showAlert(
-          "error",
-          "Error",
+          "warning",
+          "Couldn't Send Reset",
           error.message || "Failed to send reset link. Please try again.",
         );
       } else {
@@ -94,7 +94,7 @@ export default function ForgetPasswordScreen() {
       }
     } catch (e: any) {
       console.error("Password reset exception:", e);
-      showAlert("error", "Error", "An unexpected error occurred. Please try again.");
+      showAlert("warning", "Couldn't Send Reset", "An unexpected error occurred. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -148,11 +148,11 @@ export default function ForgetPasswordScreen() {
             ]}
             onPress={() => {
               if (!email.trim()) {
-                showAlert("error", "Error", "Please enter your email address.");
+                showAlert("warning", "Email Required", "Please enter your email address.");
                 return;
               }
               if (!validateEmail(email.trim())) {
-                showAlert("error", "Error", "Please enter a valid email address.");
+                showAlert("warning", "Invalid Email", "Please enter a valid email address.");
                 return;
               }
               setModalVisible(true);

@@ -276,6 +276,17 @@ const ListingCard: React.FC<ListingCardProps> = ({
     }
     return [];
   }, [item.image, item.images]);
+  const fallbackImageUri = useMemo(() => {
+    if (typeof item.owner_avatar_url === "string" && item.owner_avatar_url.length > 0) {
+      return item.owner_avatar_url;
+    }
+
+    if (typeof item.avatar_url === "string" && item.avatar_url.length > 0) {
+      return item.avatar_url;
+    }
+
+    return undefined;
+  }, [item.avatar_url, item.owner_avatar_url]);
   const hasMultipleImages = images.length > 1;
   const imageCacheVersion = useMemo(
     () => item.updated_at || item.created_at || item.id,
@@ -376,6 +387,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                     >
                       <CachedImage
                         uri={img}
+                        fallbackUri={fallbackImageUri}
                         style={StyleSheet.absoluteFillObject}
                         width={cardWidth}
                         height={cardHeight}
@@ -398,6 +410,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                     <View key={index} style={styles.pagerPage}>
                       <CachedImage
                         uri={img}
+                        fallbackUri={fallbackImageUri}
                         style={StyleSheet.absoluteFillObject}
                         width={cardWidth}
                         height={cardHeight}
@@ -411,6 +424,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           ) : (
             <CachedImage
               uri={images.length > 0 ? images[0] : undefined}
+              fallbackUri={fallbackImageUri}
               style={StyleSheet.absoluteFillObject}
               width={cardWidth}
               height={cardHeight}

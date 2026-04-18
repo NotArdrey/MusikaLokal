@@ -267,7 +267,7 @@ export default function AddGigScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "venue-owner") {
-        showAlert("error", "Unauthorized", "Only venue owners can create gigs.");
+        showAlert("warning", "Unauthorized", "Only venue owners can create gigs.");
         router.replace("/home");
         return;
       }
@@ -312,12 +312,12 @@ export default function AddGigScreen() {
 
   const handleAddEventCondition = () => {
     if (!eventDate.trim()) {
-      showAlert("error", "Required Field", "Please select an event date first");
+      showAlert("warning", "Required Field", "Please select an event date first");
       return;
     }
 
     if (!eventStartTime || !eventEndTime) {
-      showAlert("error", "Required Field", "Please set both start and end time first");
+      showAlert("warning", "Required Field", "Please set both start and end time first");
       return;
     }
 
@@ -379,16 +379,16 @@ export default function AddGigScreen() {
       const schedules = getNormalizedEventSchedules();
 
       if (!gigName.trim()) {
-        showAlert("error", "Required Field", "Please enter a gig name");
+        showAlert("warning", "Required Field", "Please enter a gig name");
         return false;
       }
       if (!description.trim()) {
-        showAlert("error", "Required Field", "Please enter a description");
+        showAlert("warning", "Required Field", "Please enter a description");
         return false;
       }
       if (!address.trim()) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a venue address",
         );
@@ -396,7 +396,7 @@ export default function AddGigScreen() {
       }
       if (!cost.trim() || parseFloat(cost) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid payout amount",
         );
@@ -404,7 +404,7 @@ export default function AddGigScreen() {
       }
       if (images.length === 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please upload at least one event photo",
         );
@@ -412,7 +412,7 @@ export default function AddGigScreen() {
       }
       if (schedules.length === 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please add at least one event date and time condition",
         );
@@ -526,7 +526,7 @@ export default function AddGigScreen() {
         error: sessionError,
       } = await supabase.auth.getSession();
       if (sessionError || !session || !session.user) {
-        showAlert("error", "Session Expired", "Please log in again.");
+        showAlert("warning", "Session Expired", "Please log in again.");
         router.replace("/");
         return;
       }
@@ -619,7 +619,7 @@ export default function AddGigScreen() {
         let alertMessage = `Failed to create gig: ${error.message}`;
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
         if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
-        showAlert("error", "Error", alertMessage);
+        showAlert("warning", "Couldn't Create Gig", alertMessage);
         return;
       }
 
@@ -668,8 +668,8 @@ export default function AddGigScreen() {
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Couldn't Create Gig",
         `Failed to create gig: ${e?.message || "Unknown error"}`,
       );
     } finally {
@@ -688,7 +688,7 @@ export default function AddGigScreen() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         return;
       }
 
@@ -760,7 +760,7 @@ export default function AddGigScreen() {
     } catch (e: any) {
       console.error('Address verification error:', e);
       showAlert(
-        "error",
+        "warning",
         "Verification Error",
         e.message || "Could not start address verification. Please try again."
       );
@@ -847,7 +847,7 @@ export default function AddGigScreen() {
     } catch (e: any) {
       console.error("Address verification error:", e);
       showAlert(
-        "error",
+        "warning",
         "Verification Error",
         "Could not start address verification. You can verify your venue address later from settings."
       );
@@ -1005,7 +1005,7 @@ export default function AddGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -1034,8 +1034,8 @@ export default function AddGigScreen() {
       documentPickerInProgressRef.current = false;
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {
@@ -1101,7 +1101,7 @@ export default function AddGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -1134,8 +1134,8 @@ export default function AddGigScreen() {
       documentPickerInProgressRef.current = false;
       console.error("Error uploading business permit:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload business permit. Please try again.",
       );
     } finally {
@@ -1160,7 +1160,7 @@ export default function AddGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -1198,7 +1198,7 @@ export default function AddGigScreen() {
       showAlert("success", "Success", "Business permit uploaded successfully!");
     } catch (error) {
       console.error("Error uploading business permit:", error);
-      showAlert("error", "Error", "Failed to upload business permit. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload business permit. Please try again.");
     } finally {
       setUploadingBusinessPermit(false);
       if (event.target) {
@@ -1219,7 +1219,7 @@ export default function AddGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -1253,7 +1253,7 @@ export default function AddGigScreen() {
       showAlert("success", "Success", "Contract uploaded successfully!");
     } catch (error) {
       console.error("Error uploading contract:", error);
-      showAlert("error", "Error", "Failed to upload contract. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload contract. Please try again.");
     } finally {
       setUploadingContract(false);
       if (event.target) {

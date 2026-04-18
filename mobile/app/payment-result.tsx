@@ -9,16 +9,18 @@ import { useTheme } from '../src/context/ThemeContext';
 export default function PaymentResultScreen() {
   const { colors } = useTheme();
   const { checkSubscription } = useAuth();
-  const params = useLocalSearchParams<{ status?: string; booking_id?: string; type?: string; plan_id?: string }>();
+  const params = useLocalSearchParams<{ status?: string; booking_id?: string; type?: string; plan_id?: string; amount?: string; checkout_id?: string }>();
   const [loading, setLoading] = useState(true);
   const [bookingDetails, setBookingDetails] = useState<any>(null);
   const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
   const [subscriptionActive, setSubscriptionActive] = useState(false);
+  const [depositAmount, setDepositAmount] = useState<number | null>(null);
 
   const paymentStatus = params.status || 'pending';
   const isSuccess = paymentStatus === 'success';
   const isCancelled = paymentStatus === 'cancelled';
   const isSubscription = params.type === 'subscription';
+  const isDeposit = params.type === 'deposit';
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -84,6 +86,22 @@ export default function PaymentResultScreen() {
         } catch (e) {
           console.error('Error fetching subscription plan:', e);
         }
+      } else if (isDeposit) {
+        // Wallet top-up
+        if (isSuccess && params.checkout_id) {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              await supabase.functions.invoke('paymongo', {
+                body: { action: 'check_deposit', checkout_id: params.checkout_id, user_id: user.id }
+              });
+            }
+          } catch (e) {
+            console.error('Error confirming deposit:', e);
+          }
+        }
+        const amt = parseFloat(params.amount || '0');
+        if (amt > 0) setDepositAmount(amt);
       } else if (params.booking_id) {
         try {
           if (isSuccess) {
@@ -134,13 +152,16 @@ export default function PaymentResultScreen() {
     };
 
     fetchDetails();
-  }, [params.booking_id, params.plan_id, isSubscription, isSuccess, isCancelled]);
+  }, [params.booking_id, params.plan_id, params.checkout_id, isSubscription, isDeposit, isSuccess, isCancelled]);
 
   const handleGoToBookings = () => {
+    // After a downpayment, the booking stays in Pending (balance still due); full payment → Upcoming
+    const isPartialPayment = bookingDetails?.payment_type === 'downpayment' && (bookingDetails?.remaining_balance || 0) > 0;
+    const tab = isSuccess ? (isPartialPayment ? 'Pending' : 'Upcoming') : 'Pending';
     router.replace({
       pathname: '/bookings',
       params: {
-        tab: isSuccess ? 'Upcoming' : 'Pending',
+        tab,
         payment_result: params.status,
         booking_id: params.booking_id
       }
@@ -176,7 +197,9 @@ export default function PaymentResultScreen() {
 
   const subscriptionState = isSubscription
     ? (isCancelled ? 'cancelled' : (subscriptionActive ? 'active' : 'processing'))
-    : (isSuccess ? 'success' : 'cancelled');
+    : isDeposit
+      ? (isSuccess ? 'success' : 'cancelled')
+      : (isSuccess ? 'success' : 'cancelled');
 
   const statusColor = subscriptionState === 'cancelled'
     ? '#EF4444'
@@ -213,7 +236,9 @@ export default function PaymentResultScreen() {
               : subscriptionState === 'processing'
                 ? 'Subscription Processing'
                 : 'Subscription Cancelled')
-            : (isSuccess ? 'Payment Successful!' : 'Payment Cancelled')}
+            : isDeposit
+              ? (isSuccess ? 'Wallet Topped Up!' : 'Top-Up Cancelled')
+              : (isSuccess ? 'Payment Successful!' : 'Payment Cancelled')}
         </Text>
 
         {/* Status Description */}
@@ -224,11 +249,15 @@ export default function PaymentResultScreen() {
               : subscriptionState === 'processing'
                 ? 'Your payment was received. We are finalizing activation in the background. Please wait a moment, then check your wallet.'
                 : 'Your subscription was cancelled. You can subscribe anytime from your Wallet & Subscription page.')
-            : (isSuccess
-              ? (bookingDetails?.payment_status === 'partial' || (bookingDetails?.payment_type === 'downpayment' && bookingDetails?.remaining_balance > 0)
-                ? `Downpayment received! Your booking is confirmed. Remaining balance: ₱${bookingDetails?.remaining_balance?.toLocaleString() || 0}`
-                : 'Your studio booking has been confirmed and moved to Upcoming bookings.')
-              : 'Your payment was cancelled. The booking is still in Pending - you can try again anytime.')}
+            : isDeposit
+              ? (isSuccess
+                ? `₱${depositAmount?.toLocaleString() || params.amount || '0'} has been added to your wallet.`
+                : 'Top-up was cancelled. Your wallet balance was not changed.')
+              : (isSuccess
+                ? (bookingDetails?.payment_status === 'partial' || (bookingDetails?.payment_type === 'downpayment' && bookingDetails?.remaining_balance > 0)
+                  ? `Downpayment received! Your booking is confirmed. Remaining balance: ₱${bookingDetails?.remaining_balance?.toLocaleString() || 0}`
+                  : 'Your studio booking has been confirmed and moved to Upcoming bookings.')
+                : 'Your payment was cancelled. The booking is still in Pending - you can try again anytime.')}
         </Text>
 
         {/* Subscription Details */}
@@ -341,7 +370,24 @@ export default function PaymentResultScreen() {
 
         {/* Action Buttons */}
         <View style={styles.buttonsContainer}>
-          {isSubscription ? (
+          {isDeposit ? (
+            <>
+              <TouchableOpacity activeOpacity={1}
+                style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+                onPress={handleGoToWallet}
+              >
+                <Ionicons name="wallet" size={20} color="white" />
+                <Text style={styles.primaryButtonText}>View Wallet</Text>
+              </TouchableOpacity>
+              <TouchableOpacity activeOpacity={1}
+                style={[styles.secondaryButton, { borderColor: colors.primary }]}
+                onPress={() => router.replace('/home')}
+              >
+                <Ionicons name="home" size={20} color={colors.primary} />
+                <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>Go to Home</Text>
+              </TouchableOpacity>
+            </>
+          ) : isSubscription ? (
             <>
               <TouchableOpacity activeOpacity={1}
                 style={[styles.primaryButton, { backgroundColor: colors.primary }]}
@@ -371,7 +417,11 @@ export default function PaymentResultScreen() {
               >
                 <Ionicons name="calendar" size={20} color="white" />
                 <Text style={styles.primaryButtonText}>
-                  {isSuccess ? 'View Upcoming Bookings' : 'View Pending Bookings'}
+                  {isSuccess
+                    ? (bookingDetails?.payment_type === 'downpayment' && (bookingDetails?.remaining_balance || 0) > 0
+                        ? 'View Pending Bookings'
+                        : 'View Upcoming Bookings')
+                    : 'View Pending Bookings'}
                 </Text>
               </TouchableOpacity>
 

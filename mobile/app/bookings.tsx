@@ -132,6 +132,7 @@ export default function BookingsScreen() {
     History: [],
   });
   const [pendingPermitStudios, setPendingPermitStudios] = useState<any[]>([]);
+  const [permitDeleting, setPermitDeleting] = useState<string | null>(null);
 
   // Application data separated by status for musicians
   const [applicationData, setApplicationData] = useState<{
@@ -319,38 +320,47 @@ export default function BookingsScreen() {
               if (bookingId) {
                 const { data: booking } = await supabase
                   .from("studio_bookings")
-                  .select("id, status, payment_status")
+                  .select("id, status, payment_status, payment_type, remaining_balance")
                   .eq("id", bookingId)
                   .single();
 
-                if (booking?.payment_status === "paid") {
+                if (booking?.payment_status === "paid" || booking?.payment_status === "partial") {
                   paymentConfirmed = true;
-                  debugLog("✅ Payment confirmed for booking:", bookingId);
+                  // For partial payment (downpayment), stay on Pending; for full payment, go to Upcoming
+                  const isPartial = booking.payment_status === "partial" && (booking.remaining_balance || 0) > 0;
+                  pendingPaymentBookingId.current = isPartial ? "partial" : null;
+                  debugLog("✅ Payment confirmed for booking:", bookingId, isPartial ? "(partial)" : "(full)");
                   break;
                 }
               } else {
-                // Check if any recent booking moved to paid
+                // Check if any recent booking moved to paid or partial
                 const { data: recentPaid } = await supabase
                   .from("studio_bookings")
-                  .select("id, status, payment_status")
+                  .select("id, status, payment_status, remaining_balance")
                   .eq("user_id", userId)
-                  .eq("payment_status", "paid")
+                  .in("payment_status", ["paid", "partial"])
                   .order("paid_at", { ascending: false })
                   .limit(1);
 
                 if (recentPaid && recentPaid.length > 0) {
                   paymentConfirmed = true;
+                  const isPartial = recentPaid[0].payment_status === "partial" && (recentPaid[0].remaining_balance || 0) > 0;
+                  pendingPaymentBookingId.current = isPartial ? "partial" : null;
                   debugLog("✅ Found recently paid booking");
                   break;
                 }
               }
             }
 
+            const wasPartialPayment = pendingPaymentBookingId.current === "partial";
+            pendingPaymentBookingId.current = null;
+
             // Refresh bookings
             await fetchBookings(userId);
 
             if (paymentConfirmed) {
-              setActiveTab("Upcoming");
+              // Downpayment → stay on Pending (balance still due); full payment → go to Upcoming
+              setActiveTab(wasPartialPayment ? "Pending" : "Upcoming");
             }
           } else if (userId) {
             // Even if not in payment flow, refresh when returning to app
@@ -750,6 +760,9 @@ export default function BookingsScreen() {
 
       if (b.status === "pending" || b.status === "pending_relocation") {
         fallback.Pending.push(item);
+      } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
+        // Downpayment paid but balance still owed — keep in Pending
+        fallback.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
       } else if (b.status === "confirmed") {
         if (now > endDate) {
           fallback.Review.push({ ...item, status: "Completed" });
@@ -1242,7 +1255,7 @@ export default function BookingsScreen() {
           newStatus === "late"
             ? "You already sent a late report for this booking."
             : "You already sent this attendance report for this booking.";
-        showAlert("info", "Already Reported", duplicateMessage);
+        Alert.alert("Already Reported", duplicateMessage);
         setModalVisible(false);
         return false;
       }
@@ -1256,7 +1269,7 @@ export default function BookingsScreen() {
       const errorMessage =
         (e as any)?.message ||
         (typeof e === "string" ? e : "Failed to update booking status.");
-      showAlert("error", "Error", errorMessage);
+      Alert.alert("Error", errorMessage);
       return false;
     }
   }
@@ -1266,7 +1279,7 @@ export default function BookingsScreen() {
     reason: string,
   ): Promise<boolean> {
     if (!item?.id) {
-      showAlert("error", "Error", "Booking not found.");
+      Alert.alert("Error", "Booking not found.");
       return false;
     }
 
@@ -1320,9 +1333,8 @@ export default function BookingsScreen() {
       setModalVisible(false);
       setCancellationReason("");
 
-      showAlert(
-        "success",
-        "Report submitted",
+      Alert.alert(
+        "Success",
         "Your report was sent. The studio owner has been notified and the booking issue is now under review.",
       );
       return true;
@@ -1333,7 +1345,7 @@ export default function BookingsScreen() {
         (typeof e === "string"
           ? e
           : "We could not submit your report. Please try again.");
-      showAlert("error", "Unable to submit report", errorMessage);
+      Alert.alert("Error", errorMessage);
       return false;
     }
   }
@@ -1341,6 +1353,96 @@ export default function BookingsScreen() {
   const handleDetailsPress = (item: any) => {
     setSelectedItem(item);
     bookingDetailsRef.current?.present();
+  };
+
+  const handleRemovePermitListing = (listing: any) => {
+    const listingType = listing?.entity_type === "gig" ? "gig" : "studio";
+    const listingLabel = listingType === "gig" ? "Gig" : "Studio";
+    showAlert(
+      "warning",
+      `Remove ${listingLabel}`,
+      `Are you sure you want to remove "${listing.name}"? This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            setPermitDeleting(listing.id);
+            try {
+              if (listingType === "studio") {
+                let result: any = null;
+                let needsRpcFallback = false;
+                const { data: { session } } = await supabase.auth.getSession();
+                const accessToken = session?.access_token;
+
+                if (accessToken) {
+                  try {
+                    const { data, error } = await supabase.functions.invoke("delete-studio-with-storage", {
+                      body: { studioId: listing.id, reason: "Removed by owner from pending permits" },
+                      headers: { Authorization: `Bearer ${accessToken}` },
+                    });
+                    if (error) {
+                      needsRpcFallback = true;
+                    } else {
+                      result = data;
+                      // Edge function caught an internal error — fall through to RPC
+                      if (result?.code === "DELETE_STUDIO_WITH_STORAGE_FAILED") {
+                        needsRpcFallback = true;
+                        result = null;
+                      }
+                    }
+                  } catch (e) {
+                    needsRpcFallback = true;
+                  }
+                } else {
+                  needsRpcFallback = true;
+                }
+
+                if (needsRpcFallback) {
+                  const { data: rpcData, error: rpcError } = await supabase.rpc("delete_studio_safely", {
+                    p_studio_id: listing.id,
+                    p_reason: "Removed by owner from pending permits (RPC fallback)",
+                  });
+                  if (rpcError) throw rpcError;
+                  result = rpcData;
+                }
+
+                if (!result?.success) {
+                  if (result?.code === "ACTIVE_BOOKINGS_EXIST") {
+                    showAlert("warning", "Remove Blocked", `This studio still has ${result.active_booking_count || 0} active booking(s). Resolve bookings first.`);
+                    return;
+                  }
+                  throw new Error(result?.message || result?.error || "Remove failed");
+                }
+              } else {
+                const { data, error } = await supabase.rpc("delete_gig_safely", {
+                  p_gig_id: listing.id,
+                  p_reason: "Removed by owner from pending permits",
+                });
+                if (error) throw error;
+                const result: any = data;
+                if (!result?.success) {
+                  if (result?.code === "ACTIVE_ACCEPTED_APPLICATIONS_EXIST") {
+                    showAlert("warning", "Remove Blocked", `This gig still has ${result.accepted_application_count || 0} accepted application(s). Resolve them first.`);
+                    return;
+                  }
+                  throw new Error(result?.message || "Remove failed");
+                }
+              }
+
+              setPendingPermitStudios((prev) => prev.filter((p) => p.id !== listing.id));
+              showAlert("success", `${listingLabel} Removed`, `"${listing.name}" has been removed successfully.`);
+            } catch (e) {
+              console.error("Error removing permit listing:", e);
+              showAlert("warning", "Couldn't Remove Listing", "Failed to remove listing. Please try again.");
+            } finally {
+              setPermitDeleting(null);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleConfirmBooking = async (bookingId: string) => {
@@ -1458,7 +1560,7 @@ export default function BookingsScreen() {
 
   const handleMessagePress = async (item: any) => {
     if (!userId) {
-      showAlert("info", "Sign in required", "Please sign in to use chat.");
+      Alert.alert("Info", "Please sign in to use chat.");
       return;
     }
 
@@ -1515,18 +1617,16 @@ export default function BookingsScreen() {
       }
 
       if (!recipientId) {
-        showAlert(
-          "warning",
-          "Unable to open chat",
+        Alert.alert(
+          "Warning",
           "No recipient found for this booking.",
         );
         return;
       }
 
       if (recipientId === userId) {
-        showAlert(
-          "warning",
-          "Unable to open chat",
+        Alert.alert(
+          "Warning",
           "You cannot message yourself.",
         );
         return;
@@ -1559,9 +1659,8 @@ export default function BookingsScreen() {
       });
     } catch (e) {
       debugLog("Error opening chat from booking:", e);
-      showAlert(
-        "error",
-        "Chat unavailable",
+      Alert.alert(
+        "Error",
         "Could not open chat right now. Please try again.",
       );
     }
@@ -1598,9 +1697,8 @@ export default function BookingsScreen() {
       setModalVisible(false);
       setCancellationReason("");
     } catch (err: any) {
-      showAlert(
-        "error",
-        "Action Failed",
+      Alert.alert(
+        "Error",
         err?.message || "Failed to process leader confirmation.",
       );
     }
@@ -1641,9 +1739,8 @@ export default function BookingsScreen() {
       }
 
       if (latestBooking.status !== "pending_relocation") {
-        showAlert(
-          "warning",
-          "Already Updated",
+        Alert.alert(
+          "Warning",
           "This relocation request is no longer pending.",
         );
         await fetchBookings(userId);
@@ -1654,9 +1751,8 @@ export default function BookingsScreen() {
         latestBooking.relocation_expires_at &&
         new Date(latestBooking.relocation_expires_at) <= new Date()
       ) {
-        showAlert(
-          "warning",
-          "Request Expired",
+        Alert.alert(
+          "Warning",
           "This relocation request has expired and will be auto-processed shortly.",
         );
         await fetchBookings(userId);
@@ -1699,9 +1795,8 @@ export default function BookingsScreen() {
           });
         }
 
-        showAlert(
-          "success",
-          "Relocation Confirmed",
+        Alert.alert(
+          "Success",
           "You accepted the moved schedule.",
         );
       } else {
@@ -1737,18 +1832,16 @@ export default function BookingsScreen() {
           });
         }
 
-        showAlert(
-          "info",
-          "Relocation Declined",
+        Alert.alert(
+          "Info",
           "You declined the move request. Booking has been cancelled.",
         );
       }
 
       await fetchBookings(userId);
     } catch (error: any) {
-      showAlert(
-        "error",
-        "Action Failed",
+      Alert.alert(
+        "Error",
         error?.message || "Could not process relocation response.",
       );
     } finally {
@@ -2618,7 +2711,13 @@ export default function BookingsScreen() {
                         <View
                           style={[
                             styles.cardFooter,
-                            { borderColor: colors.border, marginTop: moderateScale(12) },
+                            { 
+                              borderColor: colors.border, 
+                              marginTop: moderateScale(12),
+                              flexDirection: "column",
+                              alignItems: "flex-start",
+                              gap: moderateScale(12)
+                            },
                           ]}
                         >
                           <View style={styles.statusContainer}>
@@ -2627,7 +2726,7 @@ export default function BookingsScreen() {
                               size={moderateScale(14)}
                               color={statusColor}
                             />
-                            <Text style={[styles.statusText, { color: statusColor }]}>
+                            <Text style={[styles.statusText, { color: statusColor, flex: 1 }]} numberOfLines={2}>
                               {isRejected
                                 ? hasReapplyRemaining
                                   ? "One reapply attempt available"
@@ -2636,47 +2735,85 @@ export default function BookingsScreen() {
                             </Text>
                           </View>
 
-                          {isRejected && hasReapplyRemaining && (
+                          <View style={{ flexDirection: "row", width: "100%", justifyContent: "flex-end", alignItems: "center", gap: scale(8) }}>
+                            {isRejected && hasReapplyRemaining && (
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                onPress={() =>
+                                  router.push({
+                                    pathname: listingType === "gig" ? "/edit_gig" : "/edit_studio",
+                                    params: { id: listing.id, reapply: "1" },
+                                  } as any)
+                                }
+                                style={[
+                                  styles.outlineButton,
+                                  {
+                                    borderColor: "#F97316",
+                                    backgroundColor: isDark
+                                      ? "rgba(249,115,22,0.12)"
+                                      : "#FFF7ED",
+                                    paddingHorizontal: scale(12),
+                                    paddingVertical: moderateScale(7),
+                                  },
+                                ]}
+                              >
+                                <View style={styles.detailsButtonLabelContainer}>
+                                  <Ionicons
+                                    name="refresh-outline"
+                                    size={moderateScale(14)}
+                                    color="#EA580C"
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.outlineButtonText,
+                                      {
+                                        color: "#EA580C",
+                                        fontFamily: "Poppins_600SemiBold",
+                                      },
+                                    ]}
+                                  >
+                                    Edit & Reapply
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            )}
                             <TouchableOpacity
                               activeOpacity={1}
-                              onPress={() =>
-                                router.push({
-                                  pathname: listingType === "gig" ? "/edit_gig" : "/edit_studio",
-                                  params: { id: listing.id, reapply: "1" },
-                                } as any)
-                              }
+                              disabled={permitDeleting === listing.id}
+                              onPress={() => handleRemovePermitListing(listing)}
                               style={[
                                 styles.outlineButton,
                                 {
-                                  borderColor: "#F97316",
+                                  borderColor: "#EF4444",
                                   backgroundColor: isDark
-                                    ? "rgba(249,115,22,0.12)"
-                                    : "#FFF7ED",
+                                    ? "rgba(239,68,68,0.12)"
+                                    : "#FEF2F2",
                                   paddingHorizontal: scale(12),
                                   paddingVertical: moderateScale(7),
+                                  opacity: permitDeleting === listing.id ? 0.5 : 1,
                                 },
                               ]}
                             >
                               <View style={styles.detailsButtonLabelContainer}>
                                 <Ionicons
-                                  name="refresh-outline"
+                                  name="trash-outline"
                                   size={moderateScale(14)}
-                                  color="#EA580C"
+                                  color="#DC2626"
                                 />
                                 <Text
                                   style={[
                                     styles.outlineButtonText,
                                     {
-                                      color: "#EA580C",
+                                      color: "#DC2626",
                                       fontFamily: "Poppins_600SemiBold",
                                     },
                                   ]}
                                 >
-                                  Edit & Reapply
+                                  {permitDeleting === listing.id ? "Removing..." : "Remove"}
                                 </Text>
                               </View>
                             </TouchableOpacity>
-                          )}
+                          </View>
                         </View>
                       </View>
                     </View>
@@ -4869,12 +5006,12 @@ export default function BookingsScreen() {
             !(modalMode === "decline" && selectedItem?.leader_approval_required) &&
             !cancellationReason.trim()
           ) {
-            showAlert("warning", "Required", "Please provide a reason.");
+            Alert.alert("Warning", "Please provide a reason.");
             return;
           }
 
           if (modalMode === "late_confirm" && selectedItem && hasLateReportAlready(selectedItem)) {
-            showAlert("info", "Already Reported", "You already sent a late report for this booking.");
+            Alert.alert("Info", "You already sent a late report for this booking.");
             setModalVisible(false);
             return;
           }
@@ -4999,9 +5136,8 @@ export default function BookingsScreen() {
                 ...prev,
                 [selectedItem.id]: true,
               }));
-              showAlert(
-                "success",
-                "Late report sent",
+              Alert.alert(
+                "Success",
                 "Studio owner has been notified.",
               );
             }
@@ -5305,7 +5441,9 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: "100%",
-    height: SCREEN_HEIGHT < 700 ? verticalScale(130) : verticalScale(160),
+    height: SCREEN_HEIGHT < 700 ? verticalScale(110) : verticalScale(135),
+    borderTopLeftRadius: moderateScale(16),
+    borderTopRightRadius: moderateScale(16),
   },
   typeBadge: {
     position: "absolute",
@@ -5382,7 +5520,7 @@ const styles = StyleSheet.create({
     marginRight: scale(8),
   },
   cardTitle: {
-    fontSize: moderateScale(17),
+    fontSize: moderateScale(15),
     fontFamily: "Poppins_700Bold",
   },
   cardDate: {

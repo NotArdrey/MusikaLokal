@@ -1,4 +1,5 @@
 import { BlurView } from 'expo-blur';
+import * as Linking from 'expo-linking';
 import React from 'react';
 import { ActivityIndicator, Modal as RNModal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
@@ -21,6 +22,8 @@ type CustomModalProps = {
   termsLabel?: string;
   onTermsPress?: () => void;
   termsLinkLabel?: string;
+  contractUrl?: string | null;
+  contractName?: string;
   loading?: boolean;
   loadingMessage?: string;
 };
@@ -45,22 +48,29 @@ const CustomModal: React.FC<CustomModalProps> = ({
   termsLabel = 'I agree to the Terms and Conditions.',
   onTermsPress,
   termsLinkLabel = 'Read Terms and Conditions',
+  contractUrl,
+  contractName,
   loading = false,
   loadingMessage = 'Please wait...'
 }) => {
   const { colors } = useTheme();
   const [isTermsAccepted, setIsTermsAccepted] = React.useState(false);
+  const [isContractAccepted, setIsContractAccepted] = React.useState(false);
   const [showTermsContent, setShowTermsContent] = React.useState(false);
+  const hasCustomContract = Boolean(contractUrl);
 
   React.useEffect(() => {
     if (!visible) {
       setIsTermsAccepted(false);
+      setIsContractAccepted(false);
       setShowTermsContent(false);
     }
   }, [visible]);
 
   const isConfirmDisabled =
-    confirmDisabled || (requireTermsAcceptance && !isTermsAccepted);
+    confirmDisabled ||
+    (requireTermsAcceptance && !isTermsAccepted) ||
+    (hasCustomContract && !isContractAccepted);
 
   return (
     <RNModal
@@ -115,6 +125,37 @@ const CustomModal: React.FC<CustomModalProps> = ({
                   numberOfLines={inputMultiline ? 3 : 1}
                   autoCapitalize="none"
                 />
+              )}
+
+              {hasCustomContract && (
+                <TouchableOpacity activeOpacity={1}
+                  onPress={() => setIsContractAccepted((prev) => !prev)}
+                  style={styles.termsRow}
+                >
+                  <View
+                    style={[
+                      styles.checkbox,
+                      {
+                        borderColor: isContractAccepted ? colors.primary : colors.border,
+                        backgroundColor: isContractAccepted ? colors.primary : 'transparent'
+                      }
+                    ]}
+                  >
+                    {isContractAccepted ? (
+                      <Text style={styles.checkboxTick}>✓</Text>
+                    ) : null}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.termsText, { color: colors.text }]}>
+                      I have read and agree to{' '}
+                      <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{contractName || 'the provider'}'s</Text>
+                      {' '}custom contract.
+                    </Text>
+                    <TouchableOpacity activeOpacity={1} onPress={() => { if (contractUrl) Linking.openURL(contractUrl); }} style={{ marginTop: 4 }}>
+                      <Text style={[styles.termsLinkText, { color: colors.primary }]}>View Custom Contract</Text>
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
               )}
 
               {requireTermsAcceptance && (

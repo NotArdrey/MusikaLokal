@@ -527,6 +527,9 @@ export default function EditStudioScreen() {
         ? "recording"
         : "both";
   const allowedPromotionTargets = getAllowedPromotionTargets(studioType);
+  const effectiveAppliesTo = allowedPromotionTargets.includes(promotionForm.applies_to)
+    ? promotionForm.applies_to
+    : allowedPromotionTargets[0];
   const parsedRecordingSongsPerBlock = parsePositiveInteger(
     recordingSongsPerBlock,
   );
@@ -651,7 +654,7 @@ export default function EditStudioScreen() {
 
       if (profile?.role !== "studio-owner") {
         showAlert(
-          "error",
+          "warning",
           "Unauthorized",
           "Only studio owners can edit studios.",
         );
@@ -792,24 +795,24 @@ export default function EditStudioScreen() {
       minimum_spend,
     } = promotionForm;
     if (!name.trim()) {
-      showAlert("error", "Required", "Please enter a promotion name.");
+      showAlert("warning", "Required", "Please enter a promotion name.");
       return;
     }
     const val = parseFloat(discount_value);
     if (!val || val <= 0) {
-      showAlert("error", "Required", "Please enter a valid discount value.");
+      showAlert("warning", "Required", "Please enter a valid discount value.");
       return;
     }
     if (discount_type === "percentage" && val > 100) {
-      showAlert("error", "Invalid Value", "Percentage discount cannot exceed 100%.");
+      showAlert("warning", "Invalid Value", "Percentage discount cannot exceed 100%.");
       return;
     }
     if (!is_permanent && (!start_date || !end_date)) {
-      showAlert("error", "Required", "Please select both start and end dates for time-limited promotions.");
+      showAlert("warning", "Required", "Please select both start and end dates for time-limited promotions.");
       return;
     }
     if (!is_permanent && end_date < start_date) {
-      showAlert("error", "Invalid Dates", "End date must be on or after start date.");
+      showAlert("warning", "Invalid Dates", "End date must be on or after start date.");
       return;
     }
 
@@ -818,7 +821,7 @@ export default function EditStudioScreen() {
       const parsedHours = Number.parseFloat(minimumHoursValue);
       if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Invalid Criteria",
           "Minimum booking hours must be greater than 0.",
         );
@@ -831,7 +834,7 @@ export default function EditStudioScreen() {
       const parsedSpend = Number.parseFloat(minimumSpendValue);
       if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Invalid Criteria",
           "Minimum spend must be greater than 0.",
         );
@@ -916,7 +919,7 @@ export default function EditStudioScreen() {
 
       if (!studioId) {
         console.error("❌ Invalid studio ID after processing");
-        showAlert("error", "Error", "Invalid studio ID");
+        showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
         router.replace("/home");
         return;
       }
@@ -973,7 +976,7 @@ export default function EditStudioScreen() {
           .maybeSingle(),
         supabase
           .from('studio_operating_hours')
-          .select('day_of_week, is_open, open_time, close_time, slot_order, reason')
+          .select('day_of_week, is_open, open_time, close_time, slot_order')
           .eq('studio_id', studioId)
           .eq('is_open', true)
           .order('day_of_week', { ascending: true })
@@ -1096,7 +1099,7 @@ export default function EditStudioScreen() {
       if (!baseData) {
         console.error("❌ No data returned from edge function");
         showAlert(
-          "error",
+          "warning",
           "Not Found",
           "Studio not found or you do not have permission to edit it.",
         );
@@ -1704,7 +1707,7 @@ export default function EditStudioScreen() {
       console.error("❌ Error object:", e);
       console.error("❌ Error message:", (e as any)?.message);
       console.error("❌ Error stack:", (e as any)?.stack);
-      showAlert("error", "Error", "Failed to load studio details.");
+      showAlert("warning", "Couldn't Load Details", "Failed to load studio details.");
       router.replace("/home");
     } finally {
       setLoading(false);
@@ -1769,7 +1772,7 @@ export default function EditStudioScreen() {
       if (!daySchedule.slots.length) continue;
       const dayError = validateSlots(daySchedule.day, daySchedule.slots);
       if (dayError) {
-        showAlert("error", "Schedule Conflict", dayError);
+        showAlert("warning", "Schedule Conflict", dayError);
         return false;
       }
     }
@@ -1792,7 +1795,7 @@ export default function EditStudioScreen() {
       );
       const dateError = validateSlots(displayDate, dateData.slots);
       if (dateError) {
-        showAlert("error", "Schedule Conflict", dateError);
+        showAlert("warning", "Schedule Conflict", dateError);
         return false;
       }
     }
@@ -1802,16 +1805,16 @@ export default function EditStudioScreen() {
 
   const validateForm = (): boolean => {
     if (!studioName.trim()) {
-      showAlert("error", "Required Field", "Please enter a studio name");
+      showAlert("warning", "Required Field", "Please enter a studio name");
       return false;
     }
     if (!description.trim()) {
-      showAlert("error", "Required Field", "Please enter a description");
+      showAlert("warning", "Required Field", "Please enter a description");
       return false;
     }
     if (!address || !latitude || !longitude) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please select a location on the map",
       );
@@ -1821,7 +1824,7 @@ export default function EditStudioScreen() {
     if (studioType === "Both") {
       if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid rehearsal rate",
         );
@@ -1829,7 +1832,7 @@ export default function EditStudioScreen() {
       }
       if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid recording rate",
         );
@@ -1838,7 +1841,7 @@ export default function EditStudioScreen() {
     } else if (studioType === "Rehearsal") {
       if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid rehearsal rate",
         );
@@ -1847,7 +1850,7 @@ export default function EditStudioScreen() {
     } else {
       if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a valid recording rate",
         );
@@ -1859,7 +1862,7 @@ export default function EditStudioScreen() {
       !parsePositiveInteger(recordingSongsPerBlock)
     ) {
       showAlert(
-        "error",
+        "warning",
         "Invalid Recording Rule",
         "Please enter how many songs are included in each recording time block.",
       );
@@ -1870,7 +1873,7 @@ export default function EditStudioScreen() {
       !parsePositiveDecimal(recordingHoursPerBlock)
     ) {
       showAlert(
-        "error",
+        "warning",
         "Invalid Recording Rule",
         "Please enter how many hours each recording time block takes.",
       );
@@ -1881,7 +1884,7 @@ export default function EditStudioScreen() {
     }
     if (selectedImages.length === 0) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please upload at least one studio photo",
       );
@@ -1890,25 +1893,25 @@ export default function EditStudioScreen() {
     // Validate promotions if any
     for (const promo of promotions) {
       if (!promo.name.trim()) {
-        showAlert("error", "Invalid Promotion", "Each promotion must have a name.");
+        showAlert("warning", "Invalid Promotion", "Each promotion must have a name.");
         return false;
       }
       const val = parseFloat(promo.discount_value);
       if (!val || val <= 0) {
-        showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" must have a positive discount value.`);
+        showAlert("warning", "Invalid Promotion", `Promotion "${promo.name}" must have a positive discount value.`);
         return false;
       }
       if (promo.discount_type === "percentage" && val > 100) {
-        showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" percentage cannot exceed 100%.`);
+        showAlert("warning", "Invalid Promotion", `Promotion "${promo.name}" percentage cannot exceed 100%.`);
         return false;
       }
       if (!promo.is_permanent) {
         if (!promo.start_date || !promo.end_date) {
-          showAlert("error", "Invalid Promotion", `Time-limited promotion "${promo.name}" must have start and end dates.`);
+          showAlert("warning", "Invalid Promotion", `Time-limited promotion "${promo.name}" must have start and end dates.`);
           return false;
         }
         if (promo.end_date < promo.start_date) {
-          showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" end date must be on or after start date.`);
+          showAlert("warning", "Invalid Promotion", `Promotion "${promo.name}" end date must be on or after start date.`);
           return false;
         }
       }
@@ -1918,7 +1921,7 @@ export default function EditStudioScreen() {
         const parsedHours = Number.parseFloat(minimumHoursValue);
         if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
           showAlert(
-            "error",
+            "warning",
             "Invalid Promotion",
             `Promotion "${promo.name}" minimum booking hours must be greater than 0.`,
           );
@@ -1931,7 +1934,7 @@ export default function EditStudioScreen() {
         const parsedSpend = Number.parseFloat(minimumSpendValue);
         if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
           showAlert(
-            "error",
+            "warning",
             "Invalid Promotion",
             `Promotion "${promo.name}" minimum spend must be greater than 0.`,
           );
@@ -2213,7 +2216,7 @@ export default function EditStudioScreen() {
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
       if (!studioId) {
-        showAlert("error", "Error", "Invalid studio ID");
+        showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
         setSaving(false);
         return;
       }
@@ -2257,8 +2260,8 @@ export default function EditStudioScreen() {
     } catch (e: any) {
       console.error("❌ Error checking bookings:", e);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Couldn't Save Studio",
         `Failed to save: ${e?.message || "Unknown error"}`,
       );
       setSaving(false);
@@ -2595,8 +2598,8 @@ export default function EditStudioScreen() {
     } catch (e: any) {
       console.error("Error resolving conflicts:", e);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Couldn't Save Studio",
         `Failed to resolve conflicts: ${e?.message || "Unknown error"}`,
       );
       setSaving(false);
@@ -2616,7 +2619,7 @@ export default function EditStudioScreen() {
       // Ensure id is a string, not an array
       const studioId = Array.isArray(id) ? id[0] : id;
       if (!studioId) {
-        showAlert("error", "Error", "Invalid studio ID");
+        showAlert("warning", "Invalid Studio", "Invalid studio ID. Please try again.");
         setSaving(false);
         return;
       }
@@ -3000,7 +3003,6 @@ export default function EditStudioScreen() {
                 open_time: slot.start,
                 close_time: slot.end,
                 slot_order: slotIndex,
-                reason: buildWeeklyScheduleReason(weeklySessionType),
               });
             });
           }
@@ -3025,13 +3027,6 @@ export default function EditStudioScreen() {
               is_open: hasSlots,
               open_time: hasSlots ? entry.slots[0].start : null,
               close_time: hasSlots ? entry.slots[0].end : null,
-              reason: buildDateOverrideReason(
-                parseDateOverrideSessionType(
-                  entry.session_type,
-                  getDefaultDateOverrideSessionType(studioType),
-                ),
-                hasSlots,
-              ),
             };
           });
 
@@ -3078,8 +3073,8 @@ export default function EditStudioScreen() {
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Couldn't Save Studio",
         `Failed to update studio: ${e?.message || "Unknown error"}`,
       );
     } finally {
@@ -3293,7 +3288,7 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -3321,8 +3316,8 @@ export default function EditStudioScreen() {
     } catch (error) {
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {
@@ -3382,7 +3377,7 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -3414,8 +3409,8 @@ export default function EditStudioScreen() {
     } catch (error) {
       console.error("Error uploading business permit:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload business permit. Please try again.",
       );
     } finally {
@@ -3440,7 +3435,7 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -3478,7 +3473,7 @@ export default function EditStudioScreen() {
       showAlert("success", "Success", "Business permit uploaded successfully!");
     } catch (error) {
       console.error("Error uploading business permit:", error);
-      showAlert("error", "Error", "Failed to upload business permit. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload business permit. Please try again.");
     } finally {
       setUploadingBusinessPermit(false);
       if (event.target) {
@@ -3497,7 +3492,7 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         return;
       }
 
@@ -3505,7 +3500,7 @@ export default function EditStudioScreen() {
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
         showAlert(
-          "error",
+          "warning",
           "Permission Needed",
           "Please allow access to your photos.",
         );
@@ -3560,7 +3555,7 @@ export default function EditStudioScreen() {
       setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
     } catch (error) {
       console.error("Error uploading equipment image:", error);
-      showAlert("error", "Error", "Failed to upload image. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload image. Please try again.");
     } finally {
       setUploadingEquipmentImage(false);
     }
@@ -3578,7 +3573,7 @@ export default function EditStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -3613,8 +3608,8 @@ export default function EditStudioScreen() {
     } catch (error) {
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {
@@ -4633,8 +4628,8 @@ export default function EditStudioScreen() {
                         paddingVertical: 10,
                         borderRadius: 10,
                         borderWidth: 1.5,
-                        borderColor: promotionForm.applies_to === at ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
-                        backgroundColor: promotionForm.applies_to === at ? colors.primary + "15" : "transparent",
+                        borderColor: effectiveAppliesTo === at ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
+                        backgroundColor: effectiveAppliesTo === at ? colors.primary + "15" : "transparent",
                         alignItems: "center",
                       }}
                     >
@@ -4642,7 +4637,7 @@ export default function EditStudioScreen() {
                         style={{
                           fontFamily: "Poppins_600SemiBold",
                           fontSize: 11,
-                          color: promotionForm.applies_to === at ? colors.primary : colors.textSecondary,
+                          color: effectiveAppliesTo === at ? colors.primary : colors.textSecondary,
                         }}
                       >
                         {at === "both" ? "Both" : at === "rehearsal" ? "Rehearsal" : "Recording"}
@@ -6525,7 +6520,7 @@ export default function EditStudioScreen() {
                 onPress={() => {
                   if (!equipmentForm.name.trim()) {
                     showAlert(
-                      "error",
+                      "warning",
                       "Required",
                       "Please enter equipment name",
                     );

@@ -310,7 +310,7 @@ export default function AddGroupScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "musician") {
-        showAlert("error", "Unauthorized", "Only musicians can create groups.");
+        showAlert("warning", "Unauthorized", "Only musicians can create groups.");
         router.replace("/home");
         return;
       }
@@ -353,24 +353,24 @@ export default function AddGroupScreen() {
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
       if (!groupName.trim()) {
-        showAlert("error", "Required Field", "Please enter a group name");
+        showAlert("warning", "Required Field", "Please enter a group name");
         return false;
       }
       if (selectedGenres.length === 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please select at least one genre",
         );
         return false;
       }
       if (!description.trim()) {
-        showAlert("error", "Required Field", "Please enter a description");
+        showAlert("warning", "Required Field", "Please enter a description");
         return false;
       }
       if (!address || !latitude || !longitude) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please select a location on the map",
         );
@@ -378,7 +378,7 @@ export default function AddGroupScreen() {
       }
       if (images.length === 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please upload at least one group photo",
         );
@@ -413,7 +413,7 @@ export default function AddGroupScreen() {
             );
       if (!leaderMember?.instrument?.trim()) {
         showAlert(
-          "error",
+          "warning",
           "Leader Instrument Required",
           "Please enter your instrument/role as the group leader.",
         );
@@ -421,7 +421,7 @@ export default function AddGroupScreen() {
       }
       if (!isLeaderInstrumentFinalized) {
         showAlert(
-          "error",
+          "warning",
           "Leader Instrument Not Finalized",
           "Tap the check icon beside the leader instrument to finalize it before continuing.",
         );
@@ -436,7 +436,7 @@ export default function AddGroupScreen() {
       });
       if (unfinalizedMember) {
         showAlert(
-          "error",
+          "warning",
           "Member Instrument Not Finalized",
           `Tap the check icon beside ${unfinalizedMember.name || "this member"}'s instrument before continuing.`,
         );
@@ -449,7 +449,7 @@ export default function AddGroupScreen() {
       );
       if (memberWithoutInstrument) {
         showAlert(
-          "error",
+          "warning",
           "Missing Instrument",
           `Please enter an instrument for ${memberWithoutInstrument.name}`,
         );
@@ -582,7 +582,7 @@ export default function AddGroupScreen() {
         error: sessionError,
       } = await supabase.auth.getSession();
       if (sessionError || !session || !session.user) {
-        showAlert("error", "Session Expired", "Please log in again.");
+        showAlert("warning", "Session Expired", "Please log in again.");
         router.replace("/");
         return;
       }
@@ -637,7 +637,7 @@ export default function AddGroupScreen() {
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
         if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
 
-        showAlert("error", "Error", alertMessage);
+        showAlert("warning", "Couldn't Create Group", alertMessage);
         return;
       }
 
@@ -714,7 +714,7 @@ export default function AddGroupScreen() {
       console.log("Group Created");
     } catch (e: any) {
       console.log("Error creating group:", e);
-      showAlert("error", "Error", "Failed to create group");
+      showAlert("warning", "Couldn't Create Group", "Failed to create group. Please try again.");
     } finally {
       setCreating(false);
     }

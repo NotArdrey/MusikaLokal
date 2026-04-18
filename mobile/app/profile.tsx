@@ -1,21 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ResizeMode, Video } from "expo-av";
+import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    Animated,
-    Dimensions,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Dimensions,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { supabase } from "../lib/supabase";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -30,16 +30,48 @@ import { useTheme } from "../src/context/ThemeContext";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const GRID_GAP = 8;
 const NUM_COLUMNS = 3;
-const GRID_PADDING = 24;
+const SECTION_SIDE_MARGIN = 16;
+const GRID_PADDING = 16;
+const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.78, 320);
 const ITEM_SIZE = Math.floor(
-  (SCREEN_WIDTH - GRID_PADDING * 2 - GRID_GAP * (NUM_COLUMNS - 1)) /
+  (
+    SCREEN_WIDTH -
+    SECTION_SIDE_MARGIN * 2 -
+    GRID_PADDING * 2 -
+    GRID_GAP * (NUM_COLUMNS - 1)
+  ) /
   NUM_COLUMNS
 );
+
+const TIKTOK_GRID_GAP = 1.5;
+const TIKTOK_NUM_COLUMNS = 3;
+const TIKTOK_ITEM_SIZE = (SCREEN_WIDTH - TIKTOK_GRID_GAP * (TIKTOK_NUM_COLUMNS - 1)) / TIKTOK_NUM_COLUMNS;
 
 const EMPTY_BOOKMARKS = {
   studios: [] as any[],
   gigs: [] as any[],
   musicians: [] as any[],
+};
+
+// Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const lookup = new Uint8Array(256);
+  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
+  const b64 = base64.replace(/=/g, "");
+  let bufLen = Math.floor(b64.length * 0.75);
+  const bytes = new Uint8Array(bufLen);
+  let p = 0;
+  for (let i = 0; i < b64.length; i += 4) {
+    const e1 = lookup[b64.charCodeAt(i)];
+    const e2 = lookup[b64.charCodeAt(i + 1)];
+    const e3 = lookup[b64.charCodeAt(i + 2)];
+    const e4 = lookup[b64.charCodeAt(i + 3)];
+    if (p < bufLen) bytes[p++] = (e1 << 2) | (e2 >> 4);
+    if (p < bufLen) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
+    if (p < bufLen) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
+  }
+  return bytes;
 };
 
 export default function ProfileScreen() {
@@ -68,25 +100,86 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks">("about");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
-  const drawerAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
 
-  const openDrawer = useCallback(() => {
+  useEffect(() => {
+    if (loading) return;
+
+    console.log("[ProfileMenu][mobile] Header action eligibility", {
+      timestamp: new Date().toISOString(),
+      authLoading,
+      loading,
+      isOwner,
+      isGuest,
+      menuButtonVisible: isOwner || isGuest,
+      reportButtonVisible: !isOwner && !isGuest,
+      activeTab,
+      profileId: profile?.id ?? null,
+      currentUserId: currentUserId ?? null,
+    });
+  }, [activeTab, authLoading, currentUserId, isGuest, isOwner, loading, profile?.id]);
+
+  useEffect(() => {
+    console.log("[ProfileMenu][mobile] Menu visibility changed", {
+      timestamp: new Date().toISOString(),
+      isMenuOpen,
+      activeTab,
+      profileId: profile?.id ?? null,
+    });
+  }, [activeTab, isMenuOpen, profile?.id]);
+
+  const openDrawer = useCallback((source: string = "unknown") => {
+    if (isMenuOpen) {
+      console.log("[ProfileMenu][mobile] Open ignored because drawer is already open", {
+        timestamp: new Date().toISOString(),
+        source,
+        isMenuOpen,
+      });
+      return;
+    }
+
+    console.log("[ProfileMenu][mobile] Open requested", {
+      timestamp: new Date().toISOString(),
+      source,
+      isOwner,
+      isGuest,
+      isMenuOpen,
+      activeTab,
+      profileId: profile?.id ?? null,
+      currentUserId: currentUserId ?? null,
+    });
+
+    console.log("[ProfileMenu][mobile] Opening drawer", {
+      source,
+      nextIsMenuOpen: true,
+    });
+
     setIsMenuOpen(true);
-    Animated.spring(drawerAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      bounciness: 0,
-      speed: 20,
-    }).start();
-  }, [drawerAnim]);
+  }, [activeTab, currentUserId, isGuest, isMenuOpen, isOwner, profile?.id]);
 
-  const closeDrawer = useCallback(() => {
-    Animated.timing(drawerAnim, {
-      toValue: SCREEN_WIDTH,
-      duration: 220,
-      useNativeDriver: true,
-    }).start(() => setIsMenuOpen(false));
-  }, [drawerAnim]);
+  const closeDrawer = useCallback((source: string = "unknown") => {
+    if (!isMenuOpen) {
+      console.log("[ProfileMenu][mobile] Close ignored because drawer is already closed", {
+        timestamp: new Date().toISOString(),
+        source,
+      });
+      return;
+    }
+
+    console.log("[ProfileMenu][mobile] Close requested", {
+      timestamp: new Date().toISOString(),
+      source,
+      isMenuOpen,
+      activeTab,
+      profileId: profile?.id ?? null,
+    });
+
+    console.log("[ProfileMenu][mobile] Closing drawer", {
+      source,
+      nextIsMenuOpen: false,
+    });
+
+    setIsMenuOpen(false);
+  }, [activeTab, isMenuOpen, profile?.id]);
 
   const isMissingShowGigStatusesColumnError = (error: any) => {
     const message = String(error?.message || "").toLowerCase();
@@ -140,7 +233,7 @@ export default function ProfileScreen() {
     try {
       const { data: favoritesData, error: favoritesError } = await supabase
         .from("favorites")
-        .select("group_id, studio_id, gig_id, created_at")
+        .select("group_id, profile_id, studio_id, gig_id, created_at")
         .eq("user_id", viewerId)
         .order("created_at", { ascending: false });
 
@@ -150,6 +243,9 @@ export default function ProfileScreen() {
       const groupIds = favorites
         .map((entry: any) => entry.group_id)
         .filter((value: any): value is string => typeof value === "string");
+      const profileIds = favorites
+        .map((entry: any) => entry.profile_id)
+        .filter((value: any): value is string => typeof value === "string");
       const studioIds = favorites
         .map((entry: any) => entry.studio_id)
         .filter((value: any): value is string => typeof value === "string");
@@ -157,46 +253,74 @@ export default function ProfileScreen() {
         .map((entry: any) => entry.gig_id)
         .filter((value: any): value is string => typeof value === "string");
 
-      const [groupsResult, studiosResult, gigsResult] = await Promise.all([
+      const [groupsResult, profilesResult, studiosResult, gigsResult] = await Promise.all([
         groupIds.length > 0
           ? supabase
             .from("groups_with_stats")
-            .select("id, name, location, images, image, genre")
+            .select("id, name, location, images, genre")
             .in("id", groupIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        profileIds.length > 0
+          ? supabase
+            .from("profiles")
+            .select("id, full_name, location, avatar_url")
+            .in("id", profileIds)
           : Promise.resolve({ data: [] as any[], error: null }),
         studioIds.length > 0
           ? supabase
             .from("studios_with_stats")
-            .select("id, name, address, images, image")
+            .select("id, name, address, images")
             .in("id", studioIds)
           : Promise.resolve({ data: [] as any[], error: null }),
         gigIds.length > 0
           ? supabase
             .from("gigs_with_stats")
-            .select("id, name, location, event_date, image, images")
+            .select("id, name, location, event_date, images")
             .in("id", gigIds)
           : Promise.resolve({ data: [] as any[], error: null }),
       ]);
 
       if (groupsResult.error) throw groupsResult.error;
+      if (profilesResult.error) throw profilesResult.error;
       if (studiosResult.error) throw studiosResult.error;
       if (gigsResult.error) throw gigsResult.error;
 
       const groupById = new Map((groupsResult.data || []).map((entry: any) => [entry.id, entry]));
+      const profileById = new Map((profilesResult.data || []).map((entry: any) => [entry.id, entry]));
       const studioById = new Map((studiosResult.data || []).map((entry: any) => [entry.id, entry]));
       const gigById = new Map((gigsResult.data || []).map((entry: any) => [entry.id, entry]));
 
       const musicians = favorites
-        .filter((entry: any) => !!entry.group_id)
-        .map((entry: any) => groupById.get(entry.group_id))
-        .filter(Boolean)
-        .map((entry: any) => ({
-          id: entry.id,
-          name: entry.name || "Unnamed Musician",
-          subtitle: entry.location || entry.genre || "Musician",
-          image: resolveBookmarkImage(entry),
-          type: "Musician",
-        }));
+        .map((entry: any) => {
+          if (entry.profile_id) {
+            const artist = profileById.get(entry.profile_id);
+            if (!artist) return null;
+
+            return {
+              id: artist.id,
+              name: artist.full_name || "Unnamed Artist",
+              subtitle: artist.location || "Artist",
+              image: resolveBookmarkImage(artist),
+              type: "Artist",
+            };
+          }
+
+          if (entry.group_id) {
+            const musician = groupById.get(entry.group_id);
+            if (!musician) return null;
+
+            return {
+              id: musician.id,
+              name: musician.name || "Unnamed Musician",
+              subtitle: musician.location || musician.genre || "Musician",
+              image: resolveBookmarkImage(musician),
+              type: "Musician",
+            };
+          }
+
+          return null;
+        })
+        .filter(Boolean);
 
       const studios = favorites
         .filter((entry: any) => !!entry.studio_id)
@@ -260,9 +384,26 @@ export default function ProfileScreen() {
       const paramUserId = Array.isArray(params.userId)
         ? params.userId[0]
         : params.userId;
-      let targetId = paramUserId || currentUserId;
+      let resolvedCurrentUserId = currentUserId;
+
+      // Resolve the active user ID from auth when context is temporarily unavailable.
+      if (!resolvedCurrentUserId && !isGuest) {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+        if (error) {
+          console.log("❌ Profile - Auth error while resolving current user:", error.message);
+        }
+        if (user?.id) {
+          resolvedCurrentUserId = user.id;
+        }
+      }
+
+      let targetId = paramUserId || resolvedCurrentUserId;
       console.log("👤 Profile - Param userId:", paramUserId);
       console.log("👤 Profile - Context userId:", currentUserId);
+      console.log("👤 Profile - Resolved userId:", resolvedCurrentUserId);
 
       // If still no targetId, try to get from auth directly
       if (!targetId) {
@@ -307,7 +448,7 @@ export default function ProfileScreen() {
       console.log("🎯 Profile - Fetching profile for:", targetId);
 
       // Check ownership
-      const ownership = currentUserId && targetId === currentUserId;
+      const ownership = resolvedCurrentUserId && targetId === resolvedCurrentUserId;
       setIsOwner(!!ownership);
 
       const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
@@ -518,7 +659,7 @@ export default function ProfileScreen() {
         );
         return;
       }
-      showAlert("error", "Update Failed", e?.message || "Failed to update gig visibility.");
+      showAlert("warning", "Update Failed", e?.message || "Failed to update gig visibility.");
     } finally {
       setUpdatingGigVisibility(false);
     }
@@ -572,7 +713,7 @@ export default function ProfileScreen() {
       return;
     }
     if (!profile?.id) {
-      showAlert("error", "Unable to Report", "Missing profile details.");
+      showAlert("warning", "Unable to Report", "Missing profile details.");
       return;
     }
 
@@ -613,7 +754,7 @@ export default function ProfileScreen() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        showAlert("error", "Error", "You must be logged in.");
+        showAlert("warning", "Not Logged In", "You must be logged in.");
         return;
       }
 
@@ -647,46 +788,24 @@ export default function ProfileScreen() {
       console.log("📍 File URI:", file.uri);
       console.log("📁 File name:", fileName);
 
-      // Create FormData for upload
-      const formData = new FormData();
-      formData.append("file", {
-        uri: file.uri,
-        name: fileName.split("/").pop(),
-        type: mimeType,
-      } as any);
+      const base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' });
+      const bytes = base64ToUint8Array(base64);
 
-      // Get Supabase URL and key from the client
-      const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-      const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("portfolio")
+        .upload(fileName, bytes, {
+          contentType: mimeType,
+          upsert: true,
+        });
 
-      // Get current session for auth
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const accessToken = session?.access_token || supabaseKey;
-
-      // Upload directly via fetch with FormData
-      const uploadResponse = await fetch(
-        `${supabaseUrl}/storage/v1/object/avatars/${fileName}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "x-upsert": "true",
-          },
-          body: formData,
-        },
-      );
-
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        console.error("❌ Upload failed:", errorText);
-        throw new Error(errorText || "Upload failed");
+      if (uploadError) {
+        console.error("❌ Upload failed:", uploadError);
+        throw new Error(uploadError.message || "Upload failed");
       }
 
       // Get public URL
       const { data: urlData } = supabase.storage
-        .from("avatars")
+        .from("portfolio")
         .getPublicUrl(fileName);
 
       console.log("✅ Uploaded:", urlData.publicUrl);
@@ -728,7 +847,7 @@ export default function ProfileScreen() {
       showAlert("success", "Success", "Media added to portfolio!");
     } catch (e: any) {
       console.log("Upload error:", e);
-      showAlert("error", "Error", e.message || "Failed to upload media");
+      showAlert("warning", "Upload Failed", e.message || "Failed to upload media");
     } finally {
       setUploading(false);
     }
@@ -780,6 +899,14 @@ export default function ProfileScreen() {
     );
   }
 
+  const portfolioCount = profile?.portfolio_urls?.length ?? 0;
+  const mediaSummary =
+    portfolioCount > 0
+      ? `${portfolioCount} ${portfolioCount === 1 ? "item" : "items"} in ${isOwner ? "your" : "this"} portfolio`
+      : isOwner
+        ? "Add photos and short clips that show your sound, setup, or stage presence."
+        : "No portfolio uploads yet.";
+
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
@@ -787,11 +914,27 @@ export default function ProfileScreen() {
           title={isOwner ? "My Profile" : "User Profile"}
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
           rightComponent={(isOwner || isGuest) ? (
-            <TouchableOpacity activeOpacity={0.7} onPress={openDrawer} style={styles.headerMenuBtn}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+              onPress={() => openDrawer("header-menu-button")}
+              style={[
+                styles.headerMenuBtn,
+                { backgroundColor: isDark ? "#111827" : "#F8FAFC", borderColor: colors.border },
+              ]}
+            >
               <Ionicons name="menu-outline" size={26} color={colors.text} />
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity activeOpacity={0.7} onPress={openReportModal} style={styles.headerReportBtn}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+              onPress={openReportModal}
+              style={[
+                styles.headerReportBtn,
+                { backgroundColor: isDark ? "#111827" : "#F8FAFC", borderColor: colors.border },
+              ]}
+            >
               <Ionicons name="ellipsis-horizontal" size={24} color={colors.text} />
             </TouchableOpacity>
           )}
@@ -857,11 +1000,11 @@ export default function ProfileScreen() {
                   key={genre}
                   style={[
                     styles.genreTag,
-                    { backgroundColor: isDark ? "#1E293B" : "#F3F4F6" },
+                    { backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)" },
                   ]}
                 >
                   <Text
-                    style={[styles.genreText, { color: colors.textSecondary }]}
+                    style={[styles.genreText, { color: colors.text }]}
                   >
                     {genre}
                   </Text>
@@ -873,7 +1016,7 @@ export default function ProfileScreen() {
               <View
                 style={[
                   styles.gigVisibilityCard,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
+                  { backgroundColor: isDark ? "#1E293B" : "#F8FAFC", borderColor: colors.border },
                 ]}
               >
                 <View style={{ flex: 1, paddingRight: 12 }}>
@@ -888,9 +1031,18 @@ export default function ProfileScreen() {
                   value={profile?.show_gig_statuses !== false}
                   onValueChange={handleToggleGigVisibility}
                   disabled={updatingGigVisibility}
-                  trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: colors.primary + "66" }}
-                  thumbColor={profile?.show_gig_statuses !== false ? colors.primary : "#9CA3AF"}
+                  trackColor={{ false: isDark ? "#374151" : "#E2E8F0", true: colors.primary + "80" }}
+                  thumbColor={profile?.show_gig_statuses !== false ? colors.primary : isDark ? "#9CA3AF" : "#CBD5E1"}
                 />
+              </View>
+            )}
+
+            {/* Bio Section */}
+            {profile?.bio && (
+              <View style={styles.bioContainer}>
+                <Text style={[styles.bioText, { color: colors.text }]}>
+                  {profile.bio}
+                </Text>
               </View>
             )}
 
@@ -907,9 +1059,6 @@ export default function ProfileScreen() {
                   Rating
                 </Text>
               </View>
-              <View
-                style={[styles.statDivider, { backgroundColor: colors.border }]}
-              />
               <View style={styles.statItem}>
                 <Text style={[styles.statValue, { color: colors.text }]}>
                   {profile?.review_count || 0}
@@ -920,9 +1069,6 @@ export default function ProfileScreen() {
                   Reviews
                 </Text>
               </View>
-              <View
-                style={[styles.statDivider, { backgroundColor: colors.border }]}
-              />
               <View style={styles.statItem}>
                 <Text style={[styles.statValue, { color: colors.text }]}>
                   {profile?.role === "musician" ? gigStats.active : "-"}
@@ -935,30 +1081,21 @@ export default function ProfileScreen() {
               </View>
             </View>
 
-            {/* Bio Section */}
-            {profile?.bio && (
-              <View style={styles.bioContainer}>
-                <Text style={[styles.bioText, { color: colors.text }]}>
-                  {profile.bio}
-                </Text>
-              </View>
-            )}
-
             {/* TAB NAVIGATION */}
-            <View style={[styles.tabContainer, { borderBottomColor: colors.border }]}>
+            <View style={[styles.tabContainer, { borderBottomColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)" }]}>
               <TouchableOpacity onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                <Ionicons name="grid-outline" size={24} color={activeTab === "about" ? colors.text : colors.textSecondary} />
+                <Ionicons name={activeTab === "about" ? "grid" : "grid-outline"} size={22} color={activeTab === "about" ? colors.text : colors.textSecondary} />
               </TouchableOpacity>
               
               {profile?.role === "musician" && profile?.show_gig_statuses !== false && (
                 <TouchableOpacity onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                  <Ionicons name="mic-outline" size={24} color={activeTab === "gigs" ? colors.text : colors.textSecondary} />
+                  <Ionicons name={activeTab === "gigs" ? "mic" : "mic-outline"} size={22} color={activeTab === "gigs" ? colors.text : colors.textSecondary} />
                 </TouchableOpacity>
               )}
               
               {isOwner && !isGuest && (
                 <TouchableOpacity onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
-                  <Ionicons name="bookmark-outline" size={24} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
+                  <Ionicons name={activeTab === "bookmarks" ? "bookmark" : "bookmark-outline"} size={22} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -1069,7 +1206,7 @@ export default function ProfileScreen() {
                          if (bookmarkFilter === "all") {
                             displayedItems = [...bookmarkedListings.studios, ...bookmarkedListings.gigs, ...bookmarkedListings.musicians];
                          } else {
-                            displayedItems = bookmarkedListings[filterToKey[bookmarkFilter]];
+                            displayedItems = bookmarkedListings[filterToKey[bookmarkFilter] as keyof typeof bookmarkedListings];
                          }
 
                          if (displayedItems.length === 0) {
@@ -1128,103 +1265,79 @@ export default function ProfileScreen() {
             {/* TAB CONTENT: ABOUT/MEDIA */}
             {activeTab === "about" && (
               <View>
-                {/* Media Section - Instagram Style Grid */}
-                <View style={styles.mediaSection}>
-                  <View style={styles.mediaSectionHeader}>
-                    {isOwner && profile?.portfolio_urls?.length > 0 && (
+                <View
+                  style={[
+                    styles.mediaSectionTikTok,
+                    { backgroundColor: colors.background, marginTop: 12 },
+                  ]}
+                >
+                  <View style={styles.mediaGridTikTok}>
+                    {isOwner && (
                       <TouchableOpacity
+                        style={[
+                          styles.gridItemTikTok,
+                          {
+                            backgroundColor: isDark ? "#1E293B" : "#F3F4F6",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          },
+                        ]}
                         onPress={addMediaToPortfolio}
                         disabled={uploading}
-                        activeOpacity={1}
-                        style={[
-                          styles.addMediaBtn,
-                          { backgroundColor: colors.primary },
-                        ]}
+                        activeOpacity={0.8}
                       >
-                        <Ionicons name="add" size={20} color="#fff" />
-                        <Text style={{ color: "#fff", marginLeft: 4, fontFamily: "Poppins_500Medium" }}>Upload Media</Text>
+                        <Ionicons
+                          name={uploading ? "cloud-upload-outline" : "add"}
+                          size={32}
+                          color={colors.primary}
+                        />
+                        <Text style={{ fontSize: 12, color: colors.primary, marginTop: 4, fontFamily: "Poppins_500Medium" }}>
+                          {uploading ? "Uploading..." : "Upload"}
+                        </Text>
                       </TouchableOpacity>
                     )}
-                  </View>
 
-                  {!profile?.portfolio_urls || profile.portfolio_urls.length === 0 ? (
-                    <View style={[styles.emptyMedia, { borderColor: colors.border }]}>
-                      <Ionicons
-                        name="images-outline"
-                        size={48}
-                        color={colors.textSecondary}
-                      />
-                      <Text
-                        style={[
-                          styles.emptyMediaText,
-                          { color: colors.textSecondary },
-                        ]}
+                    {(profile?.portfolio_urls || []).map((url: string, i: number) => (
+                      <TouchableOpacity
+                        key={i}
+                        style={[styles.gridItemTikTok, { borderColor: colors.border }]}
+                        onPress={() => openMediaViewer(url)}
+                        activeOpacity={0.85}
                       >
-                        No media yet
-                      </Text>
-                      <Text
-                        style={[styles.emptyMediaSubtext, { color: colors.muted }]}
-                      >
-                        {isOwner
-                          ? "Share your best work!"
-                          : "This musician hasn't added media yet"}
-                      </Text>
-                      {isOwner && (
-                        <TouchableOpacity
-                          onPress={addMediaToPortfolio}
-                          disabled={uploading}
-                          activeOpacity={1}
-                          style={[
-                            styles.uploadBtn,
-                            {
-                              backgroundColor: uploading
-                                ? colors.textSecondary
-                                : colors.primary,
-                            },
-                          ]}
-                        >
-                          <Ionicons
-                            name="cloud-upload-outline"
-                            size={18}
-                            color="#fff"
-                            style={{ marginRight: 8 }}
-                          />
-                          <Text style={styles.uploadBtnText}>
-                            {uploading ? "Uploading..." : "Add Photos & Videos"}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  ) : (
-                    <View style={styles.mediaGrid}>
-                      {profile.portfolio_urls.map((url: string, i: number) => (
-                        <TouchableOpacity
-                          key={i}
-                          style={styles.gridItem}
-                          onPress={() => openMediaViewer(url)}
-                          activeOpacity={1}
-                        >
+                        {isVideo(url) ? (
+                          <View
+                            style={[
+                              styles.gridVideoPlaceholder,
+                              { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
+                            ]}
+                          >
+                            <Ionicons name="play-circle" size={30} color="#fff" />
+                            <Text style={styles.gridVideoPlaceholderText}>Tap to play</Text>
+                          </View>
+                        ) : (
                           <Image
                             source={{ uri: url }}
                             style={styles.gridImage}
                             resizeMode="cover"
                           />
-                          {isVideo(url) && (
-                            <View style={styles.videoIndicator}>
-                              <Ionicons name="play" size={24} color="#fff" />
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
+                        )}
+
+                        <View style={styles.gridMeta}>
+                          <View style={styles.mediaTypePill}>
+                            <Ionicons
+                              name={isVideo(url) ? "videocam" : "image"}
+                              size={10}
+                              color="#fff"
+                            />
+                            <Text style={styles.mediaTypeText}>
+                              {isVideo(url) ? "Video" : "Photo"}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
-
-                {/* hidden gig status text when gigs are hidden */}
-                {profile?.role === "musician" && profile?.show_gig_statuses === false && isOwner && (
-                  <Text style={[styles.gigHiddenText, { color: colors.textSecondary }]}>Gig status is hidden from other users.</Text>
-                )}
-
               </View>
             )}
 
@@ -1269,16 +1382,24 @@ export default function ProfileScreen() {
       <Modal
         visible={isMenuOpen}
         transparent={true}
-        animationType="none"
-        onRequestClose={closeDrawer}
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => closeDrawer("modal-request-close")}
+        onShow={() => {
+          console.log("[ProfileMenu][mobile] Drawer modal onShow fired", {
+            timestamp: new Date().toISOString(),
+            isMenuOpen,
+            activeTab,
+            profileId: profile?.id ?? null,
+          });
+        }}
       >
         <View style={styles.drawerOverlay}>
-          <TouchableOpacity activeOpacity={1} style={styles.drawerBackdrop} onPress={closeDrawer} />
-          <Animated.View
+          <TouchableOpacity activeOpacity={1} style={styles.drawerBackdrop} onPress={() => closeDrawer("drawer-backdrop")} />
+          <View
             style={[
               styles.drawerContent,
-              { backgroundColor: colors.surface },
-              { transform: [{ translateX: drawerAnim }] },
+              { backgroundColor: colors.background, borderLeftColor: colors.border },
             ]}
           >
             {/* Drawer top — avatar + name */}
@@ -1295,7 +1416,7 @@ export default function ProfileScreen() {
                   {profile?.role ? profile.role.replace("-", " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) : ""}
                 </Text>
               </View>
-              <TouchableOpacity activeOpacity={0.7} onPress={closeDrawer} style={styles.drawerCloseBtn}>
+              <TouchableOpacity activeOpacity={0.7} onPress={() => closeDrawer("drawer-close-button")} style={styles.drawerCloseBtn}>
                 <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -1308,7 +1429,13 @@ export default function ProfileScreen() {
                       activeOpacity={0.7}
                       key={item.label}
                       onPress={() => {
-                        closeDrawer();
+                        console.log("[ProfileMenu][mobile] Drawer menu item selected", {
+                          timestamp: new Date().toISOString(),
+                          label: item.label,
+                          route: item.route,
+                          isMenuOpen,
+                        });
+                        closeDrawer(`menu-item:${item.route}`);
                         setTimeout(() => router.push(item.route as any), 250);
                       }}
                       style={[styles.drawerMenuItem, { borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)" }]}
@@ -1324,7 +1451,12 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     activeOpacity={0.7}
                     onPress={() => {
-                      closeDrawer();
+                      console.log("[ProfileMenu][mobile] Guest drawer settings selected", {
+                        timestamp: new Date().toISOString(),
+                        route: "/settings",
+                        isMenuOpen,
+                      });
+                      closeDrawer("guest-settings");
                       setTimeout(() => router.push("/settings"), 250);
                     }}
                     style={[styles.drawerMenuItem, { borderBottomColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)" }]}
@@ -1338,7 +1470,7 @@ export default function ProfileScreen() {
                 ) : null}
               </View>
             </ScrollView>
-          </Animated.View>
+          </View>
         </View>
       </Modal>
 
@@ -1397,7 +1529,7 @@ const styles = StyleSheet.create({
   },
   profileSkeletonMediaGrid: {
     marginTop: 24,
-    paddingHorizontal: GRID_PADDING,
+    paddingHorizontal: SECTION_SIDE_MARGIN + GRID_PADDING,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: GRID_GAP,
@@ -1498,43 +1630,49 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
     width: "100%",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderRadius: 16,
-    backgroundColor: "rgba(0,0,0,0.02)",
-    marginBottom: 24,
+    paddingVertical: 12,
+    marginBottom: 16,
+    gap: 32,
   },
   statItem: {
     alignItems: "center",
-    flex: 1,
-    paddingHorizontal: 8,
   },
   statValue: {
     fontFamily: "Poppins_700Bold",
-    fontSize: 22,
+    fontSize: 18,
   },
   statLabel: {
-    fontFamily: "Poppins_500Medium",
-    fontSize: 13,
-    marginTop: 4,
+    fontFamily: "Poppins_400Regular",
+    fontSize: 12,
+    marginTop: 2,
   },
   statDivider: {
-    width: 1,
-    height: "80%",
-    alignSelf: "center",
+    display: "none",
+  },
+  bioContainer: {
+    paddingHorizontal: 32,
+    marginBottom: 20,
+    alignItems: "center",
+  },
+  bioText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
   },
   tabContainer: {
     flexDirection: "row",
     width: "100%",
+    borderTopWidth: 1,
     borderBottomWidth: 1,
-    marginBottom: 16,
   },
   tabButton: {
     flex: 1,
     alignItems: "center",
-    paddingVertical: 12,
+    paddingVertical: 14,
   },
   tabText: {
     fontSize: 12,
@@ -1684,18 +1822,6 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
   },
-  bioContainer: {
-    marginTop: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    width: "100%",
-  },
-  bioText: {
-    fontSize: 14,
-    fontFamily: "Poppins_400Regular",
-    textAlign: "center",
-    lineHeight: 22,
-  },
   menuContainer: {
     paddingHorizontal: 24,
     gap: 12,
@@ -1737,36 +1863,114 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     lineHeight: 18,
   },
+  mediaSectionTikTok: {
+    marginTop: 8,
+    marginBottom: 0,
+    marginHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+    borderWidth: 0,
+    borderRadius: 0,
+  },
+  mediaSectionHeaderTikTok: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    paddingHorizontal: 16, // Keep padding just for the header
+    marginBottom: 12,
+  },
   mediaSection: {
     marginTop: 24,
-    marginBottom: 8,
+    marginBottom: 12,
+    marginHorizontal: SECTION_SIDE_MARGIN,
+    paddingTop: 18,
+    paddingBottom: 20,
+    borderWidth: 1,
+    borderRadius: 24,
   },
   mediaSectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    paddingHorizontal: GRID_PADDING,
+    marginBottom: 18,
+  },
+  mediaSectionHeading: {
+    flex: 1,
+    flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 24,
-    marginBottom: 16,
+    gap: 12,
+  },
+  mediaSectionIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaSectionTextWrap: {
+    flex: 1,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 18,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  sectionSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: "Poppins_400Regular",
+  },
+  mediaSectionActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  mediaCountBadge: {
+    minWidth: 34,
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaCountBadgeText: {
+    fontSize: 12,
     fontFamily: "Poppins_600SemiBold",
   },
   addMediaBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    flexDirection: "row",
+    gap: 6,
     alignItems: "center",
     justifyContent: "center",
+  },
+  addMediaBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontFamily: "Poppins_600SemiBold",
   },
   emptyMedia: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 48,
-    marginHorizontal: 24,
+    paddingVertical: 40,
+    marginHorizontal: GRID_PADDING,
+    paddingHorizontal: 24,
     borderWidth: 2,
     borderStyle: "dashed",
-    borderRadius: 16,
+    borderRadius: 20,
+  },
+  emptyMediaIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
   },
   emptyMediaText: {
     marginTop: 12,
@@ -1783,8 +1987,8 @@ const styles = StyleSheet.create({
   uploadBtn: {
     marginTop: 16,
     paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: 11,
+    borderRadius: 14,
     flexDirection: "row",
     alignItems: "center",
   },
@@ -1793,33 +1997,74 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
   },
+  mediaGridTikTok: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-start",
+    gap: TIKTOK_GRID_GAP,
+    paddingHorizontal: 0,
+    paddingBottom: 40, // some bottom padding
+  },
+  gridItemTikTok: {
+    width: TIKTOK_ITEM_SIZE,
+    height: TIKTOK_ITEM_SIZE,
+    position: "relative",
+    borderWidth: 0,
+    backgroundColor: "#1a1a1a",
+  },
   mediaGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "flex-start",
     gap: GRID_GAP,
     paddingHorizontal: GRID_PADDING,
+    paddingBottom: 4,
   },
   gridItem: {
     width: ITEM_SIZE,
     height: ITEM_SIZE,
     position: "relative",
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: "hidden",
+    borderWidth: 1,
   },
   gridImage: {
     width: "100%",
     height: "100%",
     backgroundColor: "#1a1a1a",
-    borderRadius: 12,
   },
-  videoIndicator: {
+  gridVideoPlaceholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  gridVideoPlaceholderText: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 11,
+    fontFamily: "Poppins_500Medium",
+  },
+  gridMeta: {
     position: "absolute",
-    top: 8,
+    left: 8,
     right: 8,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    borderRadius: 4,
-    padding: 4,
+    bottom: 8,
+    flexDirection: "row",
+    justifyContent: "flex-start",
+  },
+  mediaTypePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(15,23,42,0.78)",
+  },
+  mediaTypeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontFamily: "Poppins_600SemiBold",
   },
   modalContainer: {
     flex: 1,
@@ -1835,8 +2080,8 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   modalMedia: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_WIDTH,
+    width: "100%",
+    height: "100%",
   },
   resumeSection: {
     marginTop: 24,
@@ -1871,37 +2116,49 @@ const styles = StyleSheet.create({
   },
   // Header button styles
   headerMenuBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   headerReportBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   // Drawer styles
   drawerOverlay: {
     flex: 1,
-    flexDirection: "row",
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: "rgba(0,0,0,0.42)",
+  },
+  drawerScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.42)",
+    zIndex: 1,
   },
   drawerBackdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
   },
   drawerContent: {
-    width: SCREEN_WIDTH * 0.78,
-    maxWidth: 320,
-    height: "100%",
+    width: DRAWER_WIDTH,
+    maxWidth: "80%" as any,
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 2,
     shadowColor: "#000",
     shadowOffset: { width: -4, height: 0 },
     shadowOpacity: 0.18,
     shadowRadius: 16,
     elevation: 24,
+    borderLeftWidth: 1,
     borderTopLeftRadius: 24,
     borderBottomLeftRadius: 24,
     overflow: "hidden",
@@ -1968,3 +2225,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 });
+

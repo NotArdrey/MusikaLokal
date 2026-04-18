@@ -164,7 +164,7 @@ export default function GroupDetailsScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "musician") {
-        showAlert("error", "Unauthorized", "Only musicians can access this page.");
+        showAlert("warning", "Unauthorized", "Only musicians can access this page.");
         router.replace("/home");
         return;
       }
@@ -189,7 +189,7 @@ export default function GroupDetailsScreen() {
       // Ensure id is a string, not an array
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
-        showAlert("error", "Error", "Invalid group ID");
+        showAlert("warning", "Invalid Group", "Invalid group ID. Please try again.");
         router.replace("/home");
         return;
       }
@@ -411,7 +411,7 @@ export default function GroupDetailsScreen() {
         );
         setModalVisible(false);
       } catch (e: any) {
-        showAlert("error", "Update Failed", e?.message || "Failed to update leader decision.");
+        showAlert("warning", "Update Failed", e?.message || "Failed to update leader decision.");
       }
     });
     setModalVisible(true);
@@ -447,7 +447,7 @@ export default function GroupDetailsScreen() {
       }
       setShowGigStatuses(previous);
       showAlert(
-        "error",
+        "warning",
         "Update Failed",
         e?.message || "Could not update gig visibility.",
       );
@@ -486,7 +486,7 @@ export default function GroupDetailsScreen() {
     } catch (e: any) {
       setOpenGroupApplications(previous);
       showAlert(
-        "error",
+        "warning",
         "Update Failed",
         e?.message || "Could not update group applications setting.",
       );
@@ -714,7 +714,7 @@ export default function GroupDetailsScreen() {
                         { color: colors.textSecondary },
                       ]}
                     >
-                      Shows an Open Applications badge on your group cards in Home and Discover.
+                      Shows an Open Applications badge on your group cards in Home and Search.
                     </Text>
                   </View>
                   <Switch

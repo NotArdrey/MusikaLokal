@@ -96,7 +96,6 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
             paddingHorizontal: isWebDesktop ? 32 : 16,
             paddingBottom: isWebDesktop ? 20 : 16,
             borderRadius: transparent ? 0 : (isWebDesktop ? 18 : 14),
-            overflow: 'hidden',
         }]}>
             {/* Left Container - Only for Back Button or left component */}
             {(backVisible || leftComponent) && (

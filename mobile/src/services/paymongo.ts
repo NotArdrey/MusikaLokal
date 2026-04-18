@@ -296,10 +296,8 @@ export async function createBookingCheckout(
         };
 
         if (paymentType === 'balance') {
-            // Balance payment completes the full payment
-            updateData.remaining_balance = 0;
-            updateData.payment_status = 'paid';
-            updateData.payment_amount = totalAmount; // Full amount is now paid
+            // Balance payment - don't mark as paid yet, wait for PayMongo confirmation
+            // remaining_balance will be cleared by the payment_success/webhook handler
         } else {
             updateData.payment_amount = amount;
             updateData.payment_type = paymentType;

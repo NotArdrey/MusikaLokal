@@ -441,6 +441,11 @@ const incidentStatuses: BookingIncidentFilter[] = [
   'resolved_no_refund',
   'dismissed',
 ];
+
+const manageBookingsActionFallbacks: Record<string, string> = {
+  admin_fetch_booking_incidents: 'fetch_booking_incidents',
+  admin_resolve_booking_incident: 'resolve_booking_incident',
+};
 const userRoleOptions: UserRole[] = ['musician', 'studio-owner', 'venue-owner', 'admin'];
 const subscriptionStatusOptions: SubscriptionStatusOption[] = ['none', 'active', 'cancelled', 'expired', 'past_due'];
 const userFilters: { value: UserFilter; label: string }[] = [
@@ -729,14 +734,37 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   );
 
   const invokeManageBookingsAction = useCallback(async (payload: Record<string, unknown>) => {
-    const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
-      body: payload,
-    });
+    const invokeAction = async (requestPayload: Record<string, unknown>) => {
+      const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
+        body: requestPayload,
+      });
 
-    if (error) throw error;
-    if (data?.error) throw new Error(String(data.error));
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
 
-    return data;
+      return data;
+    };
+
+    const action = String(payload?.action || '');
+
+    try {
+      return await invokeAction(payload);
+    } catch (primaryError) {
+      const fallbackAction = manageBookingsActionFallbacks[action];
+      if (!fallbackAction) {
+        throw primaryError;
+      }
+
+      const primaryMessage = await getErrorMessage(primaryError, 'Unable to process request.');
+      if (!isUnsupportedActionMessage(primaryMessage, action)) {
+        throw primaryError;
+      }
+
+      return invokeAction({
+        ...payload,
+        action: fallbackAction,
+      });
+    }
   }, []);
 
   const fetchUsers = useCallback(async () => {
@@ -829,16 +857,12 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
   const fetchIncidents = useCallback(async () => {
     setIncidentsLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
-        body: {
-          action: 'admin_fetch_booking_incidents',
-          statusFilter: incidentFilter,
-          limit: 100,
-        },
+      const data = await invokeManageBookingsAction({
+        action: 'admin_fetch_booking_incidents',
+        statusFilter: incidentFilter,
+        limit: 100,
       });
 
-      if (error) throw error;
-      if (data?.error) throw new Error(String(data.error));
       setIncidents(Array.isArray(data?.items) ? data.items : []);
     } catch (error) {
       const message = await getErrorMessage(error, 'Unable to fetch incidents.');
@@ -846,7 +870,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     } finally {
       setIncidentsLoading(false);
     }
-  }, [incidentFilter, showAlert]);
+  }, [incidentFilter, showAlert, invokeManageBookingsAction]);
 
   const mapAuditRows = useCallback(async (rows: any[]) => {
     const normalizedRows = Array.isArray(rows) ? rows : [];
@@ -1218,17 +1242,12 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
     async (incidentId: string, resolution: BookingIncidentResolution, adminResolutionNotes = '') => {
       setIncidentActionLoadingId(incidentId);
       try {
-        const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
-          body: {
-            action: 'admin_resolve_booking_incident',
-            incident_id: incidentId,
-            resolution,
-            admin_notes: adminResolutionNotes.trim() || null,
-          },
+        await invokeManageBookingsAction({
+          action: 'admin_resolve_booking_incident',
+          incident_id: incidentId,
+          resolution,
+          admin_notes: adminResolutionNotes.trim() || null,
         });
-
-        if (error) throw error;
-        if (data?.error) throw new Error(String(data.error));
 
         showAlert('success', 'Incident updated', `Incident marked as ${resolution.replace(/_/g, ' ')}.`);
         await fetchIncidents();
@@ -1241,7 +1260,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
         setIncidentActionLoadingId(null);
       }
     },
-    [fetchIncidents, showAlert],
+    [fetchIncidents, showAlert, invokeManageBookingsAction],
   );
 
   const openIncidentResolutionModal = useCallback(

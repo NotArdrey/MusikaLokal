@@ -511,6 +511,9 @@ export default function AddStudioScreen() {
         ? "recording"
         : "both";
   const allowedPromotionTargets = getAllowedPromotionTargets(studioType);
+  const effectiveAppliesTo = allowedPromotionTargets.includes(promotionForm.applies_to)
+    ? promotionForm.applies_to
+    : allowedPromotionTargets[0];
   const parsedRecordingSongsPerBlock = parsePositiveInteger(
     recordingSongsPerBlock,
   );
@@ -3351,8 +3354,8 @@ export default function AddStudioScreen() {
                             paddingVertical: 10,
                             borderRadius: 10,
                             borderWidth: 1.5,
-                            borderColor: promotionForm.applies_to === at ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
-                            backgroundColor: promotionForm.applies_to === at ? colors.primary + "15" : "transparent",
+                            borderColor: effectiveAppliesTo === at ? colors.primary : (isDark ? "#374151" : "#E5E7EB"),
+                            backgroundColor: effectiveAppliesTo === at ? colors.primary + "15" : "transparent",
                             alignItems: "center",
                           }}
                         >
@@ -3360,7 +3363,7 @@ export default function AddStudioScreen() {
                             style={{
                               fontFamily: "Poppins_600SemiBold",
                               fontSize: 11,
-                              color: promotionForm.applies_to === at ? colors.primary : colors.textSecondary,
+                              color: effectiveAppliesTo === at ? colors.primary : colors.textSecondary,
                             }}
                           >
                             {at === "both" ? "Both" : at === "rehearsal" ? "Rehearsal" : "Recording"}

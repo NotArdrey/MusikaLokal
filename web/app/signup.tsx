@@ -339,7 +339,6 @@ export default function SignupScreen() {
     const roleOptions = [
         { value: 'musician' as const, label: 'Musical Artist', icon: 'musical-notes-outline' as const, description: 'Join bands, find gigs' },
         { value: 'venue-owner' as const, label: 'Venue Owner', icon: 'business-outline' as const, description: 'Host events, hire artists' },
-        { value: 'studio-owner' as const, label: 'Studio Owner', icon: 'mic-outline' as const, description: 'Offer recording services' },
     ];
 
     // Theme Styles

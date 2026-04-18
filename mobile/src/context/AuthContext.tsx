@@ -34,7 +34,7 @@ type AuthContextType = {
   unpaidBalance: number;
   unpaidBookings: UnpaidBooking[];
   checkSystemLock: () => Promise<void>;
-  showLockAlert: () => void;
+  showLockAlert: (onBeforeNavigate?: () => void) => void;
   // Subscription status
   subscriptionStatus: string | null;
   subscriptionRequired: boolean;
@@ -398,15 +398,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [session?.user?.id]);
 
-  // Show lock alert and redirect to wallet
-  const showLockAlert = useCallback(() => {
+  // Show lock alert and redirect to bookings (Pending tab has "Pay Balance" button)
+  // onBeforeNavigate is optional — callers like ListingDetailsSheet pass it to close the BottomSheet first
+  const showLockAlert = useCallback((onBeforeNavigate?: () => void) => {
     showAlert(
       "warning",
       "Action Blocked",
       `You have an outstanding balance of ₱${unpaidBalance.toLocaleString()}. Please settle your payment to continue using the app.`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Pay Now", onPress: () => router.push("/wallet") },
+        {
+          text: "Pay Now",
+          onPress: () => {
+            if (onBeforeNavigate) onBeforeNavigate();
+            // Navigate to the Pending tab in bookings where the "Pay Balance" button lives
+            setTimeout(() => {
+              router.navigate({ pathname: "/bookings", params: { tab: "Pending" } });
+            }, 100);
+          },
+        },
       ],
     );
   }, [showAlert, unpaidBalance]);

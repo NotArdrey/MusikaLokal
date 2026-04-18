@@ -1106,9 +1106,10 @@ export default function HomeScreen() {
 
       let profileGenresById = new Map<string, string[]>();
       let profileSkillsById = new Map<string, string[]>();
+      let profileStatsById = new Map<string, { rating: number; review_count: number }>();
 
       if (profileIds.length > 0) {
-        const [{ data: profileGenreRows }, { data: profileSkillRows }] = await Promise.all([
+        const [{ data: profileGenreRows }, { data: profileSkillRows }, { data: profileStatRows }] = await Promise.all([
           supabase
             .from("profile_genres")
             .select("profile_id, genre")
@@ -1117,20 +1118,38 @@ export default function HomeScreen() {
             .from("profile_skills")
             .select("profile_id, skill")
             .in("profile_id", profileIds),
+          supabase
+            .from("profiles_with_stats")
+            .select("id, rating, review_count")
+            .in("id", profileIds),
         ]);
 
         profileGenresById = collectProfileValues(profileGenreRows, "genre");
         profileSkillsById = collectProfileValues(profileSkillRows, "skill");
+        profileStatsById = new Map(
+          (profileStatRows || [])
+            .filter((row: any) => typeof row?.id === "string")
+            .map((row: any) => [
+              row.id,
+              {
+                rating: Number(row?.rating || 0),
+                review_count: Number(row?.review_count || 0),
+              },
+            ]),
+        );
       }
 
       soloArtists = (pData || []).map((artist: any) => ({
         ...artist,
         genres: profileGenresById.get(artist.id) || [],
         skills: profileSkillsById.get(artist.id) || [],
+        rating: profileStatsById.get(artist.id)?.rating || 0,
+        review_count: profileStatsById.get(artist.id)?.review_count || 0,
       }));
       debugLog("Solo artists fetched:", soloArtists.length);
 
       const groupOwnerPreferenceMap = new Map<string, boolean>();
+      const groupOwnerAvatarMap = new Map<string, string>();
       const groupOpenApplicationsMap = new Map<string, boolean>();
       const groupGigCountsMap = new Map<string, { active: number; upcoming: number; done: number }>();
       const soloGigCountsMap = new Map<string, { active: number; upcoming: number; done: number }>();
@@ -1142,11 +1161,14 @@ export default function HomeScreen() {
       if (groupOwnerIds.length > 0) {
         const { data: ownerPrefs } = await supabase
           .from("profiles")
-          .select("id, show_gig_statuses")
+          .select("id, show_gig_statuses, avatar_url")
           .in("id", groupOwnerIds);
 
         (ownerPrefs || []).forEach((row: any) => {
           groupOwnerPreferenceMap.set(row.id, row.show_gig_statuses !== false);
+          if (typeof row?.avatar_url === "string" && row.avatar_url.length > 0) {
+            groupOwnerAvatarMap.set(row.id, row.avatar_url);
+          }
         });
       }
 
@@ -1294,6 +1316,10 @@ export default function HomeScreen() {
           name: item.name || item.full_name, // Handle profile name
           image: item.images?.[0] || item.avatar_url || null, // Handle profile avatar
           images: item.images || (item.avatar_url ? [item.avatar_url] : []),
+          owner_avatar_url:
+            type === "Group"
+              ? groupOwnerAvatarMap.get(item.owner_id) || null
+              : null,
           rating: item.rating || 0, // Solo artists might not have ratings yet
           review_count: item.review_count || 0,
           completion_rate: item.completion_rate,
@@ -1762,18 +1788,13 @@ export default function HomeScreen() {
     // Musician / Live Performance Hero Image
     // Using a moody, neon-lit stage/guitar image to match the music vibe
     const heroImage =
-      "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=2564&auto=format&fit=crop";
+      "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?q=80&w=2560&auto=format&fit=crop";
 
     // Dynamic Search Text
-    // Musicians -> looking for studios/gigs
-    // Venue/Studio -> looking for musicians
     const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
     const searchPlaceholder = isOwner
       ? "Find musicians, bands..."
-      : "Find studios, gigs, venues...";
-    const searchSubPlaceholder = isOwner
-      ? "Genre • Availability"
-      : "Location • Rate";
+      : "Search studios and gigs...";
 
     return (
       <View style={styles.heroContainer}>
@@ -1782,56 +1803,41 @@ export default function HomeScreen() {
           style={styles.heroImage}
           width={1080}
           height={640}
-          quality={70}
-          cacheVersion="home-hero-v1"
+          quality={80}
+          cacheVersion="home-hero-v3"
         />
         <LinearGradient
           colors={[
-            "rgba(0,0,0,0.3)",
-            "transparent",
-            "rgba(0,0,0,0.8)",
-            "#111827",
-          ]} // Fade into body color (assuming dark mode or just dark contrast)
-          locations={[0, 0.4, 0.8, 1]}
+            "rgba(15, 23, 42, 0.2)",
+            "rgba(15, 23, 42, 0.6)",
+            "#0F172A",
+          ]} 
           style={styles.heroGradient}
         />
 
         {/* Content within Hero */}
         <View style={styles.heroContent}>
-          {/* Greeting with Stats */}
-          <View>
-            <Text style={styles.heroGreeting}>Welcome, {userName}!</Text>
-          </View>
+          <Text style={styles.heroGreeting}>Hey {userName}</Text>
+          <Text style={styles.heroSubtitle}>Ready to make some noise?</Text>
 
-          {/* Music-Styled Glassmorphism Search Pill */}
-          <BlurView intensity={80} tint="dark" style={styles.searchPill}>
-            <TouchableOpacity 
-              activeOpacity={0.8}
-              style={styles.searchTouch}
-              onPress={openSearchSheet}
-            >
-              <View style={styles.searchIconContainer}>
-                <Ionicons
-                  name="search"
-                  size={moderateScale(22)}
-                  color="#A78BFA"
-                />
+          <TouchableOpacity 
+            activeOpacity={0.85}
+            style={styles.modernSearchCard}
+            onPress={openSearchSheet}
+          >
+            <View style={styles.modernSearchLeft}>
+              <View style={styles.modernSearchIconWrapper}>
+                <Ionicons name="search" size={20} color="#FFF" />
               </View>
-              
-              <View style={styles.searchTexts}>
-                <Text style={styles.searchPlaceholder} numberOfLines={1}>
-                  {searchPlaceholder}
-                </Text>
-                <Text style={styles.searchSubPlaceholder} numberOfLines={1}>
-                  {searchSubPlaceholder}
-                </Text>
+              <View style={styles.modernSearchTexts}>
+                <Text style={styles.modernSearchPlaceholder}>{searchPlaceholder}</Text>
+                <Text style={styles.modernSearchSub}>Tap to explore by location or rate</Text>
               </View>
-
-              <View style={styles.searchFilterBox}>
-                <Ionicons name="options" size={moderateScale(20)} color="#FFF" />
-              </View>
-            </TouchableOpacity>
-          </BlurView>
+            </View>
+            <View style={styles.modernSearchFilterBtn}>
+              <Ionicons name="options-outline" size={20} color="#0F172A" />
+            </View>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -3295,73 +3301,73 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   heroGreeting: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: height < 700 ? moderateScale(24) : moderateScale(32),
-    color: "#FFF",
-    textShadowColor: "rgba(0, 0, 0, 0.5)",
+    fontFamily: "Poppins_700Bold",
+    fontSize: height < 700 ? moderateScale(28) : moderateScale(34),
+    color: "#FFFFFF",
+    textShadowColor: "rgba(0, 0, 0, 0.4)",
     textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
-    marginBottom: height < 700 ? moderateScale(2) : moderateScale(4),
+    textShadowRadius: 8,
+    marginBottom: 4,
+    letterSpacing: -0.5,
   },
   heroSubtitle: {
     fontFamily: "Poppins_400Regular",
-    fontSize: height < 700 ? moderateScale(12) : moderateScale(14),
-    color: "rgba(255,255,255,0.95)",
-    textShadowColor: "rgba(0, 0, 0, 0.5)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-    marginBottom: height < 700 ? moderateScale(12) : moderateScale(20),
+    fontSize: height < 700 ? moderateScale(14) : moderateScale(16),
+    color: "#94A3B8",
+    marginBottom: height < 700 ? 16 : 24,
   },
-  searchPill: {
-    borderRadius: 100,
-    overflow: "hidden",
-    backgroundColor: "rgba(17, 24, 39, 0.4)", // Darker glass to contrast glowing icons
-    borderWidth: 1,
-    borderColor: "rgba(167, 139, 250, 0.2)", // Subtle purple border (music theme)
-    shadowColor: "#A78BFA",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 6,
-    marginTop: height < 700 ? 8 : 12,
-  },
-  searchTouch: {
+  modernSearchCard: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: height < 700 ? 12 : 16,
-    paddingVertical: height < 700 ? moderateScale(10) : moderateScale(14),
-  },
-  searchIconContainer: {
-    width: moderateScale(40),
-    height: moderateScale(40),
+    justifyContent: "space-between",
+    backgroundColor: "#1E293B",
     borderRadius: 20,
-    backgroundColor: "rgba(167, 139, 250, 0.15)", // Glowing circle behind search icon
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  modernSearchLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  modernSearchIconWrapper: {
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: 16,
+    backgroundColor: "#3B82F6",
     alignItems: "center",
     justifyContent: "center",
+    marginRight: 14,
   },
-  searchTexts: {
+  modernSearchTexts: {
     flex: 1,
-    marginLeft: 12,
-    marginRight: 12,
+    justifyContent: "center",
   },
-  searchPlaceholder: {
-    color: "#FFF",
+  modernSearchPlaceholder: {
+    color: "#F8FAFC",
     fontFamily: "Poppins_600SemiBold",
-    fontSize: moderateScale(15),
-    letterSpacing: 0.2, // slightly spaced for stylistic music feel
+    fontSize: moderateScale(14),
+    marginBottom: 2,
   },
-  searchSubPlaceholder: {
-    color: "rgba(167, 139, 250, 0.8)", // Purple tint on the subtitle for contrast
+  modernSearchSub: {
+    color: "#94A3B8",
     fontFamily: "Poppins_400Regular",
     fontSize: moderateScale(12),
   },
-  searchFilterBox: {
-    width: moderateScale(36),
-    height: moderateScale(36),
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.1)", // Glass button for filter/equalizer icon
+  modernSearchFilterBtn: {
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: 14,
+    backgroundColor: "#F8FAFC",
     alignItems: "center",
     justifyContent: "center",
+    marginLeft: 8,
   },
 
   // Section Commons

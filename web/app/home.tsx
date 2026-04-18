@@ -1823,18 +1823,13 @@ export default function HomeScreen() {
     // Modern System Background (Abstract Dark/Purple)
     // Using a high-quality abstract gradient/mesh that matches the app's "premium" feel
     const heroImage =
-      "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop";
+      "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?q=80&w=2560&auto=format&fit=crop";
 
     // Dynamic Search Text
-    // Musicians -> looking for studios/gigs
-    // Venue/Studio -> looking for musicians
     const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
     const searchPlaceholder = isOwner
       ? "Find musicians, bands..."
-      : "Find studios, gigs, venues...";
-    const searchSubPlaceholder = isOwner
-      ? "Genre • Availability"
-      : "Location • Rate";
+      : "Search studios and gigs...";
 
     return (
       <View style={[styles.heroContainer, Platform.OS === 'web' && { height: 480, borderRadius: 24, overflow: 'hidden' }]}>
@@ -1843,49 +1838,41 @@ export default function HomeScreen() {
           style={styles.heroImage}
           width={1080}
           height={640}
-          quality={70}
-          cacheVersion="home-hero-v1"
+          quality={80}
+          cacheVersion="home-hero-v3"
         />
         <LinearGradient
           colors={[
-            "rgba(0,0,0,0.3)",
-            "transparent",
-            "rgba(0,0,0,0.8)",
-            "#111827",
-          ]} // Fade into body color (assuming dark mode or just dark contrast)
-          locations={[0, 0.4, 0.8, 1]}
+            "rgba(15, 23, 42, 0.2)",
+            "rgba(15, 23, 42, 0.6)",
+            "#0F172A",
+          ]}
           style={styles.heroGradient}
         />
 
         {/* Content within Hero */}
         <View style={styles.heroContent}>
-          {/* Greeting with Stats */}
-          <View>
-            <Text style={styles.heroGreeting}>Welcome, {userName}!</Text>
-          </View>
+          <Text style={styles.heroGreeting}>Hey {userName}</Text>
+          <Text style={styles.heroSubtitle}>Ready to make some noise?</Text>
 
-          {/* Glassmorphism Search Pill */}
-          <BlurView intensity={60} tint="light" style={[styles.searchPill, isWebDesktop && { maxWidth: 640, alignSelf: 'flex-start' }]}>
-            <TouchableOpacity activeOpacity={1}
-              style={styles.searchTouch}
-              onPress={openSearchSheet}
-            >
-              <Ionicons
-                name="search"
-                size={20}
-                color="#FFF"
-                style={{ marginRight: 8 }}
-              />
-              <View style={styles.searchTexts}>
-                <Text style={styles.searchPlaceholder}>
-                  {searchPlaceholder}
-                </Text>
-                <Text style={styles.searchSubPlaceholder}>
-                  {searchSubPlaceholder}
-                </Text>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={[styles.modernSearchCard, isWebDesktop && { maxWidth: 640, alignSelf: 'flex-start' }]}
+            onPress={openSearchSheet}
+          >
+            <View style={styles.modernSearchLeft}>
+              <View style={styles.modernSearchIconWrapper}>
+                <Ionicons name="search" size={20} color="#FFF" />
               </View>
-            </TouchableOpacity>
-          </BlurView>
+              <View style={styles.modernSearchTexts}>
+                <Text style={styles.modernSearchPlaceholder}>{searchPlaceholder}</Text>
+                <Text style={styles.modernSearchSub}>Tap to explore by location or rate</Text>
+              </View>
+            </View>
+            <View style={styles.modernSearchFilterBtn}>
+              <Ionicons name="options-outline" size={20} color="#0F172A" />
+            </View>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -1926,7 +1913,7 @@ export default function HomeScreen() {
 
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => router.push('/discover')}
+              onPress={() => router.push('/bookings')}
               style={[
                 styles.webHeroButton,
                 {
@@ -3575,53 +3562,73 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   heroGreeting: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: Platform.OS === 'web' ? 48 : height < 700 ? moderateScale(24) : moderateScale(32),
-    color: "#FFF",
-    textShadowColor: "rgba(0, 0, 0, 0.5)",
+    fontFamily: "Poppins_700Bold",
+    fontSize: Platform.OS === 'web' ? 48 : height < 700 ? moderateScale(28) : moderateScale(34),
+    color: "#FFFFFF",
+    textShadowColor: "rgba(0, 0, 0, 0.4)",
     textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
-    marginBottom: height < 700 ? moderateScale(2) : moderateScale(4),
+    textShadowRadius: 8,
+    marginBottom: 4,
+    letterSpacing: -0.5,
   },
   heroSubtitle: {
     fontFamily: "Poppins_400Regular",
-    fontSize: Platform.OS === 'web' ? 18 : height < 700 ? moderateScale(12) : moderateScale(14),
-    color: "rgba(255,255,255,0.95)",
-    textShadowColor: "rgba(0, 0, 0, 0.5)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-    marginBottom: height < 700 ? moderateScale(12) : moderateScale(20),
+    fontSize: Platform.OS === 'web' ? 18 : height < 700 ? moderateScale(14) : moderateScale(16),
+    color: "#94A3B8",
+    marginBottom: height < 700 ? 16 : 24,
   },
-  searchPill: {
-    borderRadius: 100,
-    overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  searchTouch: {
+  modernSearchCard: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: height < 700 ? 16 : 20, // Slightly cleaner fixed padding
-    paddingVertical: height < 700 ? moderateScale(12) : moderateScale(16),
+    justifyContent: "space-between",
+    backgroundColor: "#1E293B",
+    borderRadius: 20,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 10,
   },
-  searchTexts: {
-    marginLeft: 8,
+  modernSearchLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
   },
-  searchPlaceholder: {
-    color: "#FFF",
+  modernSearchIconWrapper: {
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: 16,
+    backgroundColor: "#3B82F6",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+  modernSearchTexts: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  modernSearchPlaceholder: {
+    color: "#F8FAFC",
     fontFamily: "Poppins_600SemiBold",
-    fontSize: moderateScale(15),
+    fontSize: moderateScale(14),
+    marginBottom: 2,
   },
-  searchSubPlaceholder: {
-    color: "rgba(255,255,255,0.9)",
+  modernSearchSub: {
+    color: "#94A3B8",
     fontFamily: "Poppins_400Regular",
     fontSize: moderateScale(12),
+  },
+  modernSearchFilterBtn: {
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: 14,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 8,
   },
 
   // Web Hero

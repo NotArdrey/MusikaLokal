@@ -3,9 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ResizeMode, Video } from "expo-av";
 import * as ImagePicker from "expo-image-picker";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    Dimensions,
     Image,
     Modal,
     ScrollView,
@@ -27,15 +26,9 @@ import { DEFAULT_AVATAR } from "../src/constants/Images";
 import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
-const { width } = Dimensions.get("window");
-const SCREEN_WIDTH = Platform.OS === "web" ? Math.min(width, 1024) : width;
 const GRID_GAP = 8;
 const NUM_COLUMNS = 3;
 const GRID_PADDING = 24;
-const ITEM_SIZE = Math.floor(
-  (SCREEN_WIDTH - GRID_PADDING * 2 - GRID_GAP * (NUM_COLUMNS - 1)) /
-  NUM_COLUMNS
-);
 
 const EMPTY_BOOKMARKS = {
   studios: [] as any[],
@@ -47,6 +40,13 @@ export default function ProfileScreen() {
   const { colors, isDark } = useTheme();
   const { width: winWidth } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && winWidth >= 768;
+
+  const gridContainerWidth = isWebDesktop
+    ? Math.min(winWidth, 1120) - GRID_PADDING * 2
+    : winWidth - GRID_PADDING * 2;
+  const ITEM_SIZE = Math.floor(
+    (gridContainerWidth - GRID_GAP * (NUM_COLUMNS - 1)) / NUM_COLUMNS
+  );
   const pageBackground = isWebDesktop
     ? isDark
       ? "#0A1224"
@@ -93,6 +93,67 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks">("about");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
+
+  useEffect(() => {
+    if (loading) return;
+
+    console.log("[ProfileMenu][web] Header action eligibility", {
+      timestamp: new Date().toISOString(),
+      authLoading,
+      loading,
+      isOwner,
+      isGuest,
+      isWebDesktop,
+      width: winWidth,
+      menuButtonVisible: isOwner || isGuest,
+      reportButtonVisible: !isOwner && !isGuest,
+      activeTab,
+      profileId: profile?.id ?? null,
+      currentUserId: currentUserId ?? null,
+    });
+  }, [activeTab, authLoading, currentUserId, isGuest, isOwner, isWebDesktop, loading, profile?.id, winWidth]);
+
+  useEffect(() => {
+    console.log("[ProfileMenu][web] Menu visibility changed", {
+      timestamp: new Date().toISOString(),
+      isMenuOpen,
+      isWebDesktop,
+      width: winWidth,
+      activeTab,
+      profileId: profile?.id ?? null,
+    });
+  }, [activeTab, isMenuOpen, isWebDesktop, profile?.id, winWidth]);
+
+  const openMenu = useCallback((source: string = "unknown") => {
+    console.log("[ProfileMenu][web] Open requested", {
+      timestamp: new Date().toISOString(),
+      source,
+      isOwner,
+      isGuest,
+      isMenuOpen,
+      isWebDesktop,
+      width: winWidth,
+      activeTab,
+      profileId: profile?.id ?? null,
+      currentUserId: currentUserId ?? null,
+    });
+
+    setIsMenuOpen(true);
+  }, [activeTab, currentUserId, isGuest, isMenuOpen, isOwner, isWebDesktop, profile?.id, winWidth]);
+
+  const closeMenu = useCallback((source: string = "unknown") => {
+    console.log("[ProfileMenu][web] Close requested", {
+      timestamp: new Date().toISOString(),
+      source,
+      isMenuOpen,
+      isWebDesktop,
+      width: winWidth,
+      activeTab,
+      profileId: profile?.id ?? null,
+    });
+
+    setIsMenuOpen(false);
+  }, [activeTab, isMenuOpen, isWebDesktop, profile?.id, winWidth]);
 
   const isMissingShowGigStatusesColumnError = (error: any) => {
     const message = String(error?.message || "").toLowerCase();
@@ -146,7 +207,7 @@ export default function ProfileScreen() {
     try {
       const { data: favoritesData, error: favoritesError } = await supabase
         .from("favorites")
-        .select("group_id, studio_id, gig_id, created_at")
+        .select("group_id, profile_id, studio_id, gig_id, created_at")
         .eq("user_id", viewerId)
         .order("created_at", { ascending: false });
 
@@ -156,6 +217,9 @@ export default function ProfileScreen() {
       const groupIds = favorites
         .map((entry: any) => entry.group_id)
         .filter((value: any): value is string => typeof value === "string");
+      const profileIds = favorites
+        .map((entry: any) => entry.profile_id)
+        .filter((value: any): value is string => typeof value === "string");
       const studioIds = favorites
         .map((entry: any) => entry.studio_id)
         .filter((value: any): value is string => typeof value === "string");
@@ -163,12 +227,18 @@ export default function ProfileScreen() {
         .map((entry: any) => entry.gig_id)
         .filter((value: any): value is string => typeof value === "string");
 
-      const [groupsResult, studiosResult, gigsResult] = await Promise.all([
+      const [groupsResult, profilesResult, studiosResult, gigsResult] = await Promise.all([
         groupIds.length > 0
           ? supabase
             .from("groups_with_stats")
             .select("id, name, location, images, image, genre")
             .in("id", groupIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        profileIds.length > 0
+          ? supabase
+            .from("profiles")
+            .select("id, full_name, location, avatar_url")
+            .in("id", profileIds)
           : Promise.resolve({ data: [] as any[], error: null }),
         studioIds.length > 0
           ? supabase
@@ -185,24 +255,46 @@ export default function ProfileScreen() {
       ]);
 
       if (groupsResult.error) throw groupsResult.error;
+      if (profilesResult.error) throw profilesResult.error;
       if (studiosResult.error) throw studiosResult.error;
       if (gigsResult.error) throw gigsResult.error;
 
       const groupById = new Map((groupsResult.data || []).map((entry: any) => [entry.id, entry]));
+      const profileById = new Map((profilesResult.data || []).map((entry: any) => [entry.id, entry]));
       const studioById = new Map((studiosResult.data || []).map((entry: any) => [entry.id, entry]));
       const gigById = new Map((gigsResult.data || []).map((entry: any) => [entry.id, entry]));
 
       const musicians = favorites
-        .filter((entry: any) => !!entry.group_id)
-        .map((entry: any) => groupById.get(entry.group_id))
-        .filter(Boolean)
-        .map((entry: any) => ({
-          id: entry.id,
-          name: entry.name || "Unnamed Musician",
-          subtitle: entry.location || entry.genre || "Musician",
-          image: resolveBookmarkImage(entry),
-          type: "Musician",
-        }));
+        .map((entry: any) => {
+          if (entry.profile_id) {
+            const artist = profileById.get(entry.profile_id);
+            if (!artist) return null;
+
+            return {
+              id: artist.id,
+              name: artist.full_name || "Unnamed Artist",
+              subtitle: artist.location || "Artist",
+              image: resolveBookmarkImage(artist),
+              type: "Artist",
+            };
+          }
+
+          if (entry.group_id) {
+            const musician = groupById.get(entry.group_id);
+            if (!musician) return null;
+
+            return {
+              id: musician.id,
+              name: musician.name || "Unnamed Musician",
+              subtitle: musician.location || musician.genre || "Musician",
+              image: resolveBookmarkImage(musician),
+              type: "Musician",
+            };
+          }
+
+          return null;
+        })
+        .filter(Boolean);
 
       const studios = favorites
         .filter((entry: any) => !!entry.studio_id)
@@ -266,9 +358,26 @@ export default function ProfileScreen() {
       const paramUserId = Array.isArray(params.userId)
         ? params.userId[0]
         : params.userId;
-      let targetId = paramUserId || currentUserId;
+      let resolvedCurrentUserId = currentUserId;
+
+      // Resolve the active user ID from auth when context is temporarily unavailable.
+      if (!resolvedCurrentUserId && !isGuest) {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+        if (error) {
+          console.log("❌ Profile - Auth error while resolving current user:", error.message);
+        }
+        if (user?.id) {
+          resolvedCurrentUserId = user.id;
+        }
+      }
+
+      let targetId = paramUserId || resolvedCurrentUserId;
       console.log("👤 Profile - Param userId:", paramUserId);
       console.log("👤 Profile - Context userId:", currentUserId);
+      console.log("👤 Profile - Resolved userId:", resolvedCurrentUserId);
 
       // If still no targetId, try to get from auth directly
       if (!targetId) {
@@ -313,7 +422,7 @@ export default function ProfileScreen() {
       console.log("🎯 Profile - Fetching profile for:", targetId);
 
       // Check ownership
-      const ownership = currentUserId && targetId === currentUserId;
+      const ownership = resolvedCurrentUserId && targetId === resolvedCurrentUserId;
       setIsOwner(!!ownership);
 
       const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
@@ -741,6 +850,14 @@ export default function ProfileScreen() {
     );
   }
 
+  const portfolioCount = profile?.portfolio_urls?.length ?? 0;
+  const mediaSummary =
+    portfolioCount > 0
+      ? `${portfolioCount} ${portfolioCount === 1 ? "item" : "items"} in ${isOwner ? "your" : "this"} portfolio`
+      : isOwner
+        ? "Add photos and short clips that show your sound, setup, or stage presence."
+        : "No portfolio uploads yet.";
+
   return (
     <>
       <View style={[styles.flex1, { backgroundColor: pageBackground }]}>
@@ -748,16 +865,31 @@ export default function ProfileScreen() {
         <Header
           title={isOwner ? "My Profile" : "User Profile"}
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
-          leftComponent={(isOwner || isGuest) ? (
-            <TouchableOpacity activeOpacity={1} onPress={() => setIsMenuOpen(true)}>
-              <Ionicons name="menu" size={28} color={colors.text} />
+          rightComponent={(isOwner || isGuest) ? (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+              onPress={() => openMenu("header-menu-button")}
+              style={[
+                styles.headerMenuBtn,
+                { backgroundColor: isDark ? "#111827" : "#F8FAFC", borderColor: borderSoft },
+              ]}
+            >
+              <Ionicons name="menu-outline" size={26} color={colors.text} />
             </TouchableOpacity>
-          ) : undefined}
-          rightComponent={(!isOwner && !isGuest) ? (
-            <TouchableOpacity activeOpacity={1} onPress={openReportModal}>
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+              onPress={openReportModal}
+              style={[
+                styles.headerMenuBtn,
+                { backgroundColor: isDark ? "#111827" : "#F8FAFC", borderColor: borderSoft },
+              ]}
+            >
               <Ionicons name="ellipsis-horizontal" size={24} color={colors.text} />
             </TouchableOpacity>
-          ) : undefined}
+          )}
         />
 
         <ScrollView
@@ -918,13 +1050,13 @@ export default function ProfileScreen() {
               <TouchableOpacity onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                 <Ionicons name="grid-outline" size={24} color={activeTab === "about" ? colors.text : colors.textSecondary} />
               </TouchableOpacity>
-              
-              {activeTab === "gigs" && profile?.role === "musician" && profile?.show_gig_statuses !== false && (
+
+              {profile?.role === "musician" && profile?.show_gig_statuses !== false && (
                 <TouchableOpacity onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                   <Ionicons name="mic-outline" size={24} color={activeTab === "gigs" ? colors.text : colors.textSecondary} />
                 </TouchableOpacity>
               )}
-              
+
               {isOwner && !isGuest && (
                 <TouchableOpacity onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                   <Ionicons name="bookmark-outline" size={24} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
@@ -1099,34 +1231,104 @@ export default function ProfileScreen() {
 
           </View>
 
-          {/* Media Section - Instagram Style Grid */}
-          <View style={styles.mediaSection}>
+          {/* Media Section - Instagram Style Grid (About Tab) */}
+          {activeTab === "about" && (
+          <View
+            style={[
+              styles.mediaSection,
+              isWebDesktop && styles.mediaSectionWeb,
+              isWebDesktop && styles.webSectionCard,
+              { backgroundColor: isWebDesktop ? pageCardBackground : "transparent", borderColor: borderSoft },
+            ]}
+          >
             <View style={styles.mediaSectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                Media
-              </Text>
-              {isOwner && profile?.portfolio_urls?.length > 0 && (
-                <TouchableOpacity
-                  onPress={addMediaToPortfolio}
-                  disabled={uploading}
-                  activeOpacity={1}
+              <View style={styles.mediaSectionHeading}>
+                <View
                   style={[
-                    styles.addMediaBtn,
-                    { backgroundColor: colors.primary },
+                    styles.mediaSectionIconWrap,
+                    { backgroundColor: isDark ? "rgba(79,70,229,0.18)" : "#E0E7FF" },
                   ]}
                 >
-                  <Ionicons name="add" size={20} color="#fff" />
-                </TouchableOpacity>
-              )}
+                  <Ionicons name="images-outline" size={18} color={colors.primary} />
+                </View>
+                <View style={styles.mediaSectionTextWrap}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>Media</Text>
+                  <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+                    {mediaSummary}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.mediaSectionActions}>
+                {portfolioCount > 0 && (
+                  <View
+                    style={[
+                      styles.mediaCountBadge,
+                      {
+                        backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                        borderColor: borderSoft,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.mediaCountBadgeText, { color: colors.textSecondary }]}>
+                      {portfolioCount}
+                    </Text>
+                  </View>
+                )}
+
+                {isOwner && (
+                  <TouchableOpacity
+                    onPress={addMediaToPortfolio}
+                    disabled={uploading}
+                    activeOpacity={0.8}
+                    style={[
+                      styles.addMediaBtn,
+                      {
+                        backgroundColor: uploading
+                          ? colors.textSecondary
+                          : colors.primary,
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={portfolioCount > 0 ? "add" : "cloud-upload-outline"}
+                      size={16}
+                      color="#fff"
+                    />
+                    <Text style={styles.addMediaBtnText}>
+                      {uploading
+                        ? "Uploading..."
+                        : portfolioCount > 0
+                          ? "Upload"
+                          : "Add Media"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
 
             {!profile?.portfolio_urls || profile.portfolio_urls.length === 0 ? (
-              <View style={[styles.emptyMedia, { borderColor: colors.border }]}>
-                <Ionicons
-                  name="images-outline"
-                  size={48}
-                  color={colors.textSecondary}
-                />
+              <View
+                style={[
+                  styles.emptyMedia,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: isDark ? "#0F172A" : "#F8FAFC",
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.emptyMediaIconWrap,
+                    { backgroundColor: isDark ? "rgba(79,70,229,0.18)" : "#E0E7FF" },
+                  ]}
+                >
+                  <Ionicons
+                    name="images-outline"
+                    size={28}
+                    color={colors.primary}
+                  />
+                </View>
                 <Text
                   style={[
                     styles.emptyMediaText,
@@ -1146,7 +1348,7 @@ export default function ProfileScreen() {
                   <TouchableOpacity
                     onPress={addMediaToPortfolio}
                     disabled={uploading}
-                    activeOpacity={1}
+                    activeOpacity={0.7}
                     style={[
                       styles.uploadBtn,
                       {
@@ -1173,25 +1375,46 @@ export default function ProfileScreen() {
                 {profile.portfolio_urls.map((url: string, i: number) => (
                   <TouchableOpacity
                     key={i}
-                    style={styles.gridItem}
+                    style={[styles.gridItem, { width: ITEM_SIZE, height: ITEM_SIZE }]}
                     onPress={() => openMediaViewer(url)}
-                    activeOpacity={1}
+                    activeOpacity={0.8}
                   >
-                    <Image
-                      source={{ uri: url }}
-                      style={styles.gridImage}
-                      resizeMode="cover"
-                    />
-                    {isVideo(url) && (
-                      <View style={styles.videoIndicator}>
-                        <Ionicons name="play" size={24} color="#fff" />
+                    {isVideo(url) ? (
+                      <View
+                        style={[
+                          styles.gridVideoPlaceholder,
+                          { backgroundColor: isDark ? "#0F172A" : "#E2E8F0" },
+                        ]}
+                      >
+                        <Ionicons name="play-circle" size={30} color="#fff" />
+                        <Text style={styles.gridVideoPlaceholderText}>Tap to play</Text>
                       </View>
+                    ) : (
+                      <Image
+                        source={{ uri: url }}
+                        style={styles.gridImage}
+                        resizeMode="cover"
+                      />
                     )}
+
+                    <View style={styles.gridMeta}>
+                      <View style={styles.mediaTypePill}>
+                        <Ionicons
+                          name={isVideo(url) ? "videocam" : "image"}
+                          size={10}
+                          color="#fff"
+                        />
+                        <Text style={styles.mediaTypeText}>
+                          {isVideo(url) ? "Video" : "Photo"}
+                        </Text>
+                      </View>
+                    </View>
                   </TouchableOpacity>
                 ))}
               </View>
             )}
           </View>
+          )}
 
           {/* Media Viewer Modal */}
           <Modal
@@ -1235,14 +1458,24 @@ export default function ProfileScreen() {
         visible={isMenuOpen}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setIsMenuOpen(false)}
+        onRequestClose={() => closeMenu("modal-request-close")}
+        onShow={() => {
+          console.log("[ProfileMenu][web] Drawer modal onShow fired", {
+            timestamp: new Date().toISOString(),
+            isMenuOpen,
+            isWebDesktop,
+            width: winWidth,
+            activeTab,
+            profileId: profile?.id ?? null,
+          });
+        }}
       >
         <View style={styles.drawerOverlay}>
-          <TouchableOpacity activeOpacity={1} style={styles.drawerBackdrop} onPress={() => setIsMenuOpen(false)} />
-          <View style={[styles.drawerContent, { backgroundColor: colors.background }]}>
+          <TouchableOpacity activeOpacity={1} style={styles.drawerBackdrop} onPress={() => closeMenu("drawer-backdrop")} />
+          <View style={[styles.drawerContent, { backgroundColor: colors.background, borderLeftColor: borderSoft }]}>
             <View style={styles.drawerHeader}>
               <Text style={[styles.drawerTitle, { color: colors.text }]}>Menu</Text>
-              <TouchableOpacity activeOpacity={1} onPress={() => setIsMenuOpen(false)}>
+              <TouchableOpacity activeOpacity={0.8} onPress={() => closeMenu("drawer-close-button")}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
@@ -1253,7 +1486,15 @@ export default function ProfileScreen() {
                     <TouchableOpacity activeOpacity={1}
                       key={item.label}
                       onPress={() => {
-                        setIsMenuOpen(false);
+                        console.log("[ProfileMenu][web] Drawer menu item selected", {
+                          timestamp: new Date().toISOString(),
+                          label: item.label,
+                          route: item.route,
+                          isMenuOpen,
+                          isWebDesktop,
+                          width: winWidth,
+                        });
+                        closeMenu(`menu-item:${item.route}`);
                         router.push(item.route as any);
                       }}
                       style={[styles.drawerMenuItem, { borderBottomColor: colors.border }]}
@@ -1270,7 +1511,14 @@ export default function ProfileScreen() {
                 <View style={styles.drawerMenuList}>
                   <TouchableOpacity activeOpacity={1}
                     onPress={() => {
-                      setIsMenuOpen(false);
+                      console.log("[ProfileMenu][web] Guest drawer settings selected", {
+                        timestamp: new Date().toISOString(),
+                        route: "/settings",
+                        isMenuOpen,
+                        isWebDesktop,
+                        width: winWidth,
+                      });
+                      closeMenu("guest-settings");
                       router.push("/settings");
                     }}
                     style={[styles.drawerMenuItem, { borderBottomColor: colors.border }]}
@@ -1679,32 +1927,94 @@ const styles = StyleSheet.create({
     marginTop: 24,
     marginBottom: 8,
   },
+  mediaSectionWeb: {
+    marginHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 24,
+    marginBottom: 16,
+  },
   mediaSectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
+    gap: 12,
     paddingHorizontal: 24,
     marginBottom: 16,
   },
+  mediaSectionHeading: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  mediaSectionIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  mediaSectionTextWrap: {
+    flex: 1,
+  },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 20,
+    fontFamily: "Poppins_600SemiBold",
+  },
+  sectionSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: "Poppins_400Regular",
+  },
+  mediaSectionActions: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+  },
+  mediaCountBadge: {
+    minWidth: 34,
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  mediaCountBadgeText: {
+    fontSize: 12,
     fontFamily: "Poppins_600SemiBold",
   },
   addMediaBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
+    gap: 6,
+  },
+  addMediaBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontFamily: "Poppins_600SemiBold",
   },
   emptyMedia: {
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 48,
     marginHorizontal: 24,
+    paddingHorizontal: 24,
     borderWidth: 2,
     borderStyle: "dashed",
     borderRadius: 16,
+  },
+  emptyMediaIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 22,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
   },
   emptyMediaText: {
     marginTop: 12,
@@ -1739,8 +2049,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: GRID_PADDING,
   },
   gridItem: {
-    width: ITEM_SIZE,
-    height: ITEM_SIZE,
     position: "relative",
     borderRadius: 12,
     overflow: "hidden",
@@ -1751,13 +2059,38 @@ const styles = StyleSheet.create({
     backgroundColor: "#1a1a1a",
     borderRadius: 12,
   },
-  videoIndicator: {
+  gridVideoPlaceholder: {
+    flex: 1,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    gap: 8,
+  },
+  gridVideoPlaceholderText: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 11,
+    fontFamily: "Poppins_500Medium",
+  },
+  gridMeta: {
     position: "absolute",
-    top: 8,
+    left: 8,
     right: 8,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    borderRadius: 4,
-    padding: 4,
+    bottom: 8,
+    flexDirection: "row" as const,
+    justifyContent: "flex-start" as const,
+  },
+  mediaTypePill: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(15,23,42,0.78)",
+  },
+  mediaTypeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontFamily: "Poppins_600SemiBold",
   },
   modalContainer: {
     flex: 1,
@@ -1773,8 +2106,9 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   modalMedia: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_WIDTH,
+    width: "90%",
+    maxWidth: 800,
+    aspectRatio: 1,
   },
   resumeSection: {
     marginTop: 24,
@@ -1810,21 +2144,24 @@ const styles = StyleSheet.create({
   // Drawer styles
   drawerOverlay: {
     flex: 1,
-    flexDirection: "row" as const,
     backgroundColor: "rgba(0,0,0,0.4)",
   },
   drawerBackdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
   },
   drawerContent: {
     width: 320,
     maxWidth: "80%" as any,
-    height: "100%" as any,
+    position: "absolute" as const,
+    top: 0,
+    right: 0,
+    bottom: 0,
     shadowColor: "#000",
     shadowOffset: { width: -4, height: 0 },
     shadowOpacity: 0.18,
     shadowRadius: 16,
     elevation: 24,
+    borderLeftWidth: 1,
     borderTopLeftRadius: 24,
     borderBottomLeftRadius: 24,
     overflow: "hidden" as const,
@@ -1868,5 +2205,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: "Poppins_500Medium",
     fontSize: 14,
+  },
+  headerMenuBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
   },
 });

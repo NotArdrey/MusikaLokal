@@ -148,6 +148,7 @@ export default function BookingsScreen() {
     History: [],
   });
   const [pendingPermitStudios, setPendingPermitStudios] = useState<any[]>([]);
+  const [permitDeleting, setPermitDeleting] = useState<string | null>(null);
 
   // Application data separated by status for musicians
   const [applicationData, setApplicationData] = useState<{
@@ -566,7 +567,7 @@ export default function BookingsScreen() {
   ) {
     let studioQuery = supabase
       .from("studio_bookings")
-      .select("*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order))")
+      .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
       .order("booking_date", { ascending: false });
 
     if (role === "musician") {
@@ -702,7 +703,7 @@ export default function BookingsScreen() {
         base_rate: b.base_rate,
         total_cost: b.final_price,
         modifiers_applied: b.modifiers_applied || {},
-        studio_type: b.studio?.studio_type || null,
+        studio_type: null,
         session_type: b.session_type || null,
         song_count:
           b.song_count ||
@@ -732,7 +733,10 @@ export default function BookingsScreen() {
       if (b.status === "pending" || b.status === "pending_relocation") {
         fallback.Pending.push(item);
       } else if (b.status === "confirmed") {
-        if (now > endDate) {
+        if (role === "musician" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
+          // Downpayment paid but balance still owed — keep in Pending so musician can pay balance
+          fallback.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
+        } else if (now > endDate) {
           fallback.Review.push({ ...item, status: "Completed" });
         } else if (now >= startDate && now <= endDate) {
           fallback.Ongoing.push({ ...item, status: "In Progress" });
@@ -1309,6 +1313,96 @@ export default function BookingsScreen() {
   const handleDetailsPress = (item: any) => {
     setSelectedItem(item);
     bookingDetailsRef.current?.present();
+  };
+
+  const handleRemovePermitListing = (listing: any) => {
+    const listingType = listing?.entity_type === "gig" ? "gig" : "studio";
+    const listingLabel = listingType === "gig" ? "Gig" : "Studio";
+    showAlert(
+      "warning",
+      `Remove ${listingLabel}`,
+      `Are you sure you want to remove "${listing.name}"? This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            setPermitDeleting(listing.id);
+            try {
+              if (listingType === "studio") {
+                let result: any = null;
+                let needsRpcFallback = false;
+                const { data: { session } } = await supabase.auth.getSession();
+                const accessToken = session?.access_token;
+
+                if (accessToken) {
+                  try {
+                    const { data, error } = await supabase.functions.invoke("delete-studio-with-storage", {
+                      body: { studioId: listing.id, reason: "Removed by owner from pending permits" },
+                      headers: { Authorization: `Bearer ${accessToken}` },
+                    });
+                    if (error) {
+                      needsRpcFallback = true;
+                    } else {
+                      result = data;
+                      // Edge function caught an internal error — fall through to RPC
+                      if (result?.code === "DELETE_STUDIO_WITH_STORAGE_FAILED") {
+                        needsRpcFallback = true;
+                        result = null;
+                      }
+                    }
+                  } catch (e) {
+                    needsRpcFallback = true;
+                  }
+                } else {
+                  needsRpcFallback = true;
+                }
+
+                if (needsRpcFallback) {
+                  const { data: rpcData, error: rpcError } = await supabase.rpc("delete_studio_safely", {
+                    p_studio_id: listing.id,
+                    p_reason: "Removed by owner from pending permits (RPC fallback)",
+                  });
+                  if (rpcError) throw rpcError;
+                  result = rpcData;
+                }
+
+                if (!result?.success) {
+                  if (result?.code === "ACTIVE_BOOKINGS_EXIST") {
+                    showAlert("warning", "Remove Blocked", `This studio still has ${result.active_booking_count || 0} active booking(s). Resolve bookings first.`);
+                    return;
+                  }
+                  throw new Error(result?.message || result?.error || "Remove failed");
+                }
+              } else {
+                const { data, error } = await supabase.rpc("delete_gig_safely", {
+                  p_gig_id: listing.id,
+                  p_reason: "Removed by owner from pending permits",
+                });
+                if (error) throw error;
+                const result: any = data;
+                if (!result?.success) {
+                  if (result?.code === "ACTIVE_ACCEPTED_APPLICATIONS_EXIST") {
+                    showAlert("warning", "Remove Blocked", `This gig still has ${result.accepted_application_count || 0} accepted application(s). Resolve them first.`);
+                    return;
+                  }
+                  throw new Error(result?.message || "Remove failed");
+                }
+              }
+
+              setPendingPermitStudios((prev) => prev.filter((p) => p.id !== listing.id));
+              showAlert("success", `${listingLabel} Removed`, `"${listing.name}" has been removed successfully.`);
+            } catch (e) {
+              console.error("Error removing permit listing:", e);
+              showAlert("error", "Error", "Failed to remove listing. Please try again.");
+            } finally {
+              setPermitDeleting(null);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleConfirmBooking = async (bookingId: string) => {
@@ -2502,6 +2596,7 @@ export default function BookingsScreen() {
                           backgroundColor: pageCardBackground,
                           borderColor: borderSoft,
                           borderWidth: 1,
+                          borderWidth: 1,
                           marginBottom: 0,
                         },
                       ]}
@@ -2564,7 +2659,13 @@ export default function BookingsScreen() {
                         <View
                           style={[
                             styles.cardFooter,
-                            { borderColor: borderSoft, marginTop: moderateScale(12) },
+                            { 
+                              borderColor: borderSoft, 
+                              marginTop: moderateScale(12),
+                              flexDirection: "column",
+                              alignItems: "flex-start",
+                              gap: moderateScale(12)
+                            },
                           ]}
                         >
                           <View style={styles.statusContainer}>
@@ -2573,7 +2674,7 @@ export default function BookingsScreen() {
                               size={moderateScale(14)}
                               color={statusColor}
                             />
-                            <Text style={[styles.statusText, { color: statusColor }]}> 
+                            <Text style={[styles.statusText, { color: statusColor, flex: 1 }]} numberOfLines={2}> 
                               {isRejected
                                 ? hasReapplyRemaining
                                   ? "One reapply attempt available"
@@ -2582,47 +2683,85 @@ export default function BookingsScreen() {
                             </Text>
                           </View>
 
-                          {isRejected && hasReapplyRemaining && (
+                          <View style={{ flexDirection: "row", width: "100%", justifyContent: "flex-end", alignItems: "center", gap: scale(8) }}>
+                            {isRejected && hasReapplyRemaining && (
+                              <TouchableOpacity
+                                activeOpacity={1}
+                                onPress={() =>
+                                  router.push({
+                                    pathname: listingType === "gig" ? "/edit_gig" : "/edit_studio",
+                                    params: { id: listing.id, reapply: "1" },
+                                  } as any)
+                                }
+                                style={[
+                                  styles.outlineButton,
+                                  {
+                                    borderColor: "#F97316",
+                                    backgroundColor: isDark
+                                      ? "rgba(249,115,22,0.12)"
+                                      : "#FFF7ED",
+                                    paddingHorizontal: scale(12),
+                                    paddingVertical: moderateScale(7),
+                                  },
+                                ]}
+                              >
+                                <View style={styles.detailsButtonLabelContainer}>
+                                  <Ionicons
+                                    name="refresh-outline"
+                                    size={moderateScale(14)}
+                                    color="#EA580C"
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.outlineButtonText,
+                                      {
+                                        color: "#EA580C",
+                                        fontFamily: "Poppins_600SemiBold",
+                                      },
+                                    ]}
+                                  >
+                                    Edit & Reapply
+                                  </Text>
+                                </View>
+                              </TouchableOpacity>
+                            )}
                             <TouchableOpacity
                               activeOpacity={1}
-                              onPress={() =>
-                                router.push({
-                                  pathname: listingType === "gig" ? "/edit_gig" : "/edit_studio",
-                                  params: { id: listing.id, reapply: "1" },
-                                } as any)
-                              }
+                              disabled={permitDeleting === listing.id}
+                              onPress={() => handleRemovePermitListing(listing)}
                               style={[
                                 styles.outlineButton,
                                 {
-                                  borderColor: "#F97316",
+                                  borderColor: "#EF4444",
                                   backgroundColor: isDark
-                                    ? "rgba(249,115,22,0.12)"
-                                    : "#FFF7ED",
+                                    ? "rgba(239,68,68,0.12)"
+                                    : "#FEF2F2",
                                   paddingHorizontal: scale(12),
                                   paddingVertical: moderateScale(7),
+                                  opacity: permitDeleting === listing.id ? 0.5 : 1,
                                 },
                               ]}
                             >
                               <View style={styles.detailsButtonLabelContainer}>
                                 <Ionicons
-                                  name="refresh-outline"
+                                  name="trash-outline"
                                   size={moderateScale(14)}
-                                  color="#EA580C"
+                                  color="#DC2626"
                                 />
                                 <Text
                                   style={[
                                     styles.outlineButtonText,
                                     {
-                                      color: "#EA580C",
+                                      color: "#DC2626",
                                       fontFamily: "Poppins_600SemiBold",
                                     },
                                   ]}
                                 >
-                                  Edit & Reapply
+                                  {permitDeleting === listing.id ? "Removing..." : "Remove"}
                                 </Text>
                               </View>
                             </TouchableOpacity>
-                          )}
+                          </View>
                         </View>
                       </View>
                     </View>
@@ -2698,6 +2837,7 @@ export default function BookingsScreen() {
                       {
                         backgroundColor: pageCardBackground,
                         borderColor: borderSoft,
+                          borderWidth: 1,
                       },
                     ]}
                   >
@@ -5193,6 +5333,8 @@ const styles = StyleSheet.create({
   cardImage: {
     width: "100%",
     height: SCREEN_HEIGHT < 700 ? verticalScale(130) : verticalScale(160),
+    borderTopLeftRadius: moderateScale(16),
+    borderTopRightRadius: moderateScale(16),
   },
   typeBadge: {
     position: "absolute",

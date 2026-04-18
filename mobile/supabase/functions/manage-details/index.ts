@@ -9,12 +9,20 @@ const corsHeaders = {
 }
 
 type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile'
+type FavoriteTargetType = 'group' | 'studio' | 'gig' | 'profile'
 
 const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
     group: 'groups',
     studio: 'studios',
     gig: 'gigs',
     profile: 'profiles',
+}
+
+const favoriteTargetColumnMap: Record<FavoriteTargetType, string> = {
+    group: 'group_id',
+    studio: 'studio_id',
+    gig: 'gig_id',
+    profile: 'profile_id',
 }
 
 const uuidPattern =
@@ -34,6 +42,20 @@ const normalizeReportTargetType = (rawType: unknown): NormalizedReportTargetType
     return null
 }
 
+const normalizeFavoriteTargetType = (rawType: unknown): FavoriteTargetType | null => {
+    const value = String(rawType || '').trim().toLowerCase()
+
+    if (value === 'venue') return 'studio'
+    if (value === 'artist' || value === 'user') return 'profile'
+    if (value === 'group' || value === 'studio' || value === 'gig' || value === 'profile') {
+        return value
+    }
+
+    return null
+}
+
+const getFavoriteTargetColumn = (type: FavoriteTargetType): string => favoriteTargetColumnMap[type]
+
 const normalizeRequiredText = (rawValue: unknown, maxLength: number): string => {
     const value = typeof rawValue === 'string' ? rawValue.trim() : ''
     if (!value) return ''
@@ -49,13 +71,13 @@ const normalizeOptionalText = (rawValue: unknown, maxLength: number): string | n
 
 const getFavoritesCount = async (
     client: any,
-    type: 'group' | 'studio' | 'gig',
+    type: FavoriteTargetType,
     id: string,
 ): Promise<number> => {
     const { count, error } = await client
         .from('favorites')
         .select('id', { count: 'exact', head: true })
-        .eq(type + '_id', id)
+        .eq(getFavoriteTargetColumn(type), id)
 
     if (error) throw error
     return count || 0
@@ -187,12 +209,19 @@ serve(async (req: Request) => {
 
         // 2. TOGGLE FAVORITE
         if (action === 'toggle_favorite') {
+            const normalizedType = normalizeFavoriteTargetType(type)
+            if (!normalizedType) {
+                throw new Error('Invalid favorite target type.')
+            }
+
+            const favoriteColumn = getFavoriteTargetColumn(normalizedType)
+
             // Check if exists
             const { data: existing, error: existingError } = await supabaseClient
                 .from('favorites')
                 .select('id')
                 .eq('user_id', userId)
-                .eq(type + '_id', id)
+                .eq(favoriteColumn, id)
                 .maybeSingle()
 
             if (existingError) throw existingError
@@ -202,7 +231,7 @@ serve(async (req: Request) => {
                 const { error: deleteError } = await supabaseClient.from('favorites').delete().eq('id', existing.id)
                 if (deleteError) throw deleteError
 
-                const favoritesCount = await getFavoritesCount(supabaseClient, type, id)
+                const favoritesCount = await getFavoritesCount(supabaseClient, normalizedType, id)
                 return new Response(
                     JSON.stringify({ is_favorited: false, favorites_count: favoritesCount }),
                     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
@@ -210,12 +239,12 @@ serve(async (req: Request) => {
             } else {
                 // Add
                 const payload: any = { user_id: userId }
-                payload[type + '_id'] = id
+                payload[favoriteColumn] = id
 
                 const { error: insertError } = await supabaseClient.from('favorites').insert(payload)
                 if (insertError) throw insertError
 
-                const favoritesCount = await getFavoritesCount(supabaseClient, type, id)
+                const favoritesCount = await getFavoritesCount(supabaseClient, normalizedType, id)
                 return new Response(
                     JSON.stringify({ is_favorited: true, favorites_count: favoritesCount }),
                     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },

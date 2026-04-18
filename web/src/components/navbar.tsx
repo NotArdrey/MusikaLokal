@@ -63,7 +63,6 @@ function Navbar() {
 
     const activeTab = useMemo(() => {
         if (pathname.includes('home')) return 'home';
-        if (pathname.includes('discover')) return 'discover';
         if (pathname.includes('bookings')) return 'activity';
         if (pathname.includes('ai_suggestions')) return 'ai-suggest';
         if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
@@ -89,7 +88,6 @@ function Navbar() {
     const navItems = useMemo(
         () => [
             { id: 'home', icon: 'home', label: 'Home', route: '/home' },
-            { id: 'discover', icon: 'compass', label: 'Discover', route: '/discover' },
             { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
             { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
             { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },

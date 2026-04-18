@@ -102,7 +102,7 @@ interface StudioBookTabProps {
   setBookingNotes: (value: string) => void;
   loading: boolean;
   setLoading: (value: boolean) => void;
-  handleConfirm: (action: () => void, title: string, message: string, options?: { requireTerms?: boolean }) => void;
+  handleConfirm: (action: () => void, title: string, message: string, options?: { requireTerms?: boolean; contractUrl?: string | null; contractName?: string }) => void;
   setModalVisible: (value: boolean) => void;
   setPaymentBookingData: (value: any) => void;
   setSelectedPaymentType: (value: "full" | "downpayment") => void;
@@ -1877,7 +1877,7 @@ const StudioBookTab = ({
                 isRecordingMode
                   ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. Time rule: ${recordingRuleShort}. The studio owner will review and approve your booking request.`
                   : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
-                { requireTerms: true },
+                { requireTerms: true, contractUrl: group?.contract_url ?? null, contractName: group?.name },
               )
             }
           >

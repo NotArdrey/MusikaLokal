@@ -96,6 +96,11 @@ export default function WalletScreen() {
   const [unpaidBookings, setUnpaidBookings] = useState<any[]>([]);
   const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
 
+  // Top-up state
+  const [topUpModalVisible, setTopUpModalVisible] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState('');
+  const [isTopping, setIsTopping] = useState(false);
+
   // Subscription state
   const [userRole, setUserRole] = useState<string | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
@@ -469,6 +474,56 @@ export default function WalletScreen() {
       Alert.alert('Error', e?.message || 'Failed to initiate payment.');
     } finally {
       setPayingBookingId(null);
+    }
+  };
+
+  // Wallet top-up via PayMongo
+  const handleTopUp = async () => {
+    const amount = parseFloat(topUpAmount);
+    if (!amount || amount < 50) {
+      Alert.alert('Invalid Amount', 'Minimum top-up amount is ₱50.');
+      return;
+    }
+    try {
+      setIsTopping(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const redirectUrl = ExpoLinking.createURL('payment-result', {
+        queryParams: { status: 'success', type: 'deposit', amount: String(amount) }
+      });
+      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', {
+        queryParams: { status: 'cancelled', type: 'deposit' }
+      });
+
+      const { data: depositData, error: depositError } = await supabase.functions.invoke('paymongo', {
+        body: {
+          action: 'create_deposit',
+          user_id: user.id,
+          amount,
+          redirect_url: redirectUrl,
+          cancel_redirect_url: cancelRedirectUrl,
+        }
+      });
+
+      if (depositError || !depositData?.checkout_url) {
+        Alert.alert('Error', 'Failed to create top-up session. Please try again.');
+        return;
+      }
+
+      setTopUpModalVisible(false);
+      setTopUpAmount('');
+
+      const canOpen = await Linking.canOpenURL(depositData.checkout_url);
+      if (canOpen) {
+        await Linking.openURL(depositData.checkout_url);
+      } else {
+        Alert.alert('Error', 'Unable to open payment page.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to initiate top-up.');
+    } finally {
+      setIsTopping(false);
     }
   };
 
@@ -902,6 +957,11 @@ export default function WalletScreen() {
     [withdrawals],
   );
 
+  const pendingBalance = useMemo(
+    () => pendingWithdrawals.reduce((sum, w) => sum + (Number(w.amount) || 0), 0),
+    [pendingWithdrawals],
+  );
+
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -931,7 +991,7 @@ export default function WalletScreen() {
               <View style={styles.balanceRow}>
                 <View>
                   <Text style={styles.balanceSubLabel}>Pending</Text>
-                  <Text style={styles.balanceSubValue}>₱ 500.00</Text>
+                  <Text style={styles.balanceSubValue}>₱ {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={[styles.balanceDivider, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
                 <View>
@@ -954,6 +1014,7 @@ export default function WalletScreen() {
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Withdraw</Text>
               </TouchableOpacity>
               <TouchableOpacity activeOpacity={1}
+                onPress={() => setTopUpModalVisible(true)}
                 style={[
                   styles.actionButton,
                   { backgroundColor: colors.surface, borderColor: colors.border }
@@ -1209,6 +1270,94 @@ export default function WalletScreen() {
           <Navbar />
         </View>
       </View>
+
+      {/* Top-Up Modal */}
+      <RNModal
+        visible={topUpModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setTopUpModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.withdrawModal, { backgroundColor: colors.background }]}>
+            <View style={styles.withdrawModalHeader}>
+              <View>
+                <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Top Up Wallet</Text>
+                <Text style={[styles.withdrawModalSubtitle, { color: colors.textSecondary }]}>
+                  Add funds via GCash or Card
+                </Text>
+              </View>
+              <TouchableOpacity activeOpacity={1}
+                onPress={() => setTopUpModalVisible(false)}
+                style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
+              >
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputSection}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Add</Text>
+              <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
+                <TextInput
+                  style={[styles.amountInput, { color: colors.text }]}
+                  placeholder="0.00"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="decimal-pad"
+                  value={topUpAmount}
+                  onChangeText={setTopUpAmount}
+                />
+              </View>
+              <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
+                Minimum top-up: ₱50
+              </Text>
+            </View>
+
+            <View style={styles.quickAmounts}>
+              {[100, 250, 500, 1000].map((preset) => (
+                <TouchableOpacity activeOpacity={1}
+                  key={preset}
+                  onPress={() => setTopUpAmount(String(preset))}
+                  style={[
+                    styles.quickAmountBtn,
+                    {
+                      backgroundColor: parseFloat(topUpAmount) === preset ? colors.primary : colors.surface,
+                      borderColor: colors.border
+                    }
+                  ]}
+                >
+                  <Text style={[
+                    styles.quickAmountText,
+                    { color: parseFloat(topUpAmount) === preset ? 'white' : colors.text }
+                  ]}>
+                    ₱{preset}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity activeOpacity={1}
+              onPress={handleTopUp}
+              disabled={isTopping || !topUpAmount || parseFloat(topUpAmount) < 50}
+              style={[
+                styles.withdrawBtn,
+                {
+                  backgroundColor: (!topUpAmount || parseFloat(topUpAmount) < 50) ? colors.border : colors.primary,
+                  marginTop: 24,
+                }
+              ]}
+            >
+              {isTopping
+                ? <ActivityIndicator size="small" color="white" />
+                : <Text style={styles.withdrawBtnText}>Proceed to Payment</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </RNModal>
 
       {/* Withdraw Modal */}
       <RNModal

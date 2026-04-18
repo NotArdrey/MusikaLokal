@@ -256,12 +256,12 @@ export default function EditGigScreen() {
 
   const handleAddEventCondition = () => {
     if (!eventDate.trim()) {
-      showAlert("error", "Required Field", "Please select an event date first");
+      showAlert("warning", "Required Field", "Please select an event date first");
       return;
     }
 
     if (!eventStartTime || !eventEndTime) {
-      showAlert("error", "Required Field", "Please set both start and end time first");
+      showAlert("warning", "Required Field", "Please set both start and end time first");
       return;
     }
 
@@ -314,7 +314,7 @@ export default function EditGigScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "venue-owner") {
-        showAlert("error", "Unauthorized", "Only venue owners can edit gigs.");
+        showAlert("warning", "Unauthorized", "Only venue owners can edit gigs.");
         router.replace("/home");
         return;
       }
@@ -387,7 +387,7 @@ export default function EditGigScreen() {
       // Ensure id is a string, not an array
       const gigId = Array.isArray(id) ? id[0] : id;
       if (!gigId) {
-        showAlert("error", "Error", "Invalid gig ID");
+        showAlert("warning", "Invalid Gig", "Invalid gig ID. Please try again.");
         router.replace("/home");
         return;
       }
@@ -428,7 +428,7 @@ export default function EditGigScreen() {
 
       if (!baseData) {
         showAlert(
-          "error",
+          "warning",
           "Not Found",
           "Gig not found or you do not have permission to edit it.",
         );
@@ -465,7 +465,7 @@ export default function EditGigScreen() {
       // If no data returned, user doesn't own this gig
       if (!data) {
         showAlert(
-          "error",
+          "warning",
           "Not Found",
           "Gig not found or you do not have permission to edit it.",
         );
@@ -599,7 +599,7 @@ export default function EditGigScreen() {
       console.log('✅ ===== FETCH GIG DETAILS COMPLETED =====');
     } catch (e) {
       console.log("Error fetching gig details:", e);
-      showAlert("error", "Error", "Failed to load gig details.");
+      showAlert("warning", "Couldn't Load Details", "Failed to load gig details.");
       router.replace("/home");
     } finally {
       setLoading(false);
@@ -610,16 +610,16 @@ export default function EditGigScreen() {
     const schedules = getNormalizedEventSchedules();
 
     if (!gigName.trim()) {
-      showAlert("error", "Required Field", "Please enter a gig name");
+      showAlert("warning", "Required Field", "Please enter a gig name");
       return false;
     }
     if (!description.trim()) {
-      showAlert("error", "Required Field", "Please enter a description");
+      showAlert("warning", "Required Field", "Please enter a description");
       return false;
     }
     if (!address || !latitude || !longitude) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please select a location on the map",
       );
@@ -627,7 +627,7 @@ export default function EditGigScreen() {
     }
     if (!cost.trim() || parseFloat(cost) <= 0) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please enter a valid payout amount",
       );
@@ -635,7 +635,7 @@ export default function EditGigScreen() {
     }
     if (images.length === 0) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please upload at least one event photo",
       );
@@ -643,7 +643,7 @@ export default function EditGigScreen() {
     }
     if (schedules.length === 0) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please add at least one event date and time condition",
       );
@@ -668,7 +668,7 @@ export default function EditGigScreen() {
       // Ensure id is a string, not an array
       const gigId = Array.isArray(id) ? id[0] : id;
       if (!gigId) {
-        showAlert("error", "Error", "Invalid gig ID");
+        showAlert("warning", "Invalid Gig", "Invalid gig ID. Please try again.");
         setSaving(false);
         return;
       }
@@ -773,7 +773,7 @@ export default function EditGigScreen() {
         if (updateError.hint) alertMessage += `\n\nHint: ${updateError.hint}`;
         if (updateError.details) alertMessage += `\n\nDetails: ${updateError.details}`;
 
-        showAlert("error", "Error", alertMessage);
+        showAlert("warning", "Couldn't Save Gig", alertMessage);
         return;
       }
 
@@ -892,8 +892,8 @@ export default function EditGigScreen() {
     } catch (e: any) {
       console.error("❌ Error updating gig:", e);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Couldn't Save Gig",
         `Failed to update gig: ${e?.message || "Unknown error"}`,
       );
     } finally {
@@ -1102,7 +1102,7 @@ export default function EditGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -1130,8 +1130,8 @@ export default function EditGigScreen() {
     } catch (error) {
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {
@@ -1191,7 +1191,7 @@ export default function EditGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -1223,8 +1223,8 @@ export default function EditGigScreen() {
     } catch (error) {
       console.error("Error uploading business permit:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload business permit. Please try again.",
       );
     } finally {
@@ -1249,7 +1249,7 @@ export default function EditGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -1287,7 +1287,7 @@ export default function EditGigScreen() {
       showAlert("success", "Success", "Business permit uploaded successfully!");
     } catch (error) {
       console.error("Error uploading business permit:", error);
-      showAlert("error", "Error", "Failed to upload business permit. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload business permit. Please try again.");
     } finally {
       setUploadingBusinessPermit(false);
       if (event.target) {
@@ -1308,7 +1308,7 @@ export default function EditGigScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -1343,8 +1343,8 @@ export default function EditGigScreen() {
     } catch (error) {
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {

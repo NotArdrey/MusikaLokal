@@ -13,7 +13,7 @@ import { useTheme } from '../src/context/ThemeContext';
 
 const normalizePermitStatus = (permitStatus: string | null | undefined) => {
     const normalizedPermitStatus = String(permitStatus || '').trim().toLowerCase();
-    if (!normalizedPermitStatus) return 'approved';
+    if (!normalizedPermitStatus) return 'pending_review';
     if (['approved', 'approved_by_admin', 'verified'].includes(normalizedPermitStatus)) return 'approved';
     if (['pending', 'pending_review', 'in_review', 'under_review'].includes(normalizedPermitStatus)) return 'pending_review';
     if (['resubmitted', 'resubmit', 'reapplied'].includes(normalizedPermitStatus)) return 'resubmitted';
@@ -73,8 +73,9 @@ export default function MyStudioScreen() {
         try {
             const { data: baseStudios, error: baseError } = await supabase
                 .from('studios')
-                .select('id, owner_id, name, description, created_at, updated_at, permit_status, permit_rejection_reason, permit_reviewed_at')
+                .select('id, owner_id, name, description, created_at, permit_status, permit_rejection_reason, permit_reviewed_at')
                 .eq('owner_id', userId)
+                .in('permit_status', ['approved', 'approved_by_admin', 'verified'])
                 .order('created_at', { ascending: false });
 
             if (baseError) throw baseError;

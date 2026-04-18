@@ -66,8 +66,8 @@ export default function ChangePasswordScreen() {
           if (error) {
             console.error("Error setting session from recovery:", error);
             showAlert(
-              "error",
-              "Error",
+              "warning",
+              "Link Expired",
               "Invalid or expired reset link. Please request a new one.",
             );
           }
@@ -93,13 +93,13 @@ export default function ChangePasswordScreen() {
     // Validate new password
     const passwordError = validatePassword(newPassword);
     if (passwordError) {
-      showAlert("error", "Error", passwordError);
+      showAlert("warning", "Invalid Password", passwordError);
       return;
     }
 
     // Check if passwords match
     if (newPassword !== confirmPassword) {
-      showAlert("error", "Error", "New passwords do not match.");
+      showAlert("warning", "Passwords Don't Match", "New passwords do not match.");
       return;
     }
 
@@ -113,7 +113,7 @@ export default function ChangePasswordScreen() {
 
         if (error) {
           console.error("Password update error:", error);
-          showAlert("error", "Error", error.message || "Failed to update password.");
+          showAlert("warning", "Update Failed", error.message || "Failed to update password.");
         } else {
           setSuccessModalVisible(true);
         }
@@ -124,7 +124,7 @@ export default function ChangePasswordScreen() {
         } = await supabase.auth.getUser();
 
         if (!user?.email) {
-          showAlert("error", "Error", "Unable to verify user. Please log in again.");
+          showAlert("warning", "Verification Failed", "Unable to verify user. Please log in again.");
           return;
         }
 
@@ -135,7 +135,7 @@ export default function ChangePasswordScreen() {
         });
 
         if (signInError) {
-          showAlert("error", "Error", "Current password is incorrect.");
+          showAlert("warning", "Incorrect Password", "Current password is incorrect.");
           return;
         }
 
@@ -147,8 +147,8 @@ export default function ChangePasswordScreen() {
         if (updateError) {
           console.error("Password update error:", updateError);
           showAlert(
-            "error",
-            "Error",
+            "warning",
+            "Update Failed",
             updateError.message || "Failed to update password.",
           );
         } else {
@@ -157,7 +157,7 @@ export default function ChangePasswordScreen() {
       }
     } catch (e: any) {
       console.error("Password change exception:", e);
-      showAlert("error", "Error", "An unexpected error occurred. Please try again.");
+      showAlert("warning", "Something Went Wrong", "An unexpected error occurred. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -261,19 +261,19 @@ export default function ChangePasswordScreen() {
             onPress={() => {
               // Validate before showing modal
               if (!isResetFlow && !currentPassword) {
-                showAlert("error", "Error", "Please enter your current password.");
+                showAlert("warning", "Current Password Required", "Please enter your current password.");
                 return;
               }
               if (!newPassword) {
-                showAlert("error", "Error", "Please enter a new password.");
+                showAlert("warning", "New Password Required", "Please enter a new password.");
                 return;
               }
               if (!confirmPassword) {
-                showAlert("error", "Error", "Please confirm your new password.");
+                showAlert("warning", "Confirmation Required", "Please confirm your new password.");
                 return;
               }
               if (newPassword !== confirmPassword) {
-                showAlert("error", "Error", "New passwords do not match.");
+                showAlert("warning", "Passwords Don't Match", "New passwords do not match.");
                 return;
               }
               setModalVisible(true);

@@ -515,8 +515,8 @@ serve(async (req: Request) => {
       };
 
       if (isBalancePayment) {
-        // Balance payment - don't change payment_type, just track we're paying remaining
-        updateData.remaining_balance = 0; // Will be 0 after this payment
+        // Balance payment - don't change payment_type or remaining_balance yet
+        // These will be updated by payment_success/webhook after PayMongo confirms payment
       } else {
         // Initial payment (full or downpayment)
         updateData.payment_amount = amount;

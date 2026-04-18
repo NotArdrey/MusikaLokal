@@ -132,10 +132,13 @@ export default function PaymentResultScreen() {
   }, [params.booking_id, params.plan_id, isSubscription, isSuccess]);
 
   const handleGoToBookings = () => {
+    // After a downpayment, the booking stays in Pending (balance still due); full payment → Upcoming
+    const isPartialPayment = bookingDetails?.payment_type === 'downpayment' && (bookingDetails?.remaining_balance || 0) > 0;
+    const tab = isSuccess ? (isPartialPayment ? 'Pending' : 'Upcoming') : 'Pending';
     router.replace({
       pathname: '/bookings',
       params: {
-        tab: isSuccess ? 'Upcoming' : 'Pending',
+        tab,
         payment_result: params.status,
         booking_id: params.booking_id
       }
@@ -326,7 +329,11 @@ export default function PaymentResultScreen() {
               >
                 <Ionicons name="calendar" size={20} color="white" />
                 <Text style={styles.primaryButtonText}>
-                  {isSuccess ? 'View Upcoming Bookings' : 'View Pending Bookings'}
+                  {isSuccess
+                    ? (bookingDetails?.payment_type === 'downpayment' && (bookingDetails?.remaining_balance || 0) > 0
+                        ? 'View Pending Bookings'
+                        : 'View Upcoming Bookings')
+                    : 'View Pending Bookings'}
                 </Text>
               </TouchableOpacity>
 

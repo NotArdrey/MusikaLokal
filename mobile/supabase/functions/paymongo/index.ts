@@ -168,9 +168,11 @@ async function creditOwnerWallet(
       return;
     }
 
-    // Use the payment amount if provided, otherwise use the booking's payment_amount or final_price
+    // Prefer the booking's actual payment_amount from DB over the PayMongo-charged amount.
+    // In TEST MODE PayMongo always charges ₱1 (100 centavos), but the booking records the
+    // real agreed price — that is what the studio owner should receive in their wallet.
     const creditAmount =
-      paymentAmount || booking.payment_amount || booking.final_price;
+      booking.payment_amount || booking.final_price || paymentAmount;
     if (!creditAmount || creditAmount <= 0) {
       console.error("❌ Invalid credit amount:", creditAmount);
       return;
@@ -720,8 +722,8 @@ serve(async (req: Request) => {
       };
 
       if (isBalancePayment) {
-        // Balance payment - don't change payment_type, just track we're paying remaining
-        updateData.remaining_balance = 0; // Will be 0 after this payment
+        // Balance payment - don't change payment_type or remaining_balance yet
+        // These will be updated by payment_success/webhook after PayMongo confirms payment
       } else {
         // Initial payment (full or downpayment)
         updateData.payment_amount = amount;
@@ -1165,12 +1167,14 @@ serve(async (req: Request) => {
           const studioImage = fullBooking.studio?.images?.[0];
           const userAvatar = fullBooking.profile?.avatar_url;
 
-          // Notify musician
+          // Notify musician — downpayment lands in Pending (balance due), full payment lands in Upcoming
           await supabaseAdmin.from("notifications").insert({
             user_id: fullBooking.user_id,
             type: "success",
             title: "Payment Successful!",
-            message: `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
+            message: isDownpayment
+              ? `Downpayment received for ${fullBooking.studio?.name}. Pay the remaining balance in your Pending bookings.`
+              : `Your booking at ${fullBooking.studio?.name} has been confirmed and moved to Upcoming.`,
             image: studioImage,
             meta: { booking_id: fullBooking.id },
           });
@@ -2323,6 +2327,181 @@ serve(async (req: Request) => {
           status: 200,
         },
       );
+    }
+
+    // ====================================================================
+    // WALLET TOP-UP: create_deposit — creates a PayMongo checkout to add funds to wallet
+    // ====================================================================
+    if (action === "create_deposit") {
+      const { user_id, amount, redirect_url, cancel_redirect_url } = params;
+
+      if (!user_id || !amount || amount <= 0) {
+        return new Response(JSON.stringify({ error: "user_id and amount are required" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const TEST_MODE = true; // Set to false in production
+      const amountCentavos = TEST_MODE ? 100 : Math.round(amount * 100);
+
+      const checkoutPayload = {
+        data: {
+          attributes: {
+            amount: amountCentavos,
+            currency: "PHP",
+            description: `Wallet top-up: ₱${amount.toLocaleString()}`,
+            payment_method_types: ["gcash", "card", "paymaya"],
+            success_url: redirect_url || "https://musikalokal.com/payment-result?status=success&type=deposit",
+            cancel_url: cancel_redirect_url || "https://musikalokal.com/payment-result?status=cancelled&type=deposit",
+            metadata: {
+              type: "wallet_deposit",
+              user_id: String(user_id),
+              amount: String(amount), // actual peso amount
+            },
+          },
+        },
+      };
+
+      const PAYMONGO_SECRET = Deno.env.get("PAYMONGO_SECRET_KEY") || "";
+      const encoded = btoa(`${PAYMONGO_SECRET}:`);
+
+      const pmRes = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${encoded}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(checkoutPayload),
+      });
+
+      const pmData = await pmRes.json();
+      if (!pmRes.ok) {
+        console.error("PayMongo create_deposit error:", pmData);
+        return new Response(JSON.stringify({ error: "Failed to create deposit checkout", details: pmData }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        });
+      }
+
+      const checkoutId = pmData.data?.id;
+      const checkoutUrl = pmData.data?.attributes?.checkout_url;
+
+      // Store the pending deposit record
+      const { error: depositError } = await supabaseAdmin.from("wallet_deposits").insert({
+        user_id,
+        checkout_session_id: checkoutId,
+        amount: Number(amount),
+        status: "pending",
+      });
+
+      if (depositError) {
+        // wallet_deposits table may not exist yet — still return checkout URL so user can pay
+        console.warn("wallet_deposits insert error (table may not exist):", depositError.message);
+      }
+
+      return new Response(JSON.stringify({ checkout_url: checkoutUrl, checkout_id: checkoutId }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // ====================================================================
+    // WALLET TOP-UP: check_deposit — verifies payment and credits the user's wallet
+    // ====================================================================
+    if (action === "check_deposit") {
+      const { checkout_id, user_id } = params;
+
+      if (!checkout_id || !user_id) {
+        return new Response(JSON.stringify({ error: "checkout_id and user_id are required" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      const PAYMONGO_SECRET = Deno.env.get("PAYMONGO_SECRET_KEY") || "";
+      const encoded = btoa(`${PAYMONGO_SECRET}:`);
+
+      const pmRes = await fetch(`https://api.paymongo.com/v1/checkout_sessions/${checkout_id}`, {
+        headers: { "Authorization": `Basic ${encoded}` },
+      });
+
+      const pmData = await pmRes.json();
+      const sessionAttr = pmData.data?.attributes;
+      const paymentStatus = sessionAttr?.payment_intent?.attributes?.status;
+      const payments = sessionAttr?.payments || [];
+      const succeeded = paymentStatus === "succeeded" || payments.some((p: any) => p.attributes?.status === "paid");
+
+      if (!succeeded) {
+        return new Response(JSON.stringify({ success: false, status: paymentStatus || "pending" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+
+      // Idempotency: check if already credited
+      const { data: existingDeposit } = await supabaseAdmin
+        .from("wallet_deposits")
+        .select("id, status")
+        .eq("checkout_session_id", checkout_id)
+        .maybeSingle();
+
+      if (existingDeposit?.status === "completed") {
+        return new Response(JSON.stringify({ success: true, status: "already_credited" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+
+      // Get actual amount from metadata
+      const metadata = sessionAttr?.metadata || {};
+      const depositAmount = Number(metadata.amount || payments[0]?.attributes?.amount / 100 || 0);
+
+      if (depositAmount <= 0) {
+        return new Response(JSON.stringify({ error: "Invalid deposit amount" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400,
+        });
+      }
+
+      // Credit the user's wallet
+      let { data: wallet } = await supabaseAdmin.from("wallets").select("id, balance").eq("user_id", user_id).single();
+      if (!wallet) {
+        const { data: newWallet } = await supabaseAdmin.from("wallets").insert([{ user_id, balance: 0 }]).select().single();
+        wallet = newWallet;
+      }
+
+      const newBalance = (wallet?.balance || 0) + depositAmount;
+      await supabaseAdmin.from("wallets").update({ balance: newBalance, updated_at: new Date().toISOString() }).eq("id", wallet.id);
+
+      await supabaseAdmin.from("wallet_transactions").insert({
+        wallet_id: wallet.id,
+        amount: depositAmount,
+        type: "deposit",
+        description: `Wallet top-up via PayMongo`,
+        reference_id: checkout_id,
+        is_credit: true,
+        status: "completed",
+      });
+
+      // Mark deposit record as completed
+      if (existingDeposit) {
+        await supabaseAdmin.from("wallet_deposits").update({ status: "completed" }).eq("checkout_session_id", checkout_id);
+      }
+
+      // Notify user
+      await supabaseAdmin.from("notifications").insert({
+        user_id,
+        type: "success",
+        title: "Wallet Topped Up!",
+        message: `₱${depositAmount.toLocaleString()} has been added to your wallet.`,
+        meta: { type: "wallet_deposit", amount: depositAmount },
+      }).catch(() => {});
+
+      return new Response(JSON.stringify({ success: true, credited_amount: depositAmount, new_balance: newBalance }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
     }
 
     return new Response(JSON.stringify({ error: "Invalid action" }), {

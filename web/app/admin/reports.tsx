@@ -218,6 +218,8 @@ const incidentStatuses: BookingIncidentFilter[] = [
   'dismissed',
 ];
 
+const manageBookingsActionFallbacks: Record<string, string> = {};
+
 const REPORTS_PAGE_SIZE = 50;
 const REPORTS_CACHE_TTL_MS = 30_000;
 const INCIDENTS_CACHE_TTL_MS = 30_000;
@@ -734,14 +736,37 @@ export default function AdminReportsPage() {
   );
 
   const invokeManageBookingsAction = useCallback(async (payload: Record<string, unknown>) => {
-    const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
-      body: payload,
-    });
+    const invokeAction = async (requestPayload: Record<string, unknown>) => {
+      const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
+        body: requestPayload,
+      });
 
-    if (error) throw error;
-    if (data?.error) throw new Error(String(data.error));
+      if (error) throw error;
+      if (data?.error) throw new Error(String(data.error));
 
-    return data;
+      return data;
+    };
+
+    const action = String(payload?.action || '');
+
+    try {
+      return await invokeAction(payload);
+    } catch (primaryError) {
+      const fallbackAction = manageBookingsActionFallbacks[action];
+      if (!fallbackAction) {
+        throw primaryError;
+      }
+
+      const primaryMessage = await getErrorMessage(primaryError, 'Unable to process request.');
+      if (!isUnsupportedActionMessage(primaryMessage, action)) {
+        throw primaryError;
+      }
+
+      return invokeAction({
+        ...payload,
+        action: fallbackAction,
+      });
+    }
   }, []);
 
   const fetchReports = useCallback(async (options?: { silent?: boolean }) => {
@@ -812,17 +837,14 @@ export default function AdminReportsPage() {
     }
 
     try {
-      const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
-        body: {
-          action: 'admin_fetch_booking_incidents',
-          statusFilter: incidentFilter,
-          limit: 100,
-        },
+      const { data, error } = await supabase.rpc('admin_fetch_booking_incidents', {
+        p_status_filter: incidentFilter,
+        p_limit: 100,
       });
 
       if (error) throw error;
-      if (data?.error) throw new Error(String(data.error));
-      const nextIncidents = Array.isArray(data?.items) ? data.items : [];
+
+      const nextIncidents = Array.isArray(data) ? data : [];
       setIncidents(nextIncidents);
       writeAdminPageCache(incidentsCacheKey, nextIncidents);
     } catch (error) {
@@ -1133,17 +1155,13 @@ export default function AdminReportsPage() {
     async (incidentId: string, resolution: BookingIncidentResolution, adminResolutionNotes = '') => {
       setIncidentActionLoadingId(incidentId);
       try {
-        const { data, error } = await supabase.functions.invoke<any>('manage-bookings', {
-          body: {
-            action: 'admin_resolve_booking_incident',
-            incident_id: incidentId,
-            resolution,
-            admin_notes: adminResolutionNotes.trim() || null,
-          },
+        const { error } = await supabase.rpc('admin_resolve_booking_incident', {
+          p_incident_id: incidentId,
+          p_resolution: resolution,
+          p_admin_notes: adminResolutionNotes.trim() || null,
         });
 
         if (error) throw error;
-        if (data?.error) throw new Error(String(data.error));
 
         invalidateAdminPageCache();
         showAlert('success', 'Incident updated', `Incident marked as ${resolution.replace(/_/g, ' ')}.`);

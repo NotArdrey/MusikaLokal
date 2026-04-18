@@ -206,7 +206,7 @@ export default function EditGroupScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "musician") {
-        showAlert("error", "Unauthorized", "Only musicians can edit groups.");
+        showAlert("warning", "Unauthorized", "Only musicians can edit groups.");
         router.replace("/home");
         return;
       }
@@ -303,7 +303,7 @@ export default function EditGroupScreen() {
       // Ensure id is a string, not an array
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
-        showAlert("error", "Error", "Invalid group ID");
+        showAlert("warning", "Invalid Group", "Invalid group ID. Please try again.");
         router.replace("/home");
         return;
       }
@@ -373,7 +373,7 @@ export default function EditGroupScreen() {
 
       if (!baseData) {
         showAlert(
-          "error",
+          "warning",
           "Not Found",
           "Group not found or you do not have permission to edit it.",
         );
@@ -390,7 +390,7 @@ export default function EditGroupScreen() {
       // If no data returned, user doesn't own this group
       if (!data) {
         showAlert(
-          "error",
+          "warning",
           "Not Found",
           "Group not found or you do not have permission to edit it.",
         );
@@ -523,7 +523,7 @@ export default function EditGroupScreen() {
       fetchGroupImpactSummary(groupId);
     } catch (e) {
       console.log("Error fetching group details:", e);
-      showAlert("error", "Error", "Failed to load group details.");
+      showAlert("warning", "Couldn't Load Details", "Failed to load group details.");
       router.replace("/home");
     } finally {
       setLoading(false);
@@ -532,20 +532,20 @@ export default function EditGroupScreen() {
 
   const validateForm = (): boolean => {
     if (!groupName.trim()) {
-      showAlert("error", "Required Field", "Please enter a group name");
+      showAlert("warning", "Required Field", "Please enter a group name");
       return false;
     }
     if (selectedGenres.length === 0) {
-      showAlert("error", "Required Field", "Please select at least one genre");
+      showAlert("warning", "Required Field", "Please select at least one genre");
       return false;
     }
     if (!description.trim()) {
-      showAlert("error", "Required Field", "Please enter a description");
+      showAlert("warning", "Required Field", "Please enter a description");
       return false;
     }
     if (!address || !latitude || !longitude) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please select a location on the map",
       );
@@ -553,7 +553,7 @@ export default function EditGroupScreen() {
     }
     if (images.length === 0) {
       showAlert(
-        "error",
+        "warning",
         "Required Field",
         "Please upload at least one group photo",
       );
@@ -563,7 +563,7 @@ export default function EditGroupScreen() {
     const leader = members.find((m) => isGroupLeaderMember(m, groupOwnerId));
     if (!leader?.instrument?.trim()) {
       showAlert(
-        "error",
+        "warning",
         "Leader Instrument Required",
         "Please enter your instrument/role as the group leader.",
       );
@@ -571,7 +571,7 @@ export default function EditGroupScreen() {
     }
     if (!isLeaderInstrumentFinalized) {
       showAlert(
-        "error",
+        "warning",
         "Leader Instrument Not Finalized",
         "Tap the check icon beside the leader instrument to finalize it before saving.",
       );
@@ -580,7 +580,7 @@ export default function EditGroupScreen() {
     const memberWithoutInstrument = members.find((member) => !member.instrument?.trim());
     if (memberWithoutInstrument) {
       showAlert(
-        "error",
+        "warning",
         "Missing Instrument",
         `Please enter an instrument for ${memberWithoutInstrument.name || "a member"}.`,
       );
@@ -594,7 +594,7 @@ export default function EditGroupScreen() {
     );
     if (unfinalizedMember) {
       showAlert(
-        "error",
+        "warning",
         "Member Instrument Not Finalized",
         `Tap the check icon beside ${unfinalizedMember.name || "this member"}'s instrument before saving.`,
       );
@@ -632,7 +632,7 @@ export default function EditGroupScreen() {
       // Ensure id is a string, not an array
       const groupId = Array.isArray(id) ? id[0] : id;
       if (!groupId) {
-        showAlert("error", "Error", "Invalid group ID");
+        showAlert("warning", "Invalid Group", "Invalid group ID. Please try again.");
         setSaving(false);
         return;
       }
@@ -675,7 +675,7 @@ export default function EditGroupScreen() {
       if (error) {
         console.error('❌ Update failed with error:', error);
         const errorMsg = error.message || "Unknown error";
-        showAlert("error", "Error", `Failed to update group: ${errorMsg}`);
+        showAlert("warning", "Couldn't Save Group", `Failed to update group: ${errorMsg}`);
         return;
       }
 
@@ -698,7 +698,7 @@ export default function EditGroupScreen() {
           .from('group_roster_members')
           .insert(rosterRows);
         if (rosterError) {
-          showAlert("error", "Error", `Group profile updated but failed to sync roster: ${rosterError.message || "Unknown error"}`);
+          showAlert("warning", "Sync Failed", `Group profile updated but failed to sync roster: ${rosterError.message || "Unknown error"}`);
           return;
         }
       }
@@ -715,7 +715,7 @@ export default function EditGroupScreen() {
           .from('group_media')
           .insert(imageRows);
         if (mediaError) {
-          showAlert("error", "Error", `Group profile updated but failed to sync images: ${mediaError.message || "Unknown error"}`);
+          showAlert("warning", "Sync Failed", `Group profile updated but failed to sync images: ${mediaError.message || "Unknown error"}`);
           return;
         }
       }
@@ -745,8 +745,8 @@ export default function EditGroupScreen() {
 
       if (upsertMembersError) {
         showAlert(
-          "error",
-          "Error",
+          "warning",
+          "Sync Failed",
           `Group profile updated but failed to sync members: ${upsertMembersError.message || "Unknown error"}`,
         );
         return;
@@ -762,8 +762,8 @@ export default function EditGroupScreen() {
 
         if (deleteStaleMembersError) {
           showAlert(
-            "error",
-            "Error",
+            "warning",
+            "Sync Failed",
             `Group profile updated but failed to remove stale members: ${deleteStaleMembersError.message || "Unknown error"}`,
           );
           return;
@@ -786,8 +786,8 @@ export default function EditGroupScreen() {
     } catch (e: any) {
       console.log("❌ Error updating group:", e);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Couldn't Save Group",
         `Failed to update group: ${e?.message || "Unknown error"}`,
       );
     } finally {
@@ -1254,8 +1254,8 @@ export default function EditGroupScreen() {
       if (error) {
         console.error("Error creating transfer request:", error);
         showAlert(
-          "error",
-          "Error",
+          "warning",
+          "Transfer Failed",
           "Failed to send transfer request. " + (error.message || ""),
         );
         return;
@@ -1289,7 +1289,7 @@ export default function EditGroupScreen() {
       fetchPendingTransfer();
     } catch (e) {
       console.error("Error initiating transfer:", e);
-      showAlert("error", "Error", "Failed to send transfer request.");
+      showAlert("warning", "Transfer Failed", "Failed to send transfer request.");
     } finally {
       setIsTransferring(false);
     }
@@ -1327,7 +1327,7 @@ export default function EditGroupScreen() {
               setPendingTransfer(null);
             } catch (e) {
               console.error("Error cancelling transfer:", e);
-              showAlert("error", "Error", "Failed to cancel transfer request.");
+              showAlert("warning", "Couldn't Cancel Transfer", "Failed to cancel transfer request.");
             }
           },
         },

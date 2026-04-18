@@ -83,9 +83,9 @@ BEGIN
     -- 2. Create Profiles if they don't exist (Upsert)
     INSERT INTO public.profiles (id, email, full_name, role, location, avatar_url, verification_status)
     VALUES 
-        (user1_id, 'musician@tet.com', 'Musician User', 'musician', 'Quezon City', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&fit=crop', 'APPROVED'),
-        (user2_id, 'studio@test.com', 'Studio Owner User', 'studio-owner', 'Makati City', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&fit=crop', 'APPROVED'),
-        (user3_id, 'manager@test.com', 'Venue Owner', 'venue-owner', 'BGC, Taguig', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&fit=crop', 'APPROVED')
+         (user1_id, 'musician@tet.com', 'Gabriel dela Cruz', 'musician', 'Quezon City, Metro Manila', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&fit=crop', 'APPROVED'),
+      (user2_id, 'studio@test.com', 'Studio Owner User', 'studio-owner', 'Makati City', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&fit=crop', 'APPROVED'),
+         (user3_id, 'manager@test.com', 'Marco Reyes', 'venue-owner', 'Quezon City, Metro Manila', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&fit=crop', 'APPROVED')
     ON CONFLICT (id) DO UPDATE 
     SET full_name = EXCLUDED.full_name, role = EXCLUDED.role, avatar_url = EXCLUDED.avatar_url, email = EXCLUDED.email, verification_status = EXCLUDED.verification_status;
 
@@ -94,13 +94,13 @@ BEGIN
     INSERT INTO public.groups (owner_id, name, genre, description, location, images, members, rate, latitude, longitude)
     VALUES (
         user1_id,
-        'The Neon Lights',
-        'Indie Pop',
-        'High-energy indie pop band available for weddings, corporate events, and parties. We bring the vibes and get everyone on the dance floor!',
-        'Quezon City',
+      'Amihan Sessions',
+      'Indie Folk',
+      'Quezon City indie folk band playing OPM favorites, weddings, campus fairs, and brand events with a full live setup.',
+      'Quezon City, Metro Manila',
         ARRAY['https://images.unsplash.com/photo-1493225255756-d9584f8606e9?w=800&fit=crop', 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&fit=crop'],
-        '["Marc", "Buddy", "Ely", "Raymund"]'::jsonb,
-        15000,
+      '["Gabriel", "Kyla", "Paolo", "Mika"]'::jsonb,
+      18000,
         14.6760, 121.0437 -- Quezon City
     ) RETURNING id INTO temp_id;
     group_ids := array_append(group_ids, temp_id);
@@ -109,13 +109,13 @@ BEGIN
     INSERT INTO public.groups (owner_id, name, genre, description, location, images, members, rate, latitude, longitude)
     VALUES (
         user1_id,
-        'Midnight Jazz Trio',
+      'Kundiman After Dark',
         'Jazz',
-        'Sophisticated jazz standards for cocktail hours and upscale events.',
-        'Makati City',
+      'Jazz trio blending standards, bossa, and kundiman arrangements for hotel lounges and intimate receptions.',
+      'Makati City, Metro Manila',
         ARRAY['https://images.unsplash.com/photo-1511192336575-5a79af67a629?w=800&fit=crop'],
-        '["Sax", "Keys", "Bass"]'::jsonb,
-        8000,
+      '["Lia", "Anton", "Miko"]'::jsonb,
+      9000,
         14.5547, 121.0244 -- Makati
     ) RETURNING id INTO temp_id;
     group_ids := array_append(group_ids, temp_id);
@@ -124,14 +124,14 @@ BEGIN
     INSERT INTO public.groups (owner_id, name, genre, description, location, images, members, rate, latitude, longitude)
     VALUES (
         user1_id,
-        'Sonic Boom',
-        'Rock',
-        'Alternative rock band playing 90s hits and originals.',
-        'Mandaluyong',
+      'Silakbo Collective',
+      'Alternative Rock',
+      'Metro Manila alt-rock band with a tight OPM set, 90s throwbacks, and crowd-ready originals.',
+      'Pasig City, Metro Manila',
         ARRAY['https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800&fit=crop'],
-        '["Lead", "Rhythm", "Bass", "Drums"]'::jsonb,
-        12000,
-        14.5794, 121.0359 -- Mandaluyong
+      '["Ian", "Rafa", "Nico", "Theo"]'::jsonb,
+      14000,
+      14.5764, 121.0851 -- Pasig
     ) RETURNING id INTO temp_id;
     group_ids := array_append(group_ids, temp_id);
 
@@ -139,13 +139,13 @@ BEGIN
     INSERT INTO public.groups (owner_id, name, genre, description, location, images, members, rate, latitude, longitude)
     VALUES (
         user1_id,
-        'Acoustic Soul',
-        'Acoustic',
-        'Soulful acoustic duo perfect for intimate gatherings.',
-        'San Juan',
+      'Harana Duo',
+      'Acoustic OPM',
+      'Acoustic duo built for garden weddings, cafe nights, and private dinners with modern OPM arrangements.',
+      'San Juan City, Metro Manila',
         ARRAY['https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=800&fit=crop'],
-        '["Vocals", "Guitar"]'::jsonb,
-        5000,
+      '["Ella", "Migs"]'::jsonb,
+      6500,
         14.6019, 121.0355 -- San Juan
     ) RETURNING id INTO temp_id;
     group_ids := array_append(group_ids, temp_id);
@@ -154,14 +154,14 @@ BEGIN
     INSERT INTO public.groups (owner_id, name, genre, description, location, images, members, rate, latitude, longitude)
     VALUES (
         user1_id,
-        'Electric Dreams',
-        'Synthwave',
-        'Retro-futuristic synthwave band bringing 80s nostalgia.',
-        'Ortigas',
+      'Mayumi Midnight',
+      'Synth Pop',
+      'Synth-driven pop act from the south of Metro Manila mixing city-pop textures with Filipino hooks.',
+      'Muntinlupa City, Metro Manila',
         ARRAY['https://images.unsplash.com/photo-1506157786151-b8491531f063?w=800&fit=crop'],
-        '["Synths", "Drums"]'::jsonb,
-        10000,
-        14.5866, 121.0601 -- Ortigas
+      '["Aya", "Gio"]'::jsonb,
+      11000,
+      14.4081, 121.0415 -- Muntinlupa
     ) RETURNING id INTO temp_id;
     group_ids := array_append(group_ids, temp_id);
 
@@ -171,11 +171,11 @@ BEGIN
     INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
     VALUES (
         user2_id,
-        'SoundLab Manila',
-        'Makati City, Metro Manila',
-        1200,
-        'State of the art recording studio in the heart of Makati. Features a fully treated live room, vocal booth, and premium analog gear.',
-        ARRAY['Wifi', 'Aircon', 'Lounge', 'Parking', 'Stage'],
+      'SoundLab Manila',
+      'Makati City, Metro Manila',
+      1200,
+      'State of the art recording studio in the heart of Makati. Features a fully treated live room, vocal booth, and premium analog gear.',
+      ARRAY['Wifi', 'Aircon', 'Lounge', 'Parking', 'Stage'],
         ARRAY['https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&fit=crop', 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=800&fit=crop'],
         14.5547, 121.0244
     ) RETURNING id INTO temp_id;
@@ -185,11 +185,11 @@ BEGIN
     INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
     VALUES (
         user2_id,
-        'Basement Beats',
-        'Marikina City',
-        500,
-        'Affordable rehearsal space for up-and-coming bands. Basic backline provided. Open 24/7.',
-        ARRAY['Aircon', 'Vending Machine', 'Drum Kit'],
+      'Basement Beats',
+      'Marikina City',
+      500,
+      'Affordable rehearsal space for up-and-coming bands. Basic backline provided. Open 24/7.',
+      ARRAY['Aircon', 'Vending Machine', 'Drum Kit'],
         ARRAY['https://images.unsplash.com/photo-1520523831597-d8c3be5287c2?w=800&fit=crop'],
         14.6333, 121.0980
     ) RETURNING id INTO temp_id;
@@ -199,10 +199,10 @@ BEGIN
     INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
     VALUES (
         user2_id,
-        'The Red Room',
-        'Quezon City',
-        800,
-        'Cozy recording booth perfect for vocal tracking and mixing.',
+      'The Red Room',
+      'Quezon City',
+      800,
+      'Cozy recording booth perfect for vocal tracking and mixing.',
         ARRAY['Wifi', 'Coffee', 'Vocal Booth'],
         ARRAY['https://images.unsplash.com/photo-1525201548942-d8732f6617a0?w=800&fit=crop'],
         14.6760, 121.0437
@@ -213,11 +213,11 @@ BEGIN
     INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
     VALUES (
         user2_id,
-        'ProAudio Hub',
-        'Pasig City',
-        1500,
-        'Professional studio with mastering services available.',
-        ARRAY['Wifi', 'Lounge', 'Valet', 'Mixing Console'],
+      'ProAudio Hub',
+      'Pasig City',
+      1500,
+      'Professional studio with mastering services available.',
+      ARRAY['Wifi', 'Lounge', 'Valet', 'Mixing Console'],
         ARRAY['https://images.unsplash.com/photo-1581368129683-176c2688825e?w=800&fit=crop'],
         14.5764, 121.0851
     ) RETURNING id INTO temp_id;
@@ -227,10 +227,10 @@ BEGIN
     INSERT INTO public.studios (owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
     VALUES (
         user2_id,
-        'Garage Jam',
-        'Parañaque',
-        400,
-        'No frills jamming studio. Bring your own cymbals.',
+      'Garage Jam',
+      'Parañaque',
+      400,
+      'No frills jamming studio. Bring your own cymbals.',
         ARRAY['Fan', 'Amps'],
         ARRAY['https://images.unsplash.com/photo-1519508234439-4f23643125c1?w=800&fit=crop'],
         14.4793, 121.0198
@@ -258,14 +258,14 @@ BEGIN
     INSERT INTO public.gigs (organizer_id, name, location, budget, description, event_date, status, images, latitude, longitude)
     VALUES (
         user3_id,
-        'Acoustic Nights at The Hive',
-        'BGC, Taguig',
-        3500,
-        'Looking for acoustic solo acts or duos for our weekend dinner service. Chill vibes, appreciative crowd, and free dinner included.',
+      'Acoustic Nights at Jess & Pat''s',
+      'Jess & Pat''s, Quezon City',
+      5000,
+      'Looking for acoustic solo acts or duos with a warm OPM-heavy set for an intimate Friday crowd.',
         NOW() + INTERVAL '7 days',
         'open',
         ARRAY['https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&fit=crop'],
-        14.5543, 121.0524
+      14.6500, 121.0490
     ) RETURNING id INTO temp_id;
     gig_ids := array_append(gig_ids, temp_id);
 
@@ -273,10 +273,10 @@ BEGIN
     INSERT INTO public.gigs (organizer_id, name, location, budget, description, event_date, status, images, latitude, longitude)
     VALUES (
         user3_id,
-        'Wedding Reception Band',
-        'Tagaytay',
-        25000,
-        'Need a full band for a wedding reception. Must play outdated pop songs.',
+      'Tagaytay Wedding Reception Band',
+      'Tagaytay, Cavite',
+      30000,
+      'Need a polished full band for a wedding reception. Strong OPM, pop ballad, and sing-along repertoire required.',
         NOW() + INTERVAL '30 days',
         'open',
         ARRAY['https://images.unsplash.com/photo-1519750157634-b6d493a0f77c?w=800&fit=crop'],
@@ -288,14 +288,14 @@ BEGIN
     INSERT INTO public.gigs (organizer_id, name, location, budget, description, event_date, status, images, latitude, longitude)
     VALUES (
         user3_id,
-        'Corporate Event Opener',
-        'SMX Convention Center',
-        15000,
-        'Looking for a high energy opener for a tech conference.',
+      'Corporate Opening Set at SMX Manila',
+      'SMX Convention Center Manila, Pasay',
+      18000,
+      'Looking for a high-energy opener for a brand launch at SMX. Clean stage look and a tight 30-minute set are required.',
         NOW() + INTERVAL '14 days',
         'open',
         ARRAY['https://images.unsplash.com/photo-1505236858219-8359eb29e329?w=800&fit=crop'],
-        14.5323, 120.9841
+      14.5311, 120.9827
     ) RETURNING id INTO temp_id;
     gig_ids := array_append(gig_ids, temp_id);
 
@@ -303,14 +303,14 @@ BEGIN
     INSERT INTO public.gigs (organizer_id, name, location, budget, description, event_date, status, images, latitude, longitude)
     VALUES (
         user3_id,
-        'Bar gig: Friday Night',
-        'Tomas Morato',
-        5000,
-        'Rock bands needed for Friday night lineup.',
+      'Friday OPM Set at 70''s Bistro',
+      '70''s Bistro, Quezon City',
+      7000,
+      'Rock and alt-pop bands needed for a Friday night lineup with a crowd that knows the classics.',
         NOW() + INTERVAL '5 days',
         'open',
         ARRAY['https://images.unsplash.com/photo-1514525253440-b393452e8d26?w=800&fit=crop'],
-        14.6361, 121.0365
+      14.6348, 121.0387
     ) RETURNING id INTO temp_id;
     gig_ids := array_append(gig_ids, temp_id);
 
@@ -318,10 +318,10 @@ BEGIN
     INSERT INTO public.gigs (organizer_id, name, location, budget, description, event_date, status, images, latitude, longitude)
     VALUES (
         user3_id,
-        'Private Party',
-        'Forbes Park',
-        10000,
-        'Private birthday party. Jazz band preferred.',
+      'Private Jazz Night in Forbes Park',
+      'Forbes Park, Makati',
+      12000,
+      'Private birthday dinner in Makati. Jazz trio or classy lounge band preferred.',
         NOW() + INTERVAL '21 days',
         'open',
         ARRAY['https://images.unsplash.com/photo-1429962714451-bb934ecdc4ec?w=800&fit=crop'],
@@ -373,19 +373,19 @@ INSERT INTO profiles (id, email, full_name, role, bio, location, skills, genres,
 VALUES (
     '14d2e916-8d1c-4c04-9877-7ccd9bea6149',
     'musician@test.com',
-    'Juan Dela Cruz',
+  'Gabriel dela Cruz',
     'musician',
-    'Professional drummer with 10 years experience in rock and indie bands.',
-    'Manila, Philippines',
-    ARRAY['Drums', 'Percussion', 'Backing Vocals'],
-    ARRAY['Rock', 'Indie', 'Alternative'],
+  'Quezon City session musician with years of live and studio work across indie folk, alt-rock, and OPM gigs.',
+  'Quezon City, Metro Manila, Philippines',
+  ARRAY['Drums', 'Percussion', 'Backing Vocals'],
+  ARRAY['Indie Folk', 'Alternative Rock', 'OPM'],
     TRUE,
     'APPROVED'
 ) ON CONFLICT (id) DO UPDATE SET 
     is_verified = TRUE,
     verification_status = 'APPROVED',
     role = 'musician',
-    full_name = 'Juan Dela Cruz';
+  full_name = 'Gabriel dela Cruz';
 
 -- Test User 2: Studio Owner
 -- Email: studio@test.com / Password: pass123
@@ -394,17 +394,17 @@ INSERT INTO profiles (id, email, full_name, role, bio, location, is_verified, ve
 VALUES (
     '00000000-0000-0000-0000-000000000003',
     'studio@test.com',
-    'Maria Santos',
+  'Maria Santos',
     'studio-owner',
-    'Owner of Santos Recording Studio, serving artists since 2015.',
-    'Quezon City, Philippines',
+  'Owner of Santos Recording Studio, serving artists since 2015.',
+  'Quezon City, Philippines',
     TRUE,
     'APPROVED'
 ) ON CONFLICT (id) DO UPDATE SET 
     is_verified = TRUE,
     verification_status = 'APPROVED',
     role = 'studio-owner',
-    full_name = 'Maria Santos';
+  full_name = 'Maria Santos';
 
 -- Test User 3: Manager/Venue Owner
 -- Email: manager@test.com / Password: pass123
@@ -413,17 +413,17 @@ INSERT INTO profiles (id, email, full_name, role, bio, location, is_verified, ve
 VALUES (
     '00000000-0000-0000-0000-000000000001',
     'manager@test.com',
-    'Pedro Reyes',
+  'Marco Reyes',
     'venue-owner',
-    'Talent manager and event organizer specializing in indie rock acts.',
-    'Makati, Philippines',
+  'Venue booker and event organizer focused on OPM nights, private functions, and branded live events.',
+  'Quezon City, Metro Manila, Philippines',
     TRUE,
     'APPROVED'
 ) ON CONFLICT (id) DO UPDATE SET 
     is_verified = TRUE,
     verification_status = 'APPROVED',
     role = 'venue-owner',
-    full_name = 'Pedro Reyes';
+  full_name = 'Marco Reyes';
 
 -- ============================================================
 -- SAMPLE CONTENT (Groups, Studios, Gigs)
@@ -432,22 +432,22 @@ VALUES (
 -- Sample Groups (owned by musician)
 INSERT INTO groups (id, owner_id, name, genre, description, location, images, members, rate, latitude, longitude)
 VALUES 
-    (uuid_generate_v4(), '14d2e916-8d1c-4c04-9877-7ccd9bea6149', 'The Manila Sound', 'Rock', 'High-energy rock band from Manila', 'Manila, Philippines', ARRAY['https://picsum.photos/400/300?random=1'], '["Lead Guitar", "Bass", "Drums", "Vocals"]'::jsonb, 15000, 14.5995, 120.9842),
-    (uuid_generate_v4(), '14d2e916-8d1c-4c04-9877-7ccd9bea6149', 'Indie Vibes', 'Indie', 'Chill indie folk duo', 'Quezon City, Philippines', ARRAY['https://picsum.photos/400/300?random=2'], '["Acoustic Guitar", "Vocals"]'::jsonb, 8000, 14.6760, 121.0437)
+  (uuid_generate_v4(), '14d2e916-8d1c-4c04-9877-7ccd9bea6149', 'Amihan Sessions', 'Indie Folk', 'Quezon City indie folk band with a polished OPM live set for weddings, campus fairs, and private events.', 'Quezon City, Philippines', ARRAY['https://picsum.photos/400/300?random=1'], '["Gabriel", "Kyla", "Paolo", "Mika"]'::jsonb, 18000, 14.6760, 121.0437),
+  (uuid_generate_v4(), '14d2e916-8d1c-4c04-9877-7ccd9bea6149', 'Harana Duo', 'Acoustic OPM', 'Acoustic duo for cafe nights, proposals, and intimate receptions around Metro Manila.', 'San Juan City, Philippines', ARRAY['https://picsum.photos/400/300?random=2'], '["Ella", "Migs"]'::jsonb, 6500, 14.6019, 121.0355)
 ON CONFLICT DO NOTHING;
 
 -- Sample Studios (owned by studio owner)
 INSERT INTO studios (id, owner_id, name, address, hourly_rate, description, amenities, images, latitude, longitude)
 VALUES 
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'Santos Recording Studio', '123 Music Ave, Quezon City', 1500, 'Professional recording studio with state-of-the-art equipment', ARRAY['Air Conditioning', 'Drum Kit', 'Amplifiers', 'Mixing Console'], ARRAY['https://picsum.photos/400/300?random=3'], 14.6760, 121.0437),
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'Pocket Studio QC', '456 Sound St, Quezon City', 800, 'Affordable rehearsal and recording space', ARRAY['Air Conditioning', 'Basic PA System'], ARRAY['https://picsum.photos/400/300?random=4'], 14.6760, 121.0437)
+  (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'Santos Recording Studio', '123 Music Ave, Quezon City', 1500, 'Professional recording studio with state-of-the-art equipment', ARRAY['Air Conditioning', 'Drum Kit', 'Amplifiers', 'Mixing Console'], ARRAY['https://picsum.photos/400/300?random=3'], 14.6760, 121.0437),
+  (uuid_generate_v4(), '00000000-0000-0000-0000-000000000003', 'Pocket Studio QC', '456 Sound St, Quezon City', 800, 'Affordable rehearsal and recording space', ARRAY['Air Conditioning', 'Basic PA System'], ARRAY['https://picsum.photos/400/300?random=4'], 14.6760, 121.0437)
 ON CONFLICT DO NOTHING;
 
 -- Sample Gigs (organized by venue owner/manager)
 INSERT INTO gigs (id, organizer_id, name, location, budget, description, event_date, status, images, latitude, longitude)
 VALUES 
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000001', 'Friday Night Live', 'Route 196, Katipunan', 15000, 'Looking for a rock band to headline our Friday night show', NOW() + INTERVAL '14 days', 'open', ARRAY['https://picsum.photos/400/300?random=5'], 14.6389, 121.0733),
-    (uuid_generate_v4(), '00000000-0000-0000-0000-000000000001', 'Acoustic Sunday', 'Coffee Project, BGC', 8000, 'Need an acoustic act for our Sunday brunch sessions', NOW() + INTERVAL '7 days', 'open', ARRAY['https://picsum.photos/400/300?random=6'], 14.5547, 121.0244)
+  (uuid_generate_v4(), '00000000-0000-0000-0000-000000000001', 'Friday OPM Set at 70''s Bistro', '70''s Bistro, Quezon City', 7000, 'Looking for a rock or alt-pop act to anchor a Friday night OPM lineup.', NOW() + INTERVAL '14 days', 'open', ARRAY['https://picsum.photos/400/300?random=5'], 14.6348, 121.0387),
+  (uuid_generate_v4(), '00000000-0000-0000-0000-000000000001', 'Acoustic Nights at Jess & Pat''s', 'Jess & Pat''s, Quezon City', 5000, 'Need an acoustic act for an intimate Friday set with a warm OPM-heavy repertoire.', NOW() + INTERVAL '7 days', 'open', ARRAY['https://picsum.photos/400/300?random=6'], 14.6500, 121.0490)
 ON CONFLICT DO NOTHING;
 
 -- ============================================================
@@ -517,7 +517,7 @@ VALUES
         (SELECT id FROM groups WHERE owner_id = '14d2e916-8d1c-4c04-9877-7ccd9bea6149' LIMIT 1),
         (SELECT id FROM gigs WHERE organizer_id = '00000000-0000-0000-0000-000000000001' LIMIT 1),
         'pending',
-        'The Manila Sound would love to headline your Friday night show! We have a great setlist prepared.'
+        'Amihan Sessions would love to headline your Friday OPM set. We can bring a crowd-friendly mix of originals and familiar OPM favorites.'
     ),
     (
         uuid_generate_v4(),
@@ -525,7 +525,7 @@ VALUES
         (SELECT id FROM groups WHERE owner_id = '14d2e916-8d1c-4c04-9877-7ccd9bea6149' ORDER BY created_at DESC LIMIT 1),
         (SELECT id FROM gigs WHERE organizer_id = '00000000-0000-0000-0000-000000000001' ORDER BY created_at DESC LIMIT 1),
         'accepted',
-        'Indie Vibes is perfect for your acoustic Sunday brunch. We can bring our own equipment.'
+        'Harana Duo is a great fit for your intimate acoustic night. We can bring our own DI boxes and keep the set warm and conversational.'
     )
 ON CONFLICT DO NOTHING;
 
@@ -576,7 +576,7 @@ BEGIN
         -- A. Update specific named studios from seed
         UPDATE public.studios 
         SET owner_id = v_studio_owner_id 
-        WHERE name IN ('Santos Recording Studio', 'Pocket Studio QC', 'SoundLab Manila', 'Basement Beats', 'The Red Room', 'ProAudio Hub', 'Garage Jam') 
+        WHERE name IN ('Santos Recording Studio', 'Pocket Studio QC', 'SoundLab Manila', 'Basement Beats', 'The Red Room', 'ProAudio Hub', 'Garage Jam', 'Sampaguita Sound Lab', 'Bahay Tugtugan Marikina', 'Kundiman Room QC', 'Amihan Audio House', 'Tambayan Jam Studio') 
            OR owner_id = '00000000-0000-0000-0000-000000000003'; -- Catch the dummy ID
     ELSE
         RAISE NOTICE 'WARNING: studio@test.com not found';
@@ -586,13 +586,13 @@ BEGIN
     IF v_musician_id IS NOT NULL THEN
         RAISE NOTICE 'Found Musician: %', v_musician_id;
         INSERT INTO public.profiles (id, email, full_name, role, verification_status)
-        VALUES (v_musician_id, 'musician@test.com', 'Juan Dela Cruz', 'musician', 'APPROVED')
+      VALUES (v_musician_id, 'musician@test.com', 'Gabriel dela Cruz', 'musician', 'APPROVED')
         ON CONFLICT (id) DO UPDATE SET role = 'musician';
 
         -- Link Groups
         UPDATE public.groups 
         SET owner_id = v_musician_id 
-        WHERE name IN ('The Manila Sound', 'Indie Vibes', 'The Neon Lights', 'Midnight Jazz Trio', 'Sonic Boom', 'Acoustic Soul', 'Electric Dreams')
+        WHERE name IN ('The Manila Sound', 'Indie Vibes', 'The Neon Lights', 'Midnight Jazz Trio', 'Sonic Boom', 'Acoustic Soul', 'Electric Dreams', 'Amihan Sessions', 'Kundiman After Dark', 'Silakbo Collective', 'Harana Duo', 'Mayumi Midnight')
            OR owner_id = '00000000-0000-0000-0000-000000000002'
            OR owner_id = '14d2e916-8d1c-4c04-9877-7ccd9bea6149'; -- Catch the other dummy ID
     ELSE
@@ -603,13 +603,13 @@ BEGIN
     IF v_manager_id IS NOT NULL THEN
         RAISE NOTICE 'Found Manager: %', v_manager_id;
         INSERT INTO public.profiles (id, email, full_name, role, verification_status)
-        VALUES (v_manager_id, 'manager@test.com', 'Pedro Reyes', 'venue-owner', 'APPROVED')
+      VALUES (v_manager_id, 'manager@test.com', 'Marco Reyes', 'venue-owner', 'APPROVED')
         ON CONFLICT (id) DO UPDATE SET role = 'venue-owner';
 
         -- Link Gigs
         UPDATE public.gigs 
         SET organizer_id = v_manager_id 
-        WHERE name IN ('Friday Night Live', 'Acoustic Sunday', 'Acoustic Nights at The Hive', 'Wedding Reception Band', 'Corporate Event Opener', 'Bar gig: Friday Night', 'Private Party')
+        WHERE name IN ('Friday Night Live', 'Acoustic Sunday', 'Acoustic Nights at The Hive', 'Wedding Reception Band', 'Corporate Event Opener', 'Bar gig: Friday Night', 'Private Party', 'Acoustic Nights at Jess & Pat''s', 'Tagaytay Wedding Reception Band', 'Corporate Opening Set at SMX Manila', 'Friday OPM Set at 70''s Bistro', 'Private Jazz Night in Forbes Park')
            OR organizer_id = '00000000-0000-0000-0000-000000000001';
     ELSE
         RAISE NOTICE 'WARNING: manager@test.com not found';

@@ -107,7 +107,7 @@ interface StudioBookTabProps {
   setBookingNotes: (value: string) => void;
   loading: boolean;
   setLoading: (value: boolean) => void;
-  handleConfirm: (action: () => void, title: string, message: string, options?: { requireTerms?: boolean }) => void;
+  handleConfirm: (action: () => void, title: string, message: string, options?: { requireTerms?: boolean; contractUrl?: string | null; contractName?: string }) => void;
   setModalVisible: (value: boolean) => void;
   setPaymentBookingData: (value: any) => void;
   setSelectedPaymentType: (value: "full" | "downpayment") => void;
@@ -1230,7 +1230,7 @@ const StudioBookTab = ({
                 try {
                   const bookingDate = toDateKey(date);
                   if (!bookingDate) {
-                    showAlert("error", "Invalid Booking Date", "Invalid booking date. Please reselect your schedule.");
+                    showAlert("warning", "Date Not Selected", "Please select a valid booking date before continuing.");
                     setIsCheckingAvailability(false);
                     return;
                   }
@@ -1260,9 +1260,9 @@ const StudioBookTab = ({
                     recordingRate = getRecordingRatePerSong();
                     if (recordingRate <= 0) {
                       showAlert(
-                        "error",
-                        "Recording Rate Missing",
-                        "This studio does not have a valid recording rate yet.",
+                        "warning",
+                        "Recording Rate Not Set",
+                        "This studio hasn't set a recording rate yet. Contact the studio owner for details.",
                       );
                       setIsCheckingAvailability(false);
                       return;
@@ -1279,7 +1279,7 @@ const StudioBookTab = ({
 
                   if (availError) {
                     console.error("Availability check error:", availError);
-                    showAlert("error", "Availability Check Failed", "Failed to check availability. Please try again.");
+                    showAlert("warning", "Couldn't Check Availability", "We couldn't verify this time slot right now. Please try again in a moment.");
                     setIsCheckingAvailability(false);
                     return;
                   }
@@ -1340,7 +1340,7 @@ const StudioBookTab = ({
 
                     if (pricingError || !pricing || pricing.length === 0) {
                       console.error("Pricing error:", pricingError);
-                      showAlert("error", "Pricing Error", "Failed to calculate price. Please try again.");
+                      showAlert("warning", "Price Unavailable", "We couldn't calculate the price for this session. Please try again.");
                       setIsCheckingAvailability(false);
                       return;
                     }
@@ -1499,7 +1499,7 @@ const StudioBookTab = ({
                   setSelectedSlot(null);
                 } catch (e: any) {
                   console.error("Error adding booking:", e);
-                  showAlert("error", "Error", "An error occurred. Please try again.");
+                  showAlert("warning", "Couldn't Add Slot", "Something went wrong while adding this time slot. Please try again.");
                 } finally {
                   setIsCheckingAvailability(false);
                 }
@@ -1917,28 +1917,40 @@ const StudioBookTab = ({
                       let errorMsg = errors[0].error?.message || "Failed to create bookings";
                       const normalizedErrorMsg = String(errorMsg).toLowerCase();
 
+                      // Replace technical/raw messages with readable ones before displaying
                       if (errorMsg.includes("no_overlapping_bookings") || errorMsg.includes("exclusion constraint")) {
-                        errorMsg =
-                          "This time slot was just booked by someone else. Please select a different time slot or refresh and try again.";
+                        errorMsg = "This time slot was just taken by another booking. Please select a different time or refresh and try again.";
+                      } else if (normalizedErrorMsg.includes("invalid time slot:") || normalizedErrorMsg === "invalid time slot") {
+                        errorMsg = "One of the selected time slots is invalid. Please double-check your schedule and try again.";
+                      } else if (normalizedErrorMsg.includes("cannot create a booking in the past")) {
+                        errorMsg = "You can't book a time that's already passed. Please choose a future date and time.";
+                      } else if (normalizedErrorMsg.includes("availability check failed")) {
+                        errorMsg = "We couldn't verify availability for this time slot. Please try again in a moment.";
+                      } else if (normalizedErrorMsg.includes("pricing calculation failed")) {
+                        errorMsg = "We couldn't calculate the price for this session. Please try again.";
+                      } else if (normalizedErrorMsg === "failed to create bookings") {
+                        errorMsg = "Something went wrong while submitting your booking. Please try again.";
                       }
 
                       if (normalizedErrorMsg.includes("advance booking")) {
-                        showAlert("warning", "Advance Booking Required", errorMsg);
+                        showAlert("warning", "Advance Notice Required", errorMsg);
                       } else if (
                         normalizedErrorMsg.includes("cannot create a booking in the past") ||
                         normalizedErrorMsg.includes("bookings can only be made up to")
                       ) {
-                        showAlert("warning", "Invalid Booking Date", errorMsg);
+                        showAlert("warning", "Date Not Available", errorMsg);
                       } else if (
                         normalizedErrorMsg.includes("time slot") ||
                         normalizedErrorMsg.includes("outside operating hours")
                       ) {
-                        showAlert("warning", "Time Slot Unavailable", errorMsg);
+                        showAlert("warning", "Slot Not Available", errorMsg);
+                      } else if (normalizedErrorMsg.includes("already have a pending booking")) {
+                        showAlert("warning", "Booking Already Pending", errorMsg);
                       } else {
-                        showAlert("error", "Booking Error", errorMsg);
+                        showAlert("warning", "Booking Not Submitted", errorMsg);
                       }
                     } else if (errors.length > 0) {
-                      showAlert("warning", "Partial Success", `${results.length} booking(s) created successfully, but ${errors.length} failed. Please check the Bookings page.`);
+                      showAlert("warning", "Partially Submitted", `${results.length} session(s) were booked, but ${errors.length} could not be submitted. Please check the Bookings page.`);
                       setBookings([]);
                       setSelectedTimeSlots([]);
                       setBookingNotes("");
@@ -1989,14 +2001,14 @@ const StudioBookTab = ({
                   } catch (e: any) {
                     setLoading(false);
                     console.error("Booking creation error:", e);
-                    showAlert("error", "Unexpected Error", "An unexpected error occurred. Please try again.");
+                    showAlert("warning", "Booking Not Submitted", "An unexpected error occurred. Please try again.");
                   }
                 },
                 isRecordingMode ? "Confirm Recording Booking" : "Confirm Session Booking",
                 isRecordingMode
                   ? `Book ${bookings.length} recording session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nRecording uses time slots and is priced per song. Time rule: ${recordingRuleShort}. The studio owner will review and approve your booking request.`
                   : `Book ${bookings.length} session(s) at ${group.name}\nTotal: ₱${totalBookingsCost.toLocaleString()}\n\nThe studio owner will review and approve your booking request.`,
-                { requireTerms: true },
+                { requireTerms: true, contractUrl: group?.contract_url ?? null, contractName: group?.name },
               )
             }
           >

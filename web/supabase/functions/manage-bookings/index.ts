@@ -476,7 +476,7 @@ serve(async (req: Request) => {
       if (userRole === "musician") {
         const { data: bookings, error: bookingError } = await supabaseClient
           .from("studio_bookings")
-          .select("*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order))")
+          .select("*, studio:studios(name, owner_id, studio_media(media_url, sort_order))")
           .eq("user_id", userId)
           .order("booking_date", { ascending: false });
 
@@ -562,7 +562,7 @@ serve(async (req: Request) => {
             base_rate: b.base_rate,
             total_cost: b.final_price,
             modifiers_applied: b.modifiers_applied || {},
-            studio_type: b.studio?.studio_type || null,
+            studio_type: null,
             session_type: b.session_type || null,
             song_count:
               b.song_count ||
@@ -591,7 +591,11 @@ serve(async (req: Request) => {
             // @ts-ignore
             categorized.Pending.push(item);
           } else if (b.status === "confirmed") {
-            if (now > endDate) {
+            if (b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
+              // Downpayment paid but balance still owed — keep in Pending so musician can pay balance
+              // @ts-ignore
+              categorized.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
+            } else if (now > endDate) {
               // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
               // @ts-ignore
               categorized.Review.push({ ...item, status: "Completed" });
@@ -640,7 +644,7 @@ serve(async (req: Request) => {
           const { data: bookings, error: bookingError } = await supabaseClient
             .from("studio_bookings")
             .select(
-              "*, studio:studios(name, owner_id, studio_type, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
+              "*, studio:studios(name, owner_id, studio_media(media_url, sort_order)), profile:user_id(full_name, avatar_url, email, contact_number, address)",
             )
             .in("studio_id", studioIds)
             .order("booking_date", { ascending: false });
@@ -752,7 +756,7 @@ serve(async (req: Request) => {
               base_rate: b.base_rate,
               total_cost: b.final_price, // Use stored column
               modifiers_applied: b.modifiers_applied || {},
-              studio_type: b.studio?.studio_type || null,
+              studio_type: null,
               session_type: b.session_type || null,
               song_count:
                 b.song_count ||
@@ -3186,17 +3190,17 @@ serve(async (req: Request) => {
       // 2. Prepare update data
       // If it sends 'confirmed' status, it moves to Upcoming
       const updateData: any = {
-        payment_status: 'paid',
         paid_at: new Date().toISOString(),
         status: 'confirmed', // Auto-confirm when paid
       };
 
       // Handle remaining balance logic
       if (booking.payment_type === 'downpayment' && booking.remaining_balance > 0) {
-        // Downpayment paid, but balance remains
-        // Keep remaining_balance as is (or update if partial payment logic existed, but here we assume the required amount was paid)
+        // Downpayment paid, but balance remains — mark as partial
+        updateData.payment_status = 'partial';
       } else {
         // Full payment or Balance payment -> clear balance
+        updateData.payment_status = 'paid';
         updateData.remaining_balance = 0;
       }
 

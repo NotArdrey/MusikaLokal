@@ -286,6 +286,8 @@ const ListingDetailsSheet = forwardRef<
   const [confirmMessage, setConfirmMessage] = useState("");
   const [confirmTitle, setConfirmTitle] = useState("");
   const [confirmRequireTerms, setConfirmRequireTerms] = useState(false);
+  const [confirmContractUrl, setConfirmContractUrl] = useState<string | null>(null);
+  const [confirmContractName, setConfirmContractName] = useState<string | undefined>(undefined);
 
   // BackHandler Logic
   const [sheetIndex, setSheetIndex] = useState(-1);
@@ -444,13 +446,13 @@ const ListingDetailsSheet = forwardRef<
     action: () => void,
     title: string,
     message: string,
-    options?: { requireTerms?: boolean },
+    options?: { requireTerms?: boolean; contractUrl?: string | null; contractName?: string },
   ) => {
     debugLog("🔵 handleConfirm called");
 
     // System Lock Check - Block if user has unpaid balance
     if (isSystemLocked) {
-      showLockAlert();
+      showLockAlert(() => onDismiss());
       return;
     }
 
@@ -488,6 +490,8 @@ const ListingDetailsSheet = forwardRef<
     setConfirmTitle(title);
     setConfirmMessage(message);
     setConfirmRequireTerms(Boolean(options?.requireTerms));
+    setConfirmContractUrl(options?.contractUrl ?? null);
+    setConfirmContractName(options?.contractName);
     setModalVisible(true);
     debugLog("Modal should now be visible");
   };
@@ -511,9 +515,10 @@ const ListingDetailsSheet = forwardRef<
 
   const getFavoriteTargetType = (
     listingType?: string,
-  ): "group" | "studio" | "gig" | null => {
+  ): "group" | "studio" | "gig" | "profile" | null => {
     const normalized = (listingType || "").toLowerCase();
     if (normalized === "group") return "group";
+    if (normalized === "artist" || normalized === "musician") return "profile";
     if (normalized === "studio" || normalized === "venue") return "studio";
     if (normalized === "gig") return "gig";
     return null;
@@ -521,7 +526,7 @@ const ListingDetailsSheet = forwardRef<
 
   const syncFavoriteMetadata = useCallback(
     async (
-      targetType: "group" | "studio" | "gig" | null,
+      targetType: "group" | "studio" | "gig" | "profile" | null,
       targetId: string | null | undefined,
       currentUserId?: string | null,
     ) => {
@@ -1869,7 +1874,7 @@ const ListingDetailsSheet = forwardRef<
       showSheetAlert(
         "info",
         "Bookmark Unavailable",
-        "Bookmarking is currently available for groups, studios, and gigs.",
+        "Bookmarking is currently available for artists, groups, studios, and gigs.",
       );
       return;
     }
@@ -2512,12 +2517,16 @@ const ListingDetailsSheet = forwardRef<
         onClose={() => {
           debugLog("🔴 Modal closed without confirmation");
           setConfirmRequireTerms(false);
+          setConfirmContractUrl(null);
+          setConfirmContractName(undefined);
           setModalVisible(false);
         }}
         onConfirm={() => {
           debugLog("🟢 Modal CONFIRMED - executing action");
           debugLog("confirmAction:", confirmAction);
           setConfirmRequireTerms(false);
+          setConfirmContractUrl(null);
+          setConfirmContractName(undefined);
           setModalVisible(false);
           try {
             confirmAction();
@@ -2530,6 +2539,8 @@ const ListingDetailsSheet = forwardRef<
         message={confirmMessage}
         buttonText="Confirm"
         requireTermsAcceptance={confirmRequireTerms}
+        contractUrl={confirmContractUrl}
+        contractName={confirmContractName}
       />
 
       {/* Payment Option Modal */}

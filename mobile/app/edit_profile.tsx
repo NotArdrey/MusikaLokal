@@ -214,7 +214,7 @@ export default function EditProfileScreen() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        showAlert("error", "Error", "Please log in first");
+        showAlert("warning", "Not Logged In", "Please log in to continue.");
         router.back();
         return;
       }
@@ -335,7 +335,7 @@ export default function EditProfileScreen() {
       const asset = result.assets[0];
 
       if (!asset.base64) {
-        showAlert("error", "Error", "Could not read image data");
+        showAlert("warning", "Couldn't Read Image", "Could not read image data. Please try a different photo.");
         return;
       }
 
@@ -356,13 +356,13 @@ export default function EditProfileScreen() {
     } catch (err: any) {
       setUploadingPhoto(false);
       console.error("❌ Error:", err);
-      showAlert("error", "Error", err.message || "Failed to upload photo");
+      showAlert("warning", "Upload Failed", err.message || "Failed to upload photo");
     }
   }
 
   async function handleSave() {
     if (!userId) {
-      showAlert("error", "Error", "Not authenticated");
+      showAlert("warning", "Not Logged In", "Please log in to continue.");
       return;
     }
 
@@ -524,7 +524,7 @@ export default function EditProfileScreen() {
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (error: any) {
-      showAlert("error", "Error", error?.message || "Failed to save");
+      showAlert("warning", "Couldn't Save", error?.message || "Failed to save changes.");
     } finally {
       setUploadingPhoto(false);
       setSaving(false);

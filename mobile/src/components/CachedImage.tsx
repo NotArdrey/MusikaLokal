@@ -29,14 +29,20 @@ const CachedImage = ({
   transition = 0,
   cachePolicy = "memory-disk",
 }: CachedImageProps) => {
-  const sourceUri = useMemo(() => {
-    const raw = (uri || fallbackUri || "").trim();
+  const primarySourceUri = useMemo(() => {
+    const raw = (uri || "").trim();
     if (!raw) return null;
     return raw;
-  }, [fallbackUri, uri]);
+  }, [uri]);
 
-  const transformedUri = useMemo(() => {
-    return optimizeSupabaseImageUrl(sourceUri, {
+  const backupSourceUri = useMemo(() => {
+    const raw = (fallbackUri || "").trim();
+    if (!raw || raw === primarySourceUri) return null;
+    return raw;
+  }, [fallbackUri, primarySourceUri]);
+
+  const transformedPrimaryUri = useMemo(() => {
+    return optimizeSupabaseImageUrl(primarySourceUri, {
       width,
       height,
       quality,
@@ -44,13 +50,24 @@ const CachedImage = ({
       format,
       cacheVersion,
     });
-  }, [cacheVersion, format, height, quality, resize, sourceUri, width]);
+  }, [cacheVersion, format, height, primarySourceUri, quality, resize, width]);
 
-  const [resolvedUri, setResolvedUri] = useState<string | null>(transformedUri);
+  const transformedBackupUri = useMemo(() => {
+    return optimizeSupabaseImageUrl(backupSourceUri, {
+      width,
+      height,
+      quality,
+      resize,
+      format,
+      cacheVersion,
+    });
+  }, [backupSourceUri, cacheVersion, format, height, quality, resize, width]);
+
+  const [resolvedUri, setResolvedUri] = useState<string | null>(transformedPrimaryUri || transformedBackupUri);
 
   useEffect(() => {
-    setResolvedUri(transformedUri);
-  }, [transformedUri]);
+    setResolvedUri(transformedPrimaryUri || transformedBackupUri);
+  }, [transformedBackupUri, transformedPrimaryUri]);
 
   if (!resolvedUri) return null;
 
@@ -63,8 +80,18 @@ const CachedImage = ({
       cachePolicy={cachePolicy}
       recyclingKey={resolvedUri}
       onError={() => {
-        if (sourceUri && resolvedUri !== sourceUri) {
-          setResolvedUri(sourceUri);
+        if (primarySourceUri && resolvedUri !== primarySourceUri) {
+          setResolvedUri(primarySourceUri);
+          return;
+        }
+
+        if (transformedBackupUri && resolvedUri !== transformedBackupUri) {
+          setResolvedUri(transformedBackupUri);
+          return;
+        }
+
+        if (backupSourceUri && resolvedUri !== backupSourceUri) {
+          setResolvedUri(backupSourceUri);
         }
       }}
     />

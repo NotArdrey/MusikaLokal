@@ -590,6 +590,10 @@ serve(async (req: Request) => {
           if (b.status === "pending" || b.status === "pending_relocation") {
             // @ts-ignore
             categorized.Pending.push(item);
+          } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
+            // Downpayment paid but balance still owed — keep in Pending so musician can pay the rest
+            // @ts-ignore
+            categorized.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
           } else if (b.status === "confirmed") {
             if (now > endDate) {
               // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
@@ -787,6 +791,10 @@ serve(async (req: Request) => {
             if (b.status === "pending" || b.status === "pending_relocation") {
               // @ts-ignore
               categorized.Pending.push(item);
+            } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
+              // Downpayment paid but balance still owed — show in Pending so owner sees it awaiting full payment
+              // @ts-ignore
+              categorized.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
             } else if (b.status === "confirmed") {
               if (now > endDate) {
                 // AUTO-COMPLETE: If confirmed and time passed, treat as Completed (Review)
@@ -3184,17 +3192,17 @@ serve(async (req: Request) => {
       // 2. Prepare update data
       // If it sends 'confirmed' status, it moves to Upcoming
       const updateData: any = {
-        payment_status: 'paid',
         paid_at: new Date().toISOString(),
         status: 'confirmed', // Auto-confirm when paid
       };
 
       // Handle remaining balance logic
       if (booking.payment_type === 'downpayment' && booking.remaining_balance > 0) {
-        // Downpayment paid, but balance remains
-        // Keep remaining_balance as is (or update if partial payment logic existed, but here we assume the required amount was paid)
+        // Downpayment paid, but balance remains — mark as partial
+        updateData.payment_status = 'partial';
       } else {
         // Full payment or Balance payment -> clear balance
+        updateData.payment_status = 'paid';
         updateData.remaining_balance = 0;
       }
 

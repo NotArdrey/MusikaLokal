@@ -1,9 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Linking from "expo-linking";
 import React from "react";
 import {
     ActivityIndicator,
-    Linking,
     ScrollView,
+    StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
@@ -66,6 +67,10 @@ const GigApplyTab = ({
   groupApplicationBy,
   handleSubmitApplication,
 }: GigApplyTabProps) => {
+  const [isSystemTermsAccepted, setIsSystemTermsAccepted] = React.useState(false);
+  const [isCustomContractAccepted, setIsCustomContractAccepted] = React.useState(false);
+  const hasCustomContract = Boolean(group?.contract_url);
+
   debugLog("🎨 renderGigApply called");
   debugLog("Current state:", {
     pitchMessage,
@@ -477,54 +482,47 @@ const GigApplyTab = ({
         maxSizeMB={50}
       />
 
-      {group?.contract_url ? (
+      <View style={{ marginBottom: 24, gap: 12 }}>
+        {hasCustomContract && (
+          <TouchableOpacity activeOpacity={1}
+            onPress={() => setIsCustomContractAccepted((prev) => !prev)}
+            style={gigApplyStyles.termsRow}
+          >
+            <View style={[gigApplyStyles.checkbox, {
+              borderColor: isCustomContractAccepted ? colors.primary : colors.border,
+              backgroundColor: isCustomContractAccepted ? colors.primary : 'transparent',
+            }]}>
+              {isCustomContractAccepted && <Text style={gigApplyStyles.checkboxTick}>✓</Text>}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[gigApplyStyles.termsText, { color: colors.text }]}>
+                I have read and agree to{' '}
+                <Text style={{ fontFamily: 'Poppins_600SemiBold' }}>{group?.name || 'the organizer'}'s</Text>
+                {' '}custom contract. *
+              </Text>
+              <TouchableOpacity activeOpacity={1} onPress={() => Linking.openURL(group.contract_url)} style={{ marginTop: 4 }}>
+                <Text style={[gigApplyStyles.termsLink, { color: colors.primary }]}>View Custom Contract</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity activeOpacity={1}
-          onPress={() => Linking.openURL(group.contract_url)}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            marginBottom: 24,
-          }}
+          onPress={() => setIsSystemTermsAccepted((prev) => !prev)}
+          style={gigApplyStyles.termsRow}
         >
-          <Ionicons name="document-text-outline" size={18} color={colors.primary} />
-          <Text
-            style={{
-              color: colors.primary,
-              marginLeft: 8,
-              textDecorationLine: "underline",
-              fontFamily: "Poppins_500Medium",
-            }}
-          >
-            Review Terms & Conditions
+          <View style={[gigApplyStyles.checkbox, {
+            borderColor: isSystemTermsAccepted ? colors.primary : colors.border,
+            backgroundColor: isSystemTermsAccepted ? colors.primary : 'transparent',
+          }]}>
+            {isSystemTermsAccepted && <Text style={gigApplyStyles.checkboxTick}>✓</Text>}
+          </View>
+          <Text style={[gigApplyStyles.termsText, { color: colors.text }]}>
+            I agree to Musika Lokal's{' '}
+            <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Terms and Conditions</Text>. *
           </Text>
-          <Ionicons
-            name="open-outline"
-            size={14}
-            color={colors.primary}
-            style={{ marginLeft: 6 }}
-          />
         </TouchableOpacity>
-      ) : (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            marginBottom: 24,
-            opacity: 0.5,
-          }}
-        >
-          <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
-          <Text
-            style={{
-              color: colors.textSecondary,
-              marginLeft: 8,
-              fontFamily: "Poppins_400Regular",
-            }}
-          >
-            No Terms & Conditions uploaded
-          </Text>
-        </View>
-      )}
+      </View>
 
       {groupAlreadyApplied && selectedGroupId && (
         <View
@@ -554,6 +552,8 @@ const GigApplyTab = ({
             !pitchMessage.trim() ||
             !videoUrl ||
             groupAlreadyApplied ||
+            !isSystemTermsAccepted ||
+            (hasCustomContract && !isCustomContractAccepted) ||
             (group.requirements?.musician_type === "group" && !selectedGroupId)) &&
             { opacity: 0.5 },
         ]}
@@ -566,6 +566,8 @@ const GigApplyTab = ({
           hasExistingApplication ||
           isBlocked ||
           groupAlreadyApplied ||
+          !isSystemTermsAccepted ||
+          (hasCustomContract && !isCustomContractAccepted) ||
           (group.requirements?.musician_type === "group" && !selectedGroupId)
         }
       >
@@ -591,6 +593,39 @@ const GigApplyTab = ({
     </View>
   );
 };
+
+const gigApplyStyles = StyleSheet.create({
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 1.5,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    flexShrink: 0,
+  },
+  checkboxTick: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontFamily: 'Poppins_700Bold',
+    lineHeight: 14,
+  },
+  termsText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: 'Poppins_400Regular',
+  },
+  termsLink: {
+    fontSize: 13,
+    fontFamily: 'Poppins_500Medium',
+    textDecorationLine: 'underline',
+  },
+});
 
 export default GigApplyTab;
 
