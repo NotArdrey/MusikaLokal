@@ -1269,7 +1269,7 @@ export default function AddStudioScreen() {
           business_permit_url: payload.business_permit_url,
           latitude: payload.latitude,
           longitude: payload.longitude,
-          permit_status: 'pending_review',
+          permit_status: 'approved',
         })
         .select()
         .single();

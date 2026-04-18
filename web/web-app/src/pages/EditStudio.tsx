@@ -53,7 +53,7 @@ export default function EditStudioPage() {
   const [existingPermitUrl, setExistingPermitUrl] = useState<string | null>(null);
   const [newPermitFile, setNewPermitFile] = useState<File | null>(null);
   const [permitPreview, setPermitPreview] = useState<string | null>(null);
-  const [permitStatus, setPermitStatus] = useState<string>("pending_review");
+  const [permitStatus, setPermitStatus] = useState<string>("approved");
   const [alert, setAlert] = useState({
     visible: false,
     type: "info" as "info" | "error" | "success" | "warning",
@@ -77,7 +77,7 @@ export default function EditStudioPage() {
         setSelectedAmenities(data.amenities || []);
         setExistingImages(data.images || []);
         setExistingPermitUrl(data.business_permit_url || null);
-        setPermitStatus(data.permit_status || "pending_review");
+        setPermitStatus(data.permit_status || "approved");
       }
       setLoading(false);
     })();
@@ -159,19 +159,20 @@ export default function EditStudioPage() {
         amenities: selectedAmenities,
         images: allImages,
         business_permit_url: permitUrl,
+        permit_status: "approved",
+        permit_rejection_reason: null,
+        permit_admin_notes: null,
+        permit_reviewed_by: null,
+        permit_reviewed_at: null,
       };
-
-      // If permit was rejected and owner uploads a new one, set to resubmitted
-      if (newPermitFile && (permitStatus === "rejected")) {
-        updateData.permit_status = "resubmitted";
-        updateData.permit_rejection_reason = null;
-      }
 
       const { error } = await supabase
         .from("studios")
         .update(updateData)
         .eq("id", studioId);
       if (error) throw error;
+
+      setPermitStatus("approved");
 
       setAlert({
         visible: true,

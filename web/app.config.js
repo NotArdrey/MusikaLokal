@@ -32,13 +32,9 @@ module.exports = () => {
         "EXPO_PUBLIC_GROQ_API_KEY",
         sanitize(existingExtra.groqApiKey),
       ),
-      geminiApiKey: readEnv(
-        "EXPO_PUBLIC_GEMINI_API_KEY",
-        sanitize(existingExtra.geminiApiKey),
-      ),
-      geminiModel: readEnv(
-        "EXPO_PUBLIC_GEMINI_MODEL",
-        sanitize(existingExtra.geminiModel) || "gemini-2.5-flash-lite",
+      googleMapsApiKey: readEnv(
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY",
+        sanitize(existingExtra.googleMapsApiKey),
       ),
     },
   };

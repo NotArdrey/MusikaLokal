@@ -139,7 +139,7 @@ export default function AddStudioPage() {
           amenities: selectedAmenities,
           images: imageUrls,
           business_permit_url: permitUrl,
-          permit_status: "pending_review",
+          permit_status: "approved",
         })
         .select()
         .single();
@@ -149,9 +149,9 @@ export default function AddStudioPage() {
         visible: true,
         type: "success",
         title: "Studio Created",
-        message: "Your studio has been submitted for permit review. It will be listed publicly after admin approval.",
+        message: "Your studio is live and ready to manage.",
       });
-      setTimeout(() => navigate("/bookings?tab=pending"), 1500);
+      setTimeout(() => navigate(`/manage-studio?id=${data.id}`), 1500);
     } catch {
       setAlert({
         visible: true,
@@ -375,7 +375,7 @@ export default function AddStudioPage() {
                 className="text-xs mb-4"
                 style={{ color: colors.textSecondary }}
               >
-                Upload your business permit (PDF or image). Required for admin approval.
+                Upload your business permit (PDF or image).
               </p>
               {permitPreview ? (
                 <div className="flex items-center gap-3 rounded-xl border p-3" style={{ borderColor: borderCol }}>
