@@ -90,7 +90,7 @@ export const useRequireAuth = () => {
           router.replace("/");
         });
       } else {
-        router.replace("/home");
+        router.replace("/feed");
       }
     }
   }, [session, loading, isGuest]);
@@ -141,6 +141,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const profileRealtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const subscriptionExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const identityExpiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roleFetchInFlightRef = useRef<Promise<void> | null>(null);
+  const lastRoleFetchRef = useRef<{ userId: string | null; fetchedAt: number }>({
+    userId: null,
+    fetchedAt: 0,
+  });
+
+  const ROLE_FETCH_COOLDOWN_MS = 5000;
+  const AUTH_DEBUG_LOGS = false;
 
   const showAlert = useCallback(
     (
@@ -534,7 +542,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       const isNoisyStartupSignedOut = event === "SIGNED_OUT" && !session;
-      if (__DEV__ && event !== "INITIAL_SESSION" && !isNoisyStartupSignedOut) {
+      if (__DEV__ && AUTH_DEBUG_LOGS && event !== "INITIAL_SESSION" && !isNoisyStartupSignedOut) {
         console.log("Auth state change:", event);
       }
 
@@ -555,6 +563,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setIdentityRequired(false);
         setIdentityChecked(true);
         setIdentityExpiresAt(null);
+        roleFetchInFlightRef.current = null;
+        lastRoleFetchRef.current = { userId: null, fetchedAt: 0 };
         setLoading(false);
         return;
       }
@@ -823,36 +833,72 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setIsAdmin(false);
   };
 
-  const fetchUserRole = async (userId: string) => {
-    try {
-      console.log("🔍 Fetching role for user ID:", userId);
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", userId)
-        .limit(1);
+  const fetchUserRole = async (nextUserId: string) => {
+    const now = Date.now();
+    const last = lastRoleFetchRef.current;
 
-      if (error) {
-        console.log("❌ Error fetching user role:", error.message, error);
-        setUserRole(null);
-        setRoleResolved(true);
-        return;
-      }
-
-      if (data && data.length > 0) {
-        console.log("✅ User role fetched:", data[0].role);
-        setUserRole(data[0].role);
-        setRoleResolved(true);
-      } else {
-        console.log("⚠️ No profile data found for user");
-        setUserRole(null);
-        setRoleResolved(true);
-      }
-    } catch (error) {
-      console.log("❌ Exception fetching user role:", error);
-      setUserRole(null);
-      setRoleResolved(true);
+    if (roleFetchInFlightRef.current && last.userId === nextUserId) {
+      await roleFetchInFlightRef.current;
+      return;
     }
+
+    if (
+      last.userId === nextUserId &&
+      userRole &&
+      now - last.fetchedAt < ROLE_FETCH_COOLDOWN_MS
+    ) {
+      setRoleResolved(true);
+      return;
+    }
+
+    const run = (async () => {
+      try {
+        if (__DEV__ && AUTH_DEBUG_LOGS) {
+          console.log("🔍 Fetching role for user ID:", nextUserId);
+        }
+
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", nextUserId)
+          .limit(1);
+
+        if (error) {
+          console.warn("Error fetching user role:", error.message);
+          setUserRole(null);
+          setRoleResolved(true);
+          return;
+        }
+
+        if (data && data.length > 0) {
+          if (__DEV__ && AUTH_DEBUG_LOGS) {
+            console.log("✅ User role fetched:", data[0].role);
+          }
+
+          setUserRole(data[0].role);
+          lastRoleFetchRef.current = { userId: nextUserId, fetchedAt: Date.now() };
+          setRoleResolved(true);
+          return;
+        }
+
+        if (__DEV__ && AUTH_DEBUG_LOGS) {
+          console.log("⚠️ No profile data found for user");
+        }
+
+        setUserRole(null);
+        setRoleResolved(true);
+      } catch (error) {
+        console.warn("Exception fetching user role:", error);
+        setUserRole(null);
+        setRoleResolved(true);
+      } finally {
+        roleFetchInFlightRef.current = null;
+      }
+    })();
+
+    lastRoleFetchRef.current = { userId: nextUserId, fetchedAt: now };
+    roleFetchInFlightRef.current = run;
+    await run;
   };
 
   return (

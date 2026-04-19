@@ -296,8 +296,8 @@ export default function LoginScreen() {
             return;
           } else {
             // Verified & Profile Exists -> Allow Entry
-            console.log('Verification passed. Redirecting to Home.');
-            router.replace('/home' as any);
+            console.log('Verification passed. Redirecting to Feed.');
+            router.replace('/feed' as any);
           }
         }
       }
@@ -375,7 +375,7 @@ export default function LoginScreen() {
   const handleContinueAsGuest = async () => {
     await supabase.auth.signOut({ scope: 'local' });
     await setGuestMode(true);
-    router.replace('/home' as any);
+    router.replace('/feed' as any);
   };
 
   // Derived styles based on theme

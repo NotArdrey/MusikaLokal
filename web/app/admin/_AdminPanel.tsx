@@ -21,7 +21,7 @@ import Header from '../../src/components/header';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 
-export type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
+export type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit' | 'deals';
 type PermitFilter = 'all' | 'pending_review' | 'approved' | 'rejected' | 'resubmitted';
 type EntityFilter = 'all' | 'studio' | 'gig';
 type ReportStatus = 'pending' | 'resolved' | 'dismissed';
@@ -50,6 +50,7 @@ const adminTabRoutes: Record<Tab, string> = {
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
+  deals: '/admin/deals',
 };
 
 interface DashboardMetrics {
@@ -1926,6 +1927,7 @@ export default function AdminPanel({ initialTab, children }: AdminPanelProps) {
               { key: 'users', label: 'Users', icon: 'people-outline' },
               { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
               { key: 'audit', label: 'Audit', icon: 'time-outline' },
+              { key: 'deals', label: 'Deals', icon: 'briefcase-outline' },
             ].map((item) => {
               const active = tab === item.key;
               return (

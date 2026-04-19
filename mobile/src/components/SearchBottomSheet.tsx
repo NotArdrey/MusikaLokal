@@ -30,14 +30,18 @@ import {
 import { Easing } from "react-native-reanimated";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../context/AuthContext";
+import { showTopToast } from "../context/TopToastContext";
 import { useTheme } from "../context/ThemeContext";
 import ListingCard from "./ListingCard";
 
 const debugLog = (..._args: unknown[]) => {};
 
+const isFabricEnabled = Boolean((globalThis as { nativeFabricUIManager?: unknown }).nativeFabricUIManager);
+
 // Enable LayoutAnimation on Android
 if (
   Platform.OS === "android" &&
+  !isFabricEnabled &&
   UIManager.setLayoutAnimationEnabledExperimental
 ) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -158,12 +162,13 @@ interface SearchBottomSheetProps {
   onClose?: () => void;
   onItemPress?: (listingId: string) => void;
   onChat?: (item: any) => void;
+  onFollowChanged?: () => void;
 }
 
 const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
-  function SearchBottomSheet({ onClose, onItemPress, onChat }, ref) {
+  function SearchBottomSheet({ onClose, onItemPress, onChat, onFollowChanged }, ref) {
     const { colors, isDark } = useTheme();
-    const { userRole, isGuest } = useAuth();
+    const { userRole, isGuest, userId } = useAuth();
     const snapPoints = useMemo(() => ["90%"], []);
     const animationConfigs = useBottomSheetTimingConfigs({
       duration: 320,
@@ -178,7 +183,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
           ? []
           : isOwner
             ? ["All", "Musician"]
-            : ["All", "Musician", "Studio", "Gig"],
+            : ["All", "Musician", "Studio", "Gig", "Project", "Production"],
       [isGuest, isOwner],
     );
 
@@ -195,6 +200,8 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
     const requestIdRef = useRef(0);
     const dataRef = useRef<any[]>([]);
     const spilloverRef = useRef<any[]>([]);
+    const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+    const [followBusyById, setFollowBusyById] = useState<Record<string, boolean>>({});
 
     // Advanced Filter State
     const [showFilters, setShowFilters] = useState(false);
@@ -283,13 +290,17 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
             tables = ["groups_with_stats", "profiles"];
           } else {
             if (activeFilter === "All") {
-              tables = ["groups_with_stats", "profiles", "studios_with_stats", "gigs_with_stats"];
+              tables = ["groups_with_stats", "profiles", "studios_with_stats", "gigs_with_stats", "producer_projects_with_summary", "production_teams"];
             } else if (activeFilter === "Musician") {
               tables = ["groups_with_stats", "profiles"];
             } else if (activeFilter === "Studio") {
               tables = ["studios_with_stats"];
             } else if (activeFilter === "Gig") {
               tables = ["gigs_with_stats"];
+            } else if (activeFilter === "Project") {
+              tables = ["producer_projects_with_summary"];
+            } else if (activeFilter === "Production") {
+              tables = ["production_teams"];
             }
           }
 
@@ -306,10 +317,26 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 .eq("role", "musician");
             }
 
+            if (table === "producer_projects_with_summary") {
+              query = query.eq("status", "published");
+            }
+
+            if (table === "production_teams") {
+              query = query.select("id, owner_id, name, description, logo_url, created_at, updated_at");
+            }
+
             if (searchQuery.trim().length > 0) {
               if (table === "profiles") {
                 query = query.or(
                   `full_name.ilike.%${searchQuery}%,address.ilike.%${searchQuery}%`,
+                );
+              } else if (table === "producer_projects_with_summary") {
+                query = query.or(
+                  `title.ilike.%${searchQuery}%,genre.ilike.%${searchQuery}%,location.ilike.%${searchQuery}%`,
+                );
+              } else if (table === "production_teams") {
+                query = query.or(
+                  `name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`,
                 );
               } else {
                 query = query.or(
@@ -329,16 +356,16 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
             if (
               selectedGenre !== "All" &&
-              (table === "groups_with_stats" || table === "gigs_with_stats")
+              (table === "groups_with_stats" || table === "gigs_with_stats" || table === "producer_projects_with_summary")
             ) {
               query = query.ilike("genre", `%${selectedGenre}%`);
             }
 
-            if (minRating > 0 && table !== "profiles") {
+            if (minRating > 0 && table !== "profiles" && table !== "production_teams") {
               query = query.gte("rating", minRating);
             }
 
-            if (priceRange !== "all" && table !== "profiles") {
+            if (priceRange !== "all" && table !== "profiles" && table !== "production_teams") {
               const priceField = table.includes("studio")
                 ? "hourly_rate"
                 : table.includes("gig")
@@ -354,9 +381,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
               }
             }
 
-            if (sortBy === "rating" && table !== "profiles") {
+            if (sortBy === "rating" && table !== "profiles" && table !== "production_teams") {
               query = query.order("rating", { ascending: false });
-            } else if (sortBy === "price_low" && table !== "profiles") {
+            } else if (sortBy === "price_low" && table !== "profiles" && table !== "production_teams") {
               const priceField = table.includes("studio")
                 ? "hourly_rate"
                 : table.includes("gig")
@@ -366,7 +393,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 ascending: true,
                 nullsFirst: false,
               });
-            } else if (sortBy === "price_high" && table !== "profiles") {
+            } else if (sortBy === "price_high" && table !== "profiles" && table !== "production_teams") {
               const priceField = table.includes("studio")
                 ? "hourly_rate"
                 : table.includes("gig")
@@ -458,11 +485,23 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                   ? "Studio"
                   : table === "profiles"
                     ? "Artist"
-                    : "Gig";
+                    : table.includes("producer_project")
+                      ? "Project"
+                      : table === "production_teams"
+                        ? "Production"
+                        : "Gig";
 
               const mapped = qData.map((item: any) => ({
                 ...item,
                 type,
+                social_follow_target_id:
+                  table === "profiles"
+                    ? item.id
+                    : typeof item.owner_id === "string" && item.owner_id.length > 0
+                      ? item.owner_id
+                      : typeof item.organizer_id === "string" && item.organizer_id.length > 0
+                        ? item.organizer_id
+                        : null,
                 studio_type:
                   type === "Studio"
                     ? item.type || item.studio_type || null
@@ -477,9 +516,9 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                   table === "profiles"
                     ? profileStatsById.get(item.id)?.review_count || 0
                     : Number(item.review_count || 0),
-                name: item.name || item.full_name,
+                name: item.name || item.full_name || item.title,
                 location: item.location || item.address,
-                image: item.images?.[0] || item.image || item.avatar_url,
+                image: item.images?.[0] || item.image || item.avatar_url || item.logo_url || item.cover_image_url,
                 owner_avatar_url:
                   table === "groups_with_stats"
                     ? ownerAvatarById.get(item.owner_id) || null
@@ -491,7 +530,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                     : Array.isArray(item.genres)
                       ? item.genres.join(", ")
                       : ""),
-                rate: (item.rate || item.hourly_rate || item.budget)?.toString(),
+                rate: (item.rate || item.hourly_rate || item.budget || item.budget_range)?.toString(),
                 show_gig_statuses: item.show_gig_statuses,
               }));
 
@@ -730,6 +769,59 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
 
     const clearSearch = () => setSearchQuery("");
 
+    const getFollowTargetId = useCallback(
+      (item: any): string | null => {
+        const explicitTarget =
+          typeof item?.social_follow_target_id === "string"
+            ? item.social_follow_target_id.trim()
+            : "";
+
+        const fallbackTarget =
+          typeof item?.id === "string" && item?.type === "Artist"
+            ? item.id
+            : typeof item?.owner_id === "string"
+              ? item.owner_id
+              : typeof item?.organizer_id === "string"
+                ? item.organizer_id
+                : "";
+
+        const targetId = explicitTarget || fallbackTarget;
+        if (!targetId || targetId === userId) {
+          return null;
+        }
+
+        return targetId;
+      },
+      [userId],
+    );
+
+    const loadFollowingIds = useCallback(async () => {
+      if (isGuest || !userId) {
+        setFollowingIds(new Set());
+        return;
+      }
+
+      try {
+        const { data: followingResponse } = await supabase.functions.invoke("manage-social-feed", {
+          body: { action: "get_following" },
+        });
+
+        const nextFollowedIds = new Set(
+          (Array.isArray(followingResponse?.data) ? followingResponse.data : [])
+            .map((row: any) => row?.followed_id)
+            .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+        );
+
+        setFollowingIds(nextFollowedIds);
+      } catch {
+        // Keep existing follow state when lookup fails.
+      }
+    }, [isGuest, userId]);
+
+    useEffect(() => {
+      loadFollowingIds();
+    }, [loadFollowingIds]);
+
     const handleChatPress = useCallback(
       (item: any) => {
         // Dismiss the modal first, then trigger chat
@@ -743,18 +835,134 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
       [onChat, ref],
     );
 
+    const handleFollowToggle = useCallback(
+      async (item: any) => {
+        const targetId = getFollowTargetId(item);
+        if (!targetId || isGuest) {
+          return;
+        }
+
+        if (followBusyById[targetId]) {
+          return;
+        }
+
+        const wasFollowing = followingIds.has(targetId);
+        setFollowBusyById((prev) => ({ ...prev, [targetId]: true }));
+        setFollowingIds((prev) => {
+          const next = new Set(prev);
+          if (wasFollowing) {
+            next.delete(targetId);
+          } else {
+            next.add(targetId);
+          }
+          return next;
+        });
+
+        try {
+          const { data: followResponse } = await supabase.functions.invoke("manage-social-feed", {
+            body: { action: wasFollowing ? "unfollow" : "follow", target_id: targetId },
+          });
+
+          if (followResponse?.error) {
+            throw new Error(String(followResponse.error));
+          }
+
+          showTopToast({
+            type: "success",
+            title: wasFollowing ? "Unfollowed" : "Following",
+            message: "",
+          });
+
+          onFollowChanged?.();
+        } catch (error: any) {
+          setFollowingIds((prev) => {
+            const next = new Set(prev);
+            if (wasFollowing) {
+              next.add(targetId);
+            } else {
+              next.delete(targetId);
+            }
+            return next;
+          });
+
+          showTopToast({
+            type: "error",
+            title: "Follow failed",
+            message: error?.message || "Please try again.",
+          });
+        } finally {
+          setFollowBusyById((prev) => {
+            const next = { ...prev };
+            delete next[targetId];
+            return next;
+          });
+        }
+      },
+      [followBusyById, followingIds, getFollowTargetId, isGuest, onFollowChanged],
+    );
+
     const renderItem = useCallback(
-      ({ item }: { item: any }) => (
-        <ListingCard
-          item={item}
-          onPress={handleItemPress}
-          onChat={onChat ? handleChatPress : undefined}
-          showGigSummary={false}
-          variant="vertical"
-          style={{ width: "100%" }}
-        />
-      ),
-      [handleItemPress, handleChatPress, onChat],
+      ({ item }: { item: any }) => {
+        const followTargetId = getFollowTargetId(item);
+        const canFollow = Boolean(followTargetId) && !isGuest;
+        const isFollowing = followTargetId ? followingIds.has(followTargetId) : false;
+        const isFollowBusy = followTargetId ? followBusyById[followTargetId] === true : false;
+
+        return (
+          <View style={styles.resultCardWrap}>
+            <ListingCard
+              item={item}
+              onPress={handleItemPress}
+              onChat={onChat ? handleChatPress : undefined}
+              showGigSummary={false}
+              variant="vertical"
+              style={{ width: "100%" }}
+            />
+
+            {canFollow && (
+              <TouchableOpacity
+                activeOpacity={0.9}
+                disabled={isFollowBusy}
+                onPress={() => handleFollowToggle(item)}
+                style={[
+                  styles.followBadgeBtn,
+                  {
+                    backgroundColor: isFollowing ? (isDark ? "#111827" : "#FFFFFF") : colors.primary,
+                    borderColor: isFollowing ? (isDark ? "#374151" : "#CBD5E1") : colors.primary,
+                    opacity: isFollowBusy ? 0.7 : 1,
+                  },
+                ]}
+              >
+                {isFollowBusy ? (
+                  <ActivityIndicator size="small" color={isFollowing ? colors.textSecondary : "#FFFFFF"} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.followBadgeText,
+                      { color: isFollowing ? colors.textSecondary : "#FFFFFF" },
+                    ]}
+                  >
+                    {isFollowing ? "Following" : "Follow"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        );
+      },
+      [
+        colors.primary,
+        colors.textSecondary,
+        followBusyById,
+        followingIds,
+        getFollowTargetId,
+        handleChatPress,
+        handleFollowToggle,
+        handleItemPress,
+        isDark,
+        isGuest,
+        onChat,
+      ],
     );
 
     const keyExtractor = useCallback(
@@ -1392,6 +1600,26 @@ const styles = StyleSheet.create({
     height: 1,
     width: "100%",
     opacity: 0.1,
+  },
+  resultCardWrap: {
+    position: "relative",
+  },
+  followBadgeBtn: {
+    position: "absolute",
+    right: 14,
+    top: 14,
+    minWidth: 84,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 6,
+  },
+  followBadgeText: {
+    fontFamily: "Poppins_600SemiBold",
+    fontSize: 12,
   },
   listContent: {
     paddingBottom: 100,

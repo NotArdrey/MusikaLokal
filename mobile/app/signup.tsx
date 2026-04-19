@@ -14,9 +14,9 @@ import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 type OnboardingStep = 'role' | 'details' | 'verification' | 'email_verification';
-type SignupRole = 'musician' | 'venue-owner';
+type SignupRole = 'musician' | 'venue-owner' | 'producer';
 
-const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['musician', 'venue-owner'];
+const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['musician', 'venue-owner', 'producer'];
 
 const isAllowedSignupRole = (role: unknown): role is SignupRole => {
     return typeof role === 'string' && ALLOWED_SIGNUP_ROLES.includes(role as SignupRole);
@@ -381,9 +381,10 @@ export default function SignupScreen() {
 
 
     // Role options
-    const roleOptions: { value: SignupRole; label: string; icon: 'musical-notes-outline' | 'business-outline'; description: string }[] = [
+    const roleOptions: { value: SignupRole; label: string; icon: 'musical-notes-outline' | 'business-outline' | 'people-outline'; description: string }[] = [
         { value: 'musician' as const, label: 'Musical Artist', icon: 'musical-notes-outline' as const, description: 'Join bands, find gigs' },
         { value: 'venue-owner' as const, label: 'Venue Owner', icon: 'business-outline' as const, description: 'Host events, hire artists' },
+        { value: 'producer' as const, label: 'Producer', icon: 'people-outline' as const, description: 'Manage productions, negotiate deals' },
     ];
 
     // Theme Styles

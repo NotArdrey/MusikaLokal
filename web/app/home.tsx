@@ -7,48 +7,45 @@ import {
   ActivityIndicator,
   Dimensions,
   InteractionManager,
-  Platform,
   RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert from "../src/components/CustomAlert";
 import Header from "../src/components/header";
-import ListingCard from "../src/components/ListingCard";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
 import Navbar from "../src/components/navbar";
 import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBanner";
 import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
+import Skeleton from "../src/components/Skeleton";
 import { useTheme } from "../src/context/ThemeContext";
 import {
   getGeminiFlashLiteInfo,
   rerankHomeFeedWithGeminiFlashLite,
 } from "../src/services/groqModelRouter";
+import { getScreenCacheKey, peekScreenCache, readScreenCache, writeScreenCache } from "../src/utils/screenCache";
 
 const { width, height } = Dimensions.get("window");
 
 // Responsive scaling utilities - optimized for iPhone SE and smaller devices
-const scaleWidth = Math.min(width, 600); // Clamp width to prevent massive scaling on web
 const scale = (size: number) => {
-  const newSize = (scaleWidth / 375) * size;
+  const newSize = (width / 375) * size;
   return Math.max(newSize, size * 0.85); // Minimum 85% of original size
 };
 const verticalScale = (size: number) => {
   // Use more conservative scaling for height to prevent over-shrinking on small devices
   const baseHeight = 812;
   const ratio = height / baseHeight;
-  // Clamp ratio between 0.8 and 1.1 to prevent extreme scaling
-  const clampedRatio = Math.max(0.8, Math.min(1.1, ratio));
+  // Clamp ratio between 0.8 and 1.2 to prevent extreme scaling
+  const clampedRatio = Math.max(0.8, Math.min(1.2, ratio));
   return size * clampedRatio;
 };
 const moderateScale = (size: number, factor = 0.3) => {
@@ -59,7 +56,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useAuth } from "../src/context/AuthContext";
 
-const debugLog = (..._args: unknown[]) => {};
+const debugLog = (..._args: unknown[]) => { };
 
 const clampValue = (value: number, min = 0, max = 1) => {
   return Math.max(min, Math.min(max, value));
@@ -186,42 +183,6 @@ const rankForYouOnDevice = (
   return takeItemsWithTypeVariety(ranked, safeLimit);
 };
 
-const ResponsiveList = ({ children, style, contentContainerStyle, snapToInterval, ...props }: any) => {
-  const { width } = useWindowDimensions();
-  if (Platform.OS === 'web' && width >= 768) {
-    return (
-      <View
-        style={[
-          {
-            width: '100%',
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            alignItems: 'stretch',
-            justifyContent: 'flex-start',
-            gap: 16,
-          },
-          style,
-          contentContainerStyle,
-        ]}
-      >
-        {children}
-      </View>
-    );
-  }
-  return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={contentContainerStyle}
-      decelerationRate="fast"
-      snapToInterval={snapToInterval}
-      {...props}
-    >
-      {children}
-    </ScrollView>
-  );
-};
-
 const getTypeBadgeColor = (type: string) => {
   switch (type) {
     case "Studio":
@@ -310,20 +271,30 @@ const collectProfileValues = (rows: any[] | null | undefined, valueKey: string) 
   return valueMap;
 };
 
+const HOME_CACHE_TTL_MS = 60_000;
 const HOME_FOCUS_REFRESH_COOLDOWN_MS = 20_000;
 const HOME_AI_RERANK_COOLDOWN_MS = 5 * 60 * 1000;
 const HOME_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 const VIEWED_NEW_ARRIVALS_STORAGE_KEY = "viewed_new_arrivals";
+const RECENTLY_VIEWED_STORAGE_KEY = "recently_viewed_items";
 
-type HomeAiSessionCachePayload = {
-  userId: string;
-  updatedAt: number;
-  recommendations: any[];
+type HomeFeedCachePayload = {
+  fetchedAt: number;
+  featured: any[];
+  discover: any[];
+  newArrivals: any[];
+  randomRecommendations: any[];
+  aiRecommendations: any[];
   aiFeedProvider: string;
   aiFeedMessage: string;
+  aiRerankAt?: number;
 };
 
-let homeAiSessionCache: HomeAiSessionCachePayload | null = null;
+type HomeProfileCachePayload = {
+  fetchedAt: number;
+  userName: string;
+  hasGroups: boolean;
+};
 
 const AutoCardImage = ({
   image,
@@ -384,52 +355,123 @@ const AutoCardImage = ({
 
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
-  const { width } = useWindowDimensions();
-  const isWebDesktop = Platform.OS === "web" && width >= 768;
-  const pageBackground = isWebDesktop
-    ? isDark
-      ? "#0A1224"
-      : "#E9EEF8"
-    : colors.background;
-  const webCardBackground = isWebDesktop
-    ? isDark
-      ? "#0F172A"
-      : "#FFFFFF"
-    : isDark
-      ? "#1F2937"
-      : "#FFFFFF";
-  const webTextColor = isWebDesktop
-    ? isDark
-      ? "#E2E8F0"
-      : "#0F172A"
-    : colors.text;
-  const webTextSecondary = isWebDesktop
-    ? isDark
-      ? "#94A3B8"
-      : "#475569"
-    : colors.textSecondary;
-  const { userRole, userId, isGuest } = useAuth();
+  const { userRole, userId, isGuest, roleResolved } = useAuth();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
-  const [loading, setLoading] = useState(true);
+
+  const homeCacheBaseParams = useMemo(
+    () => ({
+      userId: userId || "guest",
+      isGuest,
+    }),
+    [userId, isGuest],
+  );
+
+  const homeCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-feed", {
+      ...homeCacheBaseParams,
+      userRole: userRole || "guest",
+    }),
+    [homeCacheBaseParams, userRole],
+  );
+
+  const homeFallbackCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-feed", homeCacheBaseParams),
+    [homeCacheBaseParams],
+  );
+
+  const homeProfileCacheKey = useMemo(
+    () => getScreenCacheKey("mobile-home-profile", {
+      userId: userId || "guest",
+      isGuest,
+    }),
+    [userId, isGuest],
+  );
+
+  const initialHomeFeedSnapshot = useMemo(
+    () =>
+      peekScreenCache<HomeFeedCachePayload>(homeCacheKey, HOME_CACHE_TTL_MS) ??
+      peekScreenCache<HomeFeedCachePayload>(homeFallbackCacheKey, HOME_CACHE_TTL_MS),
+    [homeCacheKey, homeFallbackCacheKey],
+  );
+
+  const initialHomeProfileSnapshot = useMemo(
+    () => peekScreenCache<HomeProfileCachePayload>(homeProfileCacheKey, HOME_PROFILE_CACHE_TTL_MS),
+    [homeProfileCacheKey],
+  );
+
+  const [loading, setLoading] = useState(() => initialHomeFeedSnapshot == null);
   const [refreshing, setRefreshing] = useState(false);
-  const [featured, setFeatured] = useState<any[]>([]);
-  const [discover, setDiscover] = useState<any[]>([]);
-  const [newArrivals, setNewArrivals] = useState<any[]>([]); // New Arrivals State
+  const [featured, setFeatured] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.featured) ? initialHomeFeedSnapshot.featured : [],
+  );
+  const [discover, setDiscover] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.discover) ? initialHomeFeedSnapshot.discover : [],
+  );
+  const [newArrivals, setNewArrivals] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.newArrivals) ? initialHomeFeedSnapshot.newArrivals : [],
+  ); // New Arrivals State
   const [viewedNewArrivals, setViewedNewArrivals] = useState<Set<string>>(new Set());
-  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]); // Upcoming Events State (for musicians)
   const [recentlyViewed, setRecentlyViewed] = useState<any[]>([]);
-  const [userName, setUserName] = useState("Guest");
+  const [userName, setUserName] = useState(() => initialHomeProfileSnapshot?.userName || "Guest");
   const [timeGreeting, setTimeGreeting] = useState("Hey");
   const geminiInfo = getGeminiFlashLiteInfo();
   const geminiModelLabel = geminiInfo.modelLabel;
+  const geminiConfigured = geminiInfo.configured;
+  const geminiModelSource = geminiInfo.modelSource;
+  const geminiApiKeySource = geminiInfo.apiKeySource;
+  const geminiApiKeySignature = geminiInfo.apiKeySignature;
 
   // AI Recommendation Mode
-  const [aiModeEnabled, setAiModeEnabled] = useState(true);
-  const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
-  const [randomRecommendations, setRandomRecommendations] = useState<any[]>([]);
-  const [aiFeedProvider, setAiFeedProvider] = useState(geminiModelLabel);
-  const [aiFeedMessage, setAiFeedMessage] = useState("");
+  const aiModeEnabled = true;
+  const strictLlmModeForAiPages = true;
+  const showForYouAiCard = false;
+  const [aiRecommendations, setAiRecommendations] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.aiRecommendations) ? initialHomeFeedSnapshot.aiRecommendations : [],
+  );
+  const [randomRecommendations, setRandomRecommendations] = useState<any[]>(() =>
+    Array.isArray(initialHomeFeedSnapshot?.randomRecommendations) ? initialHomeFeedSnapshot.randomRecommendations : [],
+  );
+  const [aiFeedProvider, setAiFeedProvider] = useState(
+    () => initialHomeFeedSnapshot?.aiFeedProvider || geminiModelLabel,
+  );
+  const [aiFeedMessage, setAiFeedMessage] = useState(
+    () => initialHomeFeedSnapshot?.aiFeedMessage || "",
+  );
+  const [isHomeLlmRerankPending, setIsHomeLlmRerankPending] = useState(false);
+
+  const homeAiStatusLabel = useMemo(() => {
+    if (!userId) return "AI status: Sign in required";
+
+    const providerText = aiFeedProvider || geminiModelLabel;
+    const hasResults = aiRecommendations.length > 0;
+
+    if (isHomeLlmRerankPending) {
+      return `AI status: Fetching ${geminiModelLabel} picks...`;
+    }
+
+    if (hasResults) {
+      return `AI status: Working (${providerText})`;
+    }
+
+    if (!geminiConfigured) {
+      return "AI status: Groq API key not configured";
+    }
+
+    if (aiFeedMessage && aiFeedMessage.trim().length > 0) {
+      return `AI status: ${aiFeedMessage}`;
+    }
+
+    return "AI status: Initializing...";
+  }, [
+    aiFeedProvider,
+    aiFeedMessage,
+    aiRecommendations.length,
+    geminiConfigured,
+    geminiModelLabel,
+    isHomeLlmRerankPending,
+    userId,
+  ]);
 
   // ... refs ...
   const bottomSheetRef =
@@ -442,11 +484,13 @@ export default function HomeScreen() {
   const homeRealtimeRefreshTimerRef =
     React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeDataFetchInFlightRef = React.useRef(false);
+  const hasHydratedHomeCacheRef = React.useRef(Boolean(initialHomeFeedSnapshot));
   const homeLlmRequestIdRef = React.useRef(0);
   const homeLlmRerankInFlightRef = React.useRef(false);
-  const lastHomeRefreshAtRef = React.useRef(0);
-  const lastHomeAiRerankAtRef = React.useRef(0);
-  const lastProfileRefreshAtRef = React.useRef(0);
+  const lastHomeAiRerankAtRef = React.useRef(initialHomeFeedSnapshot?.aiRerankAt || 0);
+  const lastHomeRefreshAtRef = React.useRef(initialHomeFeedSnapshot?.fetchedAt || 0);
+  const lastProfileRefreshAtRef = React.useRef(initialHomeProfileSnapshot?.fetchedAt || 0);
+  const viewedNewArrivalsLoadedRef = React.useRef(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(
     null,
   );
@@ -465,6 +509,36 @@ export default function HomeScreen() {
 
   // Scroll State for Sticky Header
   const [isScrolled, setIsScrolled] = useState(false);
+
+  const applyHomeFeedSnapshot = useCallback((snapshot: HomeFeedCachePayload) => {
+    setFeatured(Array.isArray(snapshot.featured) ? snapshot.featured : []);
+    setDiscover(Array.isArray(snapshot.discover) ? snapshot.discover : []);
+    setNewArrivals(Array.isArray(snapshot.newArrivals) ? snapshot.newArrivals : []);
+    setRandomRecommendations(Array.isArray(snapshot.randomRecommendations) ? snapshot.randomRecommendations : []);
+    setAiRecommendations(Array.isArray(snapshot.aiRecommendations) ? snapshot.aiRecommendations : []);
+    setAiFeedProvider(snapshot.aiFeedProvider || geminiModelLabel);
+    setAiFeedMessage(snapshot.aiFeedMessage || "");
+    lastHomeAiRerankAtRef.current = snapshot.aiRerankAt || 0;
+    lastHomeRefreshAtRef.current = snapshot.fetchedAt || Date.now();
+    hasHydratedHomeCacheRef.current = true;
+  }, [geminiModelLabel]);
+
+  const loadViewedNewArrivals = useCallback(async () => {
+    if (viewedNewArrivalsLoadedRef.current) {
+      return;
+    }
+
+    try {
+      const json = await AsyncStorage.getItem(VIEWED_NEW_ARRIVALS_STORAGE_KEY);
+      if (json) {
+        setViewedNewArrivals(new Set(JSON.parse(json)));
+      }
+    } catch {
+      // Ignore local storage read failures.
+    } finally {
+      viewedNewArrivalsLoadedRef.current = true;
+    }
+  }, []);
 
   const presentModalWithRetry = useCallback((modalRef: { current: any }) => {
     let attempts = 0;
@@ -566,69 +640,182 @@ export default function HomeScreen() {
 
   // Effect to update featured/discover when AI recommendations become available
   useEffect(() => {
-    if (aiModeEnabled && aiRecommendations.length > 0) {
-      debugLog("🤖 Switching to AI recommendations");
+    if (aiRecommendations.length > 0) {
+      debugLog("Switching to AI recommendations");
       const diversifiedAiItems = takeItemsWithTypeVariety(aiRecommendations, 20);
       setFeatured(diversifiedAiItems.slice(0, 10));
       setDiscover(diversifiedAiItems.slice(10, 20));
-    } else if (!aiModeEnabled && randomRecommendations.length > 0) {
-      debugLog("🎲 Switching to random recommendations");
+    } else if (randomRecommendations.length > 0) {
+      debugLog("Switching to random recommendations");
       const diversifiedRandomItems = takeItemsWithTypeVariety(randomRecommendations, 20);
       setFeatured(diversifiedRandomItems.slice(0, 10));
       setDiscover(diversifiedRandomItems.slice(10, 20));
     }
-  }, [aiModeEnabled, aiRecommendations, randomRecommendations]);
+  }, [aiRecommendations, randomRecommendations]);
 
   useEffect(() => {
-    if (!userId || !homeAiSessionCache) {
+    if (!userId) return;
+
+    const providerText = aiFeedProvider || geminiModelLabel;
+    const aiFeedActive = aiRecommendations.length > 0;
+
+    console.log("[HOME_AI_STATUS]", {
+      provider: providerText,
+      picks: aiRecommendations.length,
+      aiActive: aiFeedActive,
+      aiFeedPending: isHomeLlmRerankPending,
+      configured: geminiConfigured,
+      modelSource: geminiModelSource,
+      apiKeySource: geminiApiKeySource,
+      apiKeySignature: geminiApiKeySignature,
+      message: aiFeedMessage || "",
+    });
+  }, [
+    aiFeedProvider,
+    aiFeedMessage,
+    aiRecommendations.length,
+    geminiApiKeySignature,
+    geminiApiKeySource,
+    geminiConfigured,
+    geminiModelLabel,
+    geminiModelSource,
+    isHomeLlmRerankPending,
+    userId,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (initialHomeFeedSnapshot) {
+      applyHomeFeedSnapshot(initialHomeFeedSnapshot);
+      setLoading(false);
+    }
+
+    if (initialHomeProfileSnapshot) {
+      setUserName(initialHomeProfileSnapshot.userName || "Guest");
+      setHasGroups(Boolean(initialHomeProfileSnapshot.hasGroups));
+      lastProfileRefreshAtRef.current = initialHomeProfileSnapshot.fetchedAt || Date.now();
+    } else if (isGuest) {
+      setUserName("Guest");
+      setHasGroups(false);
+    }
+
+    hasHydratedHomeCacheRef.current = Boolean(initialHomeFeedSnapshot);
+    lastHomeAiRerankAtRef.current = initialHomeFeedSnapshot?.aiRerankAt || 0;
+    lastHomeRefreshAtRef.current = initialHomeFeedSnapshot?.fetchedAt || 0;
+    lastProfileRefreshAtRef.current = initialHomeProfileSnapshot?.fetchedAt || lastProfileRefreshAtRef.current;
+
+    void (async () => {
+      const [cachedHomeFeed, cachedFallbackHomeFeed, cachedProfile] = await Promise.all([
+        readScreenCache<HomeFeedCachePayload>(homeCacheKey, HOME_CACHE_TTL_MS),
+        readScreenCache<HomeFeedCachePayload>(homeFallbackCacheKey, HOME_CACHE_TTL_MS),
+        readScreenCache<HomeProfileCachePayload>(homeProfileCacheKey, HOME_PROFILE_CACHE_TTL_MS),
+      ]);
+      const resolvedHomeFeed = cachedHomeFeed ?? cachedFallbackHomeFeed;
+
+      if (cancelled) {
+        return;
+      }
+
+      if (resolvedHomeFeed) {
+        applyHomeFeedSnapshot(resolvedHomeFeed);
+        setLoading(false);
+      }
+
+      if (cachedProfile) {
+        setUserName(cachedProfile.userName || "Guest");
+        setHasGroups(Boolean(cachedProfile.hasGroups));
+        lastProfileRefreshAtRef.current = cachedProfile.fetchedAt || Date.now();
+      } else if (isGuest) {
+        setUserName("Guest");
+        setHasGroups(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    applyHomeFeedSnapshot,
+    homeCacheKey,
+    homeFallbackCacheKey,
+    homeProfileCacheKey,
+    initialHomeFeedSnapshot,
+    initialHomeProfileSnapshot,
+    isGuest,
+  ]);
+
+  useEffect(() => {
+    if (
+      featured.length === 0 &&
+      discover.length === 0 &&
+      newArrivals.length === 0 &&
+      randomRecommendations.length === 0 &&
+      aiRecommendations.length === 0
+    ) {
       return;
     }
 
-    if (homeAiSessionCache.userId !== userId) {
-      return;
-    }
+    const payload: HomeFeedCachePayload = {
+      fetchedAt: lastHomeRefreshAtRef.current || Date.now(),
+      featured,
+      discover,
+      newArrivals,
+      randomRecommendations,
+      aiRecommendations,
+      aiFeedProvider,
+      aiFeedMessage,
+      aiRerankAt: lastHomeAiRerankAtRef.current || 0,
+    };
 
-    if (Date.now() - homeAiSessionCache.updatedAt > HOME_AI_RERANK_COOLDOWN_MS) {
-      return;
-    }
-
-    setAiRecommendations(homeAiSessionCache.recommendations);
-    setAiFeedProvider(homeAiSessionCache.aiFeedProvider || geminiModelLabel);
-    setAiFeedMessage(homeAiSessionCache.aiFeedMessage || "");
-    lastHomeAiRerankAtRef.current = homeAiSessionCache.updatedAt;
-  }, [geminiModelLabel, userId]);
+    void Promise.all([
+      writeScreenCache(homeCacheKey, payload),
+      writeScreenCache(homeFallbackCacheKey, payload),
+    ]);
+  }, [
+    aiFeedMessage,
+    aiFeedProvider,
+    aiRecommendations,
+    discover,
+    featured,
+    homeCacheKey,
+    homeFallbackCacheKey,
+    newArrivals,
+    randomRecommendations,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
-      debugLog("👁️ useFocusEffect triggered, userRole:", userRole);
-      // Fetch data silently on focus if data already exists
-      const isFirstLoad = featured.length === 0 && discover.length === 0;
-      debugLog("🏠 isFirstLoad:", isFirstLoad);
+      debugLog("useFocusEffect triggered, userRole:", userRole);
+      const isFirstLoad =
+        featured.length === 0 &&
+        discover.length === 0 &&
+        !hasHydratedHomeCacheRef.current;
+      debugLog("isFirstLoad:", isFirstLoad);
+
       const shouldRefreshHome =
         isFirstLoad ||
         Date.now() - lastHomeRefreshAtRef.current >= HOME_FOCUS_REFRESH_COOLDOWN_MS;
       const shouldRefreshProfile =
-        Boolean(userId) &&
-        (
+        Boolean(userId) && (
           lastProfileRefreshAtRef.current === 0 ||
           Date.now() - lastProfileRefreshAtRef.current >= HOME_PROFILE_CACHE_TTL_MS
         );
 
       if (shouldRefreshHome) {
-        void fetchHomeData(isFirstLoad);
+        void fetchHomeData(isFirstLoad, { bypassCooldown: isFirstLoad });
       }
 
       if (shouldRefreshProfile) {
         void fetchUserProfile();
+      } else if (isGuest) {
+        setUserName("Guest");
+        setHasGroups(false);
       }
-      fetchRecentlyViewed();
-      fetchUpcomingEvents(); // Fetch upcoming events for musicians
-      setTimeBasedGreeting();
 
-      // Load which New Arrivals have already been viewed
-      void AsyncStorage.getItem(VIEWED_NEW_ARRIVALS_STORAGE_KEY).then(json => {
-        if (json) setViewedNewArrivals(new Set(JSON.parse(json)));
-      }).catch(() => {});
+      void fetchRecentlyViewed();
+      void loadViewedNewArrivals();
+      setTimeBasedGreeting();
 
       const reopenListingId = Array.isArray(params.reopenListingId)
         ? params.reopenListingId[0]
@@ -655,7 +842,7 @@ export default function HomeScreen() {
       };
 
       void restorePendingReopen();
-    }, [discover.length, featured.length, params.reopenListingId, userId, userRole]),
+    }, [discover.length, featured.length, isGuest, loadViewedNewArrivals, params.reopenListingId, roleResolved, userId, userRole]),
   );
 
   // Handler for realtime updates - defined before useEffect that uses it
@@ -668,7 +855,7 @@ export default function HomeScreen() {
       // Silent refresh to keep UI stable during realtime bursts.
       void fetchHomeData(false, { bypassCooldown: true });
     }, 450);
-  }, [userRole, userId]);
+  }, [roleResolved, userId, userRole]);
 
   // Realtime Updates
   useEffect(() => {
@@ -720,10 +907,9 @@ export default function HomeScreen() {
       fetchHomeData(false, { bypassCooldown: true }),
       fetchUserProfile({ force: true }),
       fetchRecentlyViewed(),
-      fetchUpcomingEvents(),
     ]);
     setRefreshing(false);
-  }, [userRole, userId, isGuest]);
+  }, [isGuest, roleResolved, userId, userRole]);
 
   const setTimeBasedGreeting = () => {
     const hour = new Date().getHours();
@@ -732,7 +918,7 @@ export default function HomeScreen() {
     else setTimeGreeting("Good evening");
   };
 
-  const [hasGroups, setHasGroups] = useState(false);
+  const [hasGroups, setHasGroups] = useState(() => Boolean(initialHomeProfileSnapshot?.hasGroups));
 
   const topItems = useMemo(() => {
     const combined = [...featured, ...discover];
@@ -740,8 +926,15 @@ export default function HomeScreen() {
       (item, index, self) => index === self.findIndex((t) => t.id === item.id),
     );
 
-    return takeItemsWithTypeVariety(dedupedCombined, 12);
-  }, [featured, discover]);
+    if (dedupedCombined.length > 0) {
+      return takeItemsWithTypeVariety(dedupedCombined, 12);
+    }
+
+    const dedupedRandom = randomRecommendations.filter(
+      (item, index, self) => index === self.findIndex((t) => t.id === item.id),
+    );
+    return takeItemsWithTypeVariety(dedupedRandom, 12);
+  }, [featured, discover, randomRecommendations]);
 
   const uniqueSmartFeedItems = useMemo(() => {
     const allItems = [...featured, ...discover];
@@ -782,26 +975,37 @@ export default function HomeScreen() {
         user = authUser;
       }
 
-      if (!user) return;
+      if (!user) {
+        setUserName("Guest");
+        setHasGroups(false);
+        return;
+      }
 
-      // Fetch Profile Name
-      const { data } = await supabase
+      const profileNameResponse = await supabase
         .from("profiles")
         .select("full_name")
         .eq("id", user.id)
         .single();
 
-      if (data?.full_name) {
-        setUserName(data.full_name.split(" ")[0]);
-      }
-
-      // Fetch Group Status (for UI warnings)
-      const { count } = await supabase
+      const groupCountResponse = await supabase
         .from("groups")
         .select("id", { count: "exact", head: true })
         .eq("owner_id", user.id);
-      setHasGroups(count ? count > 0 : false);
+
+      const nextUserName = profileNameResponse.data?.full_name
+        ? profileNameResponse.data.full_name.split(" ")[0]
+        : "Guest";
+      const nextHasGroups = groupCountResponse.count ? groupCountResponse.count > 0 : false;
+
+      setUserName(nextUserName);
+      setHasGroups(nextHasGroups);
       lastProfileRefreshAtRef.current = Date.now();
+
+      await writeScreenCache<HomeProfileCachePayload>(homeProfileCacheKey, {
+        fetchedAt: lastProfileRefreshAtRef.current,
+        userName: nextUserName,
+        hasGroups: nextHasGroups,
+      });
     } catch (e) {
       debugLog("Error fetching user profile:", e);
     }
@@ -811,7 +1015,12 @@ export default function HomeScreen() {
     showLoading = true,
     options?: { bypassCooldown?: boolean },
   ) => {
-    debugLog("🏠 fetchHomeData called, showLoading:", showLoading);
+    debugLog("fetchHomeData called, showLoading:", showLoading);
+    if (Boolean(userId) && !isGuest && !roleResolved) {
+      debugLog("Skipping home fetch while user role is still resolving");
+      return;
+    }
+
     if (homeDataFetchInFlightRef.current) {
       return;
     }
@@ -826,7 +1035,14 @@ export default function HomeScreen() {
     }
 
     homeDataFetchInFlightRef.current = true;
-    if (showLoading) setLoading(true);
+    const hasVisibleFeed =
+      featured.length > 0 ||
+      discover.length > 0 ||
+      newArrivals.length > 0 ||
+      randomRecommendations.length > 0 ||
+      aiRecommendations.length > 0;
+
+    if (showLoading && !hasVisibleFeed) setLoading(true);
     try {
       // Fetch based on Role
       // If Owner, ONLY fetch groups (musicians)
@@ -836,7 +1052,8 @@ export default function HomeScreen() {
       let soloArtists: any[] = [];
 
       const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
-      debugLog("🏠 User role:", userRole, "isOwner:", isOwner);
+      const isProducer = userRole === "producer";
+      debugLog("User role:", userRole, "isOwner:", isOwner, "isProducer:", isProducer);
 
       const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
         const eventDate = gig?.event_date ? new Date(gig.event_date) : null;
@@ -868,9 +1085,9 @@ export default function HomeScreen() {
         .select("*")
         .order("created_at", { ascending: false })
         .limit(20);
-      if (gError) debugLog("❌ Error fetching groups:", gError);
+      if (gError) debugLog("Error fetching groups:", gError);
       groups = gData || [];
-      debugLog("🏠 Groups fetched:", groups.length);
+      debugLog("Groups fetched:", groups.length);
 
       // Fetch Solo Artists (Musicians who haven't created a group, or just all musicians)
       // We assume 'musician' role in profiles
@@ -882,7 +1099,7 @@ export default function HomeScreen() {
         .eq("role", "musician")
         .order("created_at", { ascending: false })
         .limit(20);
-      if (pError) debugLog("❌ Error fetching profiles:", pError);
+      if (pError) debugLog("Error fetching profiles:", pError);
 
       const profileIds = (pData || [])
         .map((artist: any) => artist?.id)
@@ -890,9 +1107,10 @@ export default function HomeScreen() {
 
       let profileGenresById = new Map<string, string[]>();
       let profileSkillsById = new Map<string, string[]>();
+      let profileStatsById = new Map<string, { rating: number; review_count: number }>();
 
       if (profileIds.length > 0) {
-        const [{ data: profileGenreRows }, { data: profileSkillRows }] = await Promise.all([
+        const [{ data: profileGenreRows }, { data: profileSkillRows }, { data: profileStatRows }] = await Promise.all([
           supabase
             .from("profile_genres")
             .select("profile_id, genre")
@@ -901,20 +1119,38 @@ export default function HomeScreen() {
             .from("profile_skills")
             .select("profile_id, skill")
             .in("profile_id", profileIds),
+          supabase
+            .from("profiles_with_stats")
+            .select("id, rating, review_count")
+            .in("id", profileIds),
         ]);
 
         profileGenresById = collectProfileValues(profileGenreRows, "genre");
         profileSkillsById = collectProfileValues(profileSkillRows, "skill");
+        profileStatsById = new Map(
+          (profileStatRows || [])
+            .filter((row: any) => typeof row?.id === "string")
+            .map((row: any) => [
+              row.id,
+              {
+                rating: Number(row?.rating || 0),
+                review_count: Number(row?.review_count || 0),
+              },
+            ]),
+        );
       }
 
       soloArtists = (pData || []).map((artist: any) => ({
         ...artist,
         genres: profileGenresById.get(artist.id) || [],
         skills: profileSkillsById.get(artist.id) || [],
+        rating: profileStatsById.get(artist.id)?.rating || 0,
+        review_count: profileStatsById.get(artist.id)?.review_count || 0,
       }));
-      debugLog("🏠 Solo artists fetched:", soloArtists.length);
+      debugLog("Solo artists fetched:", soloArtists.length);
 
       const groupOwnerPreferenceMap = new Map<string, boolean>();
+      const groupOwnerAvatarMap = new Map<string, string>();
       const groupOpenApplicationsMap = new Map<string, boolean>();
       const groupGigCountsMap = new Map<string, { active: number; upcoming: number; done: number }>();
       const soloGigCountsMap = new Map<string, { active: number; upcoming: number; done: number }>();
@@ -926,11 +1162,14 @@ export default function HomeScreen() {
       if (groupOwnerIds.length > 0) {
         const { data: ownerPrefs } = await supabase
           .from("profiles")
-          .select("id, show_gig_statuses")
+          .select("id, show_gig_statuses, avatar_url")
           .in("id", groupOwnerIds);
 
         (ownerPrefs || []).forEach((row: any) => {
           groupOwnerPreferenceMap.set(row.id, row.show_gig_statuses !== false);
+          if (typeof row?.avatar_url === "string" && row.avatar_url.length > 0) {
+            groupOwnerAvatarMap.set(row.id, row.avatar_url);
+          }
         });
       }
 
@@ -945,7 +1184,7 @@ export default function HomeScreen() {
           .in("id", groupIds);
 
         (groupVisibilityRows || []).forEach((row: any) => {
-          groupOpenApplicationsMap.set(row.id, row.open_group_applications !== false);
+          groupOpenApplicationsMap.set(row.id, row.open_group_applications === true);
         });
       }
 
@@ -1009,7 +1248,7 @@ export default function HomeScreen() {
           .limit(20);
         if (sError) debugLog("Error fetching studios:", sError);
         studios = sData || [];
-        debugLog("🏠 Studios fetched:", studios.length);
+        debugLog("Studios fetched:", studios.length);
 
         // Fetch date overrides to calculate has_special_dates for each studio
         if (studios.length > 0) {
@@ -1031,7 +1270,25 @@ export default function HomeScreen() {
               ...studio,
               has_special_dates: studioDateOverridesMap[studio.id] || false,
             }));
-            debugLog("🏠 Studios augmented with date overrides");
+            debugLog("Studios augmented with date overrides");
+          }
+
+          // Fetch active promotions for studios
+          const todayStr = new Date().toISOString().split("T")[0];
+          const { data: studioPromos } = await supabase
+            .from("studio_promotions")
+            .select("studio_id")
+            .in("studio_id", studioIds)
+            .eq("is_active", true)
+            .or(`is_permanent.eq.true,and(start_date.lte.${todayStr},end_date.gte.${todayStr})`);
+
+          if (studioPromos) {
+            const promoStudioIds = new Set(studioPromos.map((p: any) => p.studio_id));
+            studios = studios.map((studio: any) => ({
+              ...studio,
+              has_active_promotion: promoStudioIds.has(studio.id),
+            }));
+            debugLog("Studios augmented with promotion flags");
           }
         }
       }
@@ -1047,13 +1304,9 @@ export default function HomeScreen() {
           .limit(20);
         if (gigError) debugLog("Error fetching gigs:", gigError);
         gigs = gigData || [];
-        debugLog(
-          `📱 Fetched ${gigs.length} open gigs for role: ${userRole}`,
-        );
+        debugLog(`Fetched ${gigs.length} open gigs for role: ${userRole}`);
       } else {
-        debugLog(
-          `📱 Skipping gigs fetch - user is owner (role: ${userRole})`,
-        );
+        debugLog(`Skipping gigs fetch - user is owner (role: ${userRole})`);
       }
 
       // Normalize
@@ -1064,6 +1317,10 @@ export default function HomeScreen() {
           name: item.name || item.full_name, // Handle profile name
           image: item.images?.[0] || item.avatar_url || null, // Handle profile avatar
           images: item.images || (item.avatar_url ? [item.avatar_url] : []),
+          owner_avatar_url:
+            type === "Group"
+              ? groupOwnerAvatarMap.get(item.owner_id) || null
+              : null,
           rating: item.rating || 0, // Solo artists might not have ratings yet
           review_count: item.review_count || 0,
           completion_rate: item.completion_rate,
@@ -1121,11 +1378,12 @@ export default function HomeScreen() {
                 : true,
           open_group_applications:
             type === "Group"
-              ? groupOpenApplicationsMap.get(item.id) ?? item.open_group_applications !== false
+              ? groupOpenApplicationsMap.get(item.id) ?? item.open_group_applications === true
               : undefined,
           // Seasonal pricing fields for studios
           has_seasonal_pricing: item.has_seasonal_pricing || false,
           has_special_dates: item.has_special_dates || false,
+          has_active_promotion: item.has_active_promotion || false,
           lead_time_hours: item.lead_time_hours || 24,
           weekend_multiplier: item.weekend_multiplier || 1.0,
           peak_season_multiplier: item.peak_season_multiplier || 1.0,
@@ -1141,7 +1399,7 @@ export default function HomeScreen() {
         ? [...allGroups, ...allSoloArtists]
         : [...allGroups, ...allSoloArtists, ...allStudios, ...allGigs];
       debugLog(
-        `📊 Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Solo: ${allSoloArtists.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`,
+        `Total items: ${allItemsList.length} (Groups: ${allGroups.length}, Solo: ${allSoloArtists.length}, Studios: ${allStudios.length}, Gigs: ${allGigs.length})`,
       );
 
       // === NEW ARRIVALS - Simple: Just sort by created_at and take top 10 ===
@@ -1151,11 +1409,7 @@ export default function HomeScreen() {
         return dateB - dateA; // Newest first
       });
 
-      debugLog(
-        "🆕 Setting New Arrivals:",
-        sortedByDate.length,
-        "items available",
-      );
+      debugLog("Setting New Arrivals:", sortedByDate.length, "items available");
       setNewArrivals(takeItemsWithTypeVariety(sortedByDate, 10));
 
       // === RANDOM RECOMMENDATIONS - Simple random shuffle ===
@@ -1175,12 +1429,11 @@ export default function HomeScreen() {
             lastHomeAiRerankAtRef.current > 0 &&
             Date.now() - lastHomeAiRerankAtRef.current < HOME_AI_RERANK_COOLDOWN_MS;
 
-          debugLog("🤖 Building Groq For You recommendations for user:", userId);
+          debugLog("Building Groq For You recommendations for user:", userId);
           const [skillsResult, genresResult] = await Promise.all([
             supabase.from("profile_skills").select("skill").eq("profile_id", userId),
             supabase.from("profile_genres").select("genre").eq("profile_id", userId),
           ]);
-
           const profileSignals = {
             skills: (skillsResult.data || [])
               .map((row: any) => row.skill)
@@ -1206,13 +1459,14 @@ export default function HomeScreen() {
 
               return `Using cached ${aiFeedProvider || geminiModelLabel} Home feed.`;
             });
-          } else {
-            // Keep feed realtime: show local ranking immediately while LLM rerank runs.
-            setAiRecommendations(localRankedItems);
+          } else if (!hasExistingAiFeed) {
+            setAiRecommendations([]);
             setAiFeedProvider(geminiModelLabel);
 
             if (localRankedItems.length === 0) {
               setAiFeedMessage("No listings available for AI feed ranking yet.");
+            } else if (homeLlmRerankInFlightRef.current) {
+              setAiFeedMessage(`${geminiModelLabel} rerank is already running for Home feed.`);
             } else if (hasProfileSignals) {
               setAiFeedMessage(`Preparing ${geminiModelLabel} feed for your profile.`);
             } else {
@@ -1227,6 +1481,7 @@ export default function HomeScreen() {
           } else {
             const llmRequestId = ++homeLlmRequestIdRef.current;
             homeLlmRerankInFlightRef.current = true;
+            setIsHomeLlmRerankPending(true);
 
             void (async () => {
               try {
@@ -1245,33 +1500,31 @@ export default function HomeScreen() {
                   setAiRecommendations([]);
                   setAiFeedProvider("Normal Feed");
                   setAiFeedMessage("Groq free-tier limit reached. Showing normal Home feed.");
-                  homeAiSessionCache = {
-                    userId,
-                    updatedAt: lastHomeAiRerankAtRef.current,
-                    recommendations: [],
-                    aiFeedProvider: "Normal Feed",
-                    aiFeedMessage: "Groq free-tier limit reached. Showing normal Home feed.",
-                  };
                   return;
                 }
 
                 if (llmResult.aiPowered && llmResult.recommendations.length > 0) {
-                  const resolvedProvider = llmResult.aiProvider || geminiModelLabel;
-                  const resolvedMessage =
-                    llmResult.message ||
-                    `Realtime For You feed reranked by ${resolvedProvider}.`;
-
                   lastHomeAiRerankAtRef.current = Date.now();
                   setAiRecommendations(llmResult.recommendations);
-                  setAiFeedProvider(resolvedProvider);
-                  setAiFeedMessage(resolvedMessage);
-                  homeAiSessionCache = {
-                    userId,
-                    updatedAt: lastHomeAiRerankAtRef.current,
-                    recommendations: llmResult.recommendations,
-                    aiFeedProvider: resolvedProvider,
-                    aiFeedMessage: resolvedMessage,
-                  };
+                  setAiFeedProvider(llmResult.aiProvider || geminiModelLabel);
+                  setAiFeedMessage(
+                    llmResult.message ||
+                    `Realtime For You feed reranked by ${geminiModelLabel}.`,
+                  );
+                  return;
+                }
+
+                if (strictLlmModeForAiPages) {
+                  if (!hasExistingAiFeed) {
+                    setAiRecommendations([]);
+                    setAiFeedProvider(geminiModelLabel);
+                  }
+                  setAiFeedMessage(
+                    llmResult.message ||
+                    (hasExistingAiFeed
+                      ? `Keeping the previous ${geminiModelLabel} feed while Home refresh retries.`
+                      : `${geminiModelLabel} is required for Home AI mode on this build.`),
+                  );
                   return;
                 }
 
@@ -1281,51 +1534,55 @@ export default function HomeScreen() {
               } finally {
                 if (llmRequestId === homeLlmRequestIdRef.current) {
                   homeLlmRerankInFlightRef.current = false;
+                  setIsHomeLlmRerankPending(false);
                 }
               }
             })();
           }
         } catch (aiErr) {
-          debugLog("🤖 Groq ranking error, using local fallback:", aiErr);
+          debugLog("Groq ranking error:", aiErr);
           const errorMessage = aiErr instanceof Error ? aiErr.message : String(aiErr);
           if (isGroqQuotaExhaustedMessage(errorMessage)) {
             lastHomeAiRerankAtRef.current = Date.now();
             setAiRecommendations([]);
             setAiFeedProvider("Normal Feed");
             setAiFeedMessage("Groq free-tier limit reached. Showing normal Home feed.");
-            homeAiSessionCache = {
-              userId,
-              updatedAt: lastHomeAiRerankAtRef.current,
-              recommendations: [],
-              aiFeedProvider: "Normal Feed",
-              aiFeedMessage: "Groq free-tier limit reached. Showing normal Home feed.",
-            };
             return;
           }
 
-          setAiRecommendations([]);
-          setAiFeedProvider(geminiModelLabel);
-          setAiFeedMessage("Local personalization is temporarily unavailable. Showing general picks.");
+          const hasExistingAiFeed =
+            aiRecommendations.length > 0 &&
+            !/(local ranker|local matching)/i.test(aiFeedProvider || "");
+
+          if (!hasExistingAiFeed) {
+            setAiRecommendations([]);
+            setAiFeedProvider(geminiModelLabel);
+          }
+          setAiFeedMessage(
+            strictLlmModeForAiPages
+              ? hasExistingAiFeed
+                ? `Keeping the previous ${geminiModelLabel} feed while Home refresh retries.`
+                : `${geminiModelLabel} is unavailable for Home AI mode right now.`
+              : "Local personalization is temporarily unavailable. Showing general picks.",
+          );
         }
       } else {
-        debugLog("🤖 No user logged in - skipping AI recommendations");
+        debugLog("No user logged in - skipping AI recommendations");
         lastHomeAiRerankAtRef.current = 0;
-        homeAiSessionCache = null;
         setAiRecommendations([]);
         setAiFeedProvider(geminiModelLabel);
         setAiFeedMessage("");
       }
 
-      // Set featured/discover - AI mode uses AI recommendations if available
-      // This will be toggled by the user with the switch
-      // For initial load, use AI if enabled and available
+      // Seed featured/discover with fallback random results while AI feed initializes.
       setFeatured(diversifiedRandomItems.slice(0, 10));
       setDiscover(diversifiedRandomItems.slice(10, 20));
       lastHomeRefreshAtRef.current = Date.now();
+      hasHydratedHomeCacheRef.current = true;
 
-      debugLog("✅ Home data loaded successfully");
+      debugLog("Home data loaded successfully");
     } catch (e) {
-      debugLog("❌ Error fetching home feed:", e);
+      debugLog("Error fetching home feed:", e);
     } finally {
       homeDataFetchInFlightRef.current = false;
       setLoading(false);
@@ -1347,7 +1604,7 @@ export default function HomeScreen() {
       setViewedNewArrivals(prev => {
         const next = new Set(prev);
         next.add(item.id);
-        AsyncStorage.setItem(VIEWED_NEW_ARRIVALS_STORAGE_KEY, JSON.stringify([...next])).catch(() => {});
+        AsyncStorage.setItem(VIEWED_NEW_ARRIVALS_STORAGE_KEY, JSON.stringify([...next])).catch(() => { });
         return next;
       });
     }
@@ -1400,12 +1657,10 @@ export default function HomeScreen() {
 
   const saveToRecentlyViewed = async (item: any) => {
     try {
-      debugLog("💾 saveToRecentlyViewed called with:", item.name, item.type);
-      const AsyncStorage =
-        require("@react-native-async-storage/async-storage").default;
-      const existingJson = await AsyncStorage.getItem("recently_viewed_items");
+      debugLog("saveToRecentlyViewed called with:", item.name, item.type);
+      const existingJson = await AsyncStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY);
       let items = existingJson ? JSON.parse(existingJson) : [];
-      debugLog("💾 Existing items count:", items.length);
+      debugLog("Existing items count:", items.length);
 
       // Remove if already exists to avoid duplicates
       items = items.filter((i: any) => i.id !== item.id);
@@ -1436,15 +1691,12 @@ export default function HomeScreen() {
       // Keep only last 10
       items = items.slice(0, 10);
 
-      await AsyncStorage.setItem(
-        "recently_viewed_items",
-        JSON.stringify(items),
-      );
-      debugLog("💾 Saved! New count:", items.length);
+      await AsyncStorage.setItem(RECENTLY_VIEWED_STORAGE_KEY, JSON.stringify(items));
+      debugLog("Saved. New count:", items.length);
 
       // Update state
       setRecentlyViewed(items);
-      debugLog("💾 State updated with", items.length, "items");
+      debugLog("State updated with", items.length, "items");
     } catch (e) {
       debugLog("Error saving to recently viewed:", e);
     }
@@ -1452,11 +1704,9 @@ export default function HomeScreen() {
 
   const fetchRecentlyViewed = async () => {
     try {
-      const AsyncStorage =
-        require("@react-native-async-storage/async-storage").default;
-      const existingJson = await AsyncStorage.getItem("recently_viewed_items");
+      const existingJson = await AsyncStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY);
       debugLog(
-        "📚 Recently viewed from storage:",
+        "Recently viewed from storage:",
         existingJson ? "Found" : "Empty",
       );
       if (existingJson) {
@@ -1472,10 +1722,10 @@ export default function HomeScreen() {
           }
           return true;
         });
-        debugLog("📚 Recently viewed items count:", visibleItems.length);
+        debugLog("Recently viewed items count:", visibleItems.length);
         setRecentlyViewed(visibleItems.slice(0, 5)); // Show first 5
       } else {
-        debugLog("📚 No recently viewed items in storage");
+        debugLog("No recently viewed items in storage");
         setRecentlyViewed([]);
       }
     } catch (e) {
@@ -1534,294 +1784,10 @@ export default function HomeScreen() {
     return null;
   };
 
-  const formatTimeForDisplay = (timeValue: string | null | undefined) => {
-    const parts = extractTimeParts(timeValue);
-    if (!parts) return null;
-
-    const period = parts.hours >= 12 ? "PM" : "AM";
-    const h12 = parts.hours % 12 || 12;
-    const paddedMinutes = String(parts.minutes).padStart(2, "0");
-    return `${h12}:${paddedMinutes} ${period}`;
-  };
-
-  const getEventDateTime = (
-    dateValue: string | Date | null | undefined,
-    endTimeValue?: string | null,
-    startTimeValue?: string | null,
-  ) => {
-    const baseDate = parseLocalDate(dateValue);
-    if (!baseDate) return null;
-
-    const combined = new Date(baseDate);
-    const timeParts =
-      extractTimeParts(endTimeValue || undefined) ||
-      extractTimeParts(startTimeValue || undefined);
-
-    if (timeParts) {
-      combined.setHours(timeParts.hours, timeParts.minutes, 0, 0);
-    } else {
-      combined.setHours(23, 59, 59, 999);
-    }
-
-    return combined;
-  };
-
-  // Fetch Upcoming Events for Musicians (accepted gigs & confirmed studio bookings)
-  const fetchUpcomingEvents = async () => {
-    // Only fetch for musicians
-    if (userRole !== "musician" || !userId) {
-      setUpcomingEvents([]);
-      return;
-    }
-
-    try {
-      const now = new Date();
-      const events: any[] = [];
-
-      // 1. Fetch accepted gig applications
-      const { data: gigApps, error: gigError } = await supabase
-        .from("gig_applications")
-        .select("id, gig_id, status")
-        .eq("applicant_id", userId)
-        .eq("status", "accepted");
-
-      if (gigError) {
-        debugLog("Error fetching gig applications:", gigError);
-      } else if (gigApps) {
-        const gigIds = Array.from(
-          new Set(
-            gigApps
-              .map((app: any) => app.gig_id)
-              .filter((id: any) => typeof id === "string" && id.length > 0),
-          ),
-        );
-
-        let gigById: Record<string, any> = {};
-        if (gigIds.length > 0) {
-          const { data: baseGigs, error: baseGigsError } = await supabase
-            .from("gigs")
-            .select("id, name, event_date, location, budget")
-            .in("id", gigIds);
-
-          const { data: legacyGigs, error: legacyGigsError } = await supabase
-            .from("gigs_legacy_projection")
-            .select("id, images, requirements")
-            .in("id", gigIds);
-
-          if (baseGigsError) {
-            debugLog("Error fetching base gigs for upcoming events:", baseGigsError);
-          }
-          if (legacyGigsError) {
-            debugLog(
-              "Error fetching gig legacy projection for upcoming events:",
-              legacyGigsError,
-            );
-          }
-
-          const baseGigMap = new Map(
-            (baseGigs || []).map((gig: any) => [gig.id, gig]),
-          );
-          const legacyGigMap = new Map(
-            (legacyGigs || []).map((gig: any) => [gig.id, gig]),
-          );
-
-          gigIds.forEach((id: string) => {
-            const baseGig = baseGigMap.get(id);
-            if (!baseGig) return;
-
-            const legacyGig = legacyGigMap.get(id) || {};
-            gigById[id] = {
-              ...baseGig,
-              images: Array.isArray(legacyGig.images) ? legacyGig.images : [],
-              requirements: legacyGig.requirements || {},
-            };
-          });
-        }
-
-        gigApps.forEach((app: any) => {
-          const gig = app.gig_id ? gigById[app.gig_id] : null;
-          if (!gig?.event_date) return;
-
-          const eventDate = parseLocalDate(gig.event_date);
-          const eventDateTime = getEventDateTime(
-            gig.event_date,
-            gig.requirements?.event_end_time,
-            gig.requirements?.event_start_time,
-          );
-          if (!eventDate || !eventDateTime) return;
-
-          if (eventDateTime >= now) {
-            const formattedStartTime = formatTimeForDisplay(
-              gig.requirements?.event_start_time,
-            );
-            const formattedEndTime = formatTimeForDisplay(
-              gig.requirements?.event_end_time,
-            );
-
-            events.push({
-              id: app.id,
-              type: "Gig",
-              name: gig.name,
-              date: gig.event_date,
-              sortTimestamp: eventDateTime.getTime(),
-              formattedDate: eventDate.toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              }),
-              time:
-                formattedStartTime && formattedEndTime
-                  ? `${formattedStartTime} - ${formattedEndTime}`
-                  : formattedStartTime
-                    ? formattedStartTime
-                  : "Time TBA",
-              location: gig.location || "Location TBA",
-              image: gig.images?.[0] || null,
-              budget: gig.budget,
-              status: "Accepted",
-              gigId: gig.id,
-            });
-          }
-        });
-      }
-
-      // 2. Fetch confirmed studio bookings
-      const { data: studioBookings, error: studioError } = await supabase
-        .from("studio_bookings")
-        .select(
-          "id, studio_id, booking_date, start_time, end_time, final_price, total_price, status",
-        )
-        .eq("user_id", userId)
-        .in("status", ["confirmed", "pending"]);
-
-      if (studioError) {
-        debugLog("Error fetching studio bookings:", studioError);
-      } else if (studioBookings) {
-        const seenStudioBookingSlots = new Set<string>();
-        const studioIds = Array.from(
-          new Set(
-            studioBookings
-              .map((booking: any) => booking.studio_id)
-              .filter((id: any) => typeof id === "string" && id.length > 0),
-          ),
-        );
-
-        let studioById: Record<string, any> = {};
-        if (studioIds.length > 0) {
-          const { data: baseStudios, error: baseStudiosError } = await supabase
-            .from("studios")
-            .select("id, name, address")
-            .in("id", studioIds);
-
-          const { data: legacyStudios, error: legacyStudiosError } = await supabase
-            .from("studios_legacy_projection")
-            .select("id, images")
-            .in("id", studioIds);
-
-          if (baseStudiosError) {
-            debugLog(
-              "Error fetching base studios for upcoming events:",
-              baseStudiosError,
-            );
-          }
-          if (legacyStudiosError) {
-            debugLog(
-              "Error fetching studio legacy projection for upcoming events:",
-              legacyStudiosError,
-            );
-          }
-
-          const baseStudioMap = new Map(
-            (baseStudios || []).map((studio: any) => [studio.id, studio]),
-          );
-          const legacyStudioMap = new Map(
-            (legacyStudios || []).map((studio: any) => [studio.id, studio]),
-          );
-
-          studioIds.forEach((id: string) => {
-            const baseStudio = baseStudioMap.get(id);
-            if (!baseStudio) return;
-
-            const legacyStudio = legacyStudioMap.get(id) || {};
-            studioById[id] = {
-              ...baseStudio,
-              images: Array.isArray(legacyStudio.images)
-                ? legacyStudio.images
-                : [],
-            };
-          });
-        }
-
-        studioBookings.forEach((booking: any) => {
-          const studio = booking.studio_id ? studioById[booking.studio_id] : null;
-          if (!booking.booking_date) return;
-
-          const bookingDate = parseLocalDate(booking.booking_date);
-          const bookingDateTime = getEventDateTime(
-            booking.booking_date,
-            booking.end_time,
-            booking.start_time,
-          );
-          if (!bookingDate || !bookingDateTime) return;
-
-          if (bookingDateTime >= now) {
-            const formattedStartTime = formatTimeForDisplay(booking.start_time);
-            const formattedEndTime = formatTimeForDisplay(booking.end_time);
-            const bookingSlotKey = [
-              booking.studio_id || "unknown-studio",
-              bookingDate.toISOString().split("T")[0],
-              formattedStartTime || booking.start_time || "TBA",
-              formattedEndTime || booking.end_time || "TBA",
-            ].join("|");
-
-            if (seenStudioBookingSlots.has(bookingSlotKey)) return;
-            seenStudioBookingSlots.add(bookingSlotKey);
-
-            events.push({
-              id: booking.id,
-              type: "Studio",
-              name: studio?.name || "Studio Booking",
-              date: booking.booking_date,
-              sortTimestamp: bookingDateTime.getTime(),
-              formattedDate: bookingDate.toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              }),
-              time:
-                formattedStartTime && formattedEndTime
-                  ? `${formattedStartTime} - ${formattedEndTime}`
-                  : formattedStartTime
-                    ? formattedStartTime
-                  : "Time TBA",
-              location: studio?.address || "Address TBA",
-              image: studio?.images?.[0] || null,
-              price: booking.final_price || booking.total_price,
-              status: booking.status === "confirmed" ? "Confirmed" : "Pending",
-              studioId: studio?.id,
-            });
-          }
-        });
-      }
-
-      // Sort by date (closest first)
-      events.sort(
-        (a, b) =>
-          (a.sortTimestamp || new Date(a.date).getTime()) -
-          (b.sortTimestamp || new Date(b.date).getTime()),
-      );
-
-      setUpcomingEvents(events.slice(0, 5)); // Show max 5 upcoming events
-      debugLog(`📅 Fetched ${events.length} upcoming events for musician`);
-    } catch (e) {
-      debugLog("Error fetching upcoming events:", e);
-    }
-  };
-
   // 1. Immersive Hero Section
   const renderHero = () => {
-    // Modern System Background (Abstract Dark/Purple)
-    // Using a high-quality abstract gradient/mesh that matches the app's "premium" feel
+    // Musician / Live Performance Hero Image
+    // Using a moody, neon-lit stage/guitar image to match the music vibe
     const heroImage =
       "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?q=80&w=2560&auto=format&fit=crop";
 
@@ -1832,7 +1798,7 @@ export default function HomeScreen() {
       : "Search studios and gigs...";
 
     return (
-      <View style={[styles.heroContainer, Platform.OS === 'web' && { height: 480, borderRadius: 24, overflow: 'hidden' }]}>
+      <View style={styles.heroContainer}>
         <CachedImage
           uri={heroImage}
           style={styles.heroImage}
@@ -1846,7 +1812,7 @@ export default function HomeScreen() {
             "rgba(15, 23, 42, 0.2)",
             "rgba(15, 23, 42, 0.6)",
             "#0F172A",
-          ]}
+          ]} 
           style={styles.heroGradient}
         />
 
@@ -1855,9 +1821,9 @@ export default function HomeScreen() {
           <Text style={styles.heroGreeting}>Hey {userName}</Text>
           <Text style={styles.heroSubtitle}>Ready to make some noise?</Text>
 
-          <TouchableOpacity
+          <TouchableOpacity 
             activeOpacity={0.85}
-            style={[styles.modernSearchCard, isWebDesktop && { maxWidth: 640, alignSelf: 'flex-start' }]}
+            style={styles.modernSearchCard}
             onPress={openSearchSheet}
           >
             <View style={styles.modernSearchLeft}>
@@ -1878,125 +1844,64 @@ export default function HomeScreen() {
     );
   };
 
-  // 1.5 Web SaaS Split Hero
-  const renderWebHero = () => {
-    const heroHeadingColor = isDark ? "#F8FAFC" : "#0F172A";
-    const heroBodyColor = isDark ? "#CBD5E1" : "#334155";
-    const heroPanelColor = isDark ? "rgba(15, 23, 42, 0.76)" : "rgba(255, 255, 255, 0.86)";
-    const heroShadowColor = isDark ? "#020617" : "#64748B";
-
-    return (
-      <LinearGradient
-        colors={
-          isDark
-            ? ["#0F172A", "#111827", "#1E293B"]
-            : ["#FFFFFF", "#EEF2FF", "#E0F2FE"]
-        }
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.webHeroShell}
-      >
-        <View style={styles.webHeroGlowOne} />
-        <View style={styles.webHeroGlowTwo} />
-
-        <View style={styles.webHeroGrid}>
-          <View style={styles.webHeroCopy}>
-            <Text style={[styles.webHeroTitle, { color: heroHeadingColor }]}>
-              Move faster with tools{"\n"}
-              <Text style={{ color: isDark ? "#2DD4BF" : "#0F766E" }}>
-                built for local music
-              </Text>
-            </Text>
-            <Text style={[styles.webHeroDescription, { color: heroBodyColor }]}>
-              Book gigs, discover spaces, and connect with artists in one streamlined workflow. Designed for daily operations, not spreadsheets.
-            </Text>
-
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => router.push('/bookings')}
-              style={[
-                styles.webHeroButton,
-                {
-                  backgroundColor: colors.primary,
-                  shadowColor: colors.primary,
-                },
-              ]}
-            >
-              <Text style={styles.webHeroButtonText}>Start your next gig now</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.webHeroWidgets}>
-            <View
-              style={[
-                styles.webHeroWidgetTop,
-                {
-                  backgroundColor: heroPanelColor,
-                  shadowColor: heroShadowColor,
-                },
-              ]}
-            >
-              <Text style={[styles.webHeroWidgetLabel, { color: webTextSecondary }]}>Monthly Bookings</Text>
-              <Text style={[styles.webHeroWidgetValue, { color: webTextColor }]}>124 <Text style={styles.webHeroWidgetDelta}>+12%</Text></Text>
-              <View style={styles.webHeroBarsRow}>
-                {[38, 56, 32, 82, 46].map((h, i) => (
-                  <View
-                    key={i}
-                    style={[
-                      styles.webHeroBar,
-                      {
-                        height: `${h}%`,
-                        backgroundColor: i === 3 ? colors.primary : isDark ? "#334155" : "#CFD8EA",
-                      },
-                    ]}
-                  />
-                ))}
-              </View>
-            </View>
-
-            <View
-              style={[
-                styles.webHeroWidgetBottom,
-                {
-                  backgroundColor: heroPanelColor,
-                  shadowColor: heroShadowColor,
-                },
-              ]}
-            >
-              <Text style={[styles.webHeroWidgetLabel, { color: webTextColor, textAlign: "center" }]}>Studio Traffic</Text>
-              <View style={styles.webHeroRingWrap}>
-                <View
-                  style={[
-                    styles.webHeroRing,
-                    {
-                      borderColor: isDark ? "#334155" : "#CBD5E1",
-                      borderBottomColor: colors.primary,
-                      borderRightColor: isDark ? "#1E293B" : "#E2E8F0",
-                    },
-                  ]}
-                />
-                <View style={styles.webHeroRingCut} />
-              </View>
-              <Text style={[styles.webHeroWidgetHint, { color: webTextSecondary }]}>
-                Keep your schedule updated to increase the number of interactions.
-              </Text>
-            </View>
-          </View>
-        </View>
-      </LinearGradient>
-    );
-  };
+  // 2. Top Picks Section - Same card design as New Arrivals
   const renderHighlightsSection = () => {
     if (topItems.length === 0) return null;
 
+    // Helper to get price label - same logic as New Arrivals
+    const getTopPickPrice = (item: any) => {
+      if (item.type === "Group") return null;
+
+      if (item.type === "Studio") {
+        const rehearsalRate =
+          item.rehearsal_rate && item.rehearsal_rate !== "0"
+            ? parseInt(item.rehearsal_rate)
+            : 0;
+        const recordingRate =
+          item.recording_rate && item.recording_rate !== "0"
+            ? parseInt(item.recording_rate)
+            : 0;
+        const isRecordingOnlyStudio = item.studio_type === "Recording";
+        const isRehearsalOnlyStudio = item.studio_type === "Rehearsal";
+        const hasRehearsalRate = rehearsalRate > 0 && !isRecordingOnlyStudio;
+        const hasRecordingRate = recordingRate > 0 && !isRehearsalOnlyStudio;
+
+        if (hasRehearsalRate && hasRecordingRate) {
+          return `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+        }
+        if (hasRecordingRate) {
+          return `₱${recordingRate.toLocaleString()}/song`;
+        }
+        if (hasRehearsalRate) {
+          return `₱${rehearsalRate.toLocaleString()}/hr`;
+        }
+        if (item.hourly_rate && item.hourly_rate !== "0") {
+          return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+        }
+        return null;
+      }
+
+      if (item.hourly_rate && item.hourly_rate !== "0") {
+        return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+      }
+      if (item.budget && item.budget !== "0") {
+        return `₱${parseInt(item.budget).toLocaleString()}`;
+      }
+      if (item.rate && item.rate !== "0") {
+        return `₱${parseInt(item.rate).toLocaleString()}`;
+      }
+      return null;
+    };
+
     return (
-      <View style={{ marginTop: 24, paddingHorizontal: 24 }}>
+      <View style={[styles.sectionContainer, { marginTop: 20 }]}> 
         {/* Header */}
         <View
           style={{
             flexDirection: "row",
             justifyContent: "space-between",
             alignItems: "flex-end",
+            paddingHorizontal: 24,
             marginBottom: 16,
           }}
         >
@@ -2007,14 +1912,12 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              Top Picks {aiModeEnabled ? "🤖" : "🎲"}
+              Top Picks
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
-              {aiModeEnabled
-                ? "AI-personalized recommendations"
-                : "Random selection"}
+              AI-powered recommendations
             </Text>
           </View>
           <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
@@ -2030,119 +1933,158 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Modern Masonry / Bento Grid Layout */}
-        {topItems.length >= 3 ? (
-          <View style={[styles.bentoGrid, Platform.OS === 'web' && { height: 480 }]}>
-            {/* Main Highlight (Large) */}
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => handleCardPress(topItems[0])}
-              style={styles.bentoTouchableLarge}
-            >
-              <View style={styles.bentoLarge}>
-                <AutoCardImage
-                  image={topItems[0].image}
-                  images={topItems[0].images}
-                  style={styles.bentoImage}
-                  width={720}
-                  height={560}
-                  cacheVersion={topItems[0].updated_at || topItems[0].created_at || topItems[0].id}
-                />
-                <LinearGradient
-                  colors={["transparent", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.8)"]}
-                  style={styles.bentoOverlay}
-                >
-                  <View style={styles.bentoContent}>
-                    <View
-                      style={[
-                        styles.glassBadge,
-                        { alignSelf: "flex-start", marginBottom: 8 },
-                      ]}
-                    >
-                      <Text style={styles.glassBadgeText}>
-                        {aiModeEnabled && topItems[0].similarity
-                          ? `🤖 ${(topItems[0].similarity * 100).toFixed(0)}% Match`
-                          : "🔥 Highly Rated"}
-                      </Text>
-                    </View>
-                    <Text style={styles.bentoTitleLarge} numberOfLines={2}>
-                      {topItems[0].name}
-                    </Text>
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        marginTop: 4,
-                      }}
-                    >
-                      <Ionicons
-                        name="location"
-                        size={14}
-                        color="rgba(255,255,255,0.8)"
-                      />
-                      <Text style={styles.bentoSubtitle} numberOfLines={1}>
-                        {topItems[0].location}
-                      </Text>
-                    </View>
-                  </View>
-                </LinearGradient>
-              </View>
-            </TouchableOpacity>
-
-            {/* Side Column (2 Stacked) */}
-            <View style={styles.bentoColumn}>
-              {topItems.slice(1, 3).map((item, index) => (
-                <TouchableOpacity
-                  key={item.id}
-                  activeOpacity={1}
-                  onPress={() => handleCardPress(item)}
-                  style={styles.bentoTouchableSmall}
-                >
-                  <View style={styles.bentoSmall}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingLeft: 24,
+            paddingRight: 24,
+            paddingVertical: 8,
+          }}
+          decelerationRate="fast"
+          snapToInterval={280 + 16}
+        >
+          {topItems.map((item) => {
+            const priceLabel = getTopPickPrice(item);
+            return (
+              <TouchableOpacity
+                key={item.id}
+                activeOpacity={1}
+                onPress={() => handleCardPress(item)}
+                style={[
+                  styles.newArrivalCard,
+                  { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                ]}
+              >
+                {/* Image Section */}
+                <View style={styles.newArrivalImageContainer}>
+                  {((item.images && item.images.length > 0) || item.image) ? (
                     <AutoCardImage
                       image={item.image}
                       images={item.images}
-                      style={styles.bentoImage}
-                      width={480}
+                      style={styles.newArrivalImage}
+                      width={560}
                       height={280}
                       cacheVersion={item.updated_at || item.created_at || item.id}
                     />
-                    <LinearGradient
-                      colors={["transparent", "rgba(0,0,0,0.7)"]}
-                      style={styles.bentoOverlay}
+                  ) : (
+                    <View
+                      style={[
+                        styles.newArrivalImagePlaceholder,
+                        { backgroundColor: colors.primary + "20" },
+                      ]}
                     >
-                      <Text style={styles.bentoTitleSmall} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
-                        <Ionicons name="star" size={10} color="#FCD34D" />
-                        <Text style={styles.bentoRating}>
-                          {item.rating > 0 ? item.rating.toFixed(1) : "New"}
-                        </Text>
-                      </View>
-                    </LinearGradient>
+                      <Ionicons
+                        name={
+                          item.type === "Gig"
+                            ? "musical-notes"
+                            : item.type === "Studio"
+                              ? "business"
+                              : item.type === "Artist"
+                                ? "person"
+                                : "people"
+                        }
+                        size={32}
+                        color={colors.primary}
+                      />
+                    </View>
+                  )}
+                  {/* Type Badge */}
+                  <View
+                    style={[
+                      styles.newArrivalTypeBadge,
+                      { backgroundColor: getTypeBadgeColor(item.type) },
+                    ]}
+                  >
+                    <Text style={styles.newArrivalTypeBadgeText}>
+                      {item.type}
+                    </Text>
                   </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        ) : (
-          <ResponsiveList
-            contentContainerStyle={{ paddingRight: 16 }}
-          >
-            {topItems.map((item) => (
-              <View key={item.id} style={{ marginRight: 16, marginBottom: 16 }}>
-                {renderUnifiedCard(item)}
-              </View>
-            ))}
-          </ResponsiveList>
-        )}
+                  {/* AI Match Badge (top right) */}
+                  {item.similarity && item.similarity > 0.1 && (
+                    <View
+                      style={[
+                        styles.newArrivalNewBadge,
+                        { backgroundColor: "rgba(16,185,129,0.95)" },
+                      ]}
+                    >
+                      <Ionicons name="sparkles" size={10} color="#FFF" />
+                      <Text
+                        style={[
+                          styles.newArrivalNewBadgeText,
+                          { color: "#FFF" },
+                        ]}
+                      >
+                        {Math.round(item.similarity * 100)}%
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Details Section */}
+                <View style={styles.newArrivalDetails}>
+                  <Text
+                    style={[styles.newArrivalName, { color: colors.text }]}
+                    numberOfLines={1}
+                  >
+                    {item.name}
+                  </Text>
+
+                  {/* Location/Genre */}
+                  <View style={styles.newArrivalRow}>
+                    <Ionicons
+                      name="location-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.newArrivalText,
+                        { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.location || item.genre || "Location TBA"}
+                    </Text>
+                  </View>
+
+                  {/* Rating */}
+                  <View style={styles.newArrivalRow}>
+                    <Ionicons name="star" size={14} color="#FCD34D" />
+                    <Text
+                      style={[
+                        styles.newArrivalText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {item.rating > 0
+                        ? `${item.rating.toFixed(1)} (${item.review_count || 0})`
+                        : "No ratings yet"}
+                    </Text>
+                  </View>
+
+                  {/* Price */}
+                  {priceLabel && (
+                    <Text
+                      style={[styles.newArrivalPrice, { color: colors.primary }]}
+                    >
+                      {priceLabel}
+                    </Text>
+                  )}
+                  {/* Promo Badge */}
+                  {item.type === "Studio" && item.has_active_promotion && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                      <Ionicons name="pricetag" size={10} color="#10B981" />
+                      <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                        Promo available
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
     );
   };
@@ -2170,23 +2112,6 @@ export default function HomeScreen() {
     openListingDetails(item.id);
     // The ListingDetailsSheet will show the "Connect" tab for Groups
     // allowing venue/studio owners to send booking requests
-  };
-
-  // Unified Card Renderer
-  const renderUnifiedCard = (item: any) => {
-    return (
-      <ListingCard
-        key={item.id}
-        item={item}
-        onPress={handleCardPress}
-        onInvite={handleInvite}
-        onChat={handleChat}
-        variant="horizontal"
-        hasGroups={hasGroups}
-        showGigSummary={false}
-        style={{ width: 280 }}
-      />
-    );
   };
 
   // 3. New Arrivals Section - Custom Cards
@@ -2285,12 +2210,15 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        <ResponsiveList
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
           contentContainerStyle={{
             paddingLeft: 24,
             paddingRight: 24,
             paddingVertical: 8,
           }}
+          decelerationRate="fast"
           snapToInterval={280 + 16}
         >
           {newArrivals.map((item) => {
@@ -2302,350 +2230,124 @@ export default function HomeScreen() {
                 onPress={() => handleCardPress(item)}
                 style={[
                   styles.newArrivalCard,
-                  isWebDesktop && { flex: 1, minWidth: 280, maxWidth: 320, shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { height: 6, width: 0 } },
-                  { backgroundColor: webCardBackground },
+                  { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
                 ]}
               >
-              {/* Image Section */}
-              <View style={styles.newArrivalImageContainer}>
-                {((item.images && item.images.length > 0) || item.image) ? (
-                  <AutoCardImage
-                    image={item.image}
-                    images={item.images}
-                    style={styles.newArrivalImage}
-                    width={560}
-                    height={280}
-                    cacheVersion={item.updated_at || item.created_at || item.id}
-                  />
-                ) : (
+                {/* Image Section */}
+                <View style={styles.newArrivalImageContainer}>
+                  {((item.images && item.images.length > 0) || item.image) ? (
+                    <AutoCardImage
+                      image={item.image}
+                      images={item.images}
+                      style={styles.newArrivalImage}
+                      width={560}
+                      height={280}
+                      cacheVersion={item.updated_at || item.created_at || item.id}
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.newArrivalImagePlaceholder,
+                        { backgroundColor: colors.primary + "20" },
+                      ]}
+                    >
+                      <Ionicons
+                        name={
+                          item.type === "Gig"
+                            ? "musical-notes"
+                            : item.type === "Studio"
+                              ? "business"
+                              : "people"
+                        }
+                        size={32}
+                        color={colors.primary}
+                      />
+                    </View>
+                  )}
+                  {/* Type Badge */}
                   <View
                     style={[
-                      styles.newArrivalImagePlaceholder,
-                      { backgroundColor: colors.primary + "20" },
+                      styles.newArrivalTypeBadge,
+                      { backgroundColor: getTypeBadgeColor(item.type) },
                     ]}
                   >
-                    <Ionicons
-                      name={
-                        item.type === "Gig"
-                          ? "musical-notes"
-                          : item.type === "Studio"
-                            ? "business"
-                            : "people"
-                      }
-                      size={32}
-                      color={colors.primary}
-                    />
+                    <Text style={styles.newArrivalTypeBadgeText}>
+                      {item.type}
+                    </Text>
                   </View>
-                )}
-                {/* Type Badge */}
-                <View
-                  style={[
-                    styles.newArrivalTypeBadge,
-                    { backgroundColor: getTypeBadgeColor(item.type) },
-                  ]}
-                >
-                  <Text style={styles.newArrivalTypeBadgeText}>
-                    {item.type}
-                  </Text>
+                  {/* NEW Dot Badge – hidden once the listing has been viewed */}
+                  {!viewedNewArrivals.has(item.id) && (
+                    <View style={styles.newArrivalNewBadge}>
+                      <View style={styles.newArrivalNewDot} />
+                      <Text style={styles.newArrivalNewBadgeText}>NEW</Text>
+                    </View>
+                  )}
                 </View>
-                {/* NEW Dot Badge – hidden once the listing has been viewed */}
-                {!viewedNewArrivals.has(item.id) && (
-                  <View style={styles.newArrivalNewBadge}>
-                    <View style={styles.newArrivalNewDot} />
-                    <Text style={styles.newArrivalNewBadgeText}>NEW</Text>
-                  </View>
-                )}
-              </View>
 
-              {/* Details Section */}
-              <View style={styles.newArrivalDetails}>
-                <Text
-                  style={[styles.newArrivalName, { color: colors.text }]}
-                  numberOfLines={1}
-                >
-                  {item.name}
-                </Text>
-
-                {/* Location/Genre */}
-                <View style={styles.newArrivalRow}>
-                  <Ionicons
-                    name="location-outline"
-                    size={14}
-                    color={colors.textSecondary}
-                  />
+                {/* Details Section */}
+                <View style={styles.newArrivalDetails}>
                   <Text
-                    style={[
-                      styles.newArrivalText,
-                      { color: colors.textSecondary },
-                    ]}
+                    style={[styles.newArrivalName, { color: colors.text }]}
                     numberOfLines={1}
                   >
-                    {item.location || item.genre || "Location TBA"}
+                    {item.name}
                   </Text>
-                </View>
 
-                {/* Rating */}
-                <View style={styles.newArrivalRow}>
-                  <Ionicons name="star" size={14} color="#FCD34D" />
-                  <Text
-                    style={[
-                      styles.newArrivalText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {item.rating > 0
-                      ? `${item.rating.toFixed(1)} (${item.review_count || 0})`
-                      : "No ratings yet"}
-                  </Text>
-                </View>
+                  {/* Location/Genre */}
+                  <View style={styles.newArrivalRow}>
+                    <Ionicons
+                      name="location-outline"
+                      size={14}
+                      color={colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.newArrivalText,
+                        { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.location || item.genre || "Location TBA"}
+                    </Text>
+                  </View>
 
-                {/* Price */}
-                {priceLabel && (
-                  <Text
-                    style={[styles.newArrivalPrice, { color: colors.primary }]}
-                  >
-                    {priceLabel}
-                  </Text>
-                )}
-              </View>
+                  {/* Rating */}
+                  <View style={styles.newArrivalRow}>
+                    <Ionicons name="star" size={14} color="#FCD34D" />
+                    <Text
+                      style={[
+                        styles.newArrivalText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {item.rating > 0
+                        ? `${item.rating.toFixed(1)} (${item.review_count || 0})`
+                        : "No ratings yet"}
+                    </Text>
+                  </View>
+
+                  {/* Price */}
+                  {priceLabel && (
+                    <Text
+                      style={[styles.newArrivalPrice, { color: colors.primary }]}
+                    >
+                      {priceLabel}
+                    </Text>
+                  )}
+                  {/* Promo Badge */}
+                  {item.type === "Studio" && item.has_active_promotion && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                      <Ionicons name="pricetag" size={10} color="#10B981" />
+                      <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                        Promo available
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </TouchableOpacity>
             );
           })}
-        </ResponsiveList>
-      </View>
-    );
-  };
-
-  // 3.5 Upcoming Events Section (for Musicians only)
-  const renderUpcomingEvents = () => {
-    // Only show for musicians
-    if (userRole !== "musician" || upcomingEvents.length === 0) return null;
-
-    return (
-      <View style={styles.sectionContainer}>
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "flex-end",
-            paddingHorizontal: 24,
-            marginBottom: 16,
-          }}
-        >
-          <View>
-            <Text
-              style={[
-                styles.sectionTitle,
-                { color: colors.text, marginBottom: 0 },
-              ]}
-            >
-              Upcoming Events
-            </Text>
-            <Text
-              style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
-            >
-              Your scheduled gigs & bookings
-            </Text>
-          </View>
-          <TouchableOpacity activeOpacity={1} onPress={() => router.push("/bookings")}>
-            <Text
-              style={{
-                color: colors.primary,
-                fontFamily: "Poppins_600SemiBold",
-                fontSize: moderateScale(13),
-              }}
-            >
-              View all
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <ResponsiveList
-          contentContainerStyle={{
-            paddingLeft: 24,
-            paddingRight: 24,
-            paddingVertical: 8,
-          }}
-          snapToInterval={280 + 16}
-        >
-          {upcomingEvents.map((event, index) => (
-            <TouchableOpacity
-              key={`${event.type}-${event.id}`}
-              activeOpacity={1}
-              onPress={() => {
-                // Navigate to appropriate detail screen
-                if (event.type === "Gig" && event.gigId) {
-                  // For now, just go to bookings since musicians can't view gig details directly
-                  router.push("/bookings");
-                } else if (event.type === "Studio" && event.studioId) {
-                  openListingDetails(event.studioId);
-                }
-              }}
-              style={[
-                styles.upcomingEventCard,
-                isWebDesktop && { flex: 1, minWidth: 280, maxWidth: 320 },
-                { backgroundColor: webCardBackground },
-              ]}
-            >
-              {/* Event Image */}
-              <View style={styles.upcomingEventImageContainer}>
-                {event.image ? (
-                  <CachedImage
-                    uri={event.image}
-                    style={styles.upcomingEventImage}
-                    width={560}
-                    height={240}
-                    cacheVersion={event.updated_at || event.date || event.id}
-                  />
-                ) : (
-                  <View
-                    style={[
-                      styles.upcomingEventImagePlaceholder,
-                      { backgroundColor: colors.primary + "20" },
-                    ]}
-                  >
-                    <Ionicons
-                      name={event.type === "Gig" ? "musical-notes" : "business"}
-                      size={32}
-                      color={colors.primary}
-                    />
-                  </View>
-                )}
-                {/* Type Badge */}
-                <View
-                  style={[
-                    styles.upcomingEventTypeBadge,
-                    {
-                      backgroundColor:
-                        event.type === "Gig" ? "#8B5CF6" : "#10B981",
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name={event.type === "Gig" ? "mic" : "business"}
-                    size={12}
-                    color="#FFF"
-                  />
-                  <Text style={styles.upcomingEventTypeBadgeText}>
-                    {event.type}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Event Details */}
-              <View style={styles.upcomingEventDetails}>
-                <Text
-                  style={[styles.upcomingEventName, { color: colors.text }]}
-                  numberOfLines={1}
-                >
-                  {event.name}
-                </Text>
-
-                {/* Date & Time */}
-                <View style={styles.upcomingEventRow}>
-                  <Ionicons
-                    name="calendar-outline"
-                    size={14}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.upcomingEventText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {event.formattedDate}
-                  </Text>
-                </View>
-
-                <View style={styles.upcomingEventRow}>
-                  <Ionicons
-                    name="time-outline"
-                    size={14}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.upcomingEventText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {event.time}
-                  </Text>
-                </View>
-
-                {/* Location */}
-                <View style={styles.upcomingEventRow}>
-                  <Ionicons
-                    name="location-outline"
-                    size={14}
-                    color={colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.upcomingEventText,
-                      { color: colors.textSecondary },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {event.location}
-                  </Text>
-                </View>
-
-                {/* Price/Budget & Status */}
-                <View
-                  style={[
-                    styles.upcomingEventRow,
-                    { justifyContent: "space-between", marginTop: 8 },
-                  ]}
-                >
-                  {(event.budget || event.price) && (
-                    <Text
-                      style={[
-                        styles.upcomingEventPrice,
-                        { color: colors.primary },
-                      ]}
-                    >
-                      ₱{(event.budget || event.price).toLocaleString()}
-                    </Text>
-                  )}
-                  <View
-                    style={[
-                      styles.upcomingEventStatusBadge,
-                      {
-                        backgroundColor:
-                          event.status === "Confirmed" ||
-                          event.status === "Accepted"
-                            ? "#10B98115"
-                            : "#F59E0B15",
-                        borderColor:
-                          event.status === "Confirmed" ||
-                          event.status === "Accepted"
-                            ? "#10B981"
-                            : "#F59E0B",
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.upcomingEventStatusText,
-                        {
-                          color:
-                            event.status === "Confirmed" ||
-                            event.status === "Accepted"
-                              ? "#10B981"
-                              : "#F59E0B",
-                        },
-                      ]}
-                    >
-                      {event.status}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </ResponsiveList>
+        </ScrollView>
       </View>
     );
   };
@@ -2657,9 +2359,11 @@ export default function HomeScreen() {
     if (uniqueItems.length === 0) {
       return (
         <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { color: webTextColor }]}>
-            For You
-          </Text>
+          <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              For You
+            </Text>
+          </View>
           <View
             style={{
               paddingHorizontal: 24,
@@ -2691,7 +2395,7 @@ export default function HomeScreen() {
           style={{
             flexDirection: "row",
             justifyContent: "space-between",
-            alignItems: "flex-end",
+            alignItems: "center",
             paddingHorizontal: 24,
             marginBottom: 16,
           }}
@@ -2703,14 +2407,12 @@ export default function HomeScreen() {
                 { color: colors.text, marginBottom: 0 },
               ]}
             >
-              For You {aiModeEnabled ? "🤖" : "🎲"}
+              For You
             </Text>
             <Text
               style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
             >
-              {aiModeEnabled
-                ? "Personalized picks reranked in realtime"
-                : "Random suggestions for comparison"}
+              TikTok-style feed tuned to your profile
             </Text>
           </View>
           <TouchableOpacity activeOpacity={1} onPress={openSearchSheet}>
@@ -2734,9 +2436,8 @@ export default function HomeScreen() {
               onPress={() => handleCardPress(uniqueItems[0])}
               style={[
                 styles.featuredCard,
-                isWebDesktop && { height: 480 },
                 {
-                  backgroundColor: webCardBackground,
+                  backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
                   elevation: 8,
                   shadowOpacity: 0.15,
                 },
@@ -2764,8 +2465,8 @@ export default function HomeScreen() {
                   <View style={styles.featuredBadge}>
                     <Text style={styles.featuredBadgeText}>
                       {aiModeEnabled && uniqueItems[0].similarity
-                        ? `🤖 ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match`
-                        : "✨ Top Recommendation"}
+                        ? `AI ${(uniqueItems[0].similarity * 100).toFixed(0)}% Match`
+                        : "Top Recommendation"}
                     </Text>
                   </View>
                   <View
@@ -2788,6 +2489,11 @@ export default function HomeScreen() {
                   <Text style={styles.featuredLocation} numberOfLines={1}>
                     {uniqueItems[0].location}
                   </Text>
+                  {uniqueItems[0].aiReason ? (
+                    <Text style={styles.featuredReason} numberOfLines={2}>
+                      {uniqueItems[0].aiReason}
+                    </Text>
+                  ) : null}
                   <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                     {uniqueItems[0].hourly_rate && (
                       <Text style={styles.featuredPrice}>
@@ -2802,6 +2508,11 @@ export default function HomeScreen() {
                         </Text>
                       </View>
                     )}
+                    {uniqueItems[0].type === "Studio" && uniqueItems[0].has_active_promotion && (
+                      <View style={[styles.tagBadge, { backgroundColor: "rgba(16,185,129,0.8)", borderColor: "rgba(16,185,129,0.9)" }]}>
+                        <Text style={styles.tagText}>Promo</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               </LinearGradient>
@@ -2810,12 +2521,15 @@ export default function HomeScreen() {
         )}
 
         {/* Horizontal Scroll for Rest */}
-        <ResponsiveList
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
           contentContainerStyle={{
             paddingLeft: 24,
             paddingRight: 24,
             paddingVertical: 16,
           }} // Added paddingVertical for shadows
+          decelerationRate="fast"
           snapToInterval={280 + 16}
         >
           {uniqueItems.slice(1, 11).map((item, index) => (
@@ -2825,8 +2539,7 @@ export default function HomeScreen() {
               onPress={() => handleCardPress(item)}
               style={[
                 styles.forYouCard,
-                isWebDesktop && { flex: 1, minWidth: 280, maxWidth: 320 },
-                { backgroundColor: webCardBackground },
+                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
               ]}
             >
               {/* Image Section */}
@@ -2878,8 +2591,6 @@ export default function HomeScreen() {
                       position: "absolute",
                       top: 12,
                       right: 12,
-                      flexDirection: "row",
-                      alignItems: "center",
                       paddingVertical: 4,
                       paddingHorizontal: 8,
                     },
@@ -2919,6 +2630,25 @@ export default function HomeScreen() {
                     {item.location || item.genre || "Location TBA"}
                   </Text>
                 </View>
+
+                {item.aiReason ? (
+                  <View style={styles.forYouReasonRow}>
+                    <Ionicons
+                      name="sparkles-outline"
+                      size={12}
+                      color={colors.primary}
+                    />
+                    <Text
+                      style={[
+                        styles.forYouReasonText,
+                        { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {item.aiReason}
+                    </Text>
+                  </View>
+                ) : null}
 
                 {/* Price - hide for Groups, handle Studio-specific pricing */}
                 {item.type !== "Group" &&
@@ -2984,10 +2714,19 @@ export default function HomeScreen() {
                     }
                     return null;
                   })()}
+                {/* Promo Badge */}
+                {item.type === "Studio" && item.has_active_promotion && (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                    <Ionicons name="pricetag" size={10} color="#10B981" />
+                    <Text style={{ fontSize: 11, fontFamily: "Poppins_500Medium", color: "#10B981" }}>
+                      Promo available
+                    </Text>
+                  </View>
+                )}
               </View>
             </TouchableOpacity>
           ))}
-        </ResponsiveList>
+        </ScrollView>
       </View>
     );
   };
@@ -2997,40 +2736,85 @@ export default function HomeScreen() {
 
   if (loading) {
     return (
-      <View
-        style={[
-          styles.loadingContainer,
-          { backgroundColor: pageBackground },
-        ]}
-      >
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <StatusBar
+          barStyle="light-content"
+          translucent
+          backgroundColor="transparent"
+        />
+        
+        {/* Mock Header space */}
+        <View style={{ position: "absolute", top: insets.top + 8, left: 16, zIndex: 100 }}>
+           <Skeleton width={180} height={32} borderRadius={8} />
+        </View>
+
+        <View>
+          {/* Hero Skeleton */}
+          <Skeleton 
+             width="100%" 
+             height={height < 700 ? Math.max(height * 0.45, 340) : height * 0.42} 
+             borderRadius={0} 
+          />
+          {/* Overlay elements mock inside hero */}
+          <View style={{ position: 'absolute', bottom: 24, left: 24, right: 24 }}>
+             <Skeleton width="60%" height={36} style={{ marginBottom: 20 }} />
+             <Skeleton width="100%" height={56} borderRadius={100} />
+          </View>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+          {/* Highlight/Featured Mocks */}
+          <View style={{ marginTop: 32, paddingHorizontal: 24 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+               <Skeleton width={120} height={24} />
+               <Skeleton width={60} height={20} />
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {[1, 2, 3].map((_, i) => (
+                <View key={i} style={{ marginRight: 20 }}>
+                  <Skeleton width={width * 0.7} height={moderateScale(320)} borderRadius={24} />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+          
+          {/* Another row Mock */}
+          <View style={{ marginTop: 32, paddingHorizontal: 24 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+               <Skeleton width={140} height={24} />
+               <Skeleton width={60} height={20} />
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {[1, 2, 3].map((_, i) => (
+                <View key={i} style={{ marginRight: 20 }}>
+                  <Skeleton width={width * 0.65} height={moderateScale(240)} borderRadius={20} />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </ScrollView>
+        <Navbar />
       </View>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: pageBackground }]}> 
-      <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar
         barStyle="light-content"
         translucent
         backgroundColor="transparent"
       />
 
-      {!isWebDesktop && (
-        <View
-          style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
-        >
-          <Header title="MusikaLokal" transparent={!isScrolled} />
-        </View>
-      )}
+      <View
+        style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
+      >
+        <Header title="MusikaLokal" transparent={!isScrolled} />
+      </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.homeScrollContent,
-          isWebDesktop && styles.homeScrollContentWeb,
-        ]}
+        contentContainerStyle={{ paddingBottom: 180 }}
         bounces={true}
         onScroll={(e) => {
           const contentOffsetY = e.nativeEvent.contentOffset.y;
@@ -3046,417 +2830,425 @@ export default function HomeScreen() {
           />
         }
       >
-        <View style={[styles.homeContent, isWebDesktop && styles.homeContentWeb]}>
-        {isWebDesktop ? renderWebHero() : renderHero()}
+        {renderHero()}
 
-        <View
-          style={[
-            { paddingHorizontal: 24, marginTop: 16 },
-            isWebDesktop && styles.profileBannerWrapWeb,
-          ]}
-        >
+        <View style={{ paddingHorizontal: 24, marginTop: 8 }}>
           <ProfileCompletionBanner />
         </View>
 
-        {/* AI Recommendation Comparison Toggle */}
-        <View
-          style={[{
-            marginHorizontal: 24,
-            marginTop: 20,
-            marginBottom: 8,
-            padding: 16,
-            borderRadius: 20,
-            backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
-            borderWidth: 1,
-            borderColor: aiModeEnabled
-              ? colors.primary
-              : isDark
-                ? "#374151"
-                : "#E5E7EB",
-          }, isWebDesktop && {
-            alignSelf: 'center',
-            marginHorizontal: 24,
-            maxWidth: 760,
-            width: '100%',
-            backgroundColor: webCardBackground,
-            borderColor: isDark ? '#1E293B' : '#D9E2F1',
-            shadowColor: '#0F172A',
-            shadowOffset: { width: 0, height: 12 },
-            shadowOpacity: 0.12,
-            shadowRadius: 24,
-            elevation: 8,
-          }]}
-        >
+        {userId && (
           <View
             style={{
+              marginHorizontal: 24,
+              marginTop: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              borderRadius: 12,
+              backgroundColor: isDark ? "#1F2937" : "#EFF6FF",
+              borderWidth: 1,
+              borderColor: isDark ? "#374151" : "#BFDBFE",
               flexDirection: "row",
               alignItems: "center",
-              justifyContent: "space-between",
+              gap: 8,
             }}
           >
-            <View style={{ flex: 1 }}>
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-              >
+            <Ionicons
+              name={homeAiStatusLabel.includes("Working") ? "checkmark-circle" : "information-circle"}
+              size={16}
+              color={homeAiStatusLabel.includes("Working") ? "#10B981" : colors.primary}
+            />
+            <Text
+              style={{
+                flex: 1,
+                color: colors.text,
+                fontFamily: "Poppins_500Medium",
+                fontSize: 12,
+              }}
+            >
+              {homeAiStatusLabel}
+            </Text>
+          </View>
+        )}
+
+        {/* AI Recommendation Comparison Toggle */}
+        {showForYouAiCard && userId && (
+          <View
+            style={{
+              marginHorizontal: 24,
+              marginTop: 20,
+              marginBottom: 8,
+              padding: 16,
+              borderRadius: 20,
+              backgroundColor: isDark ? "#1F2937" : "#F3F4F6",
+              borderWidth: 1,
+              borderColor: colors.primary,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+              }}
+            >
+              <View style={{ flex: 1 }}>
                 <View
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor: aiModeEnabled
-                      ? colors.primary
-                      : isDark
-                        ? "#374151"
-                        : "#D1D5DB",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
                 >
-                  <Ionicons
-                    name={aiModeEnabled ? "sparkles" : "shuffle"}
-                    size={18}
-                    color="#FFF"
-                  />
-                </View>
-                <View>
-                  <Text
+                  <View
                     style={{
-                      fontFamily: "Poppins_600SemiBold",
-                      fontSize: 14,
-                      color: webTextColor,
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      backgroundColor: colors.primary,
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                   >
-                    {aiModeEnabled ? "🤖 AI Recommendations" : "🎲 Random Mode"}
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: "Poppins_400Regular",
-                      fontSize: 11,
-                      color: webTextSecondary,
-                      marginTop: -2,
-                    }}
-                  >
-                    {aiModeEnabled
-                      ? `${aiFeedProvider}${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} matches` : ""}`
-                      : "Showing random listings for comparison"}
-                  </Text>
+                    <Ionicons
+                      name="sparkles"
+                      size={18}
+                      color="#FFF"
+                    />
+                  </View>
+                  <View>
+                    <Text
+                      style={{
+                        fontFamily: "Poppins_600SemiBold",
+                        fontSize: 14,
+                        color: colors.text,
+                      }}
+                    >
+                      For You AI
+                    </Text>
+                    <Text
+                      style={{
+                        fontFamily: "Poppins_400Regular",
+                        fontSize: 11,
+                        color: colors.textSecondary,
+                        marginTop: -2,
+                      }}
+                    >
+                      {`Engine: ${aiFeedProvider}${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} picks` : ""}`}
+                    </Text>
+                  </View>
                 </View>
               </View>
             </View>
-            <Switch
-              value={aiModeEnabled}
-              onValueChange={(value) => {
-                setAiModeEnabled(value);
-                // Update featured/discover based on mode
-                if (value && aiRecommendations.length > 0) {
-                  const diversifiedAiItems = takeItemsWithTypeVariety(aiRecommendations, 20);
-                  setFeatured(diversifiedAiItems.slice(0, 10));
-                  setDiscover(diversifiedAiItems.slice(10, 20));
-                } else {
-                  const diversifiedRandomItems = takeItemsWithTypeVariety(randomRecommendations, 20);
-                  setFeatured(diversifiedRandomItems.slice(0, 10));
-                  setDiscover(diversifiedRandomItems.slice(10, 20));
-                }
-              }}
-              trackColor={{
-                false: isDark ? "#374151" : "#D1D5DB",
-                true: colors.primary + "60",
-              }}
-              thumbColor={aiModeEnabled ? colors.primary : "#9CA3AF"}
-            />
-          </View>
 
-          {/* AI Similarity Preview */}
-          {aiModeEnabled && aiRecommendations.length > 0 && (
-            <View
-              style={{
-                marginTop: 12,
-                paddingTop: 12,
-                borderTopWidth: 1,
-                  borderTopColor: isDark ? "#334155" : "#DBE3F0",
-              }}
-            >
-              <Text
+            {aiFeedMessage ? (
+              <View
                 style={{
-                  fontFamily: "Poppins_500Medium",
-                  fontSize: 11,
-                    color: webTextSecondary,
-                  marginBottom: 8,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
+                  marginTop: 10,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
                 }}
               >
-                {hasAiSimilarityMatches
-                  ? `Top Matches (${aiFeedProvider})`
-                  : "Locally ranked by popularity and freshness"}
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                {aiPreviewItems.map((item) => (
-                  <View
-                    key={item.id}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      backgroundColor: isDark ? "#334155" : "#E8EEF8",
-                      paddingHorizontal: 10,
-                      paddingVertical: 5,
-                      borderRadius: 12,
-                      gap: 4,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontFamily: "Poppins_500Medium",
-                        fontSize: 11,
-                        color: webTextColor,
-                      }}
-                      numberOfLines={1}
-                    >
-                      {item.name?.substring(0, 15)}
-                      {item.name?.length > 15 ? "..." : ""}
-                    </Text>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={14}
+                  color={colors.textSecondary}
+                />
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily: "Poppins_400Regular",
+                    fontSize: 11,
+                    color: colors.textSecondary,
+                  }}
+                >
+                  {aiFeedMessage}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* AI Similarity Preview */}
+            {aiRecommendations.length > 0 && (
+              <View
+                style={{
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTopWidth: 1,
+                  borderTopColor: isDark ? "#374151" : "#E5E7EB",
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: "Poppins_500Medium",
+                    fontSize: 11,
+                    color: colors.textSecondary,
+                    marginBottom: 8,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  {hasAiSimilarityMatches
+                    ? "Top Matches This Session"
+                    : "Fresh recommendations for your profile"}
+                </Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                  {aiPreviewItems.map((item) => (
                     <View
+                      key={item.id}
                       style={{
-                        backgroundColor:
-                          item.similarity > 0.1 ? colors.primary : "#6B7280",
-                        paddingHorizontal: 5,
-                        paddingVertical: 1,
-                        borderRadius: 6,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        backgroundColor: isDark ? "#374151" : "#E5E7EB",
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                        borderRadius: 12,
+                        gap: 4,
                       }}
                     >
                       <Text
                         style={{
-                          fontFamily: "Poppins_600SemiBold",
-                          fontSize: 9,
-                          color: "#FFF",
+                          fontFamily: "Poppins_500Medium",
+                          fontSize: 11,
+                          color: colors.text,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {item.name?.substring(0, 15)}
+                        {item.name?.length > 15 ? "..." : ""}
+                      </Text>
+                      <View
+                        style={{
+                          backgroundColor:
+                            item.similarity > 0.1 ? colors.primary : "#6B7280",
+                          paddingHorizontal: 5,
+                          paddingVertical: 1,
+                          borderRadius: 6,
                         }}
                       >
-                        {item.similarity > 0.1
-                          ? `${((item.similarity || 0) * 100).toFixed(0)}%`
-                          : item.type}
-                      </Text>
+                        <Text
+                          style={{
+                            fontFamily: "Poppins_600SemiBold",
+                            fontSize: 9,
+                            color: "#FFF",
+                          }}
+                        >
+                          {item.similarity > 0.1
+                            ? `${((item.similarity || 0) * 100).toFixed(0)}%`
+                            : item.type}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                ))}
+                  ))}
+                </View>
               </View>
-            </View>
-          )}
+            )}
 
-          {/* No AI Data Message */}
-          {aiModeEnabled && aiRecommendations.length === 0 && userId && (
-            <View
-              style={{
-                marginTop: 12,
-                paddingTop: 12,
-                borderTopWidth: 1,
-                borderTopColor: isDark ? "#334155" : "#DBE3F0",
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <Ionicons
-                name="information-circle"
-                size={16}
-                color={colors.textSecondary}
-              />
-              <Text
+            {/* No AI Data Message */}
+            {aiModeEnabled && aiRecommendations.length === 0 && userId && (
+              <View
                 style={{
-                  fontFamily: "Poppins_400Regular",
-                  fontSize: 11,
-                  color: webTextSecondary,
-                  flex: 1,
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTopWidth: 1,
+                  borderTopColor: isDark ? "#374151" : "#E5E7EB",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
                 }}
               >
-                {aiFeedMessage || "Add profile skills and genres for stronger AI ranking signals."}
-              </Text>
-            </View>
-          )}
-
-          {aiModeEnabled && aiFeedMessage.length > 0 && aiRecommendations.length > 0 && (
-            <View
-              style={{
-                marginTop: 12,
-                paddingTop: 12,
-                borderTopWidth: 1,
-                borderTopColor: isDark ? "#334155" : "#DBE3F0",
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <Ionicons
-                name="information-circle"
-                size={16}
-                color={colors.textSecondary}
-              />
-              <Text
-                style={{
-                  fontFamily: "Poppins_400Regular",
-                  fontSize: 11,
-                  color: webTextSecondary,
-                  flex: 1,
-                }}
-              >
-                {aiFeedMessage}
-              </Text>
-            </View>
-          )}
-        </View>
+                <Ionicons
+                  name="information-circle"
+                  size={16}
+                  color={colors.textSecondary}
+                />
+                <Text
+                  style={{
+                    fontFamily: "Poppins_400Regular",
+                    fontSize: 11,
+                    color: colors.textSecondary,
+                    flex: 1,
+                  }}
+                >
+                  Add skills and genres in your profile, then browse listings to
+                  improve your For You feed quality.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {renderHighlightsSection()}
 
+        {renderNewArrivals()}
+
         {renderSmartFeed()}
 
-        {renderUpcomingEvents()}
-
-        {renderNewArrivals()}
+        {/* Phase 2: Quick Access Modules */}
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: 24, marginBottom: 12 }]}>Explore More</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20 }}>
+            {([
+              { label: "Discover", icon: "compass-outline" as const, route: "/home", color: "#3b82f6" },
+              { label: "Projects", icon: "people-outline" as const, route: "/producer_projects", color: "#8b5cf6" },
+              { label: "Shop", icon: "bag-handle-outline" as const, route: "/shop", color: "#22c55e" },
+              { label: "Orders", icon: "receipt-outline" as const, route: "/orders", color: "#eab308" },
+              { label: "Seller Hub", icon: "storefront-outline" as const, route: "/seller_hub", color: "#ec4899" },
+            ] as const).map((mod) => (
+              <TouchableOpacity
+                key={mod.label}
+                style={[styles.quickAccessCard, { backgroundColor: mod.color + "14" }]}
+                onPress={() => router.push(mod.route as any)}
+              >
+                <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "22" }]}>
+                  <Ionicons name={mod.icon} size={22} color={mod.color} />
+                </View>
+                <Text style={{ color: colors.text, fontSize: moderateScale(12), fontWeight: "600", marginTop: 6 }}>{mod.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
 
         {/* Recently Viewed Section - Custom Cards */}
         {recentlyViewed.length > 0 && (
-              <View style={styles.sectionContainer}>
-                <View
+          <View style={styles.sectionContainer}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingHorizontal: 24,
+                marginBottom: 12,
+              }}
+            >
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                Recently Viewed
+              </Text>
+              <TouchableOpacity activeOpacity={1} onPress={openRecentlyViewedSheet}>
+                <Text
                   style={{
-                    flexDirection: "row",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    paddingHorizontal: 24,
-                    marginBottom: 12,
+                    color: colors.primary,
+                    fontFamily: "Poppins_500Medium",
+                    fontSize: moderateScale(12),
                   }}
                 >
-                  <Text style={[styles.sectionTitle, { color: webTextColor }]}>
-                    Recently Viewed
-                  </Text>
-                  <TouchableOpacity activeOpacity={1} onPress={openRecentlyViewedSheet}>
-                    <Text
-                      style={{
-                        color: colors.primary,
-                        fontFamily: "Poppins_500Medium",
-                        fontSize: moderateScale(12),
-                      }}
-                    >
-                      See all
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                <ResponsiveList
-                  contentContainerStyle={{
-                    paddingLeft: 24,
-                    paddingRight: 24,
-                    paddingVertical: 8,
-                  }}
-                  snapToInterval={240 + 16}
+                  See all
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{
+                paddingLeft: 24,
+                paddingRight: 24,
+                paddingVertical: 8,
+              }}
+              decelerationRate="fast"
+              snapToInterval={240 + 16}
+            >
+              {recentlyViewed.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  activeOpacity={1}
+                  onPress={() => handleCardPress(item)}
+                  style={[
+                    styles.recentlyViewedCard,
+                    { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                  ]}
                 >
-                  {recentlyViewed.map((item) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      activeOpacity={1}
-                      onPress={() => handleCardPress(item)}
+                  {/* Image Section */}
+                  <View style={styles.recentlyViewedImageContainer}>
+                    {((item.images && item.images.length > 0) || item.image) ? (
+                      <AutoCardImage
+                        image={item.image}
+                        images={item.images}
+                        style={styles.recentlyViewedImage}
+                        width={480}
+                        height={200}
+                        cacheVersion={item.updated_at || item.created_at || item.id}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.recentlyViewedImagePlaceholder,
+                          { backgroundColor: colors.primary + "20" },
+                        ]}
+                      >
+                        <Ionicons
+                          name={
+                            item.type === "Gig"
+                              ? "musical-notes"
+                              : item.type === "Studio"
+                                ? "business"
+                                : "people"
+                          }
+                          size={24}
+                          color={colors.primary}
+                        />
+                      </View>
+                    )}
+                    {/* Type Badge */}
+                    <View
                       style={[
-                        styles.recentlyViewedCard,
-                        isWebDesktop && { flex: 1, minWidth: 240, maxWidth: 320, shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { height: 6, width: 0 } },
-                        { backgroundColor: webCardBackground },
+                        styles.recentlyViewedTypeBadge,
+                        { backgroundColor: getTypeBadgeColor(item.type) },
                       ]}
                     >
-                      {/* Image Section */}
-                      <View style={styles.recentlyViewedImageContainer}>
-                        {((item.images && item.images.length > 0) || item.image) ? (
-                          <AutoCardImage
-                            image={item.image}
-                            images={item.images}
-                            style={styles.recentlyViewedImage}
-                            width={480}
-                            height={200}
-                            cacheVersion={item.updated_at || item.created_at || item.id}
-                          />
-                        ) : (
-                          <View
-                            style={[
-                              styles.recentlyViewedImagePlaceholder,
-                              { backgroundColor: colors.primary + "20" },
-                            ]}
-                          >
-                            <Ionicons
-                              name={
-                                item.type === "Gig"
-                                  ? "musical-notes"
-                                  : item.type === "Studio"
-                                    ? "business"
-                                    : "people"
-                              }
-                              size={24}
-                              color={colors.primary}
-                            />
-                          </View>
-                        )}
-                        {/* Type Badge */}
-                        <View
-                          style={[
-                            styles.recentlyViewedTypeBadge,
-                            { backgroundColor: getTypeBadgeColor(item.type) },
-                          ]}
-                        >
-                          <Text style={styles.recentlyViewedTypeBadgeText}>
-                            {item.type}
-                          </Text>
-                        </View>
-                      </View>
+                      <Text style={styles.recentlyViewedTypeBadgeText}>
+                        {item.type}
+                      </Text>
+                    </View>
+                  </View>
 
-                      {/* Details Section */}
-                      <View style={styles.recentlyViewedDetails}>
-                        <Text
-                          style={[
-                            styles.recentlyViewedName,
-                            { color: colors.text },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item.name}
-                        </Text>
+                  {/* Details Section */}
+                  <View style={styles.recentlyViewedDetails}>
+                    <Text
+                      style={[
+                        styles.recentlyViewedName,
+                        { color: colors.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item.name}
+                    </Text>
 
-                        {/* Location/Genre */}
-                        <View style={styles.recentlyViewedRow}>
-                          <Ionicons
-                            name="location-outline"
-                            size={12}
-                            color={colors.textSecondary}
-                          />
-                          <Text
-                            style={[
-                              styles.recentlyViewedText,
-                              { color: colors.textSecondary },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {item.location || item.genre || "Location TBA"}
-                          </Text>
-                        </View>
+                    {/* Location/Genre */}
+                    <View style={styles.recentlyViewedRow}>
+                      <Ionicons
+                        name="location-outline"
+                        size={12}
+                        color={colors.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.recentlyViewedText,
+                          { color: colors.textSecondary },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {item.location || item.genre || "Location TBA"}
+                      </Text>
+                    </View>
 
-                        {/* Rating - Compact */}
-                        <View style={styles.recentlyViewedRow}>
-                          <Ionicons name="star" size={12} color="#FCD34D" />
-                          <Text
-                            style={[
-                              styles.recentlyViewedText,
-                              { color: colors.textSecondary },
-                            ]}
-                          >
-                            {item.rating > 0 ? item.rating.toFixed(1) : "New"}
-                          </Text>
-                          <View style={{ flex: 1 }} />
-                          <Ionicons
-                            name="time-outline"
-                            size={12}
-                            color={colors.textSecondary}
-                          />
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </ResponsiveList>
-              </View>
-            )}
-        </View>
+                    {/* Rating - Compact */}
+                    <View style={styles.recentlyViewedRow}>
+                      <Ionicons name="star" size={12} color="#FCD34D" />
+                      <Text
+                        style={[
+                          styles.recentlyViewedText,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        {item.rating > 0 ? item.rating.toFixed(1) : "New"}
+                      </Text>
+                      <View style={{ flex: 1 }} />
+                      <Ionicons
+                        name="time-outline"
+                        size={12}
+                        color={colors.textSecondary}
+                      />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
       </ScrollView>
 
       <Navbar />
@@ -3468,7 +3260,7 @@ export default function HomeScreen() {
       />
       <SearchBottomSheet
         ref={searchSheetRef}
-        onClose={() => {}}
+        onClose={() => { }}
         onItemPress={(id) => {
           debugLog("=== SearchBottomSheet onItemPress ===");
           debugLog("Item ID from search:", id);
@@ -3479,7 +3271,7 @@ export default function HomeScreen() {
       />
       <RecentlyViewedSheet
         ref={recentlyViewedSheetRef}
-        onClose={() => {}}
+        onClose={() => { }}
         onItemPress={(id) => {
           debugLog("=== RecentlyViewedSheet onItemPress ===");
           debugLog("Item ID from recently viewed:", id);
@@ -3497,7 +3289,6 @@ export default function HomeScreen() {
         buttons={alertConfig.buttons}
         onClose={() => setAlertVisible(false)}
       />
-      </View>
     </View>
   );
 }
@@ -3505,32 +3296,6 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  pageFrame: {
-    flex: 1,
-    width: "100%",
-  },
-  pageFrameWeb: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-  },
-  homeScrollContent: {
-    paddingBottom: 180,
-  },
-  homeScrollContentWeb: {
-    paddingBottom: 220,
-  },
-  homeContent: {
-    width: "100%",
-    flex: 1,
-  },
-  homeContentWeb: {
-    maxWidth: 1240,
-    alignSelf: "center",
-  },
-  profileBannerWrapWeb: {
-    marginTop: 18,
-    paddingHorizontal: 0,
   },
   loadingContainer: {
     flex: 1,
@@ -3556,14 +3321,14 @@ const styles = StyleSheet.create({
   },
   heroContent: {
     position: "absolute",
-    bottom: height < 700 ? 16 : 40,
+    bottom: height < 700 ? 12 : 24,
     left: 24, // Standardized alignment
     right: 24, // Standardized alignment
     zIndex: 10,
   },
   heroGreeting: {
     fontFamily: "Poppins_700Bold",
-    fontSize: Platform.OS === 'web' ? 48 : height < 700 ? moderateScale(28) : moderateScale(34),
+    fontSize: height < 700 ? moderateScale(28) : moderateScale(34),
     color: "#FFFFFF",
     textShadowColor: "rgba(0, 0, 0, 0.4)",
     textShadowOffset: { width: 0, height: 2 },
@@ -3573,7 +3338,7 @@ const styles = StyleSheet.create({
   },
   heroSubtitle: {
     fontFamily: "Poppins_400Regular",
-    fontSize: Platform.OS === 'web' ? 18 : height < 700 ? moderateScale(14) : moderateScale(16),
+    fontSize: height < 700 ? moderateScale(14) : moderateScale(16),
     color: "#94A3B8",
     marginBottom: height < 700 ? 16 : 24,
   },
@@ -3631,158 +3396,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
-  // Web Hero
-  webHeroShell: {
-    marginTop: 12,
-    borderRadius: 32,
-    minHeight: 500,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(148, 163, 184, 0.22)",
-    position: "relative",
-  },
-  webHeroGlowOne: {
-    position: "absolute",
-    top: -70,
-    left: -30,
-    width: 220,
-    height: 220,
-    borderRadius: 999,
-    backgroundColor: "rgba(45, 212, 191, 0.18)",
-  },
-  webHeroGlowTwo: {
-    position: "absolute",
-    bottom: -110,
-    right: -60,
-    width: 300,
-    height: 300,
-    borderRadius: 999,
-    backgroundColor: "rgba(56, 189, 248, 0.16)",
-  },
-  webHeroGrid: {
-    flexDirection: "row",
-    alignItems: "center",
-    minHeight: 500,
-    paddingHorizontal: 44,
-    paddingVertical: 36,
-  },
-  webHeroCopy: {
-    flex: 1,
-    paddingRight: 40,
-    zIndex: 2,
-  },
-  webHeroTitle: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 50,
-    lineHeight: 60,
-    letterSpacing: -0.6,
-  },
-  webHeroDescription: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 17,
-    marginTop: 22,
-    marginBottom: 34,
-    maxWidth: 520,
-    lineHeight: 28,
-  },
-  webHeroButton: {
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 999,
-    alignSelf: "flex-start",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.3,
-    shadowRadius: 24,
-    elevation: 7,
-  },
-  webHeroButtonText: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 15,
-    color: "#FFF",
-  },
-  webHeroWidgets: {
-    flex: 1,
-    position: "relative",
-    minHeight: 390,
-  },
-  webHeroWidgetTop: {
-    position: "absolute",
-    top: 6,
-    right: 28,
-    width: 228,
-    borderRadius: 24,
-    padding: 22,
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.18,
-    shadowRadius: 26,
-    elevation: 8,
-  },
-  webHeroWidgetBottom: {
-    position: "absolute",
-    bottom: 0,
-    left: 10,
-    width: 290,
-    borderRadius: 24,
-    padding: 22,
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.18,
-    shadowRadius: 28,
-    elevation: 8,
-  },
-  webHeroWidgetLabel: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 13,
-  },
-  webHeroWidgetValue: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 38,
-    marginTop: 8,
-  },
-  webHeroWidgetDelta: {
-    fontSize: 15,
-    color: "#14B8A6",
-    fontFamily: "Poppins_600SemiBold",
-  },
-  webHeroBarsRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    height: 52,
-    marginTop: 20,
-    gap: 6,
-  },
-  webHeroBar: {
-    flex: 1,
-    borderRadius: 6,
-  },
-  webHeroRingWrap: {
-    width: 112,
-    height: 112,
-    alignSelf: "center",
-    marginTop: 20,
-    marginBottom: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  webHeroRing: {
-    width: 112,
-    height: 112,
-    borderRadius: 56,
-    borderWidth: 18,
-  },
-  webHeroRingCut: {
-    position: "absolute",
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(15, 23, 42, 0.55)",
-  },
-  webHeroWidgetHint: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 12,
-    textAlign: "center",
-    lineHeight: 18,
-  },
-
   // Section Commons
   sectionContainer: {
     marginTop: 32,
@@ -3792,7 +3405,6 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_600SemiBold",
     fontSize: moderateScale(20),
     marginLeft: 0, // Removed double margin
-    textAlign: "left",
   },
   sectionSubtitle: {
     fontFamily: "Poppins_400Regular",
@@ -3805,7 +3417,7 @@ const styles = StyleSheet.create({
   bentoGrid: {
     flexDirection: "row",
     gap: 12,
-    height: Platform.OS === 'web' ? 420 : 280, // Fixed height for the bento block
+    height: 280, // Fixed height for the bento block
   },
   bentoTouchableLarge: {
     flex: 1.5,
@@ -3960,6 +3572,12 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_500Medium",
     fontSize: moderateScale(14),
   },
+  featuredReason: {
+    color: "rgba(255,255,255,0.92)",
+    fontFamily: "Poppins_400Regular",
+    fontSize: moderateScale(12),
+    marginTop: 4,
+  },
   featuredPrice: {
     color: "#FFF",
     fontFamily: "Poppins_600SemiBold",
@@ -3986,89 +3604,12 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
 
-  // Upcoming Events (for Musicians)
-  upcomingEventCard: {
-    width: 280,
-    borderRadius: 20,
-    overflow: "hidden",
-    marginRight: Platform.OS === "web" ? 0 : 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  upcomingEventImageContainer: {
-    width: "100%",
-    height: 120,
-    position: "relative",
-  },
-  upcomingEventImage: {
-    width: "100%",
-    height: "100%",
-  },
-  upcomingEventImagePlaceholder: {
-    width: "100%",
-    height: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  upcomingEventTypeBadge: {
-    position: "absolute",
-    top: 12,
-    left: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 100,
-  },
-  upcomingEventTypeBadgeText: {
-    color: "#FFF",
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 11,
-  },
-  upcomingEventDetails: {
-    padding: 16,
-  },
-  upcomingEventName: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 16,
-    marginBottom: 8,
-  },
-  upcomingEventRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 4,
-  },
-  upcomingEventText: {
-    fontFamily: "Poppins_400Regular",
-    fontSize: 13,
-    flex: 1,
-  },
-  upcomingEventPrice: {
-    fontFamily: "Poppins_700Bold",
-    fontSize: 16,
-  },
-  upcomingEventStatusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 100,
-    borderWidth: 1,
-  },
-  upcomingEventStatusText: {
-    fontFamily: "Poppins_600SemiBold",
-    fontSize: 11,
-  },
-
   // New Arrivals Section
   newArrivalCard: {
     width: 280,
     borderRadius: 20,
     overflow: "hidden",
-    marginRight: Platform.OS === "web" ? 0 : 16,
+    marginRight: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -4161,7 +3702,7 @@ const styles = StyleSheet.create({
     width: 240,
     borderRadius: 16,
     overflow: "hidden",
-    marginRight: Platform.OS === "web" ? 0 : 16,
+    marginRight: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -4234,7 +3775,7 @@ const styles = StyleSheet.create({
     width: 280,
     borderRadius: 20,
     overflow: "hidden",
-    marginRight: Platform.OS === "web" ? 0 : 16,
+    marginRight: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -4283,15 +3824,41 @@ const styles = StyleSheet.create({
     gap: 5,
     marginBottom: 4,
   },
+  forYouReasonRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 4,
+    marginBottom: 6,
+  },
   forYouText: {
     fontFamily: "Poppins_400Regular",
     fontSize: 12,
     flex: 1,
   },
+  forYouReasonText: {
+    fontFamily: "Poppins_400Regular",
+    fontSize: 11,
+    flex: 1,
+    lineHeight: 16,
+  },
   forYouPrice: {
     fontFamily: "Poppins_700Bold",
     fontSize: 15,
     marginTop: 6,
+  },
+  quickAccessCard: {
+    width: 90,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+    marginRight: 10,
+  },
+  quickAccessIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
 

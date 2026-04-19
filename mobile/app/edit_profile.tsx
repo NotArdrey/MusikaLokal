@@ -93,6 +93,24 @@ const GENRES = [
   "OPM",
 ];
 
+const sanitizeAvatarUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const lower = trimmed.toLowerCase();
+  if (lower === "null" || lower === "undefined") return null;
+
+  // Legacy rows may have `/object/avatars/...` which is not publicly readable.
+  return trimmed.replace("/storage/v1/object/avatars/", "/storage/v1/object/public/avatars/");
+};
+
+const withCacheBust = (url: string) => {
+  const delimiter = url.includes("?") ? "&" : "?";
+  return `${url}${delimiter}v=${Date.now()}`;
+};
+
 export default function EditProfileScreen() {
   const { colors, isDark } = useTheme();
 
@@ -257,7 +275,8 @@ export default function EditProfileScreen() {
         setContactNumber(resolvedProfile.contact_number || "");
         setLocation(resolvedProfile.address || resolvedProfile.location || "");
         setBio(resolvedProfile.bio || "");
-        setAvatarUrl(resolvedProfile.avatar_url || DEFAULT_AVATAR);
+        const normalizedAvatarUrl = sanitizeAvatarUrl(resolvedProfile.avatar_url);
+        setAvatarUrl(normalizedAvatarUrl || DEFAULT_AVATAR);
         setSelectedRoles(Array.isArray(resolvedProfile.skills) ? resolvedProfile.skills : []);
         setSelectedGenres(Array.isArray(resolvedProfile.genres) ? resolvedProfile.genres : []);
 
@@ -445,7 +464,7 @@ export default function EditProfileScreen() {
         const { data: urlData } = supabase.storage
           .from("avatars")
           .getPublicUrl(data.path);
-        uploadedAvatarUrl = urlData.publicUrl;
+        uploadedAvatarUrl = sanitizeAvatarUrl(urlData.publicUrl);
       }
 
       const profilePayload: any = {
@@ -507,7 +526,7 @@ export default function EditProfileScreen() {
       }
 
       if (uploadedAvatarUrl) {
-        setAvatarUrl(uploadedAvatarUrl);
+        setAvatarUrl(withCacheBust(uploadedAvatarUrl));
       }
 
       setPendingAvatar(null);

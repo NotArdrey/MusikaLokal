@@ -1052,7 +1052,8 @@ export default function HomeScreen() {
       let soloArtists: any[] = [];
 
       const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
-      debugLog("User role:", userRole, "isOwner:", isOwner);
+      const isProducer = userRole === "producer";
+      debugLog("User role:", userRole, "isOwner:", isOwner, "isProducer:", isProducer);
 
       const classifyGigBucket = (gig: any): "active" | "upcoming" | "done" => {
         const eventDate = gig?.event_date ? new Date(gig.event_date) : null;
@@ -3077,6 +3078,31 @@ export default function HomeScreen() {
 
         {renderSmartFeed()}
 
+        {/* Phase 2: Quick Access Modules */}
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: 24, marginBottom: 12 }]}>Explore More</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20 }}>
+            {([
+              { label: "Discover", icon: "compass-outline" as const, route: "/home", color: "#3b82f6" },
+              { label: "Projects", icon: "people-outline" as const, route: "/producer_projects", color: "#8b5cf6" },
+              { label: "Shop", icon: "bag-handle-outline" as const, route: "/shop", color: "#22c55e" },
+              { label: "Orders", icon: "receipt-outline" as const, route: "/orders", color: "#eab308" },
+              { label: "Seller Hub", icon: "storefront-outline" as const, route: "/seller_hub", color: "#ec4899" },
+            ] as const).map((mod) => (
+              <TouchableOpacity
+                key={mod.label}
+                style={[styles.quickAccessCard, { backgroundColor: mod.color + "14" }]}
+                onPress={() => router.push(mod.route as any)}
+              >
+                <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "22" }]}>
+                  <Ionicons name={mod.icon} size={22} color={mod.color} />
+                </View>
+                <Text style={{ color: colors.text, fontSize: moderateScale(12), fontWeight: "600", marginTop: 6 }}>{mod.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+
         {/* Recently Viewed Section - Custom Cards */}
         {recentlyViewed.length > 0 && (
           <View style={styles.sectionContainer}>
@@ -3819,6 +3845,20 @@ const styles = StyleSheet.create({
     fontFamily: "Poppins_700Bold",
     fontSize: 15,
     marginTop: 6,
+  },
+  quickAccessCard: {
+    width: 90,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+    marginRight: 10,
+  },
+  quickAccessIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
 

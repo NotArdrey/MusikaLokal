@@ -65,6 +65,7 @@ type Tab =
   | "Upcoming"
   | "Ongoing"
   | "Review"
+  | "Deals"
   | "History";
 
 // Venue owner specific tabs for managing gig applications
@@ -137,6 +138,7 @@ export default function BookingsScreen() {
     Upcoming: any[];
     Ongoing: any[];
     Review: any[];
+    Deals: any[];
     History: any[];
   }>({
     Applicants: [],
@@ -145,6 +147,7 @@ export default function BookingsScreen() {
     Upcoming: [],
     Ongoing: [],
     Review: [],
+    Deals: [],
     History: [],
   });
   const [pendingPermitStudios, setPendingPermitStudios] = useState<any[]>([]);
@@ -1046,6 +1049,36 @@ export default function BookingsScreen() {
           new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
       ); // Closest gig first
 
+      // 6. Fetch commercial deals
+      let dealsItems: any[] = [];
+      try {
+        const { data: dealsResp } = await supabase.functions.invoke(
+          "manage-deals",
+          { body: { action: "list_my_deals" } },
+        );
+        if (dealsResp?.deals) {
+          const vpDeals = (dealsResp.deals.venue_partnerships || []).map((d: any) => ({
+            ...d,
+            type_id: "venue_partnership_deal",
+            display_name: d.title,
+            display_status: d.status,
+          }));
+          const recDeals = (dealsResp.deals.recording_deals || []).map((d: any) => ({
+            ...d,
+            type_id: "recording_deal",
+            display_name: d.title,
+            display_status: d.status,
+          }));
+          dealsItems = [...vpDeals, ...recDeals].sort(
+            (a: any, b: any) =>
+              new Date(b.updated_at || b.created_at).getTime() -
+              new Date(a.updated_at || a.created_at).getTime(),
+          );
+        }
+      } catch (_) {
+        // Deals fetch is non-critical; ignore errors
+      }
+
       const processedData = {
         Applicants: applicants,
         ActiveMusicians: activeGigMusicians,
@@ -1053,6 +1086,7 @@ export default function BookingsScreen() {
         Upcoming: allUpcoming,
         Ongoing: allOngoing,
         Review: unreviewedItems,
+        Deals: dealsItems,
         History: historyItems,
       };
 
@@ -2532,7 +2566,7 @@ export default function BookingsScreen() {
               )
             ) : (
               // Default tabs for other users (musicians, studio-owners)
-              ["Pending", "Upcoming", "Ongoing", "Review", "History"].map(
+              ["Pending", "Upcoming", "Ongoing", "Review", "Deals", "History"].map(
                 (tab) => renderTab(tab as Tab),
               )
             )}
@@ -2819,6 +2853,83 @@ export default function BookingsScreen() {
             <View style={[styles.gridWrap, isWebDesktop && styles.gridWrapWeb]}>
               {currentItems.map((item: any) => {
                 // ==========================================
+              // 0. DEAL CARD (Venue Partnership or Recording)
+              // ==========================================
+              if (item.type_id === "venue_partnership_deal" || item.type_id === "recording_deal") {
+                const dealType = item.type_id === "venue_partnership_deal" ? "Partnership" : "Recording";
+                const statusColors: Record<string, string> = {
+                  proposed: "#F59E0B",
+                  countered: "#3B82F6",
+                  accepted: "#10B981",
+                  rejected: "#EF4444",
+                  cancelled: "#6B7280",
+                  settled: "#8B5CF6",
+                  disputed: "#EF4444",
+                  expired: "#6B7280",
+                  completed: "#10B981",
+                };
+                const statusColor = statusColors[item.display_status] || colors.textSecondary;
+
+                return (
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    key={item.id}
+                    onPress={() => {
+                      router.push({
+                        pathname: "/deal_details" as any,
+                        params: {
+                          deal_id: item.id,
+                          deal_type: item.type_id === "venue_partnership_deal" ? "venue_partnership" : "recording",
+                        },
+                      });
+                    }}
+                    style={[
+                      styles.cardContainer,
+                      isWebDesktop && styles.cardContainerWeb,
+                      isWebDesktop && styles.gridItemWeb,
+                      {
+                        backgroundColor: pageCardBackground,
+                        borderColor: borderSoft,
+                        borderWidth: 1,
+                      },
+                    ]}
+                  >
+                    <View style={{ padding: scale(16) }}>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: moderateScale(8) }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: scale(8), flex: 1 }}>
+                          <Ionicons name={item.type_id === "venue_partnership_deal" ? "business-outline" : "musical-notes-outline"} size={moderateScale(20)} color={colors.primary} />
+                          <Text style={{ fontSize: moderateScale(16), fontWeight: "700", color: colors.text }} numberOfLines={1}>
+                            {item.display_name}
+                          </Text>
+                        </View>
+                        <View style={{ backgroundColor: statusColor + "20", paddingHorizontal: scale(10), paddingVertical: scale(4), borderRadius: moderateScale(12) }}>
+                          <Text style={{ fontSize: moderateScale(12), fontWeight: "600", color: statusColor, textTransform: "capitalize" }}>
+                            {item.display_status}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary, marginBottom: moderateScale(4) }}>
+                        {dealType} Deal
+                      </Text>
+                      {item.production_teams?.name && (
+                        <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary }}>
+                          Team: {item.production_teams.name}
+                        </Text>
+                      )}
+                      {item.studios?.name && (
+                        <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary }}>
+                          Studio: {item.studios.name}
+                        </Text>
+                      )}
+                      <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
+                        {new Date(item.updated_at || item.created_at).toLocaleDateString()}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }
+
+              // ==========================================
               // 1. GIG APPLICATION CARD (Recruitment View)
               // ==========================================
               if (item.type_id === "gig_application") {

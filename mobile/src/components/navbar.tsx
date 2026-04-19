@@ -41,6 +41,8 @@ function Navbar() {
                     setManageRoute('/my_group');
                 } else if (data.role === 'venue-owner') {
                     setManageRoute('/my_venue');
+                } else if (data.role === 'producer') {
+                    setManageRoute('/production_team');
                 } else {
                     setManageRoute('/manage');
                 }
@@ -59,9 +61,10 @@ function Navbar() {
     );
 
     const activeTab = useMemo(() => {
-        if (pathname.includes('home')) return 'home';
+        if (pathname.includes('feed') || pathname.includes('home')) return 'home';
+        if (pathname.includes('marketplace') || pathname.includes('shop') || pathname.includes('seller_hub') || pathname.includes('orders') || pathname.includes('product_details')) return 'marketplace';
+        if (pathname.includes('ai_suggestions')) return 'ai';
         if (pathname.includes('bookings')) return 'activity';
-        if (pathname.includes('ai_suggestions')) return 'ai-suggest';
         if (pathname.includes('profile') || pathname.includes('settings') || pathname.includes('wallet')) {
             return 'profile';
         }
@@ -71,6 +74,7 @@ function Navbar() {
             pathname.includes('my_studio') ||
             pathname.includes('my_venue') ||
             pathname.includes('my_group') ||
+            pathname.includes('production_team') ||
             pathname.includes('manage_') ||
             pathname.includes('edit_') ||
             pathname.includes('add_')
@@ -82,8 +86,9 @@ function Navbar() {
 
     const navItems = useMemo(
         () => [
-            { id: 'home', icon: 'home', label: 'Home', route: '/home' },
-            { id: 'ai-suggest', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
+            { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
+            { id: 'marketplace', icon: 'storefront', label: 'Shop', route: '/marketplace' },
+            { id: 'ai', icon: 'sparkles', label: 'AI', route: '/ai_suggestions' },
             { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },
             { id: 'manage', icon: 'briefcase', label: 'Manage', route: manageRoute },
             { id: 'profile', icon: 'person', label: 'Profile', route: '/profile' }
@@ -123,7 +128,7 @@ function Navbar() {
                                 <View style={styles.iconWrapper}>
                                     <Ionicons
                                         name={isActive ? item.icon as any : `${item.icon}-outline` as any}
-                                        size={28}
+                                        size={22}
                                         color={isActive ? colors.primary : colors.textSecondary}
                                     />
                                     {isActive && <View style={[styles.activeDot, { backgroundColor: colors.primary }]} />}
@@ -172,8 +177,8 @@ const styles = StyleSheet.create({
     tabButton: {
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 16,
-        borderRadius: 20,
+        padding: 10,
+        borderRadius: 16,
     },
     iconWrapper: {
         alignItems: 'center',

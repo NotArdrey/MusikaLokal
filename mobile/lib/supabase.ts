@@ -91,6 +91,8 @@ type NormalizedFunctionsError = Error & {
     status?: number;
 };
 
+const FUNCTIONS_INVOKE_DEBUG_LOGS = false;
+
 const isJwtLike = (token?: string | null): token is string => {
     if (typeof token !== 'string') return false;
     const parts = token.split('.');
@@ -293,20 +295,20 @@ const withSessionAuthorization = async (
             const token = await getFreshAccessToken();
             if (token) {
                 mergedHeaders.Authorization = `Bearer ${token}`;
-                if (__DEV__) {
+                if (__DEV__ && FUNCTIONS_INVOKE_DEBUG_LOGS) {
                     console.log('[supabase.functions.invoke] Attached access token', {
                         tokenLength: token.length,
                         tokenPrefix: token.slice(0, 16),
                         isJwtLike: isJwtLike(token),
                     });
                 }
-            } else if (__DEV__) {
+            } else if (__DEV__ && FUNCTIONS_INVOKE_DEBUG_LOGS) {
                 console.warn('[supabase.functions.invoke] No access token available; invoke will continue without user Authorization header');
             }
         } catch {
             // ignore auth header hydration failures and let invoke proceed
         }
-    } else if (__DEV__) {
+    } else if (__DEV__ && FUNCTIONS_INVOKE_DEBUG_LOGS) {
         console.log('[supabase.functions.invoke] Using caller-supplied Authorization header');
     }
 

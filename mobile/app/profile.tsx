@@ -43,14 +43,26 @@ const ITEM_SIZE = Math.floor(
   NUM_COLUMNS
 );
 
-const TIKTOK_GRID_GAP = 1.5;
+const TIKTOK_GRID_GAP = 2;
 const TIKTOK_NUM_COLUMNS = 3;
-const TIKTOK_ITEM_SIZE = (SCREEN_WIDTH - TIKTOK_GRID_GAP * (TIKTOK_NUM_COLUMNS - 1)) / TIKTOK_NUM_COLUMNS;
+const TIKTOK_ITEM_SIZE = Math.floor((SCREEN_WIDTH - TIKTOK_GRID_GAP * (TIKTOK_NUM_COLUMNS - 1)) / TIKTOK_NUM_COLUMNS);
 
 const EMPTY_BOOKMARKS = {
   studios: [] as any[],
   gigs: [] as any[],
   musicians: [] as any[],
+};
+
+const sanitizeAvatarUrl = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const lower = trimmed.toLowerCase();
+  if (lower === "null" || lower === "undefined") return null;
+
+  return trimmed.replace("/storage/v1/object/avatars/", "/storage/v1/object/public/avatars/");
 };
 
 // Decode base64 to Uint8Array without using fetch().arrayBuffer() which crashes on Android New Architecture
@@ -82,6 +94,9 @@ export default function ProfileScreen() {
     returnToHome?: string;
     returnListingId?: string;
   }>();
+  const normalizedParamUserId = useMemo(() => {
+    return Array.isArray(params.userId) ? params.userId[0] : params.userId;
+  }, [params.userId]);
 
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -97,9 +112,12 @@ export default function ProfileScreen() {
   const [gigSearchQuery, setGigSearchQuery] = useState("");
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
-  const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks">("about");
+  const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks" | "playlists">("about");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
+  const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
+  const [loadingPlaylists, setLoadingPlaylists] = useState(false);
+  const profileFetchInFlightRef = useRef(false);
 
   useEffect(() => {
     if (loading) return;
@@ -218,7 +236,7 @@ export default function ProfileScreen() {
     return null;
   };
 
-  const fetchBookmarkedListings = async (
+  const fetchBookmarkedListings = useCallback(async (
     viewerId: string,
     shouldLoad: boolean,
   ) => {
@@ -365,25 +383,33 @@ export default function ProfileScreen() {
     } finally {
       setLoadingBookmarks(false);
     }
-  };
+  }, []);
+
+  // Fetch user playlists
+  const fetchPlaylists = useCallback(async (targetUserId: string) => {
+    setLoadingPlaylists(true);
+    try {
+      const { data } = await supabase.functions.invoke("manage-playlists", {
+        body: { action: "list_user_playlists", user_id: targetUserId },
+      });
+      setUserPlaylists(data?.data || data?.playlists || []);
+    } catch (_) {
+      setUserPlaylists([]);
+    } finally {
+      setLoadingPlaylists(false);
+    }
+  }, []);
 
   // Refresh profile data every time the screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      if (!authLoading) {
-        fetchProfile();
-      }
-    }, [params.userId, authLoading, currentUserId, isGuest]),
-  );
+  const fetchProfile = useCallback(async () => {
+    if (profileFetchInFlightRef.current) {
+      return;
+    }
 
-  async function fetchProfile() {
+    profileFetchInFlightRef.current = true;
     try {
       setLoading(true);
       // Determine target ID: param OR current user
-      // Handle case where userId might be an array
-      const paramUserId = Array.isArray(params.userId)
-        ? params.userId[0]
-        : params.userId;
       let resolvedCurrentUserId = currentUserId;
 
       // Resolve the active user ID from auth when context is temporarily unavailable.
@@ -400,8 +426,8 @@ export default function ProfileScreen() {
         }
       }
 
-      let targetId = paramUserId || resolvedCurrentUserId;
-      console.log("👤 Profile - Param userId:", paramUserId);
+      let targetId = normalizedParamUserId || resolvedCurrentUserId;
+      console.log("👤 Profile - Param userId:", normalizedParamUserId);
       console.log("👤 Profile - Context userId:", currentUserId);
       console.log("👤 Profile - Resolved userId:", resolvedCurrentUserId);
 
@@ -582,9 +608,14 @@ export default function ProfileScreen() {
           .order("sort_order", { ascending: true }),
       ]);
 
+      const normalizedAvatarUrl =
+        sanitizeAvatarUrl(profileData?.avatar_url) ||
+        sanitizeAvatarUrl(profileStatsData?.avatar_url);
+
       setProfile({
         ...(profileStatsData || {}),
         ...profileData,
+        avatar_url: normalizedAvatarUrl,
         skills: (skillsResult.data || []).map((row: any) => row.skill).filter(Boolean),
         genres: (genresResult.data || []).map((row: any) => row.genre).filter(Boolean),
         portfolio_urls: (portfolioResult.data || [])
@@ -593,12 +624,22 @@ export default function ProfileScreen() {
       });
 
       await fetchBookmarkedListings(targetId, !!ownership && !isGuest);
+      fetchPlaylists(targetId);
     } catch (e) {
       console.log("Error fetching profile:", e);
     } finally {
+      profileFetchInFlightRef.current = false;
       setLoading(false);
     }
-  }
+  }, [currentUserId, fetchBookmarkedListings, fetchPlaylists, isGuest, normalizedParamUserId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!authLoading) {
+        fetchProfile();
+      }
+    }, [authLoading, fetchProfile]),
+  );
 
   const MENU_ITEMS = [
     { label: "Edit Profile", icon: "person-outline", route: "/edit_profile" },
@@ -1098,6 +1139,10 @@ export default function ProfileScreen() {
                   <Ionicons name={activeTab === "bookmarks" ? "bookmark" : "bookmark-outline"} size={22} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
                 </TouchableOpacity>
               )}
+
+              <TouchableOpacity onPress={() => setActiveTab("playlists")} style={[styles.tabButton, activeTab === "playlists" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                <Ionicons name={activeTab === "playlists" ? "musical-notes" : "musical-notes-outline"} size={22} color={activeTab === "playlists" ? colors.text : colors.textSecondary} />
+              </TouchableOpacity>
             </View>
 
             {/* TAB CONTENT: GIGS */}
@@ -1258,6 +1303,82 @@ export default function ProfileScreen() {
                       })()}
                     </View>
                   </>
+                )}
+              </View>
+            )}
+
+            {/* TAB CONTENT: PLAYLISTS */}
+            {activeTab === "playlists" && (
+              <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+                {isOwner && !isGuest && (
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      paddingVertical: 14,
+                      borderRadius: 12,
+                      backgroundColor: colors.primary,
+                      marginBottom: 16,
+                      gap: 6,
+                    }}
+                    onPress={() => router.push("/create_playlist" as any)}
+                  >
+                    <Ionicons name="add" size={20} color="#fff" />
+                    <Text style={{ color: "#fff", fontSize: 15, fontFamily: "Poppins_700Bold" }}>Create Playlist</Text>
+                  </TouchableOpacity>
+                )}
+                {loadingPlaylists ? (
+                  <View style={{ gap: 10 }}>
+                    {[1, 2, 3].map((i) => (
+                      <Skeleton key={i} width={SCREEN_WIDTH - 32} height={72} style={{ borderRadius: 12 }} />
+                    ))}
+                  </View>
+                ) : userPlaylists.length > 0 ? (
+                  userPlaylists.map((pl: any) => (
+                    <TouchableOpacity
+                      key={pl.id}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        padding: 12,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: isDark ? "#334155" : "#E2E8F0",
+                        backgroundColor: colors.surface,
+                        marginBottom: 10,
+                      }}
+                      onPress={() => router.push({ pathname: "/playlist_details" as any, params: { playlist_id: pl.id } })}
+                    >
+                      <View style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 8,
+                        backgroundColor: colors.primary + "15",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}>
+                        <Ionicons name="musical-notes" size={22} color={colors.primary} />
+                      </View>
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <Text style={{ fontSize: 14, fontFamily: "Poppins_600SemiBold", color: colors.text }} numberOfLines={1}>{pl.title}</Text>
+                        {pl.genre && (
+                          <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{pl.genre}</Text>
+                        )}
+                        <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
+                          {pl.item_count || 0} track{(pl.item_count || 0) !== 1 ? "s" : ""} • {pl.visibility === "private" ? "Private" : "Public"}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <View style={{ alignItems: "center", justifyContent: "center", minHeight: 200 }}>
+                    <Ionicons name="musical-notes-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
+                    <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 15, fontFamily: "Poppins_500Medium", textAlign: "center" }}>
+                      {isOwner ? "No playlists yet. Create your first!" : "No playlists"}
+                    </Text>
+                  </View>
                 )}
               </View>
             )}
@@ -2011,6 +2132,7 @@ const styles = StyleSheet.create({
     position: "relative",
     borderWidth: 0,
     backgroundColor: "#1a1a1a",
+    overflow: "hidden",
   },
   mediaGrid: {
     flexDirection: "row",

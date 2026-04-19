@@ -3198,6 +3198,28 @@ export default function AddGigScreen() {
                 )}
               </View>
 
+              {/* Partnership Proposal Entry Point */}
+              <View style={{ marginTop: 16, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: isDark ? "#374151" : "#E5E7EB", backgroundColor: isDark ? "#1F2937" : "#F9FAFB" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+                  <Ionicons name="people-outline" size={20} color={colors.primary} />
+                  <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 14, color: colors.text, marginLeft: 8 }}>
+                    Production Partnership
+                  </Text>
+                </View>
+                <Text style={{ fontFamily: "Poppins_400Regular", fontSize: 12, color: colors.textSecondary, marginBottom: 10 }}>
+                  After creating this gig, you can propose a venue partnership deal with a production team to negotiate revenue splits and event terms.
+                </Text>
+                <TouchableOpacity
+                  onPress={() => router.push("/production_team" as any)}
+                  style={{ flexDirection: "row", alignItems: "center" }}
+                >
+                  <Text style={{ fontFamily: "Poppins_500Medium", fontSize: 13, color: colors.primary }}>
+                    Manage Production Teams
+                  </Text>
+                  <Ionicons name="arrow-forward" size={14} color={colors.primary} style={{ marginLeft: 4 }} />
+                </TouchableOpacity>
+              </View>
+
               <Text style={styles.termsText}>
                 By tapping Create Gig, you agree to our Terms and Conditions.
               </Text>

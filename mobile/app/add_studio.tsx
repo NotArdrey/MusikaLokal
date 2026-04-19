@@ -237,6 +237,7 @@ export default function AddStudioScreen() {
   >("Both");
   const [recordingSongsPerBlock, setRecordingSongsPerBlock] = useState("");
   const [recordingHoursPerBlock, setRecordingHoursPerBlock] = useState("");
+  const [recordingRateNegotiable, setRecordingRateNegotiable] = useState(false);
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -1189,6 +1190,7 @@ export default function AddStudioScreen() {
             parsePositiveInteger(recordingSongsPerBlock) || 1,
           recording_hours_per_block:
             parsePositiveDecimal(recordingHoursPerBlock) || 3,
+          recording_rate_negotiable: recordingRateNegotiable,
         },
       };
 
@@ -1346,6 +1348,7 @@ export default function AddStudioScreen() {
         peak_season_dates: bookingSettings.peak_season_dates || [],
         off_peak_multiplier: Number(bookingSettings.off_peak_multiplier) || 1.0,
         off_peak_dates: bookingSettings.off_peak_dates || [],
+        recording_rate_negotiable: bookingSettings.recording_rate_negotiable ?? false,
       });
 
       // Insert promotions
@@ -2609,6 +2612,9 @@ export default function AddStudioScreen() {
                         >
                           Rehearsal
                         </Text>
+                        <View style={{ backgroundColor: '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                          <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>FIXED</Text>
+                        </View>
                       </View>
                       <Text
                         style={{
@@ -2680,6 +2686,9 @@ export default function AddStudioScreen() {
                         >
                           Recording
                         </Text>
+                        <View style={{ backgroundColor: recordingRateNegotiable ? '#F59E0B' : '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                          <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>{recordingRateNegotiable ? 'NEGOTIABLE' : 'FIXED'}</Text>
+                        </View>
                       </View>
                       <Text
                         style={{
@@ -2715,6 +2724,20 @@ export default function AddStudioScreen() {
                         /song
                       </Text>
                     </View>
+
+                    <TouchableOpacity
+                      onPress={() => setRecordingRateNegotiable(!recordingRateNegotiable)}
+                      style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 6 }}
+                    >
+                      <Ionicons
+                        name={recordingRateNegotiable ? 'checkbox' : 'square-outline'}
+                        size={20}
+                        color={recordingRateNegotiable ? colors.primary : colors.textSecondary}
+                      />
+                      <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 12, marginLeft: 6 }}>
+                        Allow clients to negotiate recording rate
+                      </Text>
+                    </TouchableOpacity>
 
                     <View style={{ marginTop: 10 }}>
                       <Text

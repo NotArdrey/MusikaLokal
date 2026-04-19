@@ -93,6 +93,7 @@ export default function WalletScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [txFilter, setTxFilter] = useState<string>("all");
   const [unpaidBookings, setUnpaidBookings] = useState<any[]>([]);
   const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
 
@@ -962,6 +963,20 @@ export default function WalletScreen() {
     [pendingWithdrawals],
   );
 
+  const filteredTransactions = useMemo(() => {
+    if (txFilter === "all") return transactions;
+    return transactions.filter((tx: any) => tx.reference_type === txFilter);
+  }, [transactions, txFilter]);
+
+  const txFilterOptions = [
+    { key: "all", label: "All" },
+    { key: "booking", label: "Booking" },
+    { key: "deal_deposit", label: "Deposit" },
+    { key: "deal_settlement", label: "Settlement" },
+    { key: "penalty", label: "Penalty" },
+    { key: "refund", label: "Refund" },
+  ];
+
   return (
     <>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1218,29 +1233,51 @@ export default function WalletScreen() {
           <View style={styles.historySection}>
             <Text style={[styles.historyTitle, { color: colors.text }]}>Transaction History</Text>
 
+            {/* Filter chips */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+              {txFilterOptions.map((opt) => (
+                <TouchableOpacity
+                  key={opt.key}
+                  onPress={() => setTxFilter(opt.key)}
+                  style={{
+                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 8,
+                    backgroundColor: txFilter === opt.key ? colors.primary : colors.card,
+                    borderWidth: 1, borderColor: txFilter === opt.key ? colors.primary : colors.border,
+                  }}
+                >
+                  <Text style={{
+                    fontFamily: 'Poppins_500Medium', fontSize: 12,
+                    color: txFilter === opt.key ? '#fff' : colors.textSecondary,
+                  }}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
             <View style={[styles.historyContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
               {loading ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
                   <ActivityIndicator size="small" color={colors.primary} />
                 </View>
-              ) : transactions.length === 0 ? (
+              ) : filteredTransactions.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
                   <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No transaction history</Text>
                 </View>
               ) : (
-                transactions.map((tx, index) => (
+                filteredTransactions.map((tx, index) => (
                   <View
                     key={tx.id}
                     style={[
                       styles.transactionItem,
-                      { borderBottomWidth: index === transactions.length - 1 ? 0 : 1, borderBottomColor: colors.border }
+                      { borderBottomWidth: index === filteredTransactions.length - 1 ? 0 : 1, borderBottomColor: colors.border }
                     ]}
                   >
                     <View style={styles.transactionLeft}>
                       <View
                         style={[
                           styles.transactionIcon,
-                          { backgroundColor: tx.is_credit ? '#DCFCE7' : '#FEE2E2' } // green-100 / red-100
+                          { backgroundColor: tx.is_credit ? '#DCFCE7' : '#FEE2E2' }
                         ]}
                       >
                         <Ionicons
@@ -1251,6 +1288,11 @@ export default function WalletScreen() {
                       </View>
                       <View>
                         <Text style={[styles.transactionType, { color: colors.text }]}>{tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</Text>
+                        {tx.reference_type && tx.reference_type !== 'booking' && (
+                          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 11, color: colors.primary }}>
+                            {tx.reference_type.replace(/_/g, ' ')}
+                          </Text>
+                        )}
                         <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
                           {new Date(tx.created_at).toLocaleDateString()}
                         </Text>
@@ -1343,7 +1385,7 @@ export default function WalletScreen() {
               onPress={handleTopUp}
               disabled={isTopping || !topUpAmount || parseFloat(topUpAmount) < 50}
               style={[
-                styles.withdrawBtn,
+                styles.withdrawSubmitBtn,
                 {
                   backgroundColor: (!topUpAmount || parseFloat(topUpAmount) < 50) ? colors.border : colors.primary,
                   marginTop: 24,
@@ -1352,7 +1394,7 @@ export default function WalletScreen() {
             >
               {isTopping
                 ? <ActivityIndicator size="small" color="white" />
-                : <Text style={styles.withdrawBtnText}>Proceed to Payment</Text>
+                : <Text style={styles.withdrawSubmitText}>Proceed to Payment</Text>
               }
             </TouchableOpacity>
           </View>

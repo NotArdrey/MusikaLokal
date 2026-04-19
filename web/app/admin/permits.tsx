@@ -93,7 +93,7 @@ const readErrorContextMessage = async (context: unknown): Promise<string | null>
   }
 };
 
-type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit';
+type Tab = 'dashboard' | 'permits' | 'users' | 'reports' | 'audit' | 'deals' | 'posts' | 'products' | 'projects';
 
 type PermitFilter = 'all' | 'pending_review' | 'approved' | 'rejected' | 'resubmitted';
 
@@ -105,6 +105,10 @@ const adminTabRoutes: Record<Tab, string> = {
   users: '/admin/users',
   reports: '/admin/reports',
   audit: '/admin/audit',
+  deals: '/admin/deals',
+  posts: '/admin/posts',
+  products: '/admin/products',
+  projects: '/admin/projects',
 };
 
 const PERMITS_CACHE_TTL_MS = 45_000;
@@ -491,6 +495,10 @@ const tabItems: Array<{ key: Tab; label: string; icon: string }> = [
   { key: 'users', label: 'Users', icon: 'people-outline' },
   { key: 'reports', label: 'Reports', icon: 'shield-checkmark-outline' },
   { key: 'audit', label: 'Audit', icon: 'time-outline' },
+  { key: 'deals', label: 'Deals', icon: 'briefcase-outline' },
+  { key: 'posts', label: 'Posts', icon: 'newspaper-outline' },
+  { key: 'products', label: 'Products', icon: 'bag-handle-outline' },
+  { key: 'projects', label: 'Projects', icon: 'people-circle-outline' },
 ];
 
 export default function AdminPermitsPage() {

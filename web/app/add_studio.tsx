@@ -92,7 +92,6 @@ const formatTimeInput = (text: string): string => {
 
 const TITLE_MAX_LENGTH = 120;
 const DESCRIPTION_MAX_LENGTH = 1000;
-const IS_WEB = Platform.OS === "web";
 
 const canonicalizeStudioType = (
   value: unknown,
@@ -129,34 +128,10 @@ const parsePositiveDecimal = (value: unknown): number | null => {
   return parsed;
 };
 
-const PROMOTION_CRITERIA_PREFIX = "How to get promo:";
-const PROMOTION_MIN_HOURS_PREFIX = "Minimum booking hours:";
-const PROMOTION_MIN_SPEND_PREFIX = "Minimum spend:";
-
 const buildPromotionDescription = (
   description: string,
-  criteria: string,
-  minimum_booking_hours: string,
-  minimum_spend: string,
 ): string => {
-  const lines: string[] = [];
-  const trimmedDescription = description.trim();
-  const trimmedCriteria = criteria.trim();
-  const trimmedMinimumHours = minimum_booking_hours.trim();
-  const trimmedMinimumSpend = minimum_spend.trim();
-
-  if (trimmedDescription) lines.push(trimmedDescription);
-  if (trimmedCriteria) {
-    lines.push(`${PROMOTION_CRITERIA_PREFIX} ${trimmedCriteria}`);
-  }
-  if (trimmedMinimumHours) {
-    lines.push(`${PROMOTION_MIN_HOURS_PREFIX} ${trimmedMinimumHours}`);
-  }
-  if (trimmedMinimumSpend) {
-    lines.push(`${PROMOTION_MIN_SPEND_PREFIX} ${trimmedMinimumSpend}`);
-  }
-
-  return lines.join("\n");
+  return description.trim();
 };
 
 const getAllowedPromotionTargets = (
@@ -262,6 +237,7 @@ export default function AddStudioScreen() {
   >("Both");
   const [recordingSongsPerBlock, setRecordingSongsPerBlock] = useState("");
   const [recordingHoursPerBlock, setRecordingHoursPerBlock] = useState("");
+  const [recordingRateNegotiable, setRecordingRateNegotiable] = useState(false);
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -629,7 +605,7 @@ export default function AddStudioScreen() {
       if (profileError) throw profileError;
 
       if (profile?.role !== "studio-owner") {
-        showAlert("error", "Unauthorized", "Only studio owners can create studios.");
+        showAlert("warning", "Unauthorized", "Only studio owners can create studios.");
         router.replace("/home");
         return;
       }
@@ -679,24 +655,24 @@ export default function AddStudioScreen() {
       minimum_spend,
     } = promotionForm;
     if (!name.trim()) {
-      showAlert("error", "Required", "Please enter a promotion name.");
+      showAlert("warning", "Required", "Please enter a promotion name.");
       return;
     }
     const val = parseFloat(discount_value);
     if (!val || val <= 0) {
-      showAlert("error", "Required", "Please enter a valid discount value.");
+      showAlert("warning", "Required", "Please enter a valid discount value.");
       return;
     }
     if (discount_type === "percentage" && val > 100) {
-      showAlert("error", "Invalid Value", "Percentage discount cannot exceed 100%.");
+      showAlert("warning", "Invalid Value", "Percentage discount cannot exceed 100%.");
       return;
     }
     if (!is_permanent && (!start_date || !end_date)) {
-      showAlert("error", "Required", "Please select both start and end dates for time-limited promotions.");
+      showAlert("warning", "Required", "Please select both start and end dates for time-limited promotions.");
       return;
     }
     if (!is_permanent && end_date < start_date) {
-      showAlert("error", "Invalid Dates", "End date must be on or after start date.");
+      showAlert("warning", "Invalid Dates", "End date must be on or after start date.");
       return;
     }
 
@@ -705,7 +681,7 @@ export default function AddStudioScreen() {
       const parsedHours = Number.parseFloat(minimumHoursValue);
       if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Invalid Criteria",
           "Minimum booking hours must be greater than 0.",
         );
@@ -718,7 +694,7 @@ export default function AddStudioScreen() {
       const parsedSpend = Number.parseFloat(minimumSpendValue);
       if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
         showAlert(
-          "error",
+          "warning",
           "Invalid Criteria",
           "Minimum spend must be greater than 0.",
         );
@@ -777,16 +753,16 @@ export default function AddStudioScreen() {
   const validateStep = (currentStep: number): boolean => {
     if (currentStep === 1) {
       if (!studioName.trim()) {
-        showAlert("error", "Required Field", "Please enter a studio name");
+        showAlert("warning", "Required Field", "Please enter a studio name");
         return false;
       }
       if (!description.trim()) {
-        showAlert("error", "Required Field", "Please enter a description");
+        showAlert("warning", "Required Field", "Please enter a description");
         return false;
       }
       if (!address.trim()) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please enter a studio address",
         );
@@ -796,7 +772,7 @@ export default function AddStudioScreen() {
       if (studioType === "Both") {
         if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
           showAlert(
-            "error",
+            "warning",
             "Required Field",
             "Please enter a valid rehearsal rate",
           );
@@ -804,7 +780,7 @@ export default function AddStudioScreen() {
         }
         if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
           showAlert(
-            "error",
+            "warning",
             "Required Field",
             "Please enter a valid recording rate",
           );
@@ -813,7 +789,7 @@ export default function AddStudioScreen() {
       } else if (studioType === "Rehearsal") {
         if (!rehearsalRate.trim() || parseFloat(rehearsalRate) <= 0) {
           showAlert(
-            "error",
+            "warning",
             "Required Field",
             "Please enter a valid rehearsal rate",
           );
@@ -822,7 +798,7 @@ export default function AddStudioScreen() {
       } else {
         if (!recordingRate.trim() || parseFloat(recordingRate) <= 0) {
           showAlert(
-            "error",
+            "warning",
             "Required Field",
             "Please enter a valid recording rate",
           );
@@ -834,7 +810,7 @@ export default function AddStudioScreen() {
         !parsePositiveInteger(recordingSongsPerBlock)
       ) {
         showAlert(
-          "error",
+          "warning",
           "Invalid Recording Rule",
           "Please enter how many songs are included in each recording time block.",
         );
@@ -845,7 +821,7 @@ export default function AddStudioScreen() {
         !parsePositiveDecimal(recordingHoursPerBlock)
       ) {
         showAlert(
-          "error",
+          "warning",
           "Invalid Recording Rule",
           "Please enter how many hours each recording time block takes.",
         );
@@ -853,7 +829,7 @@ export default function AddStudioScreen() {
       }
       if (images.length === 0) {
         showAlert(
-          "error",
+          "warning",
           "Required Field",
           "Please upload at least one studio photo",
         );
@@ -862,35 +838,34 @@ export default function AddStudioScreen() {
       // Validate promotions if any
       for (const promo of promotions) {
         if (!promo.name.trim()) {
-          showAlert("error", "Invalid Promotion", "Each promotion must have a name.");
+          showAlert("warning", "Invalid Promotion", "Each promotion must have a name.");
           return false;
         }
         const val = parseFloat(promo.discount_value);
         if (!val || val <= 0) {
-          showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" must have a positive discount value.`);
+          showAlert("warning", "Invalid Promotion", `Promotion "${promo.name}" must have a positive discount value.`);
           return false;
         }
         if (promo.discount_type === "percentage" && val > 100) {
-          showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" percentage cannot exceed 100%.`);
+          showAlert("warning", "Invalid Promotion", `Promotion "${promo.name}" percentage cannot exceed 100%.`);
           return false;
         }
         if (!promo.is_permanent) {
           if (!promo.start_date || !promo.end_date) {
-            showAlert("error", "Invalid Promotion", `Time-limited promotion "${promo.name}" must have start and end dates.`);
+            showAlert("warning", "Invalid Promotion", `Time-limited promotion "${promo.name}" must have start and end dates.`);
             return false;
           }
           if (promo.end_date < promo.start_date) {
-            showAlert("error", "Invalid Promotion", `Promotion "${promo.name}" end date must be on or after start date.`);
+            showAlert("warning", "Invalid Promotion", `Promotion "${promo.name}" end date must be on or after start date.`);
             return false;
           }
         }
-
         const minimumHoursValue = promo.minimum_booking_hours?.trim();
         if (minimumHoursValue) {
           const parsedHours = Number.parseFloat(minimumHoursValue);
           if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
             showAlert(
-              "error",
+              "warning",
               "Invalid Promotion",
               `Promotion "${promo.name}" minimum booking hours must be greater than 0.`,
             );
@@ -903,7 +878,7 @@ export default function AddStudioScreen() {
           const parsedSpend = Number.parseFloat(minimumSpendValue);
           if (!Number.isFinite(parsedSpend) || parsedSpend <= 0) {
             showAlert(
-              "error",
+              "warning",
               "Invalid Promotion",
               `Promotion "${promo.name}" minimum spend must be greater than 0.`,
             );
@@ -1096,7 +1071,7 @@ export default function AddStudioScreen() {
       } = await supabase.auth.getSession();
 
       if (sessionError || !session || !session.user) {
-        showAlert("error", "Session Expired", "Please log in again.");
+        showAlert("warning", "Session Expired", "Please log in again.");
         router.replace("/");
         return;
       }
@@ -1215,6 +1190,7 @@ export default function AddStudioScreen() {
             parsePositiveInteger(recordingSongsPerBlock) || 1,
           recording_hours_per_block:
             parsePositiveDecimal(recordingHoursPerBlock) || 3,
+          recording_rate_negotiable: recordingRateNegotiable,
         },
       };
 
@@ -1284,7 +1260,7 @@ export default function AddStudioScreen() {
         if (error.hint) alertMessage += `\n\nHint: ${error.hint}`;
         if (error.details) alertMessage += `\n\nDetails: ${error.details}`;
 
-        showAlert("error", "Error", alertMessage);
+        showAlert("warning", "Couldn't Create Studio", alertMessage);
         return;
       }
 
@@ -1372,6 +1348,7 @@ export default function AddStudioScreen() {
         peak_season_dates: bookingSettings.peak_season_dates || [],
         off_peak_multiplier: Number(bookingSettings.off_peak_multiplier) || 1.0,
         off_peak_dates: bookingSettings.off_peak_dates || [],
+        recording_rate_negotiable: bookingSettings.recording_rate_negotiable ?? false,
       });
 
       // Insert promotions
@@ -1382,13 +1359,12 @@ export default function AddStudioScreen() {
             promotions.map((promo) => ({
               studio_id: studioId,
               name: promo.name,
-              description:
-                buildPromotionDescription(
-                  promo.description,
-                  promo.criteria,
-                  promo.minimum_booking_hours,
-                  promo.minimum_spend,
-                ) || null,
+              description: buildPromotionDescription(promo.description) || null,
+              criteria: promo.criteria.trim() || null,
+              minimum_booking_hours: parsePositiveDecimal(
+                promo.minimum_booking_hours,
+              ),
+              minimum_spend: parsePositiveDecimal(promo.minimum_spend),
               discount_type: promo.discount_type,
               discount_value: parseFloat(promo.discount_value),
               is_permanent: promo.is_permanent,
@@ -1472,8 +1448,8 @@ export default function AddStudioScreen() {
         JSON.stringify(e, Object.getOwnPropertyNames(e), 2),
       );
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Couldn't Create Studio",
         `Failed to create studio: ${e?.message || "Unknown error"}`,
       );
     } finally {
@@ -1509,7 +1485,7 @@ export default function AddStudioScreen() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         return;
       }
 
@@ -1596,7 +1572,7 @@ export default function AddStudioScreen() {
     } catch (e: any) {
       console.error('Address verification error:', e);
       showAlert(
-        "error",
+        "warning",
         "Verification Error",
         e.message || "Could not start address verification. Please try again."
       );
@@ -1664,7 +1640,7 @@ export default function AddStudioScreen() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         return;
       }
 
@@ -1799,7 +1775,7 @@ export default function AddStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -1830,8 +1806,8 @@ export default function AddStudioScreen() {
     } catch (error) {
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {
@@ -1891,7 +1867,7 @@ export default function AddStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -1923,8 +1899,8 @@ export default function AddStudioScreen() {
     } catch (error) {
       console.error("Error uploading business permit:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload business permit. Please try again.",
       );
     } finally {
@@ -1949,7 +1925,7 @@ export default function AddStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingBusinessPermit(false);
         return;
       }
@@ -1987,7 +1963,7 @@ export default function AddStudioScreen() {
       showAlert("success", "Success", "Business permit uploaded successfully!");
     } catch (error) {
       console.error("Error uploading business permit:", error);
-      showAlert("error", "Error", "Failed to upload business permit. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload business permit. Please try again.");
     } finally {
       setUploadingBusinessPermit(false);
       if (event.target) {
@@ -2003,7 +1979,7 @@ export default function AddStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         return;
       }
 
@@ -2011,7 +1987,7 @@ export default function AddStudioScreen() {
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
         showAlert(
-          "error",
+          "warning",
           "Permission Needed",
           "Please allow access to your photos.",
         );
@@ -2066,7 +2042,7 @@ export default function AddStudioScreen() {
       setEquipmentForm({ ...equipmentForm, image: urlData.publicUrl });
     } catch (error) {
       console.error("Error uploading equipment image:", error);
-      showAlert("error", "Error", "Failed to upload image. Please try again.");
+      showAlert("warning", "Upload Failed", "Failed to upload image. Please try again.");
     } finally {
       setUploadingEquipmentImage(false);
     }
@@ -2084,7 +2060,7 @@ export default function AddStudioScreen() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
-        showAlert("error", "Error", "Session expired. Please log in again.");
+        showAlert("warning", "Session Expired", "Your session has expired. Please log in again.");
         setUploadingContract(false);
         return;
       }
@@ -2119,8 +2095,8 @@ export default function AddStudioScreen() {
     } catch (error) {
       console.error("Error uploading contract:", error);
       showAlert(
-        "error",
-        "Error",
+        "warning",
+        "Upload Failed",
         "Failed to upload contract. Please try again.",
       );
     } finally {
@@ -2216,8 +2192,6 @@ export default function AddStudioScreen() {
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
         <Header title="List Studio" />
 
-        <View style={styles.contentFrame}>
-
         <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
           <TouchableOpacity activeOpacity={1}
             onPress={handleAutoFillTestData}
@@ -2248,15 +2222,7 @@ export default function AddStudioScreen() {
         </View>
 
         {/* Enhanced Step Indicator (Fixed at top) */}
-        <View
-          style={[
-            styles.stepIndicatorContainer,
-            {
-              backgroundColor: isDark ? "#111827" : "#FFFFFF",
-              borderColor: isDark ? "#1F2937" : "#E5E7EB",
-            },
-          ]}
-        >
+        <View style={styles.stepIndicatorContainer}>
           <View style={styles.stepIndicatorContent}>
             {/* Progress Line Background */}
             <View
@@ -2326,13 +2292,7 @@ export default function AddStudioScreen() {
         </View>
 
         <ScrollView
-          style={[
-            styles.formContainer,
-            {
-              backgroundColor: isDark ? "#111827" : "#FFFFFF",
-              borderColor: isDark ? "#1F2937" : "#E5E7EB",
-            },
-          ]}
+          style={styles.formContainer}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
@@ -2652,6 +2612,9 @@ export default function AddStudioScreen() {
                         >
                           Rehearsal
                         </Text>
+                        <View style={{ backgroundColor: '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                          <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>FIXED</Text>
+                        </View>
                       </View>
                       <Text
                         style={{
@@ -2723,6 +2686,9 @@ export default function AddStudioScreen() {
                         >
                           Recording
                         </Text>
+                        <View style={{ backgroundColor: recordingRateNegotiable ? '#F59E0B' : '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                          <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>{recordingRateNegotiable ? 'NEGOTIABLE' : 'FIXED'}</Text>
+                        </View>
                       </View>
                       <Text
                         style={{
@@ -2758,6 +2724,20 @@ export default function AddStudioScreen() {
                         /song
                       </Text>
                     </View>
+
+                    <TouchableOpacity
+                      onPress={() => setRecordingRateNegotiable(!recordingRateNegotiable)}
+                      style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 6 }}
+                    >
+                      <Ionicons
+                        name={recordingRateNegotiable ? 'checkbox' : 'square-outline'}
+                        size={20}
+                        color={recordingRateNegotiable ? colors.primary : colors.textSecondary}
+                      />
+                      <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 12, marginLeft: 6 }}>
+                        Allow clients to negotiate recording rate
+                      </Text>
+                    </TouchableOpacity>
 
                     <View style={{ marginTop: 10 }}>
                       <Text
@@ -2957,17 +2937,13 @@ export default function AddStudioScreen() {
                           {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                           {" "}on {promo.applies_to === "both" ? "all" : promo.applies_to} bookings
                         </Text>
-                        {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) && (
+                        {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend) ? (
                           <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
-                            {[
-                              promo.criteria ? `How to get promo: ${promo.criteria}` : null,
-                              promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr(s)` : null,
-                              promo.minimum_spend ? `Min spend ₱${promo.minimum_spend}` : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" • ")}
+                            {promo.criteria ? `${promo.criteria}. ` : ""}
+                            {promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr. ` : ""}
+                            {promo.minimum_spend ? `Min ₱${promo.minimum_spend}.` : ""}
                           </Text>
-                        )}
+                        ) : null}
                         <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
                           {promo.is_permanent
                             ? "Always available"
@@ -3055,13 +3031,14 @@ export default function AddStudioScreen() {
                       }}
                     />
 
+                    {/* Criteria */}
                     <Text style={{ fontFamily: "Poppins_500Medium", color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
                       How to Get This Promo (Optional)
                     </Text>
                     <TextInput
                       value={promotionForm.criteria}
                       onChangeText={(t) => setPromotionForm((p) => ({ ...p, criteria: t }))}
-                      placeholder="e.g. Minimum 2-hour booking and full payment"
+                      placeholder="e.g. Book 2+ hours on weekdays"
                       placeholderTextColor={colors.textSecondary}
                       style={{
                         backgroundColor: isDark ? "#111827" : "#FFF",
@@ -3083,12 +3060,7 @@ export default function AddStudioScreen() {
                         </Text>
                         <TextInput
                           value={promotionForm.minimum_booking_hours}
-                          onChangeText={(t) =>
-                            setPromotionForm((p) => ({
-                              ...p,
-                              minimum_booking_hours: t.replace(/[^0-9.]/g, ""),
-                            }))
-                          }
+                          onChangeText={(t) => setPromotionForm((p) => ({ ...p, minimum_booking_hours: t }))}
                           placeholder="e.g. 2"
                           placeholderTextColor={colors.textSecondary}
                           keyboardType="numeric"
@@ -3110,12 +3082,7 @@ export default function AddStudioScreen() {
                         </Text>
                         <TextInput
                           value={promotionForm.minimum_spend}
-                          onChangeText={(t) =>
-                            setPromotionForm((p) => ({
-                              ...p,
-                              minimum_spend: t.replace(/[^0-9.]/g, ""),
-                            }))
-                          }
+                          onChangeText={(t) => setPromotionForm((p) => ({ ...p, minimum_spend: t }))}
                           placeholder="e.g. 3000"
                           placeholderTextColor={colors.textSecondary}
                           keyboardType="numeric"
@@ -5163,16 +5130,10 @@ export default function AddStudioScreen() {
                           <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium", fontSize: 12 }}>
                             "{promo.name}": {promo.discount_type === "percentage" ? `${promo.discount_value}% off` : `₱${promo.discount_value}/hr off`}
                             {" "}({promo.applies_to === "both" ? "All" : promo.applies_to})
+                            {promo.criteria ? ` • ${promo.criteria}` : ""}
+                            {promo.minimum_booking_hours ? ` • Min ${promo.minimum_booking_hours} hr` : ""}
+                            {promo.minimum_spend ? ` • Min ₱${promo.minimum_spend}` : ""}
                             {" "}• {promo.is_permanent ? "Regular" : `${promo.start_date} – ${promo.end_date}`}
-                            {(promo.criteria || promo.minimum_booking_hours || promo.minimum_spend)
-                              ? ` • ${[
-                                promo.criteria ? `How to get promo: ${promo.criteria}` : null,
-                                promo.minimum_booking_hours ? `Min ${promo.minimum_booking_hours} hr(s)` : null,
-                                promo.minimum_spend ? `Min spend ₱${promo.minimum_spend}` : null,
-                              ]
-                                .filter(Boolean)
-                                .join(" | ")}`
-                              : ""}
                           </Text>
                         </View>
                       ))}
@@ -5445,7 +5406,6 @@ export default function AddStudioScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
-        </View>
 
         <Navbar />
       </View>
@@ -5800,7 +5760,7 @@ export default function AddStudioScreen() {
                 onPress={() => {
                   if (!equipmentForm.name.trim()) {
                     showAlert(
-                      "error",
+                      "warning",
                       "Required",
                       "Please enter equipment name",
                     );
@@ -5868,45 +5828,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  contentFrame: {
-    flex: 1,
-    width: "100%",
-    maxWidth: IS_WEB ? 1080 : undefined,
-    alignSelf: "center",
-    paddingHorizontal: IS_WEB ? 24 : 0,
-    paddingTop: IS_WEB ? 16 : 0,
-  },
   stepIndicatorContainer: {
-    paddingHorizontal: IS_WEB ? 22 : 24,
-    paddingTop: IS_WEB ? 18 : 24,
-    paddingBottom: IS_WEB ? 14 : 8,
-    borderRadius: IS_WEB ? 20 : 0,
-    borderWidth: IS_WEB ? 1 : 0,
-    marginBottom: IS_WEB ? 12 : 0,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: IS_WEB ? 0.08 : 0,
-    shadowRadius: IS_WEB ? 16 : 0,
-    elevation: IS_WEB ? 2 : 0,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 8,
   },
   stepIndicatorContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     position: "relative",
-    paddingHorizontal: IS_WEB ? 8 : 0,
   },
   progressLineBg: {
     position: "absolute",
-    left: IS_WEB ? 8 : 0,
-    right: IS_WEB ? 8 : 0,
+    left: 0,
+    right: 0,
     height: 4,
     top: 20,
     zIndex: 0,
   },
   activeProgressLine: {
     position: "absolute",
-    left: IS_WEB ? 8 : 0,
+    left: 0,
     height: 4,
     top: 20,
     zIndex: 0,
@@ -5914,63 +5857,53 @@ const styles = StyleSheet.create({
   stepItem: {
     alignItems: "center",
     zIndex: 10,
-    width: IS_WEB ? 96 : 80,
+    width: 80,
   },
   stepCircle: {
-    width: IS_WEB ? 44 : 40,
-    height: IS_WEB ? 44 : 40,
-    borderRadius: 999,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 4,
   },
   stepText: {
-    fontSize: IS_WEB ? 13 : 12,
+    fontSize: 12,
     marginTop: 8,
     textAlign: "center",
   },
   formContainer: {
     flex: 1,
-    marginTop: IS_WEB ? 0 : 16,
-    borderRadius: IS_WEB ? 20 : 0,
-    borderWidth: IS_WEB ? 1 : 0,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: IS_WEB ? 0.08 : 0,
-    shadowRadius: IS_WEB ? 22 : 0,
-    elevation: IS_WEB ? 3 : 0,
+    paddingHorizontal: 24,
+    marginTop: 16,
   },
   scrollContent: {
-    paddingHorizontal: IS_WEB ? 28 : 24,
-    paddingTop: IS_WEB ? 26 : 0,
-    paddingBottom: IS_WEB ? 170 : 150,
+    paddingBottom: 150,
   },
   sectionTitle: {
-    fontSize: IS_WEB ? 24 : 20,
-    marginBottom: IS_WEB ? 22 : 24,
-    textAlign: IS_WEB ? "left" : "center",
+    fontSize: 20,
+    marginBottom: 24,
+    textAlign: "center",
     fontFamily: "Poppins_600SemiBold",
   },
   inputContainer: {
-    marginBottom: IS_WEB ? 18 : 16,
+    marginBottom: 16,
   },
   inputLabel: {
-    marginBottom: 10,
+    marginBottom: 8,
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 1,
     fontFamily: "Poppins_600SemiBold",
   },
   inputWrapper: {
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
     overflow: "hidden",
   },
   textInput: {
-    paddingHorizontal: 16,
-    paddingVertical: IS_WEB ? 14 : 16,
+    padding: 16,
     fontFamily: "Poppins_400Regular",
-    fontSize: 14,
     textAlign: "left",
     textAlignVertical: "center",
   },
@@ -6060,9 +5993,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   navigationButtons: {
-    marginTop: IS_WEB ? 30 : 32,
+    marginTop: 32,
     flexDirection: "row",
-    gap: 12,
+    gap: 16,
     marginBottom: 16,
   },
   backBtn: {
@@ -6070,9 +6003,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: "center",
-    justifyContent: "center",
     borderWidth: 1,
-    height: 56,
   },
   backBtnText: {
     fontFamily: "Poppins_600SemiBold",
@@ -6080,15 +6011,12 @@ const styles = StyleSheet.create({
   nextBtn: {
     flex: 1,
     paddingVertical: 16,
-    paddingHorizontal: 24,
     borderRadius: 12,
     alignItems: "center",
-    justifyContent: "center",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
-    height: 56,
   },
   nextBtnText: {
     fontFamily: "Poppins_600SemiBold",

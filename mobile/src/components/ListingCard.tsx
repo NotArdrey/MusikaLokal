@@ -192,6 +192,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
     } else if (normalizedType === "Artist") {
       nextBadgeLabel = "Artist";
       nextBadgeColor = "#EC4899";
+    } else if (normalizedType === "Production") {
+      nextBadgeLabel = "Production";
+      nextBadgeColor = "#F97316";
+    } else if (normalizedType === "Project") {
+      nextBadgeLabel = "Project";
+      nextBadgeColor = "#6366F1";
     } else {
       nextBadgeLabel = normalizedType;
       nextBadgeColor = "#7C3AED";

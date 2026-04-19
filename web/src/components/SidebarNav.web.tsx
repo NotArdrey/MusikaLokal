@@ -388,7 +388,7 @@ export default function SidebarNav() {
     const activeTab = useMemo(() => {
         if (isAdminContext) return activeAdminTab;
 
-        if (pathname.includes('home')) return 'home';
+        if (pathname.includes('feed') || pathname.includes('home')) return 'home';
         if (pathname.includes('discover')) return 'discover';
         if (pathname.includes('bookings')) return 'activity';
         if (pathname.includes('ai_suggestions')) return 'ai-suggest';
@@ -422,7 +422,7 @@ export default function SidebarNav() {
         }
 
         return [
-            { id: 'home', icon: 'home', label: 'Home', route: '/home' },
+            { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
             { id: 'discover', icon: 'compass', label: 'Discover', route: '/discover' },
             { id: 'ai-suggest', icon: 'sparkles', label: 'AI Discovery', route: '/ai_suggestions' },
             { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },

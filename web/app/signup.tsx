@@ -6,16 +6,25 @@ import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Dimensions } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { supabase } from '../lib/supabase';
-import AuthMusicHero from '../src/components/AuthMusicHero';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
+import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
 type OnboardingStep = 'role' | 'details' | 'verification' | 'email_verification';
+type SignupRole = 'musician' | 'venue-owner' | 'producer';
+
+const ALLOWED_SIGNUP_ROLES: SignupRole[] = ['musician', 'venue-owner', 'producer'];
+
+const isAllowedSignupRole = (role: unknown): role is SignupRole => {
+    return typeof role === 'string' && ALLOWED_SIGNUP_ROLES.includes(role as SignupRole);
+};
+
+const isAdminRole = (role: unknown): boolean => {
+    return typeof role === 'string' && role.toLowerCase() === 'admin';
+};
 
 export default function SignupScreen() {
     const { colors, isDark } = useTheme();
@@ -26,14 +35,13 @@ export default function SignupScreen() {
     const [userId, setUserId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [verificationUrl, setVerificationUrl] = useState('');
-    const isWebDesktop = Platform.OS === 'web' && SCREEN_WIDTH >= 768;
     const [tempSessionRef, setTempSessionRef] = useState('');
     const [sessionId, setSessionId] = useState<string>('');
 
     const { verified, session_id, check_verification } = useLocalSearchParams<{ verified: string; session_id: string; check_verification: string }>();
 
     // Form Fields
-    const [selectedRole, setSelectedRole] = useState<'musician' | 'venue-owner' | 'studio-owner' | null>(null);
+    const [selectedRole, setSelectedRole] = useState<SignupRole | null>(null);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -56,17 +64,52 @@ export default function SignupScreen() {
         setAlertVisible(true);
     };
 
-    const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
-        const lowerTitle = (title || '').toLowerCase();
-        let type: AlertType = 'info';
+    const isSimpleTopToastButtons = (buttons?: any[]) => {
+        if (!buttons || buttons.length === 0) return true;
+        if (buttons.length !== 1) return false;
+
+        const onlyButton = buttons[0];
+        const normalizedText = String(onlyButton?.text ?? 'OK').trim().toLowerCase();
+        const hasNoCallback = !onlyButton?.onPress;
+        const isNeutralStyle =
+            !onlyButton?.style || onlyButton.style === 'default' || onlyButton.style === 'cancel';
+
+        return (
+            hasNoCallback &&
+            isNeutralStyle &&
+            (normalizedText === 'ok' || normalizedText === 'close' || normalizedText === 'got it')
+        );
+    };
+
+    const resolveAlertType = (title: string): AlertType => {
+        const lowerTitle = title.toLowerCase();
         if (lowerTitle.includes('error') || lowerTitle.includes('failed') || lowerTitle.includes('invalid') || lowerTitle.includes('timeout') || lowerTitle.includes('exists')) {
-            type = 'error';
-        } else if (lowerTitle.includes('success') || lowerTitle.includes('sent')) {
-            type = 'success';
-        } else if (lowerTitle.includes('pending') || lowerTitle.includes('processing') || lowerTitle.includes('required') || lowerTitle.includes('verification')) {
-            type = 'warning';
+            return 'error';
         }
-        showAlert(type, title || 'Notice', message || '', buttons);
+        if (lowerTitle.includes('success') || lowerTitle.includes('sent')) {
+            return 'success';
+        }
+        if (lowerTitle.includes('pending') || lowerTitle.includes('processing') || lowerTitle.includes('required') || lowerTitle.includes('verification')) {
+            return 'warning';
+        }
+        return 'info';
+    };
+
+    const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+        const normalizedTitle = title || 'Notice';
+        const normalizedMessage = message || '';
+        const type = resolveAlertType(normalizedTitle);
+
+        if (isSimpleTopToastButtons(buttons)) {
+            showTopToast({
+                type,
+                title: normalizedTitle,
+                message: normalizedMessage.trim() ? normalizedMessage : normalizedTitle,
+            });
+            return;
+        }
+
+        showAlert(type, normalizedTitle, normalizedMessage, buttons);
     };
 
     const Alert = { alert: showAlertNative };
@@ -88,7 +131,9 @@ export default function SignupScreen() {
                         const { email: sEmail, password: sPassword, selectedRole: sRole, tempRef, sSessionId } = JSON.parse(savedState);
                         if (sEmail) setEmail(sEmail);
                         if (sPassword) setPassword(sPassword);
-                        if (sRole) setSelectedRole(sRole);
+                        if (isAllowedSignupRole(sRole)) {
+                            setSelectedRole(sRole);
+                        }
                         if (tempRef) setTempSessionRef(tempRef);
                         if (sSessionId) setSessionId(sSessionId);
 
@@ -336,9 +381,10 @@ export default function SignupScreen() {
 
 
     // Role options
-    const roleOptions = [
+    const roleOptions: { value: SignupRole; label: string; icon: 'musical-notes-outline' | 'business-outline' | 'people-outline'; description: string }[] = [
         { value: 'musician' as const, label: 'Musical Artist', icon: 'musical-notes-outline' as const, description: 'Join bands, find gigs' },
         { value: 'venue-owner' as const, label: 'Venue Owner', icon: 'business-outline' as const, description: 'Host events, hire artists' },
+        { value: 'producer' as const, label: 'Producer', icon: 'people-outline' as const, description: 'Manage productions, negotiate deals' },
     ];
 
     // Theme Styles
@@ -454,6 +500,13 @@ export default function SignupScreen() {
         setErrors({});
         const newErrors: any = {};
 
+        if (!isAllowedSignupRole(selectedRole)) {
+            setErrors({ role: 'Please select a valid account type.' });
+            Alert.alert('Unsupported Account Type', 'Admin accounts are not allowed in the mobile app.');
+            setStep('role');
+            return;
+        }
+
         // Basic Validation
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!email) newErrors.email = 'Required';
@@ -480,7 +533,13 @@ export default function SignupScreen() {
 
         try {
             // Check if profile exists (optional, nice to have to prevent dupe emails early)
-            const { data: profile } = await supabase.from('profiles').select('id, is_verified').eq('email', email.trim()).maybeSingle();
+            const { data: profile } = await supabase.from('profiles').select('id, is_verified, role').eq('email', email.trim()).maybeSingle();
+
+            if (isAdminRole(profile?.role)) {
+                Alert.alert('Unsupported Account Type', 'Admin accounts cannot be used in the mobile app.');
+                setLoading(false);
+                return;
+            }
 
             if (profile) {
                 if (profile.is_verified) {
@@ -514,6 +573,12 @@ export default function SignupScreen() {
                     setStep('details');
                 }
             }]);
+            return;
+        }
+
+        if (!isAllowedSignupRole(selectedRole) || isAdminRole(selectedRole)) {
+            Alert.alert('Unsupported Account Type', 'Admin accounts cannot be registered in the mobile app.');
+            setStep('role');
             return;
         }
 
@@ -1024,30 +1089,11 @@ export default function SignupScreen() {
 
     // Main Render
     if (step === 'verification' || step === 'email_verification') {
-        // Verification steps take over full screen mostly, but respect split layout on web
+        // Verification steps take over full screen mostly
         return (
             <>
                 <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
-                    <ScrollView contentContainerStyle={isWebDesktop ? styles.webScrollContent : styles.scrollContent}>
-                        <View style={isWebDesktop ? styles.webContainer : styles.contentContainer}>
-                            {/* Left Side Branding (Web Desktop Only) */}
-                            {isWebDesktop && (
-                                <View style={styles.webLeftPanel}>
-                                    <AuthMusicHero
-                                        title={`Join\nMusikaLokal.`}
-                                        subtitle="Your journey into the local music scene starts here."
-                                    />
-                                </View>
-                            )}
-
-                            {/* Right Side Form */}
-                            <View style={isWebDesktop ? [styles.webRightPanel, { backgroundColor: isDark ? 'rgba(31, 41, 55, 0.85)' : 'rgba(255, 255, 255, 0.85)' }] : null}>
-                                <View style={isWebDesktop ? styles.webFormWrapper : null}>
-                                    {step === 'verification' ? renderVerificationStep() : renderEmailVerificationStep()}
-                                </View>
-                            </View>
-                        </View>
-                    </ScrollView>
+                    {step === 'verification' ? renderVerificationStep() : renderEmailVerificationStep()}
                 </KeyboardAvoidingView>
                 <CustomAlert
                     visible={alertVisible}
@@ -1064,35 +1110,18 @@ export default function SignupScreen() {
     return (
         <>
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.flex1, themeStyles.container]}>
-                <ScrollView contentContainerStyle={isWebDesktop ? styles.webScrollContent : styles.scrollContent}>
-                    <View style={isWebDesktop ? styles.webContainer : styles.contentContainer}>
-                        
-                        {/* Left Side Branding (Web Desktop Only) */}
-                        {isWebDesktop && (
-                            <View style={styles.webLeftPanel}>
-                                <AuthMusicHero
-                                    title={`Join\nMusikaLokal.`}
-                                    subtitle="Your journey into the local music scene starts here."
-                                />
-                            </View>
-                        )}
-
-                        {/* Right Side Form */}
-                        <View style={isWebDesktop ? [styles.webRightPanel, { backgroundColor: isDark ? 'rgba(31, 41, 55, 0.85)' : 'rgba(255, 255, 255, 0.85)' }] : null}>
-                            <View style={isWebDesktop ? styles.webFormWrapper : null}>
-                                
-                                {/* Progress Indicator */}
-                                <View style={styles.progressContainer}>
-                                    <View style={[styles.dot, step === 'role' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                                    <View style={[styles.dot, step === 'details' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                                    <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                                    <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
-                                </View>
-
-                                {step === 'role' && renderRoleStep()}
-                                {step === 'details' && renderDetailsStep()}
-                            </View>
+                <ScrollView contentContainerStyle={styles.scrollContent}>
+                    <View style={styles.contentContainer}>
+                        {/* Progress Indicator */}
+                        <View style={styles.progressContainer}>
+                            <View style={[styles.dot, step === 'role' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
+                            <View style={[styles.dot, step === 'details' ? { backgroundColor: colors.primary } : { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
+                            <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
+                            <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: 0.3 }]} />
                         </View>
+
+                        {step === 'role' && renderRoleStep()}
+                        {step === 'details' && renderDetailsStep()}
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -1111,44 +1140,26 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
     flex1: { flex: 1 },
     scrollContent: { flexGrow: 1 },
-    webScrollContent: { flexGrow: 1, height: '100%' },
     contentContainer: { flex: 1, padding: 24, justifyContent: 'center' },
-    webContainer: { flex: 1, flexDirection: 'row' },
-    webLeftPanel: { flex: 1, display: 'flex' },
-    webHeroImage: { flex: 1, width: '100%', height: '100%' },
-    webHeroOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', padding: 64, justifyContent: 'center' },
-    webHeroTitle: { color: 'white', fontSize: 48, fontFamily: 'Poppins_700Bold', lineHeight: 56, marginBottom: 16 },
-    webHeroSubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 18, fontFamily: 'Poppins_400Regular', maxWidth: 400, lineHeight: 28 },
-    webRightPanel: { flex: 1, maxWidth: 800, justifyContent: 'center', alignItems: 'center', padding: 64 },
-    webFormWrapper: { width: '100%', maxWidth: 500 },
-    logoWrapper: { width: 64, height: 64, borderRadius: 16, backgroundColor: 'white', justifyContent: 'center', alignItems: 'center' },
-    logoImage: { width: 40, height: 40 },
-    shadow: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
-        elevation: 8,
-    },
     stepContainer: { flex: 1, width: '100%', maxWidth: 500, alignSelf: 'center' },
-    stepTitle: { fontSize: 36, fontWeight: 'bold', marginBottom: 12, fontFamily: 'Poppins_700Bold' },
-    stepSubtitle: { fontSize: 18, marginBottom: 40, fontFamily: 'Poppins_400Regular' },
-    roleGrid: { gap: 20 },
+    stepTitle: { fontSize: 28, fontWeight: 'bold', marginBottom: 8, fontFamily: 'Poppins_700Bold' },
+    stepSubtitle: { fontSize: 16, marginBottom: 32, fontFamily: 'Poppins_400Regular' },
+    roleGrid: { gap: 16 },
     roleCardBig: {
-        flexDirection: 'row', alignItems: 'center', padding: 24, borderRadius: 20, borderWidth: 1, gap: 20
+        flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 16, borderWidth: 1, gap: 16
     },
-    roleLabelBig: { fontSize: 20, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
-    roleDescBig: { fontSize: 14, flex: 1, fontFamily: 'Poppins_400Regular' },
+    roleLabelBig: { fontSize: 18, fontWeight: '600', fontFamily: 'Poppins_600SemiBold' },
+    roleDescBig: { fontSize: 12, flex: 1, fontFamily: 'Poppins_400Regular' },
     nextButton: {
-        height: 64, borderRadius: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 40,
+        height: 56, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 32,
         shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4
     },
-    nextButtonText: { color: 'white', fontSize: 18, fontWeight: '600', marginRight: 8, fontFamily: 'Poppins_600SemiBold' },
+    nextButtonText: { color: 'white', fontSize: 16, fontWeight: '600', marginRight: 8, fontFamily: 'Poppins_600SemiBold' },
     inputContainer: {
-        flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, height: 64, borderRadius: 20, borderWidth: 1
+        flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, height: 56, borderRadius: 16, borderWidth: 1
     },
-    input: { flex: 1, marginLeft: 16, height: '100%', fontFamily: 'Poppins_400Regular', fontSize: 16 },
-    formGap: { gap: 20 },
+    input: { flex: 1, marginLeft: 12, height: '100%', fontFamily: 'Poppins_400Regular' },
+    formGap: { gap: 16 },
     backLink: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 4 },
     progressContainer: { flexDirection: 'row', gap: 8, marginBottom: 24, justifyContent: 'center' },
     dot: { width: 8, height: 8, borderRadius: 4 }

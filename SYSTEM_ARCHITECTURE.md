@@ -149,11 +149,15 @@ The mobile app uses file-based routing under [mobile/app](mobile/app).
 Primary feature areas include:
 
 - authentication and onboarding: [mobile/app/index.tsx](mobile/app/index.tsx), [mobile/app/signup.tsx](mobile/app/signup.tsx), [mobile/app/forget_password.tsx](mobile/app/forget_password.tsx), [mobile/app/change_password.tsx](mobile/app/change_password.tsx)
-- discovery and home: [mobile/app/home.tsx](mobile/app/home.tsx), [mobile/app/ai_suggestions.tsx](mobile/app/ai_suggestions.tsx)
+- discovery and home: [mobile/app/home.tsx](mobile/app/home.tsx), [mobile/app/feed.tsx](mobile/app/feed.tsx), [mobile/app/ai_suggestions.tsx](mobile/app/ai_suggestions.tsx)
 - listings and ownership flows: [mobile/app/add_gig.tsx](mobile/app/add_gig.tsx), [mobile/app/add_studio.tsx](mobile/app/add_studio.tsx), [mobile/app/add_group.tsx](mobile/app/add_group.tsx), [mobile/app/manage_gig.tsx](mobile/app/manage_gig.tsx), [mobile/app/manage_studio.tsx](mobile/app/manage_studio.tsx), [mobile/app/manage_group.tsx](mobile/app/manage_group.tsx)
 - bookings and wallet: [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/wallet.tsx](mobile/app/wallet.tsx), [mobile/app/payment-result.tsx](mobile/app/payment-result.tsx)
 - messaging and notifications: [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/notifications.tsx](mobile/app/notifications.tsx)
 - profile and policy screens: [mobile/app/profile.tsx](mobile/app/profile.tsx), [mobile/app/settings.tsx](mobile/app/settings.tsx), [mobile/app/account_details.tsx](mobile/app/account_details.tsx), [mobile/app/identity_verification.tsx](mobile/app/identity_verification.tsx)
+- Phase 2 producer network: [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx), [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx)
+- Phase 2 social feed: [mobile/app/post_details.tsx](mobile/app/post_details.tsx)
+- Phase 2 playlists: [mobile/app/create_playlist.tsx](mobile/app/create_playlist.tsx), [mobile/app/playlist_details.tsx](mobile/app/playlist_details.tsx)
+- Phase 2 marketplace: [mobile/app/seller_hub.tsx](mobile/app/seller_hub.tsx), [mobile/app/product_details.tsx](mobile/app/product_details.tsx), [mobile/app/orders.tsx](mobile/app/orders.tsx)
 
 ### Mobile composition model
 
@@ -224,7 +228,25 @@ Patterns used:
 
 ### Mobile home and recommendation architecture
 
-The home screen in [mobile/app/home.tsx](mobile/app/home.tsx) combines:
+The home screen landscape changed in Phase 2. There are now two distinct home-area screens:
+
+**feed.tsx — social home (primary landing page)**
+
+[mobile/app/feed.tsx](mobile/app/feed.tsx) is the entry point when a user taps the Home tab in the bottom navbar. It implements a Facebook-style social home page with:
+
+- a branded custom top bar (replaces the generic Header component) with notification and chat shortcuts
+- an inline composer prompt row for quick post creation
+- a horizontal shortcut row to Producer Projects, Shop, Playlists, Orders, and Seller Hub
+- For You and Following feed tabs
+- FlatList with infinite scroll pagination, pull-to-refresh, and optimistic reaction and follow toggles
+- rich post cards: media grids, linked playlist and product tiles, reaction summary row, Like / Comment / Share action bar
+- a Facebook-style create post modal with visibility control
+
+The feed data is served by the `manage-social-feed` Edge Function (actions: `get_feed`, `create_post`, `react_to_post`, `remove_reaction`, `follow`, `unfollow`).
+
+**home.tsx — marketplace discovery hub**
+
+[mobile/app/home.tsx](mobile/app/home.tsx) remains the Explore / discovery entry point. It combines:
 
 - direct content reads
 - profile-signal extraction from skills and genres
@@ -232,7 +254,7 @@ The home screen in [mobile/app/home.tsx](mobile/app/home.tsx) combines:
 - AI reranking through [mobile/src/services/groqModelRouter.ts](mobile/src/services/groqModelRouter.ts)
 - cached results for fast remount behavior
 
-This is not a purely backend-ranked home feed. The client participates in recommendation shaping.
+This is not a purely backend-ranked feed. The client participates in recommendation shaping.
 
 ### Mobile-specific platform features
 
@@ -264,10 +286,14 @@ This shell mirrors the mobile app closely but adapts layout for desktop and larg
 Feature routes under [web/app](web/app) largely mirror the mobile surface:
 
 - auth and account
-- home, bookings, manage, profile, notifications, wallet
+- home, feed (social home), bookings, manage, profile, notifications, wallet
 - listing creation and management
 - AI suggestions
 - verification and subscription flows
+- Phase 2 producer network: producer_projects, producer_project_details
+- Phase 2 social feed: post_details
+- Phase 2 playlists: create_playlist, playlist_details
+- Phase 2 marketplace: seller_hub, product_details, orders
 
 Additional admin pages:
 
@@ -291,6 +317,17 @@ The Expo web client reuses the same architectural principles as mobile:
 Key difference from mobile:
 
 - the shell adapts into a desktop-oriented layout with sidebar navigation and larger responsive sections instead of mobile-first bottom navigation behavior.
+
+### Feed-as-home routing (Phase 2)
+
+Both shells now route the Home navigation item to `/feed` instead of `/home`:
+
+- mobile navbar: [mobile/src/components/navbar.tsx](mobile/src/components/navbar.tsx) — Home tab href `/feed`, activeTab detection matches `feed|home`
+- web sidebar: [web/src/components/SidebarNav.web.tsx](web/src/components/SidebarNav.web.tsx) — Home navItem href `/feed`, activeTab detection matches `feed|home`
+
+`/home` remains accessible as the marketplace discovery hub (Explore / AI-ranked listings). The `home.tsx` Explore More shortcut section was updated to link to `/home` as "Discover" rather than `/feed`.
+
+`match_inbox.tsx` was removed from both shells. Notification-style social matching surfaces are handled by the existing notifications page.
 
 ## 6.2 Vite Web SPA
 
@@ -361,6 +398,10 @@ Important domains:
 - verification and onboarding: [mobile/supabase/functions/create-didit-session](mobile/supabase/functions/create-didit-session), [mobile/supabase/functions/create-address-verification](mobile/supabase/functions/create-address-verification), [mobile/supabase/functions/verify-identity](mobile/supabase/functions/verify-identity), [mobile/supabase/functions/didit-webhook](mobile/supabase/functions/didit-webhook), [mobile/supabase/functions/verification-redirect](mobile/supabase/functions/verification-redirect), [mobile/supabase/functions/login-redirect](mobile/supabase/functions/login-redirect), [mobile/supabase/functions/create-unverified-user](mobile/supabase/functions/create-unverified-user)
 - AI and recommendation: [mobile/supabase/functions/home-feed](mobile/supabase/functions/home-feed), [mobile/supabase/functions/instrument-suggestions](mobile/supabase/functions/instrument-suggestions), [mobile/supabase/functions/upload-safety-screen](mobile/supabase/functions/upload-safety-screen)
 - storage lifecycle: [mobile/supabase/functions/upload-file](mobile/supabase/functions/upload-file), [mobile/supabase/functions/setup-storage](mobile/supabase/functions/setup-storage), [mobile/supabase/functions/delete-studio-with-storage](mobile/supabase/functions/delete-studio-with-storage)
+- Phase 2 producer network: [mobile/supabase/functions/manage-producer-network](mobile/supabase/functions/manage-producer-network) — create/publish/archive projects, apply/review/withdraw applications, invite musicians, save talent, browse projects and match scores
+- Phase 2 social feed: [mobile/supabase/functions/manage-social-feed](mobile/supabase/functions/manage-social-feed) — follow/unfollow, create/update/delete posts, get_feed (public + following), post reactions, comments, reporting, user post history
+- Phase 2 playlists and radio: [mobile/supabase/functions/manage-playlists](mobile/supabase/functions/manage-playlists) — CRUD playlists, manage items and teaser assets, external links, record play events, CRUD radio stations and time-slot schedules
+- Phase 2 marketplace: [mobile/supabase/functions/manage-marketplace](mobile/supabase/functions/manage-marketplace) — create/publish/update products, browse products, create/update orders, order status lifecycle, fulfillments, shipping profiles, seller dashboard metrics
 
 ### Web-only administrative backend additions
 
@@ -483,6 +524,51 @@ This domain powers 1:1 messaging, group messaging, presence-driven UX, and syste
 
 This is the control plane for content review, operational moderation, and incident resolution.
 
+### Phase 2 producer network domain
+
+- producer_projects
+- producer_project_roles
+- producer_project_applications
+- producer_project_invites
+- saved_talent
+
+This domain powers the producer-to-musician matching and collaboration layer.
+
+### Phase 2 social feed domain
+
+- follows
+- feed_posts
+- post_media
+- post_reactions
+- post_comments
+
+This domain powers the social graph, the ranked home feed, and post engagement. `follows` is a user-to-user edge table that also determines the "Following" feed filter in `manage-social-feed`.
+
+### Phase 2 playlists and radio domain
+
+- playlists
+- playlist_items
+- playlist_teaser_assets
+- playlist_external_links
+- radio_stations
+- radio_station_slots
+- play_events
+
+This domain powers the teaser playlist product and the radio station scheduling layer. Playlists are linkable from feed posts and embeddable in marketplace products.
+
+### Phase 2 marketplace domain
+
+- products
+- product_variants
+- product_media
+- marketplace_orders
+- order_items
+- order_fulfillments
+- shipping_profiles
+- digital_entitlements
+
+This domain powers the merchandise and digital-drop commerce layer. Physical products have variant, stock, and shipping profile support. Digital products generate entitlements for gated-content access.
+
 ## 9. End-to-End Flow Architecture
 
 ## 9.1 Mobile and Expo Web request flow
@@ -565,3 +651,41 @@ If you need to think about this codebase as one system, the cleanest mental mode
 - Shared control plane: Supabase Auth, Postgres, Realtime, Storage, Edge Functions
 - Domain cores: marketplace listings, bookings, messaging, wallet and subscription payments, identity verification, moderation and admin
 - Integration edges: PayMongo for payments, Didit and Smile webhooks for verification, Groq-backed AI for recommendation and screening
+
+## 11. Expansion Roadmap
+
+- roadmap index: [docs/implementation/README.md](docs/implementation/README.md)
+- phase 1 spec: [docs/implementation/phase-1-commercial-booking.md](docs/implementation/phase-1-commercial-booking.md) — **delivered**
+- phase 2 spec: [docs/implementation/phase-2-producer-social-media-marketplace.md](docs/implementation/phase-2-producer-social-media-marketplace.md) — **delivered**
+
+### Phase 1 summary (delivered)
+
+Added the commercial booking layer on top of the existing studio and gig listings: time-boxed holds, booking requests, payment-linked attendance events, booking incidents, payout-linked wallet transactions, and a per-profile unpaid-booking lock gate.
+
+### Phase 2 summary (delivered)
+
+Phase 2 added four new product domains managed by four new Edge Functions and four new migration files.
+
+**Workstream A — Producer Network** (`manage-producer-network`)
+
+Producers can create projects with structured roles, publish them for discovery, send direct invitations to musicians, and manage the full application and review lifecycle. Musicians browse published projects and apply. Both sides maintain a saved-talent list. Talent matching surfaces compatibility scores from profile skills/genres.
+
+Key tables: `producer_projects`, `producer_project_roles`, `producer_project_applications`, `producer_project_invites`, `saved_talent`
+
+**Workstream B — Social Feed** (`manage-social-feed`)
+
+A user-to-user follow graph powers a ranked public feed. Posts can carry text, media, and linked entities (projects, playlists, products). Reactions, comments, and reporting are first-class surfaces. The feed is the primary home landing page in both mobile and web clients.
+
+Key tables: `follows`, `feed_posts`, `post_media`, `post_reactions`, `post_comments`
+
+**Workstream C — Playlists and Radio** (`manage-playlists`)
+
+Musicians and producers create teaser playlists with tracks, cover art, and short preview clips. A radio station layer allows producers to build timed slot schedules from existing playlist items. Play events are recorded for analytics. Playlists are linkable from feed posts and embedded in product listings.
+
+Key tables: `playlists`, `playlist_items`, `playlist_teaser_assets`, `playlist_external_links`, `radio_stations`, `radio_station_slots`, `play_events`
+
+**Workstream D — Merchandise and Digital Marketplace** (`manage-marketplace`)
+
+Sellers list physical merchandise and digital drops with variants, limited-edition flags, and per-product media. Buyers place orders through a wallet-backed checkout flow. Orders proceed through a fulfillment and shipping profile lifecycle. Digital purchases generate entitlements for gated content. A seller dashboard aggregates revenue and order metrics.
+
+Key tables: `products`, `product_variants`, `product_media`, `marketplace_orders`, `order_items`, `order_fulfillments`, `shipping_profiles`, `digital_entitlements`

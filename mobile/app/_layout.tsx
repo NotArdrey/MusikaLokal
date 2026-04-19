@@ -10,13 +10,17 @@ import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import * as Linking from "expo-linking";
 import { router, Stack, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useRef, useState } from "react";
-import { LogBox, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { supabase } from "../lib/supabase";
 import { AuthProvider, useAuth } from "../src/context/AuthContext";
-import { showTopToast, TopToastProvider } from "../src/context/TopToastContext";
+import {
+  showTopToast,
+  TopToastProvider,
+  type TopToastType,
+} from "../src/context/TopToastContext";
 import { ThemeProvider, useTheme } from "../src/context/ThemeContext";
 import SubscriptionRequiredScreen from "./subscription_required";
 
@@ -24,7 +28,31 @@ SplashScreen.preventAutoHideAsync();
 
 LogBox.ignoreLogs([
   "AuthApiError: Invalid Refresh Token: Refresh Token Not Found",
+  "SafeAreaView has been deprecated and will be removed in a future release.",
+  "setLayoutAnimationEnabledExperimental is currently a no-op in the New Architecture.",
+  "[expo-av]: Expo AV has been deprecated and will be removed in SDK 54.",
 ]);
+
+const NOTIFICATION_TOAST_DEDUPE_LIMIT = 120;
+const NOTIFICATION_TOAST_BACKFILL_LIMIT = 12;
+const NOTIFICATION_TOAST_BACKFILL_SKEW_MS = 15000;
+const NOTIFICATION_TOAST_RECONNECT_DELAY_MS = 1500;
+const NOTIFICATION_TOAST_DEBUG_LOGS = false;
+
+type IncomingNotificationToastRecord = {
+  id?: string | null;
+  title?: string | null;
+  message?: string | null;
+  type?: string | null;
+  created_at?: string | null;
+  read?: boolean | null;
+};
+
+const logNotificationToastDebug = (...args: unknown[]) => {
+  if (__DEV__ && NOTIFICATION_TOAST_DEBUG_LOGS) {
+    console.log("[notification-toast]", ...args);
+  }
+};
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -74,62 +102,275 @@ function RootContent() {
   const segments = useSegments();
   const processedDeepLinksRef = useRef<Set<string>>(new Set());
   const shownNotificationToastIdsRef = useRef<Set<string>>(new Set());
+  const notificationAppStateRef = useRef(AppState.currentState);
+  const notificationBackgroundedAtRef = useRef<number | null>(null);
 
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+
+  const rememberShownNotificationToast = useCallback((notificationId: string) => {
+    if (shownNotificationToastIdsRef.current.has(notificationId)) {
+      return false;
+    }
+
+    shownNotificationToastIdsRef.current.add(notificationId);
+    if (shownNotificationToastIdsRef.current.size > NOTIFICATION_TOAST_DEDUPE_LIMIT) {
+      const oldestId = shownNotificationToastIdsRef.current.values().next().value;
+      if (oldestId) {
+        shownNotificationToastIdsRef.current.delete(oldestId);
+      }
+    }
+
+    return true;
+  }, []);
+
+  const showNotificationToastFromRecord = useCallback(
+    (
+      incomingRecord: IncomingNotificationToastRecord | null | undefined,
+      source: string,
+    ) => {
+      const nextNotification = incomingRecord || {};
+      const notificationId = String(nextNotification.id || "").trim();
+      if (!notificationId) {
+        logNotificationToastDebug("Skipping notification toast with missing id", {
+          source,
+          nextNotification,
+        });
+        return false;
+      }
+
+      const message = String(nextNotification.message || "").trim();
+      if (!message) {
+        logNotificationToastDebug("Skipping notification toast with empty message", {
+          source,
+          notificationId,
+        });
+        return false;
+      }
+
+      if (!rememberShownNotificationToast(notificationId)) {
+        logNotificationToastDebug("Skipping duplicate notification toast", {
+          source,
+          notificationId,
+        });
+        return false;
+      }
+
+      const normalizedType = String(nextNotification.type || "info").toLowerCase();
+      let toastType: TopToastType = "info";
+      if (
+        normalizedType === "success" ||
+        normalizedType === "error" ||
+        normalizedType === "warning" ||
+        normalizedType === "info"
+      ) {
+        toastType = normalizedType;
+      }
+
+      showTopToast({
+        type: toastType,
+        title: String(nextNotification.title || "").trim() || "Notification",
+        message,
+      });
+
+      logNotificationToastDebug("Displayed notification toast", {
+        source,
+        notificationId,
+        toastType,
+      });
+      return true;
+    },
+    [rememberShownNotificationToast],
+  );
+
+  const backfillRecentNotificationToasts = useCallback(
+    async (userId: string, sinceMs: number, reason: string) => {
+      const queryFloorIso = new Date(
+        Math.max(0, sinceMs - NOTIFICATION_TOAST_BACKFILL_SKEW_MS),
+      ).toISOString();
+
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, title, message, type, created_at, read")
+        .eq("user_id", userId)
+        .eq("read", false)
+        .gte("created_at", queryFloorIso)
+        .order("created_at", { ascending: true })
+        .limit(NOTIFICATION_TOAST_BACKFILL_LIMIT);
+
+      if (error) {
+        console.warn("[notification-toast] Failed to backfill recent notifications", {
+          reason,
+          message: error.message,
+        });
+        return;
+      }
+
+      for (const notification of data || []) {
+        showNotificationToastFromRecord(notification, `backfill:${reason}`);
+      }
+
+      logNotificationToastDebug("Backfilled recent notifications", {
+        reason,
+        count: data?.length ?? 0,
+        queryFloorIso,
+      });
+    },
+    [showNotificationToastFromRecord],
+  );
+
+  useEffect(() => {
+    shownNotificationToastIdsRef.current.clear();
+    notificationBackgroundedAtRef.current = null;
+    notificationAppStateRef.current = AppState.currentState;
+  }, [session?.user?.id]);
 
   useEffect(() => {
     const activeUserId = session?.user?.id;
     if (!activeUserId) return;
 
-    const notificationChannel = supabase
-      .channel(`root-notification-toast:${activeUserId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${activeUserId}`,
-        },
-        (payload) => {
-          const nextNotification = (payload as any)?.new || {};
-          const notificationId = String(nextNotification?.id || "").trim();
-          if (!notificationId) return;
-          if (shownNotificationToastIdsRef.current.has(notificationId)) return;
+    let isDisposed = false;
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null;
+    let activeChannelStatus = "INITIAL";
+    let activeChannelGeneration = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let latestSubscribeStartedAt = Date.now();
 
-          shownNotificationToastIdsRef.current.add(notificationId);
-          if (shownNotificationToastIdsRef.current.size > 120) {
-            const oldestId = shownNotificationToastIdsRef.current.values().next().value;
-            if (oldestId) {
-              shownNotificationToastIdsRef.current.delete(oldestId);
+    const clearReconnectTimer = () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+    };
+
+    const disposeChannel = () => {
+      if (activeChannel) {
+        supabase.removeChannel(activeChannel);
+        activeChannel = null;
+      }
+      activeChannelStatus = "CLOSED";
+    };
+
+    const scheduleReconnect = (reason: string) => {
+      if (isDisposed || reconnectTimer) return;
+
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!isDisposed) {
+          connectChannel(`retry:${reason}`);
+        }
+      }, NOTIFICATION_TOAST_RECONNECT_DELAY_MS);
+    };
+
+    const connectChannel = (reason: string) => {
+      clearReconnectTimer();
+      disposeChannel();
+
+      latestSubscribeStartedAt = Date.now();
+      activeChannelStatus = "CONNECTING";
+      const channelGeneration = ++activeChannelGeneration;
+
+      activeChannel = supabase
+        .channel(`root-notification-toast:${activeUserId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "notifications",
+            filter: `user_id=eq.${activeUserId}`,
+          },
+          (payload) => {
+            if (isDisposed || channelGeneration !== activeChannelGeneration) {
+              return;
             }
+
+            showNotificationToastFromRecord(
+              (payload as { new?: IncomingNotificationToastRecord })?.new ?? null,
+              "realtime",
+            );
+          },
+        )
+        .subscribe((status) => {
+          if (isDisposed || channelGeneration !== activeChannelGeneration) {
+            return;
           }
 
-          const message = String(nextNotification?.message || "").trim();
-          if (!message) return;
-
-          const normalizedType = String(nextNotification?.type || "info").toLowerCase();
-          const toastType =
-            normalizedType === "success" ||
-            normalizedType === "error" ||
-            normalizedType === "warning" ||
-            normalizedType === "info"
-              ? normalizedType
-              : "info";
-
-          showTopToast({
-            type: toastType,
-            title: String(nextNotification?.title || "").trim() || "Notification",
-            message,
+          activeChannelStatus = status;
+          logNotificationToastDebug("Notification toast channel status", {
+            reason,
+            status,
+            activeUserId,
           });
-        },
-      )
-      .subscribe();
+
+          if (status === "SUBSCRIBED") {
+            clearReconnectTimer();
+            void backfillRecentNotificationToasts(
+              activeUserId,
+              latestSubscribeStartedAt,
+              reason,
+            );
+            return;
+          }
+
+          if (
+            status === "CHANNEL_ERROR" ||
+            status === "TIMED_OUT" ||
+            status === "CLOSED"
+          ) {
+            console.warn("[notification-toast] Realtime channel unavailable", {
+              reason,
+              status,
+              activeUserId,
+            });
+            scheduleReconnect(status.toLowerCase());
+          }
+        });
+    };
+
+    connectChannel("initial");
+
+    const appStateSub = AppState.addEventListener("change", (nextState) => {
+      const previousState = notificationAppStateRef.current;
+      notificationAppStateRef.current = nextState;
+
+      if (previousState === nextState) {
+        return;
+      }
+
+      if (previousState === "active" && nextState !== "active") {
+        notificationBackgroundedAtRef.current = Date.now();
+        return;
+      }
+
+      if (nextState === "active") {
+        const backgroundedAt = notificationBackgroundedAtRef.current;
+        notificationBackgroundedAtRef.current = null;
+
+        if (activeChannelStatus !== "SUBSCRIBED") {
+          connectChannel("foreground");
+        }
+
+        if (backgroundedAt) {
+          void backfillRecentNotificationToasts(
+            activeUserId,
+            backgroundedAt,
+            "foreground",
+          );
+        }
+      }
+    });
 
     return () => {
-      supabase.removeChannel(notificationChannel);
+      isDisposed = true;
+      clearReconnectTimer();
+      appStateSub.remove();
+      disposeChannel();
     };
-  }, [session?.user?.id]);
+  }, [
+    backfillRecentNotificationToasts,
+    session?.user?.id,
+    showNotificationToastFromRecord,
+  ]);
 
   // Handle global identity/subscription gates
   useEffect(() => {

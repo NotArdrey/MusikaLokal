@@ -28,7 +28,7 @@ function Header({ title, transparent, onBackPress, leftComponent, rightComponent
     const [hasUnread, setHasUnread] = useState(false);
     const [hasUnreadChats, setHasUnreadChats] = useState(false);
     const isMainNavPath = useMemo(
-        () => pathname === "/home" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
+        () => pathname === "/home" || pathname === "/feed" || pathname === "/manage" || pathname === "/bookings" || pathname === "/ai_suggestions",
         [pathname],
     );
 

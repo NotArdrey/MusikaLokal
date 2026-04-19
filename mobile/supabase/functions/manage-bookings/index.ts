@@ -1958,6 +1958,46 @@ serve(async (req: Request) => {
         final_price: pricingData.final_price || finalBaseRate * finalHours,
       };
 
+      // Attach cancellation policy snapshot if studio has an active policy
+      try {
+        const { data: activePolicy } = await supabaseAdmin
+          .from("booking_cancellation_policies")
+          .select("*")
+          .eq("studio_id", studio_id)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (activePolicy) {
+          bookingInsertPayload.cancellation_policy_id = activePolicy.id;
+          bookingInsertPayload.cancellation_policy_snapshot = {
+            name: activePolicy.name,
+            full_refund_hours_before: activePolicy.full_refund_hours_before,
+            partial_refund_hours_before: activePolicy.partial_refund_hours_before,
+            partial_refund_pct: activePolicy.partial_refund_pct,
+            no_show_penalty_pct: activePolicy.no_show_penalty_pct,
+            late_cancel_penalty_pct: activePolicy.late_cancel_penalty_pct,
+          };
+        }
+      } catch (policyErr) {
+        console.error("Non-critical: failed to attach cancellation policy:", policyErr);
+      }
+
+      // Attach recording deal package if applicable
+      try {
+        if (normalizedSessionType === "recording") {
+          const { data: activePkg } = await supabaseAdmin.rpc(
+            "resolve_active_recording_package",
+            { p_studio_id: studio_id, p_counterparty_id: user_id, p_hours: Number(finalHours || 0) },
+          );
+          if (activePkg && !activePkg.error && activePkg.deal_id) {
+            bookingInsertPayload.recording_deal_id = activePkg.deal_id;
+            bookingInsertPayload.recording_deal_package_id = activePkg.package_id;
+          }
+        }
+      } catch (dealPkgErr) {
+        console.error("Non-critical: failed to resolve recording package:", dealPkgErr);
+      }
+
       const { data: insertData, error: insertError } = await supabaseClient
         .from("studio_bookings")
         .insert(bookingInsertPayload)
@@ -2168,6 +2208,36 @@ serve(async (req: Request) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
           status: 404,
         });
+      }
+
+      // CANCELLATION PENALTY LOGIC for studio bookings
+      if (table === "studio_bookings" && new_status === "cancelled" && data.cancellation_policy_id) {
+        try {
+          const { data: penaltyResult, error: penaltyCalcErr } = await supabaseAdmin.rpc(
+            "calculate_booking_cancellation_penalty",
+            { p_booking_id: booking_id },
+          );
+          console.log("🧮 Penalty calculation:", { penaltyResult, penaltyCalcErr });
+
+          if (!penaltyCalcErr && penaltyResult && penaltyResult.penalty_amount > 0) {
+            const { data: penaltyApplied, error: penaltyApplyErr } = await supabaseAdmin.rpc(
+              "apply_booking_penalty",
+              {
+                p_booking_id: booking_id,
+                p_penalty_amount: penaltyResult.penalty_amount,
+                p_penalty_type: penaltyResult.penalty_type || "late_cancel",
+                p_cancelled_by: authUser.id,
+              },
+            );
+            console.log("💰 Penalty applied:", { penaltyApplied, penaltyApplyErr });
+
+            if (penaltyApplyErr) {
+              console.error("Failed to apply penalty:", penaltyApplyErr);
+            }
+          }
+        } catch (penaltyErr) {
+          console.error("Non-critical penalty calculation error:", penaltyErr);
+        }
       }
 
       // NOTIFICATION LOGIC

@@ -2,12 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ExpoLinking from 'expo-linking';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import CustomModal from '../src/components/modal';
 import Navbar from '../src/components/navbar';
+import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
 
 // Payout Method Type
@@ -62,34 +63,9 @@ interface WithdrawalErrorPayload {
   suggestion?: string;
 }
 
-
 export default function WalletScreen() {
   const { colors, isDark } = useTheme();
   const router = useRouter();
-  const { width } = useWindowDimensions();
-  const isWebDesktop = Platform.OS === 'web' && width >= 768;
-  const pageBackground = isWebDesktop
-    ? isDark
-      ? '#0A1224'
-      : '#E9EEF8'
-    : colors.background;
-  const pageCardBackground = isWebDesktop
-    ? isDark
-      ? '#0F172A'
-      : '#FFFFFF'
-    : colors.card;
-  const surfaceBackground = isWebDesktop
-    ? isDark
-      ? '#13213A'
-      : '#F4F7FE'
-    : colors.surface;
-  const borderSoft = isWebDesktop
-    ? isDark
-      ? '#1E2C48'
-      : '#D8E3F2'
-    : colors.border;
-  const walletCardBackground = isWebDesktop ? pageCardBackground : colors.card;
-  const walletSurfaceBackground = isWebDesktop ? surfaceBackground : colors.surface;
   const params = useLocalSearchParams<{ refresh?: string }>();
   const walletRefreshKey = Array.isArray(params.refresh) ? params.refresh[0] : params.refresh;
   const [modalVisible, setModalVisible] = useState(false);
@@ -117,8 +93,14 @@ export default function WalletScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [txFilter, setTxFilter] = useState<string>("all");
   const [unpaidBookings, setUnpaidBookings] = useState<any[]>([]);
   const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
+
+  // Top-up state
+  const [topUpModalVisible, setTopUpModalVisible] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState('');
+  const [isTopping, setIsTopping] = useState(false);
 
   // Subscription state
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -149,17 +131,52 @@ export default function WalletScreen() {
     setAlertVisible(true);
   };
 
-  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
-    const lowerTitle = (title || '').toLowerCase();
-    let type: AlertType = 'info';
+  const isSimpleTopToastButtons = (buttons?: any[]) => {
+    if (!buttons || buttons.length === 0) return true;
+    if (buttons.length !== 1) return false;
+
+    const onlyButton = buttons[0];
+    const normalizedText = String(onlyButton?.text ?? 'OK').trim().toLowerCase();
+    const hasNoCallback = !onlyButton?.onPress;
+    const isNeutralStyle =
+      !onlyButton?.style || onlyButton.style === 'default' || onlyButton.style === 'cancel';
+
+    return (
+      hasNoCallback &&
+      isNeutralStyle &&
+      (normalizedText === 'ok' || normalizedText === 'close' || normalizedText === 'got it')
+    );
+  };
+
+  const resolveAlertType = (title: string): AlertType => {
+    const lowerTitle = title.toLowerCase();
     if (lowerTitle.includes('error') || lowerTitle.includes('failed') || lowerTitle.includes('invalid') || lowerTitle.includes('missing') || lowerTitle.includes('insufficient')) {
-      type = 'error';
-    } else if (lowerTitle.includes('success')) {
-      type = 'success';
-    } else if (lowerTitle.includes('warning')) {
-      type = 'warning';
+      return 'error';
     }
-    showAlert(type, title || 'Notice', message || '', buttons);
+    if (lowerTitle.includes('success')) {
+      return 'success';
+    }
+    if (lowerTitle.includes('warning')) {
+      return 'warning';
+    }
+    return 'info';
+  };
+
+  const showAlertNative = (title: string, message?: string, buttons?: any[]) => {
+    const normalizedTitle = title || 'Notice';
+    const normalizedMessage = message || '';
+    const type = resolveAlertType(normalizedTitle);
+
+    if (isSimpleTopToastButtons(buttons)) {
+      showTopToast({
+        type,
+        title: normalizedTitle,
+        message: normalizedMessage.trim() ? normalizedMessage : normalizedTitle,
+      });
+      return;
+    }
+
+    showAlert(type, normalizedTitle, normalizedMessage, buttons);
   };
 
   const Alert = { alert: showAlertNative };
@@ -254,7 +271,6 @@ export default function WalletScreen() {
 
     Alert.alert(fallbackTitle, errorMessage);
   };
-
 
   const fetchWallet = async () => {
     try {
@@ -459,6 +475,56 @@ export default function WalletScreen() {
       Alert.alert('Error', e?.message || 'Failed to initiate payment.');
     } finally {
       setPayingBookingId(null);
+    }
+  };
+
+  // Wallet top-up via PayMongo
+  const handleTopUp = async () => {
+    const amount = parseFloat(topUpAmount);
+    if (!amount || amount < 50) {
+      Alert.alert('Invalid Amount', 'Minimum top-up amount is ₱50.');
+      return;
+    }
+    try {
+      setIsTopping(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const redirectUrl = ExpoLinking.createURL('payment-result', {
+        queryParams: { status: 'success', type: 'deposit', amount: String(amount) }
+      });
+      const cancelRedirectUrl = ExpoLinking.createURL('payment-result', {
+        queryParams: { status: 'cancelled', type: 'deposit' }
+      });
+
+      const { data: depositData, error: depositError } = await supabase.functions.invoke('paymongo', {
+        body: {
+          action: 'create_deposit',
+          user_id: user.id,
+          amount,
+          redirect_url: redirectUrl,
+          cancel_redirect_url: cancelRedirectUrl,
+        }
+      });
+
+      if (depositError || !depositData?.checkout_url) {
+        Alert.alert('Error', 'Failed to create top-up session. Please try again.');
+        return;
+      }
+
+      setTopUpModalVisible(false);
+      setTopUpAmount('');
+
+      const canOpen = await Linking.canOpenURL(depositData.checkout_url);
+      if (canOpen) {
+        await Linking.openURL(depositData.checkout_url);
+      } else {
+        Alert.alert('Error', 'Unable to open payment page.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to initiate top-up.');
+    } finally {
+      setIsTopping(false);
     }
   };
 
@@ -892,15 +958,33 @@ export default function WalletScreen() {
     [withdrawals],
   );
 
+  const pendingBalance = useMemo(
+    () => pendingWithdrawals.reduce((sum, w) => sum + (Number(w.amount) || 0), 0),
+    [pendingWithdrawals],
+  );
+
+  const filteredTransactions = useMemo(() => {
+    if (txFilter === "all") return transactions;
+    return transactions.filter((tx: any) => tx.reference_type === txFilter);
+  }, [transactions, txFilter]);
+
+  const txFilterOptions = [
+    { key: "all", label: "All" },
+    { key: "booking", label: "Booking" },
+    { key: "deal_deposit", label: "Deposit" },
+    { key: "deal_settlement", label: "Settlement" },
+    { key: "penalty", label: "Penalty" },
+    { key: "refund", label: "Refund" },
+  ];
+
   return (
     <>
-      <View style={[styles.container, { backgroundColor: pageBackground }]}>
-        <View style={[styles.pageFrame, isWebDesktop && styles.pageFrameWeb]}>
-          <Header title="Wallet & Subscription" />
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Header title="Wallet & Subscription" />
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.scrollContent, isWebDesktop && styles.scrollContentWeb]}
+          contentContainerStyle={styles.scrollContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
 
@@ -909,7 +993,6 @@ export default function WalletScreen() {
             <View
               style={[
                 styles.balanceCard,
-                isWebDesktop && styles.webSectionCard,
                 { backgroundColor: colors.primary }
               ]}
             >
@@ -923,7 +1006,7 @@ export default function WalletScreen() {
               <View style={styles.balanceRow}>
                 <View>
                   <Text style={styles.balanceSubLabel}>Pending</Text>
-                  <Text style={styles.balanceSubValue}>₱ 500.00</Text>
+                  <Text style={styles.balanceSubValue}>₱ {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={[styles.balanceDivider, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
                 <View>
@@ -939,16 +1022,17 @@ export default function WalletScreen() {
                 onPress={openWithdrawModal}
                 style={[
                   styles.actionButton,
-                  { backgroundColor: walletSurfaceBackground, borderColor: borderSoft }
+                  { backgroundColor: colors.surface, borderColor: colors.border }
                 ]}
               >
                 <Ionicons name="arrow-down-circle-outline" size={20} color={colors.primary} />
                 <Text style={{ fontFamily: 'Poppins_600SemiBold', color: colors.primary }}>Withdraw</Text>
               </TouchableOpacity>
               <TouchableOpacity activeOpacity={1}
+                onPress={() => setTopUpModalVisible(true)}
                 style={[
                   styles.actionButton,
-                  { backgroundColor: walletSurfaceBackground, borderColor: borderSoft }
+                  { backgroundColor: colors.surface, borderColor: colors.border }
                 ]}
               >
                 <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
@@ -960,7 +1044,7 @@ export default function WalletScreen() {
           {/* Unpaid Balances Section */}
           {unpaidBookings.length > 0 && (
             <View style={styles.cardWrapper}>
-              <View style={[styles.unpaidSection, isWebDesktop && styles.webSectionCard, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
+              <View style={[styles.unpaidSection, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
                 <View style={styles.unpaidHeader}>
                   <View style={styles.unpaidHeaderLeft}>
                     <Ionicons name="warning" size={24} color="#DC2626" />
@@ -1027,7 +1111,7 @@ export default function WalletScreen() {
             <View style={styles.cardWrapper}>
               {subscription ? (
                 // Active Subscription Display
-                <View style={[styles.subscriptionCard, isWebDesktop && styles.webSectionCard, { backgroundColor: walletCardBackground, borderColor: borderSoft }]}>
+                <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <View style={styles.subscriptionHeader}>
                     <View>
                       <Text style={[styles.subscriptionTitle, { color: colors.text }]}>{subscription.plan?.name || 'Subscription'} Plan</Text>
@@ -1074,9 +1158,9 @@ export default function WalletScreen() {
                 </View>
               ) : (
                 // No Subscription - Show Subscribe CTA
-                <View style={[styles.subscriptionCard, isWebDesktop && styles.webSectionCard, { backgroundColor: walletCardBackground, borderColor: borderSoft }]}>
+                <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <View style={styles.noSubContainer}>
-                    <View style={[styles.noSubIcon, { backgroundColor: isDark ? colors.primaryLight : '#E7EEFD' }]}>
+                    <View style={[styles.noSubIcon, { backgroundColor: isDark ? colors.primaryLight : '#EEF2FF' }]}>
                       <Ionicons name="diamond-outline" size={32} color={colors.primary} />
                     </View>
                     <Text style={[styles.noSubTitle, { color: colors.text }]}>Unlock Premium Features</Text>
@@ -1100,13 +1184,13 @@ export default function WalletScreen() {
           {pendingWithdrawals.length > 0 && (
             <View style={styles.historySection}>
               <Text style={[styles.historyTitle, { color: colors.text }]}>Pending Withdrawals</Text>
-              <View style={[styles.historyContainer, isWebDesktop && styles.webSectionCard, { backgroundColor: walletCardBackground, borderColor: borderSoft }]}>
+              <View style={[styles.historyContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 {pendingWithdrawals.map((withdrawal, index, arr) => (
                   <View
                     key={withdrawal.id}
                     style={[
                       styles.withdrawalItem,
-                      { borderBottomWidth: index === arr.length - 1 ? 0 : 1, borderBottomColor: borderSoft }
+                      { borderBottomWidth: index === arr.length - 1 ? 0 : 1, borderBottomColor: colors.border }
                     ]}
                   >
                     <View style={styles.withdrawalLeft}>
@@ -1149,29 +1233,51 @@ export default function WalletScreen() {
           <View style={styles.historySection}>
             <Text style={[styles.historyTitle, { color: colors.text }]}>Transaction History</Text>
 
-            <View style={[styles.historyContainer, isWebDesktop && styles.webSectionCard, { backgroundColor: walletCardBackground, borderColor: borderSoft }]}>
+            {/* Filter chips */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+              {txFilterOptions.map((opt) => (
+                <TouchableOpacity
+                  key={opt.key}
+                  onPress={() => setTxFilter(opt.key)}
+                  style={{
+                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 8,
+                    backgroundColor: txFilter === opt.key ? colors.primary : colors.card,
+                    borderWidth: 1, borderColor: txFilter === opt.key ? colors.primary : colors.border,
+                  }}
+                >
+                  <Text style={{
+                    fontFamily: 'Poppins_500Medium', fontSize: 12,
+                    color: txFilter === opt.key ? '#fff' : colors.textSecondary,
+                  }}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={[styles.historyContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
               {loading ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
                   <ActivityIndicator size="small" color={colors.primary} />
                 </View>
-              ) : transactions.length === 0 ? (
+              ) : filteredTransactions.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
                   <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular' }}>No transaction history</Text>
                 </View>
               ) : (
-                transactions.map((tx, index) => (
+                filteredTransactions.map((tx, index) => (
                   <View
                     key={tx.id}
                     style={[
                       styles.transactionItem,
-                      { borderBottomWidth: index === transactions.length - 1 ? 0 : 1, borderBottomColor: borderSoft }
+                      { borderBottomWidth: index === filteredTransactions.length - 1 ? 0 : 1, borderBottomColor: colors.border }
                     ]}
                   >
                     <View style={styles.transactionLeft}>
                       <View
                         style={[
                           styles.transactionIcon,
-                          { backgroundColor: tx.is_credit ? '#DCFCE7' : '#FEE2E2' } // green-100 / red-100
+                          { backgroundColor: tx.is_credit ? '#DCFCE7' : '#FEE2E2' }
                         ]}
                       >
                         <Ionicons
@@ -1182,6 +1288,11 @@ export default function WalletScreen() {
                       </View>
                       <View>
                         <Text style={[styles.transactionType, { color: colors.text }]}>{tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}</Text>
+                        {tx.reference_type && tx.reference_type !== 'booking' && (
+                          <Text style={{ fontFamily: 'Poppins_400Regular', fontSize: 11, color: colors.primary }}>
+                            {tx.reference_type.replace(/_/g, ' ')}
+                          </Text>
+                        )}
                         <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
                           {new Date(tx.created_at).toLocaleDateString()}
                         </Text>
@@ -1200,8 +1311,95 @@ export default function WalletScreen() {
         <View style={styles.navbarContainer}>
           <Navbar />
         </View>
-        </View>
       </View>
+
+      {/* Top-Up Modal */}
+      <RNModal
+        visible={topUpModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setTopUpModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.withdrawModal, { backgroundColor: colors.background }]}>
+            <View style={styles.withdrawModalHeader}>
+              <View>
+                <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Top Up Wallet</Text>
+                <Text style={[styles.withdrawModalSubtitle, { color: colors.textSecondary }]}>
+                  Add funds via GCash or Card
+                </Text>
+              </View>
+              <TouchableOpacity activeOpacity={1}
+                onPress={() => setTopUpModalVisible(false)}
+                style={[styles.closeModalButton, { backgroundColor: colors.surface }]}
+              >
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputSection}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Add</Text>
+              <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
+                <TextInput
+                  style={[styles.amountInput, { color: colors.text }]}
+                  placeholder="0.00"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="decimal-pad"
+                  value={topUpAmount}
+                  onChangeText={setTopUpAmount}
+                />
+              </View>
+              <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
+                Minimum top-up: ₱50
+              </Text>
+            </View>
+
+            <View style={styles.quickAmounts}>
+              {[100, 250, 500, 1000].map((preset) => (
+                <TouchableOpacity activeOpacity={1}
+                  key={preset}
+                  onPress={() => setTopUpAmount(String(preset))}
+                  style={[
+                    styles.quickAmountBtn,
+                    {
+                      backgroundColor: parseFloat(topUpAmount) === preset ? colors.primary : colors.surface,
+                      borderColor: colors.border
+                    }
+                  ]}
+                >
+                  <Text style={[
+                    styles.quickAmountText,
+                    { color: parseFloat(topUpAmount) === preset ? 'white' : colors.text }
+                  ]}>
+                    ₱{preset}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity activeOpacity={1}
+              onPress={handleTopUp}
+              disabled={isTopping || !topUpAmount || parseFloat(topUpAmount) < 50}
+              style={[
+                styles.withdrawSubmitBtn,
+                {
+                  backgroundColor: (!topUpAmount || parseFloat(topUpAmount) < 50) ? colors.border : colors.primary,
+                  marginTop: 24,
+                }
+              ]}
+            >
+              {isTopping
+                ? <ActivityIndicator size="small" color="white" />
+                : <Text style={styles.withdrawSubmitText}>Proceed to Payment</Text>
+              }
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </RNModal>
 
       {/* Withdraw Modal */}
       <RNModal
@@ -1765,32 +1963,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  pageFrame: {
-    flex: 1,
-    width: '100%',
-  },
-  pageFrameWeb: {
-    maxWidth: 1240,
-    alignSelf: 'center',
-    width: '100%',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-  },
   scrollContent: {
     paddingBottom: 100,
-  },
-  scrollContentWeb: {
-    maxWidth: 1120,
-    width: '100%',
-    alignSelf: 'center',
-    paddingTop: 12,
-  },
-  webSectionCard: {
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 3,
   },
   cardWrapper: {
     paddingHorizontal: 24,

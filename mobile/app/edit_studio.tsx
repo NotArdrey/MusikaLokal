@@ -306,6 +306,7 @@ export default function EditStudioScreen() {
   >("Both");
   const [recordingSongsPerBlock, setRecordingSongsPerBlock] = useState("");
   const [recordingHoursPerBlock, setRecordingHoursPerBlock] = useState("");
+  const [recordingRateNegotiable, setRecordingRateNegotiable] = useState(false);
   const [pax, setPax] = useState("");
 
   // Promotions state
@@ -1122,6 +1123,8 @@ export default function EditStudioScreen() {
           studioSettingsData?.recording_hours_per_block ??
           studioSettingsData?.min_booking_duration_hours ??
           3,
+        recording_rate_negotiable:
+          (studioSettingsData as any)?.recording_rate_negotiable ?? false,
       } as any;
 
       console.log("✅ ===== DATA VALIDATION PASSED =====");
@@ -1297,6 +1300,8 @@ export default function EditStudioScreen() {
       setRecordingHoursPerBlock(
         loadedHoursPerBlock ? String(loadedHoursPerBlock) : "",
       );
+
+      setRecordingRateNegotiable(Boolean(data.recording_rate_negotiable));
 
       const paxValue = data.pax?.toString() || "";
       console.log(
@@ -2749,6 +2754,7 @@ export default function EditStudioScreen() {
             parsePositiveInteger(recordingSongsPerBlock) || 1,
           recording_hours_per_block:
             parsePositiveDecimal(recordingHoursPerBlock) || 3,
+          recording_rate_negotiable: recordingRateNegotiable,
         },
       };
 
@@ -2905,6 +2911,7 @@ export default function EditStudioScreen() {
             parsePositiveDecimal(payload.booking_settings.recording_hours_per_block) ||
             parsePositiveDecimal(payload.booking_settings.min_booking_duration_hours) ||
             3,
+          recording_rate_negotiable: payload.booking_settings.recording_rate_negotiable ?? false,
         }, { onConflict: 'studio_id' });
 
       // Update promotions (delete-and-re-insert)
@@ -3868,6 +3875,9 @@ export default function EditStudioScreen() {
                     >
                       Rehearsal
                     </Text>
+                    <View style={{ backgroundColor: '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                      <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>FIXED</Text>
+                    </View>
                   </View>
                   <Text
                     style={{
@@ -3939,6 +3949,9 @@ export default function EditStudioScreen() {
                     >
                       Recording
                     </Text>
+                    <View style={{ backgroundColor: recordingRateNegotiable ? '#F59E0B' : '#16A34A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                      <Text style={{ color: '#fff', fontSize: 10, fontFamily: 'Poppins_600SemiBold' }}>{recordingRateNegotiable ? 'NEGOTIABLE' : 'FIXED'}</Text>
+                    </View>
                   </View>
                   <Text
                     style={{
@@ -3974,6 +3987,20 @@ export default function EditStudioScreen() {
                     /song
                   </Text>
                 </View>
+
+                <TouchableOpacity
+                  onPress={() => setRecordingRateNegotiable(!recordingRateNegotiable)}
+                  style={{ flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 6 }}
+                >
+                  <Ionicons
+                    name={recordingRateNegotiable ? 'checkbox' : 'square-outline'}
+                    size={20}
+                    color={recordingRateNegotiable ? colors.primary : colors.textSecondary}
+                  />
+                  <Text style={{ color: colors.textSecondary, fontFamily: 'Poppins_400Regular', fontSize: 12, marginLeft: 6 }}>
+                    Allow clients to negotiate recording rate
+                  </Text>
+                </TouchableOpacity>
 
                 <View style={{ marginTop: 10 }}>
                   <Text

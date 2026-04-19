@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { router, useFocusEffect, usePathname } from 'expo-router';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { Platform, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -18,7 +18,6 @@ function Navbar() {
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
-    const { width } = useWindowDimensions();
 
     const fetchUserRole = useCallback(async () => {
         if (isGuest) return; // Skip for guests
@@ -42,8 +41,8 @@ function Navbar() {
                     setManageRoute('/my_group');
                 } else if (data.role === 'venue-owner') {
                     setManageRoute('/my_venue');
-                } else if (data.role === 'admin') {
-                    setManageRoute('/admin');
+                } else if (data.role === 'producer') {
+                    setManageRoute('/production_team');
                 } else {
                     setManageRoute('/manage');
                 }
@@ -69,13 +68,12 @@ function Navbar() {
             return 'profile';
         }
         if (
-            pathname === '/admin' ||
-            pathname.startsWith('/admin/') ||
             pathname === '/manage' ||
             pathname.startsWith('/manage/') ||
             pathname.includes('my_studio') ||
             pathname.includes('my_venue') ||
             pathname.includes('my_group') ||
+            pathname.includes('production_team') ||
             pathname.includes('manage_') ||
             pathname.includes('edit_') ||
             pathname.includes('add_')
@@ -95,10 +93,6 @@ function Navbar() {
         ],
         [manageRoute],
     );
-
-    if (Platform.OS === 'web' && width >= 768) {
-        return null;
-    }
 
     return (
         <View style={[styles.navbarWrapper, { bottom: NAVBAR_BOTTOM_OFFSET + insets.bottom }]}>
