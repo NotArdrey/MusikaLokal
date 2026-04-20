@@ -33,6 +33,55 @@ async function insertNotification(
   });
 }
 
+/** Get or create a contextual 1-on-1 conversation linked to a deal, then insert a system message. */
+async function insertDealSystemMessage(
+  supabaseAdmin: any,
+  dealId: string,
+  userIdA: string,
+  userIdB: string,
+  messageContent: string,
+) {
+  // Find existing conversation for this deal
+  let conversationId: string | null = null;
+
+  const { data: existing } = await supabaseAdmin
+    .from("conversations")
+    .select("id")
+    .eq("deal_id", dealId)
+    .eq("is_group", false)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    conversationId = existing.id;
+  } else {
+    // Create a new conversation tied to this deal
+    const newId = crypto.randomUUID();
+    const { error: convErr } = await supabaseAdmin
+      .from("conversations")
+      .insert({ id: newId, is_group: false, deal_id: dealId });
+
+    if (!convErr) {
+      conversationId = newId;
+      // Add both participants
+      await supabaseAdmin.from("conversation_participants").upsert([
+        { conversation_id: newId, user_id: userIdA, role: "owner" },
+        { conversation_id: newId, user_id: userIdB, role: "member" },
+      ], { onConflict: "conversation_id,user_id" });
+    }
+  }
+
+  if (conversationId) {
+    await supabaseAdmin.from("messages").insert({
+      id: crypto.randomUUID(),
+      conversation_id: conversationId,
+      sender_id: userIdA,
+      content: messageContent,
+      message_type: "system",
+    });
+  }
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -277,6 +326,15 @@ serve(async (req: Request) => {
         });
       }
 
+      // Create conversation with system message
+      await insertDealSystemMessage(
+        supabaseAdmin,
+        deal.id,
+        authUser.id,
+        venue_owner_id,
+        `📋 New partnership proposal: "${title.trim()}" — Revenue split: Venue ${revenue_split_venue_pct}% / Production ${revenue_split_production_pct}%`,
+      );
+
       return jsonResponse({ success: true, deal, term_version: termVersion });
     }
 
@@ -440,6 +498,20 @@ serve(async (req: Request) => {
             message: `Partnership deal "${deal.title}" has been accepted!`,
             meta: { event_type: "deal_accepted", deal_id },
           });
+        }
+
+        // System message in deal conversation
+        const otherPartyId = deal.venue_owner_id === authUser.id
+          ? deal.production_teams?.owner_id
+          : deal.venue_owner_id;
+        if (otherPartyId) {
+          await insertDealSystemMessage(
+            supabaseAdmin,
+            deal_id,
+            authUser.id,
+            otherPartyId,
+            `✅ Deal "${deal.title}" has been accepted! Terms are now locked.`,
+          );
         }
       }
 
@@ -903,6 +975,15 @@ serve(async (req: Request) => {
           message: `The settlement for "${deal.title}" has been marked as paid.`,
           meta: { event_type: "deal_settled", deal_id },
         });
+
+        // System message in deal conversation
+        await insertDealSystemMessage(
+          supabaseAdmin,
+          deal_id,
+          authUser.id,
+          productionOwnerId,
+          `💰 Settlement for "${deal.title}" marked as paid. Gross revenue: ₱${Number(gross_revenue).toLocaleString()}`,
+        );
       }
 
       return jsonResponse({ success: true, settlement });

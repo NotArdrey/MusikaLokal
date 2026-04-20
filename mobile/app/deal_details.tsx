@@ -46,6 +46,10 @@ export default function DealDetailsScreen() {
   const [counterDeposit, setCounterDeposit] = useState("");
   const [counterNotes, setCounterNotes] = useState("");
 
+  // Settlement state
+  const [showSettlementModal, setShowSettlementModal] = useState(false);
+  const [settlementRevenue, setSettlementRevenue] = useState("");
+
   // Alert
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
@@ -196,6 +200,56 @@ export default function DealDetailsScreen() {
     }
   };
 
+  const handleSettle = async () => {
+    if (!settlementRevenue || isNaN(Number(settlementRevenue)) || Number(settlementRevenue) <= 0) {
+      showAlert("error", "Error", "Please enter a valid gross revenue amount");
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-deals", {
+        body: {
+          action: "mark_settlement_paid",
+          deal_id,
+          gross_revenue: Number(settlementRevenue),
+        },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      showAlert("success", "Settled", "Settlement has been recorded.");
+      setShowSettlementModal(false);
+      setSettlementRevenue("");
+      fetchDeal();
+    } catch (err: any) {
+      showAlert("error", "Error", err?.message || "Failed to settle deal");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleMessageParty = () => {
+    // Determine the other party to message
+    const otherPartyId = deal?.venue_owner?.id !== userId
+      ? deal?.venue_owner?.id
+      : deal?.counterparty?.id || deal?.production_teams?.owner_id;
+    const otherPartyName = deal?.venue_owner?.id !== userId
+      ? deal?.venue_owner?.full_name
+      : deal?.counterparty?.full_name || deal?.production_teams?.name;
+
+    if (!otherPartyId) {
+      showAlert("warning", "Error", "Could not determine the other party");
+      return;
+    }
+    router.push({
+      pathname: "/chat",
+      params: {
+        recipientId: otherPartyId,
+        recipientName: otherPartyName || "Deal Counterparty",
+        dealId: deal_id,
+      },
+    });
+  };
+
   const statusColors: Record<string, string> = {
     proposed: "#F59E0B",
     countered: "#3B82F6",
@@ -241,13 +295,13 @@ export default function DealDetailsScreen() {
       {term.fixed_fee > 0 && (
         <View style={styles.termRow}>
           <Text style={[styles.termKey, { color: colors.textSecondary }]}>Fixed Fee</Text>
-          <Text style={[styles.termValue, { color: colors.text }]}>₱{term.fixed_fee?.toLocaleString()}</Text>
+          <Text style={[styles.termValue, { color: colors.text }]}>â‚±{term.fixed_fee?.toLocaleString()}</Text>
         </View>
       )}
       {term.deposit_amount > 0 && (
         <View style={styles.termRow}>
           <Text style={[styles.termKey, { color: colors.textSecondary }]}>Deposit</Text>
-          <Text style={[styles.termValue, { color: colors.text }]}>₱{term.deposit_amount?.toLocaleString()}</Text>
+          <Text style={[styles.termValue, { color: colors.text }]}>â‚±{term.deposit_amount?.toLocaleString()}</Text>
         </View>
       )}
       {term.event_date && (
@@ -317,6 +371,9 @@ export default function DealDetailsScreen() {
 
   const canDispute =
     deal && ["accepted", "settled"].includes(deal.status) && deal_type !== "recording";
+
+  const canSettle =
+    deal && deal.status === "accepted" && deal_type !== "recording";
 
   if (loading) {
     return (
@@ -444,7 +501,7 @@ export default function DealDetailsScreen() {
                 )}
                 <View style={styles.termRow}>
                   <Text style={[styles.termKey, { color: colors.textSecondary }]}>Price</Text>
-                  <Text style={[styles.termValue, { color: colors.text }]}>₱{pkg.price?.toLocaleString()}</Text>
+                  <Text style={[styles.termValue, { color: colors.text }]}>â‚±{pkg.price?.toLocaleString()}</Text>
                 </View>
               </View>
             ))}
@@ -468,7 +525,7 @@ export default function DealDetailsScreen() {
         <View style={{ marginTop: moderateScale(24), gap: moderateScale(12), paddingBottom: moderateScale(100) }}>
           {(canAcceptOrReject || canAcceptRecording) && (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: "#10B981" }]}
               onPress={() => {
                 setConfirmAction("accept");
@@ -483,7 +540,7 @@ export default function DealDetailsScreen() {
 
           {canCounter && (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: "#3B82F6" }]}
               onPress={() => {
                 // Pre-fill with latest terms
@@ -507,7 +564,7 @@ export default function DealDetailsScreen() {
 
           {canAcceptOrReject && (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: "#EF4444" }]}
               onPress={() => {
                 setConfirmAction("reject");
@@ -522,7 +579,7 @@ export default function DealDetailsScreen() {
 
           {canDispute && (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: "#F59E0B" }]}
               onPress={() => {
                 setConfirmAction("dispute");
@@ -532,6 +589,30 @@ export default function DealDetailsScreen() {
             >
               <Ionicons name="warning-outline" size={moderateScale(18)} color="#FFF" />
               <Text style={styles.actionBtnText}>Raise Dispute</Text>
+            </TouchableOpacity>
+          )}
+
+          {canSettle && (
+            <TouchableOpacity
+              activeOpacity={1}
+              style={[styles.actionBtn, { backgroundColor: "#8B5CF6" }]}
+              onPress={() => setShowSettlementModal(true)}
+              disabled={actionLoading}
+            >
+              <Ionicons name="cash-outline" size={moderateScale(18)} color="#FFF" />
+              <Text style={styles.actionBtnText}>Mark Settlement</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Message counterparty */}
+          {deal && (
+            <TouchableOpacity
+              activeOpacity={1}
+              style={[styles.actionBtn, { backgroundColor: colors.primary }]}
+              onPress={handleMessageParty}
+            >
+              <Ionicons name="chatbubble-outline" size={moderateScale(18)} color="#FFF" />
+              <Text style={styles.actionBtnText}>Message</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -607,7 +688,7 @@ export default function DealDetailsScreen() {
                 placeholderTextColor={colors.textSecondary}
               />
               <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary }}>
-                Fixed Fee (₱)
+                Fixed Fee (â‚±)
               </Text>
               <TextInput
                 value={counterFixedFee}
@@ -618,7 +699,7 @@ export default function DealDetailsScreen() {
                 placeholderTextColor={colors.textSecondary}
               />
               <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary }}>
-                Deposit Amount (₱)
+                Deposit Amount (â‚±)
               </Text>
               <TextInput
                 value={counterDeposit}
@@ -641,11 +722,49 @@ export default function DealDetailsScreen() {
               />
             </View>
             <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: scale(10), marginTop: moderateScale(16) }}>
-              <TouchableOpacity onPress={() => setShowCounterModal(false)} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.inputBackground }}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowCounterModal(false)} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.inputBackground }}>
                 <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleCounter} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.primary }}>
+              <TouchableOpacity activeOpacity={1} onPress={handleCounter} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.primary }}>
                 <Text style={{ color: "#fff", fontFamily: "Poppins_500Medium" }}>Submit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </RNModal>
+
+      {/* Settlement Modal */}
+      <RNModal
+        visible={showSettlementModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSettlementModal(false)}
+      >
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: scale(20), width: "88%", maxWidth: 420 }}>
+            <Text style={{ fontSize: moderateScale(16), fontWeight: "700", color: colors.text, marginBottom: moderateScale(12) }}>
+              Record Settlement
+            </Text>
+            <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary, marginBottom: moderateScale(12) }}>
+              Enter the gross revenue amount to calculate the settlement split.
+            </Text>
+            <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary }}>
+              Gross Revenue (₱)
+            </Text>
+            <TextInput
+              value={settlementRevenue}
+              onChangeText={setSettlementRevenue}
+              keyboardType="numeric"
+              style={[styles.input, { color: colors.text, borderColor: colors.border, marginTop: moderateScale(6) }]}
+              placeholder="e.g. 50000"
+              placeholderTextColor={colors.textSecondary}
+            />
+            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: scale(10), marginTop: moderateScale(16) }}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowSettlementModal(false)} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.inputBackground }}>
+                <Text style={{ color: colors.text }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity activeOpacity={1} onPress={handleSettle} disabled={actionLoading} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: "#8B5CF6", opacity: actionLoading ? 0.6 : 1 }}>
+                {actionLoading ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "600" }}>Settle</Text>}
               </TouchableOpacity>
             </View>
           </View>

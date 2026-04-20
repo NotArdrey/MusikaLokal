@@ -374,6 +374,19 @@ Deno.serve(async (req: Request) => {
         application_id,
       });
 
+      // Notify project owner about withdrawal
+      const { data: withdrawnProj } = await supabaseAdmin.from("producer_projects").select("owner_id, title").eq("id", app.project_id).single();
+      if (withdrawnProj) {
+        const { data: withdrawer } = await supabaseAdmin.from("profiles").select("full_name").eq("id", uid).single();
+        await insertNotification(supabaseAdmin, {
+          user_id: withdrawnProj.owner_id,
+          type: "producer_application",
+          title: "Application Withdrawn",
+          message: `${withdrawer?.full_name || "A musician"} withdrew their application from "${withdrawnProj.title}"`,
+          meta: { event_type: "application_withdrawn", project_id: app.project_id, application_id },
+        });
+      }
+
       return jsonResponse({ success: true, data });
     }
 
@@ -409,26 +422,12 @@ Deno.serve(async (req: Request) => {
 
       if (error) return jsonResponse({ error: error.message }, 500);
 
-      // Increment filled_slots if accepted
+      // Atomically increment filled_slots if accepted
       if (decision === "accepted" && app.role_id) {
-        await supabaseAdmin.rpc("", {}).catch(() => {}); // no-op placeholder
-        await supabaseAdmin
-          .from("producer_project_roles")
-          .update({ filled_slots: supabaseAdmin.rpc ? undefined : undefined })
-          .eq("id", app.role_id);
-        // Use raw SQL increment
-        await supabaseAdmin.rpc("exec_sql", { sql: "" }).catch(() => {});
-        // Simpler: re-read and update
-        const { data: role } = await supabaseAdmin
-          .from("producer_project_roles")
-          .select("filled_slots")
-          .eq("id", app.role_id)
-          .single();
-        if (role) {
-          await supabaseAdmin
-            .from("producer_project_roles")
-            .update({ filled_slots: (role.filled_slots || 0) + 1 })
-            .eq("id", app.role_id);
+        const { error: slotErr } = await supabaseAdmin.rpc("increment_role_filled_slot", { p_role_id: app.role_id });
+        if (slotErr) {
+          console.error("Slot increment failed:", slotErr.message);
+          // Role may be fully filled — do not block the accept, but log it
         }
       }
 
@@ -516,13 +515,19 @@ Deno.serve(async (req: Request) => {
 
       const { data: invite } = await supabaseAdmin
         .from("producer_talent_invites")
-        .select("invitee_id, inviter_id, project_id, status, role_id")
+        .select("invitee_id, inviter_id, project_id, status, role_id, expires_at")
         .eq("id", invite_id)
         .single();
 
       if (!invite) return jsonResponse({ error: "Invite not found" }, 404);
       if (invite.invitee_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
       if (invite.status !== "pending") return jsonResponse({ error: "Invite is not pending" }, 400);
+
+      // Enforce invite expiry
+      if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+        await supabaseAdmin.from("producer_talent_invites").update({ status: "expired" }).eq("id", invite_id);
+        return jsonResponse({ error: "This invite has expired" }, 400);
+      }
 
       const { data, error } = await supabaseAdmin
         .from("producer_talent_invites")
@@ -533,18 +538,11 @@ Deno.serve(async (req: Request) => {
 
       if (error) return jsonResponse({ error: error.message }, 500);
 
-      // Increment filled slot if role_id set
+      // Atomically increment filled slot if role_id set
       if (invite.role_id) {
-        const { data: role } = await supabaseAdmin
-          .from("producer_project_roles")
-          .select("filled_slots")
-          .eq("id", invite.role_id)
-          .single();
-        if (role) {
-          await supabaseAdmin
-            .from("producer_project_roles")
-            .update({ filled_slots: (role.filled_slots || 0) + 1 })
-            .eq("id", invite.role_id);
+        const { error: slotErr } = await supabaseAdmin.rpc("increment_role_filled_slot", { p_role_id: invite.role_id });
+        if (slotErr) {
+          console.error("Slot increment failed:", slotErr.message);
         }
       }
 
@@ -583,13 +581,19 @@ Deno.serve(async (req: Request) => {
 
       const { data: invite } = await supabaseAdmin
         .from("producer_talent_invites")
-        .select("invitee_id, inviter_id, project_id, status")
+        .select("invitee_id, inviter_id, project_id, status, expires_at")
         .eq("id", invite_id)
         .single();
 
       if (!invite) return jsonResponse({ error: "Invite not found" }, 404);
       if (invite.invitee_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
       if (invite.status !== "pending") return jsonResponse({ error: "Invite is not pending" }, 400);
+
+      // Enforce invite expiry
+      if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+        await supabaseAdmin.from("producer_talent_invites").update({ status: "expired" }).eq("id", invite_id);
+        return jsonResponse({ error: "This invite has expired" }, 400);
+      }
 
       const { data, error } = await supabaseAdmin
         .from("producer_talent_invites")
@@ -599,6 +603,17 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
+
+      // Notify the inviter about rejection
+      const { data: rejProj } = await supabaseAdmin.from("producer_projects").select("title").eq("id", invite.project_id).single();
+      const { data: rejector } = await supabaseAdmin.from("profiles").select("full_name").eq("id", uid).single();
+      await insertNotification(supabaseAdmin, {
+        user_id: invite.inviter_id,
+        type: "producer_invite",
+        title: "Invite Declined",
+        message: `${rejector?.full_name || "A musician"} declined your invite to "${rejProj?.title || "your project"}"`,
+        meta: { event_type: "invite_rejected", project_id: invite.project_id, invite_id },
+      });
 
       await recordActivityEvent(supabaseAdmin, {
         event_type: "invite_rejected",
@@ -701,6 +716,22 @@ Deno.serve(async (req: Request) => {
       if (lim) query = query.limit(Number(lim));
 
       const { data, error } = await query;
+      if (error) return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ success: true, data });
+    }
+
+    // ── search_musicians (for invite picker) ────────────────────────
+    if (action === "search_musicians") {
+      const { query: searchQuery, limit: searchLimit } = params;
+      if (!searchQuery || searchQuery.length < 2) return jsonResponse({ error: "query must be at least 2 characters" }, 400);
+
+      const { data, error } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, avatar_url, role")
+        .or(`full_name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%`)
+        .neq("id", uid)
+        .limit(Number(searchLimit) || 20);
+
       if (error) return jsonResponse({ error: error.message }, 500);
       return jsonResponse({ success: true, data });
     }

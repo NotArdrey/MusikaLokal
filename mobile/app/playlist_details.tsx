@@ -142,7 +142,7 @@ export default function PlaylistDetailsScreen() {
         <View style={styles.metaSection}>
           <Text style={[styles.title, { color: colors.text }]}>{playlist.title}</Text>
           <Text style={[styles.creator, { color: colors.textSecondary }]}>
-            by {playlist.creator_name || "Unknown"} • {items.length} tracks
+            by {playlist.creator_name || "Unknown"} â€¢ {items.length} tracks
           </Text>
           {playlist.description && (
             <Text style={[styles.description, { color: colors.textSecondary }]}>{playlist.description}</Text>
@@ -160,7 +160,7 @@ export default function PlaylistDetailsScreen() {
         </View>
 
         {/* Play button */}
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={1}
           style={[styles.playBtn, { backgroundColor: colors.primary }]}
           onPress={handleRecordPlay}
         >
@@ -185,7 +185,7 @@ export default function PlaylistDetailsScreen() {
                   </Text>
                 )}
                 {isOwner && (
-                  <TouchableOpacity onPress={() => handleRemoveItem(item.id)} style={{ marginLeft: 10 }}>
+                  <TouchableOpacity activeOpacity={1} onPress={() => handleRemoveItem(item.id)} style={{ marginLeft: 10 }}>
                     <Ionicons name="remove-circle-outline" size={20} color="#ef4444" />
                   </TouchableOpacity>
                 )}
@@ -223,7 +223,7 @@ export default function PlaylistDetailsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Listen On</Text>
             <View style={styles.linksRow}>
               {externalLinks.map((link: any) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={link.id}
                   style={[styles.linkChip, { borderColor: colors.border }]}
                 >
@@ -239,14 +239,14 @@ export default function PlaylistDetailsScreen() {
         {isOwner && (
           <View style={styles.section}>
             <View style={styles.ownerActions}>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.actionBtn, { backgroundColor: colors.primary }]}
                 onPress={() => router.push({ pathname: "/create_playlist", params: { edit_id: playlist.id } })}
               >
                 <Ionicons name="create" size={16} color="#fff" />
                 <Text style={styles.actionBtnText}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.actionBtn, { backgroundColor: "#ef4444" }]}
                 onPress={handleDelete}
               >

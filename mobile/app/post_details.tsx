@@ -251,15 +251,15 @@ export default function PostDetailsScreen() {
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={[styles.authorName, { color: colors.text }]}>{post.author_name || "User"}</Text>
             <Text style={[styles.postTime, { color: colors.textSecondary }]}>
-              {new Date(post.created_at).toLocaleString()} • {post.visibility === "followers" ? "Followers" : "Public"}
+              {new Date(post.created_at).toLocaleString()} â€¢ {post.visibility === "followers" ? "Followers" : "Public"}
             </Text>
           </View>
           {isOwner ? (
-            <TouchableOpacity onPress={handleDeletePost}>
+            <TouchableOpacity activeOpacity={1} onPress={handleDeletePost}>
               <Ionicons name="trash-outline" size={20} color="#ef4444" />
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity onPress={handleReport}>
+            <TouchableOpacity activeOpacity={1} onPress={handleReport}>
               <Ionicons name="flag-outline" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           )}
@@ -279,7 +279,7 @@ export default function PostDetailsScreen() {
 
         {/* Reactions bar */}
         <View style={[styles.reactionsBar, { borderColor: colors.border }]}>
-          <TouchableOpacity style={styles.reactionItem} onPress={handleReaction}>
+          <TouchableOpacity activeOpacity={1} style={styles.reactionItem} onPress={handleReaction}>
             <Ionicons
               name={post.my_reaction ? "heart" : "heart-outline"}
               size={22}
@@ -311,7 +311,7 @@ export default function PostDetailsScreen() {
                   </Text>
                 </View>
                 {c.author_id === userId && (
-                  <TouchableOpacity onPress={() => handleDeleteComment(c.id)}>
+                  <TouchableOpacity activeOpacity={1} onPress={() => handleDeleteComment(c.id)}>
                     <Ionicons name="trash-outline" size={16} color="#ef4444" />
                   </TouchableOpacity>
                 )}
@@ -336,7 +336,7 @@ export default function PostDetailsScreen() {
           multiline
           maxLength={1000}
         />
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={1}
           style={[styles.sendBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]}
           onPress={handleAddComment}
           disabled={submitting || !commentText.trim()}

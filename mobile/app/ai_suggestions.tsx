@@ -1713,10 +1713,15 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 4,
         borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     tagText: {
         fontSize: 11,
         fontFamily: 'Poppins_500Medium',
+        lineHeight: 13,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
         textTransform: 'capitalize',
     },
     errorContainer: {

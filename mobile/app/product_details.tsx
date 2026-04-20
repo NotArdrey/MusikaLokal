@@ -27,14 +27,14 @@ const moderateScale = (size: number, factor = 0.3) => {
 };
 
 export default function ProductDetailsScreen() {
-  const { colors } = useTheme();
-  const { session, userId } = useAuth();
+  const { colors, isDark } = useTheme();
+  const { isGuest, userId } = useAuth();
   const { product_id } = useLocalSearchParams();
 
   const [product, setProduct] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedVariant, setSelectedVariant] = useState<any>(null);
-  const [ordering, setOrdering] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
 
   const fetchProduct = useCallback(async () => {
@@ -58,35 +58,71 @@ export default function ProductDetailsScreen() {
 
   useEffect(() => { fetchProduct(); }, [fetchProduct]);
 
-  const handleOrder = async () => {
-    if (!product) return;
-    setOrdering(true);
+  const handleMessageSeller = async () => {
+    if (product?.status === "sold_out") {
+      setAlert({ type: "info", title: "Listing Sold", message: "This item has already been marked as sold." });
+      return;
+    }
+
+    if (!product?.seller_id) {
+      setAlert({ type: "error", title: "Unavailable", message: "Seller information is missing for this listing." });
+      return;
+    }
+
+    if (isGuest || !userId) {
+      setAlert({ type: "info", title: "Sign In Required", message: "Sign in to message the seller about this listing." });
+      return;
+    }
+
+    if (product.seller_id === userId) {
+      router.push("/marketplace");
+      return;
+    }
+
+    router.push({
+      pathname: "/chat",
+      params: {
+        recipientId: product.seller_id,
+        recipientName: product.seller_name || "Seller",
+      },
+    });
+  };
+
+  const handleSellerStatus = async (action: "mark_product_sold" | "relist_product" | "publish_product") => {
+    if (!product?.id) return;
+
+    setStatusUpdating(true);
     try {
-      const items = [{
-        product_id: product.id,
-        variant_id: selectedVariant?.id || null,
-        quantity: 1,
-        unit_price: selectedVariant?.price || product.price,
-      }];
       const { data } = await supabase.functions.invoke("manage-marketplace", {
-        body: { action: "create_order", items },
+        body: { action, product_id: product.id },
       });
+
       if (data?.success) {
-        showTopToast({ type: "success", title: "Order Placed!", message: `Order #${data.data?.order_number || ""} created.` });
-        router.push("/orders");
-      } else {
-        setAlert({ type: "error", title: "Order Failed", message: data?.error || "Could not place order" });
+        showTopToast({
+          type: "success",
+          title: action === "mark_product_sold" ? "Marked as Sold" : action === "relist_product" ? "Listing Relisted" : "Published",
+          message: action === "mark_product_sold"
+            ? "The listing is now hidden from buyers in browse."
+            : action === "relist_product"
+              ? "The listing is live again."
+              : "The listing is now live.",
+        });
+        fetchProduct();
+        return;
       }
+
+      setAlert({ type: "error", title: "Error", message: data?.error || "Unable to update listing." });
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
     } finally {
-      setOrdering(false);
+      setStatusUpdating(false);
     }
   };
 
-  const formatPrice = (price: number | null) => {
-    if (!price) return "Free";
-    return `₱${price.toLocaleString()}`;
+  const formatPrice = (price: number | string | null | undefined) => {
+    const amount = Number(price ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) return "Free";
+    return `â‚±${amount.toLocaleString()}`;
   };
 
   if (loading) {
@@ -118,7 +154,12 @@ export default function ProductDetailsScreen() {
   const variants = product.variants || [];
   const media = product.media || [];
   const isSeller = product.seller_id === userId;
-  const displayPrice = selectedVariant?.price || product.price;
+  const displayPrice = selectedVariant?.price || product.price || product.base_price;
+  const mediaUrls = media
+    .map((item: any) => item?.url || item?.storage_path)
+    .filter((value: unknown): value is string => typeof value === "string" && value.length > 0);
+  const isSold = product.status === "sold_out";
+  const isDraft = product.status === "draft";
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -126,14 +167,14 @@ export default function ProductDetailsScreen() {
 
       <ScrollView style={styles.content}>
         {/* Image gallery */}
-        {media.length > 0 ? (
+        {mediaUrls.length > 0 ? (
           <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.gallery}>
-            {media.map((m: any, idx: number) => (
-              <CachedImage key={idx} uri={m.url } style={styles.galleryImage} />
+            {mediaUrls.map((imageUrl: string, idx: number) => (
+              <CachedImage key={`${imageUrl}-${idx}`} uri={imageUrl} style={styles.galleryImage} />
             ))}
           </ScrollView>
-        ) : product.cover_image_url ? (
-          <CachedImage uri={product.cover_image_url } style={styles.singleImage} />
+        ) : product.cover_image_url || product.primary_image ? (
+          <CachedImage uri={product.cover_image_url || product.primary_image} style={styles.singleImage} />
         ) : (
           <View style={[styles.imagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
             <Ionicons name="bag-outline" size={56} color={colors.primary} />
@@ -142,10 +183,33 @@ export default function ProductDetailsScreen() {
 
         {/* Title & Price */}
         <View style={styles.titleSection}>
-          <Text style={[styles.productTitle, { color: colors.text }]}>{product.title}</Text>
+          <View style={styles.titleRow}>
+            <Text style={[styles.productTitle, { color: colors.text, flex: 1 }]}>{product.title}</Text>
+            {isSold && (
+              <View style={[styles.statusPill, { backgroundColor: "#F97316" + "18", borderColor: "#F97316" + "44" }]}>
+                <Text style={[styles.statusPillText, { color: "#F97316" }]}>Sold</Text>
+              </View>
+            )}
+            {isDraft && (
+              <View style={[styles.statusPill, { backgroundColor: colors.primary + "14", borderColor: colors.primary + "32" }]}>
+                <Text style={[styles.statusPillText, { color: colors.primary }]}>Draft</Text>
+              </View>
+            )}
+          </View>
           <Text style={[styles.price, { color: colors.primary }]}>{formatPrice(displayPrice)}</Text>
           <Text style={[styles.seller, { color: colors.textSecondary }]}>
-            Sold by {product.seller_name || "Seller"}
+            Listed by {product.seller_name || "Seller"}
+          </Text>
+          <Text style={[styles.marketNote, { color: colors.textSecondary }]}>
+            {isSeller
+              ? isSold
+                ? "This listing is marked sold and hidden from browse until you relist it."
+                : isDraft
+                  ? "Publish this listing when you're ready to start receiving buyer messages."
+                  : "Once the item is gone, mark it sold so buyers stop messaging you about it."
+              : isSold
+                ? "This listing has already been marked as sold."
+                : "Questions, offers, and delivery details happen in chat."}
           </Text>
         </View>
 
@@ -155,7 +219,7 @@ export default function ProductDetailsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Options</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {variants.map((v: any) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={v.id}
                   style={[
                     styles.variantPill,
@@ -177,7 +241,7 @@ export default function ProductDetailsScreen() {
                   </Text>
                   <Text style={{ color: colors.textSecondary, fontSize: moderateScale(11), marginTop: 2 }}>
                     {formatPrice(v.price)}
-                    {v.stock_qty != null && ` • ${v.stock_qty} left`}
+                    {v.stock_qty != null && ` â€¢ ${v.stock_qty} left`}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -210,22 +274,57 @@ export default function ProductDetailsScreen() {
         {/* Seller info */}
         {isSeller && (
           <View style={styles.section}>
-            <TouchableOpacity
-              style={[styles.sellerBtn, { borderColor: colors.border }]}
-              onPress={() => router.push("/seller_hub")}
-            >
-              <Ionicons name="storefront-outline" size={18} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontSize: moderateScale(13), fontWeight: "600", marginLeft: 8 }}>
-                Manage in Seller Hub
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.sellerActionRow}>
+              <TouchableOpacity activeOpacity={1}
+                style={[styles.sellerBtn, { borderColor: colors.border }]}
+                onPress={() => router.push("/marketplace")}
+              >
+                <Ionicons name="storefront-outline" size={18} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontSize: moderateScale(13), fontWeight: "600", marginLeft: 8 }}>
+                  Back to Marketplace
+                </Text>
+              </TouchableOpacity>
+
+              {product.status === "active" && (
+                <TouchableOpacity activeOpacity={1}
+                  style={[styles.primarySellerBtn, { backgroundColor: "#F97316", opacity: statusUpdating ? 0.65 : 1 }]}
+                  disabled={statusUpdating}
+                  onPress={() => handleSellerStatus("mark_product_sold")}
+                >
+                  <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                  <Text style={styles.primarySellerBtnText}>{statusUpdating ? "Updating..." : "Mark as Sold"}</Text>
+                </TouchableOpacity>
+              )}
+
+              {product.status === "sold_out" && (
+                <TouchableOpacity activeOpacity={1}
+                  style={[styles.primarySellerBtn, { backgroundColor: colors.primary, opacity: statusUpdating ? 0.65 : 1 }]}
+                  disabled={statusUpdating}
+                  onPress={() => handleSellerStatus("relist_product")}
+                >
+                  <Ionicons name="refresh-outline" size={18} color="#fff" />
+                  <Text style={styles.primarySellerBtnText}>{statusUpdating ? "Updating..." : "Relist Listing"}</Text>
+                </TouchableOpacity>
+              )}
+
+              {product.status === "draft" && (
+                <TouchableOpacity activeOpacity={1}
+                  style={[styles.primarySellerBtn, { backgroundColor: colors.primary, opacity: statusUpdating ? 0.65 : 1 }]}
+                  disabled={statusUpdating}
+                  onPress={() => handleSellerStatus("publish_product")}
+                >
+                  <Ionicons name="radio-outline" size={18} color="#fff" />
+                  <Text style={styles.primarySellerBtnText}>{statusUpdating ? "Updating..." : "Publish Listing"}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         )}
 
         <View style={{ height: 120 }} />
       </ScrollView>
 
-      {/* Buy button (not shown for seller) */}
+      {/* Message seller button (not shown for seller) */}
       {!isSeller && (
         <View style={[styles.buyBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
           <View>
@@ -234,19 +333,13 @@ export default function ProductDetailsScreen() {
               <Text style={[styles.buyVariant, { color: colors.textSecondary }]}>{selectedVariant.label || selectedVariant.sku}</Text>
             )}
           </View>
-          <TouchableOpacity
-            style={[styles.buyBtn, { backgroundColor: colors.primary, opacity: ordering ? 0.6 : 1 }]}
-            onPress={handleOrder}
-            disabled={ordering}
+          <TouchableOpacity activeOpacity={1}
+            style={[styles.buyBtn, { backgroundColor: isSold ? (isDark ? "#334155" : "#CBD5E1") : colors.primary }]}
+            onPress={handleMessageSeller}
+            disabled={isSold}
           >
-            {ordering ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="cart" size={18} color="#fff" />
-                <Text style={styles.buyBtnText}>Buy Now</Text>
-              </>
-            )}
+            <Ionicons name={isSold ? "checkmark-circle" : "chatbubble-ellipses"} size={18} color="#fff" />
+            <Text style={styles.buyBtnText}>{isSold ? "Sold" : "Message Seller"}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -266,16 +359,23 @@ const styles = StyleSheet.create({
   singleImage: { width: "100%", height: SCREEN_WIDTH - 32, borderRadius: 12, marginTop: 12 },
   imagePlaceholder: { width: "100%", height: 240, borderRadius: 12, marginTop: 12, alignItems: "center", justifyContent: "center" },
   titleSection: { marginTop: 16 },
+  titleRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   productTitle: { fontSize: moderateScale(20), fontWeight: "800" },
+  statusPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, marginTop: 3 },
+  statusPillText: { fontSize: moderateScale(11), fontWeight: "700" },
   price: { fontSize: moderateScale(22), fontWeight: "800", marginTop: 4 },
   seller: { fontSize: moderateScale(13), marginTop: 4 },
+  marketNote: { fontSize: moderateScale(12), marginTop: 8, lineHeight: 18 },
   section: { marginTop: 20 },
   sectionTitle: { fontSize: moderateScale(15), fontWeight: "700", marginBottom: 10 },
   variantPill: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8, marginRight: 10, minWidth: 80 },
   description: { fontSize: moderateScale(14), lineHeight: 22 },
   metaRow: { flexDirection: "row", gap: 8, marginTop: 16 },
   metaBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 },
+  sellerActionRow: { gap: 10 },
   sellerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 12, borderWidth: 1, borderRadius: 10 },
+  primarySellerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 10 },
+  primarySellerBtnText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "700" },
   buyBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, paddingBottom: 24, borderTopWidth: 1 },
   buyPrice: { fontSize: moderateScale(18), fontWeight: "700" },
   buyVariant: { fontSize: moderateScale(11), marginTop: 2 },

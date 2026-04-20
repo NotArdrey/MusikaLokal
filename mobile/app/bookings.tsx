@@ -65,9 +65,8 @@ type Tab =
   | "Upcoming"
   | "Ongoing"
   | "Review"
-  | "Deals"
-  | "Project Apps"
-  | "Project Invites"
+  | "Applications"
+  | "Sent Invites"
   | "History";
 
 // Venue owner specific tabs for managing gig applications
@@ -124,7 +123,6 @@ export default function BookingsScreen() {
     Upcoming: any[];
     Ongoing: any[];
     Review: any[];
-    Deals: any[];
     History: any[];
   }>({
     Applicants: [],
@@ -133,7 +131,6 @@ export default function BookingsScreen() {
     Upcoming: [],
     Ongoing: [],
     Review: [],
-    Deals: [],
     History: [],
   });
   const [pendingPermitStudios, setPendingPermitStudios] = useState<any[]>([]);
@@ -267,6 +264,7 @@ export default function BookingsScreen() {
   // Handle route params (from payment result screen)
   useEffect(() => {
     if (params.tab) {
+      const requestedTab = params.tab === "Deals" ? "Pending" : params.tab;
       const validTabs: Tab[] = [
         "Applicants",
         "Active Musicians",
@@ -276,8 +274,8 @@ export default function BookingsScreen() {
         "Review",
         "History",
       ];
-      if (validTabs.includes(params.tab as Tab)) {
-        setActiveTab(params.tab as Tab);
+      if (validTabs.includes(requestedTab as Tab)) {
+        setActiveTab(requestedTab as Tab);
       }
     }
 
@@ -309,11 +307,11 @@ export default function BookingsScreen() {
           appState.current.match(/inactive|background/) &&
           nextAppState === "active"
         ) {
-          debugLog("📱 App returned to foreground");
+          debugLog("ðŸ“± App returned to foreground");
 
           // If we were in payment flow, check status and refresh
           if (paymentInProgressRef.current && userId) {
-            debugLog("💳 Checking payment status after return...");
+            debugLog("ðŸ’³ Checking payment status after return...");
             const bookingId = pendingPaymentBookingId.current;
             paymentInProgressRef.current = false;
             pendingPaymentBookingId.current = null;
@@ -321,7 +319,7 @@ export default function BookingsScreen() {
             // Poll for payment status with retries (webhook might be processing)
             let paymentConfirmed = false;
             for (let attempt = 1; attempt <= 3; attempt++) {
-              debugLog(`💳 Payment status check attempt ${attempt}/3...`);
+              debugLog(`ðŸ’³ Payment status check attempt ${attempt}/3...`);
               await new Promise((resolve) =>
                 setTimeout(resolve, 1500 * attempt),
               ); // Increasing delay
@@ -339,7 +337,7 @@ export default function BookingsScreen() {
                   // For partial payment (downpayment), stay on Pending; for full payment, go to Upcoming
                   const isPartial = booking.payment_status === "partial" && (booking.remaining_balance || 0) > 0;
                   pendingPaymentBookingId.current = isPartial ? "partial" : null;
-                  debugLog("✅ Payment confirmed for booking:", bookingId, isPartial ? "(partial)" : "(full)");
+                  debugLog("âœ… Payment confirmed for booking:", bookingId, isPartial ? "(partial)" : "(full)");
                   break;
                 }
               } else {
@@ -356,7 +354,7 @@ export default function BookingsScreen() {
                   paymentConfirmed = true;
                   const isPartial = recentPaid[0].payment_status === "partial" && (recentPaid[0].remaining_balance || 0) > 0;
                   pendingPaymentBookingId.current = isPartial ? "partial" : null;
-                  debugLog("✅ Found recently paid booking");
+                  debugLog("âœ… Found recently paid booking");
                   break;
                 }
               }
@@ -369,7 +367,7 @@ export default function BookingsScreen() {
             await fetchBookings(userId);
 
             if (paymentConfirmed) {
-              // Downpayment → stay on Pending (balance still due); full payment → go to Upcoming
+              // Downpayment â†’ stay on Pending (balance still due); full payment â†’ go to Upcoming
               setActiveTab(wasPartialPayment ? "Pending" : "Upcoming");
             }
           } else if (userId) {
@@ -548,7 +546,7 @@ export default function BookingsScreen() {
       }
 
       channel = liveChannel.subscribe((status: string) => {
-        debugLog("📡 Realtime status:", status);
+        debugLog("ðŸ“¡ Realtime status:", status);
       });
     };
 
@@ -708,7 +706,7 @@ export default function BookingsScreen() {
         start_time: b.start_time,
         end_time: b.end_time,
         name: b.studio?.name || "Unknown Studio",
-        date: `${b.booking_date} • ${b.start_time} - ${b.end_time}`,
+        date: `${b.booking_date} â€¢ ${b.start_time} - ${b.end_time}`,
         image:
           b.studio?.studio_media
             ?.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]
@@ -771,7 +769,7 @@ export default function BookingsScreen() {
       if (b.status === "pending" || b.status === "pending_relocation") {
         fallback.Pending.push(item);
       } else if (b.status === "confirmed" && b.payment_status === "partial" && (b.remaining_balance || 0) > 0) {
-        // Downpayment paid but balance still owed — keep in Pending
+        // Downpayment paid but balance still owed â€” keep in Pending
         fallback.Pending.push({ ...item, status: "Downpayment Paid - Balance Due" });
       } else if (b.status === "confirmed") {
         if (now > endDate) {
@@ -942,6 +940,62 @@ export default function BookingsScreen() {
       const normalizeStatus = (status?: string | null) =>
         String(status || "").trim().toLowerCase();
 
+      const isClosedDealStatus = (status?: string | null) =>
+        ["rejected", "cancelled", "settled", "expired", "completed"].includes(
+          normalizeStatus(status),
+        );
+
+      const isDealActivity = (item: any) =>
+        item?.type_id === "venue_partnership_deal" || item?.type_id === "recording_deal";
+
+      const getPendingSortTime = (item: any) => {
+        const candidates = [
+          ...(isDealActivity(item)
+            ? [item?.updated_at, item?.created_at]
+            : [
+              item?.created_at,
+              item?.raw_date && item?.start_time
+                ? `${item.raw_date}T${item.start_time}`
+                : null,
+              item?.raw_date,
+              item?.date,
+              item?.updated_at,
+            ]),
+        ];
+
+        for (const candidate of candidates) {
+          if (!candidate) continue;
+          const timestamp = new Date(candidate).getTime();
+          if (!Number.isNaN(timestamp)) return timestamp;
+        }
+
+        return 0;
+      };
+
+      const getHistorySortTime = (item: any) => {
+        const candidates = [
+          ...(isDealActivity(item)
+            ? [item?.updated_at, item?.created_at]
+            : [
+              item?.raw_date && item?.start_time
+                ? `${item.raw_date}T${item.start_time}`
+                : null,
+              item?.raw_date,
+              item?.date,
+              item?.updated_at,
+              item?.created_at,
+            ]),
+        ];
+
+        for (const candidate of candidates) {
+          if (!candidate) continue;
+          const timestamp = new Date(candidate).getTime();
+          if (!Number.isNaN(timestamp)) return timestamp;
+        }
+
+        return 0;
+      };
+
       // Separate Items Logic
 
       // 1. Applicants (Pending Gig items)
@@ -1084,7 +1138,7 @@ export default function BookingsScreen() {
           new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
       ); // Closest gig first
 
-      // 6. Fetch commercial deals
+      // 6. Fetch commercial deals and fold them into Pending/History.
       let dealsItems: any[] = [];
       try {
         const { data: dealsResp } = await supabase.functions.invoke(
@@ -1114,15 +1168,29 @@ export default function BookingsScreen() {
         // Deals fetch is non-critical; ignore errors
       }
 
+      const openDeals = dealsItems.filter(
+        (item: any) => !isClosedDealStatus(item.display_status),
+      );
+      const closedDeals = dealsItems.filter((item: any) =>
+        isClosedDealStatus(item.display_status),
+      );
+
+      const pendingItemsWithDeals = [...activePendingItems, ...openDeals].sort(
+        (a: any, b: any) => getPendingSortTime(b) - getPendingSortTime(a),
+      );
+
+      const historyItemsWithDeals = [...historyItems, ...closedDeals].sort(
+        (a: any, b: any) => getHistorySortTime(b) - getHistorySortTime(a),
+      );
+
       const processedData = {
         Applicants: applicants,
         ActiveMusicians: activeGigMusicians,
-        Pending: activePendingItems,
+        Pending: pendingItemsWithDeals,
         Upcoming: allUpcoming,
         Ongoing: allOngoing,
         Review: unreviewedItems,
-        Deals: dealsItems,
-        History: historyItems,
+        History: historyItemsWithDeals,
       };
 
       setData(processedData);
@@ -1181,12 +1249,12 @@ export default function BookingsScreen() {
         });
       }
 
-      // Fetch producer project matches (applications & invites)
-      if (role === "musician" || role === "producer") {
+      // Fetch producer project matches for producers only.
+      if (role === "producer") {
         try {
           const { data: matchData } = await supabase.functions.invoke(
             "manage-producer-network",
-            { body: { action: "list_matches" } },
+            { body: { action: "list_matches", role: "producer" } },
           );
           const matches = matchData?.data || matchData?.matches || [];
           setProjectApps(matches.filter((m: any) => m.match_type === "application"));
@@ -1194,6 +1262,9 @@ export default function BookingsScreen() {
         } catch (_) {
           // Non-critical; ignore errors
         }
+      } else {
+        setProjectApps([]);
+        setProjectInvites([]);
       }
     } catch (e) {
       debugLog("Error fetching bookings:", e);
@@ -1209,7 +1280,7 @@ export default function BookingsScreen() {
     reason?: string,
   ): Promise<boolean> {
     try {
-      debugLog("📤 handleStatusUpdate called with:", {
+      debugLog("ðŸ“¤ handleStatusUpdate called with:", {
         bookingId,
         newStatus,
         typeId,
@@ -1232,7 +1303,7 @@ export default function BookingsScreen() {
         error = rpcResult.error;
 
         if (error) {
-          debugLog("⚠️ record_booking_attendance failed, falling back to manage-bookings:", error);
+          debugLog("âš ï¸ record_booking_attendance failed, falling back to manage-bookings:", error);
 
           const invokeFallback = await supabase.functions.invoke("manage-bookings", {
             body: {
@@ -1264,7 +1335,7 @@ export default function BookingsScreen() {
         error = invokeResult.error;
       }
 
-      debugLog("📥 handleStatusUpdate response:", { data, error });
+      debugLog("ðŸ“¥ handleStatusUpdate response:", { data, error });
 
       if (error) {
         const errorContext = (error as any)?.context;
@@ -1442,7 +1513,7 @@ export default function BookingsScreen() {
                       needsRpcFallback = true;
                     } else {
                       result = data;
-                      // Edge function caught an internal error — fall through to RPC
+                      // Edge function caught an internal error â€” fall through to RPC
                       if (result?.code === "DELETE_STUDIO_WITH_STORAGE_FAILED") {
                         needsRpcFallback = true;
                         result = null;
@@ -1499,6 +1570,44 @@ export default function BookingsScreen() {
         },
       ],
     );
+  };
+
+  // Producer project match actions (accept/reject/withdraw/decline)
+  const handleMatchAction = async (matchId: string, action: "accept" | "reject" | "withdraw", matchType: string) => {
+    try {
+      let actionName: string;
+      let bodyKey: string;
+      if (action === "accept") {
+        actionName = matchType === "invite" ? "accept_invite" : "review_application";
+        bodyKey = matchType === "invite" ? "invite_id" : "application_id";
+      } else if (action === "reject") {
+        actionName = matchType === "invite" ? "reject_invite" : "review_application";
+        bodyKey = matchType === "invite" ? "invite_id" : "application_id";
+      } else {
+        actionName = "withdraw_application";
+        bodyKey = "application_id";
+      }
+
+      const body: any = { action: actionName, [bodyKey]: matchId };
+      if (actionName === "review_application") {
+        body.decision = action === "accept" ? "accepted" : "rejected";
+      }
+
+      const { data } = await supabase.functions.invoke("manage-producer-network", { body });
+      if (data?.success) {
+        showTopToast({
+          type: "success",
+          title: action === "accept" ? "Accepted" : action === "reject" ? "Rejected" : "Withdrawn",
+          message: `Action completed successfully.`,
+        });
+        // Refresh the list
+        if (userId) fetchBookings(userId);
+      } else {
+        showTopToast({ type: "error", title: "Error", message: data?.error || "Action failed" });
+      }
+    } catch (e: any) {
+      showTopToast({ type: "error", title: "Error", message: e.message || "Action failed" });
+    }
   };
 
   const handleConfirmBooking = async (bookingId: string) => {
@@ -1768,7 +1877,7 @@ export default function BookingsScreen() {
     const timePart = timeValue.substring(0, 5);
     const parsed = new Date(`${dateValue}T${timePart}`);
     if (isNaN(parsed.getTime())) return `${dateValue} ${timePart}`;
-    return `${parsed.toLocaleDateString()} • ${parsed.toLocaleTimeString([], {
+    return `${parsed.toLocaleDateString()} â€¢ ${parsed.toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
@@ -2050,7 +2159,7 @@ export default function BookingsScreen() {
         paymentType === "downpayment" ? Math.round(totalAmount / 2) : 0;
 
       debugLog(
-        "💳 Initiating payment for booking:",
+        "ðŸ’³ Initiating payment for booking:",
         item.id,
         "Type:",
         paymentType,
@@ -2090,7 +2199,7 @@ export default function BookingsScreen() {
       }
 
       if (result.checkout_url) {
-        debugLog("✅ Opening checkout URL:", result.checkout_url);
+        debugLog("âœ… Opening checkout URL:", result.checkout_url);
         const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
@@ -2123,7 +2232,7 @@ export default function BookingsScreen() {
     try {
       setLoading(true);
       debugLog(
-        "💳 Paying remaining balance for booking:",
+        "ðŸ’³ Paying remaining balance for booking:",
         item.id,
         "Amount:",
         item.remaining_balance,
@@ -2158,7 +2267,7 @@ export default function BookingsScreen() {
       }
 
       if (result.checkout_url) {
-        debugLog("✅ Opening checkout URL:", result.checkout_url);
+        debugLog("âœ… Opening checkout URL:", result.checkout_url);
         const canOpen = await Linking.canOpenURL(result.checkout_url);
         if (canOpen) {
           paymentInProgressRef.current = true;
@@ -2201,7 +2310,7 @@ export default function BookingsScreen() {
       const balanceAmount = selectedItem.remaining_balance;
 
       debugLog(
-        "💵 Clearing remaining balance for booking:",
+        "ðŸ’µ Clearing remaining balance for booking:",
         bookingId,
         "Amount:",
         balanceAmount,
@@ -2273,8 +2382,8 @@ export default function BookingsScreen() {
       await supabase.from("notifications").insert({
         user_id: booking.user_id,
         type: "success",
-        title: "Balance Cleared! ✅",
-        message: `Your remaining balance of ₱${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
+        title: "Balance Cleared! âœ…",
+        message: `Your remaining balance of â‚±${balanceAmount.toLocaleString()} for ${booking.studio?.name || "your booking"} has been marked as paid.`,
         read: false,
         meta: {
           type: "balance_cleared",
@@ -2283,11 +2392,11 @@ export default function BookingsScreen() {
         },
       });
 
-      debugLog(`💵 Balance cleared: ₱${balanceAmount} for booking ${bookingId}`);
+      debugLog(`ðŸ’µ Balance cleared: â‚±${balanceAmount} for booking ${bookingId}`);
 
       Alert.alert(
         "Balance Cleared",
-        `₱${balanceAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
+        `â‚±${balanceAmount?.toLocaleString()} has been marked as paid and credited to your wallet.`,
       );
       setModalVisible(false);
       if (userId) fetchBookings(userId);
@@ -2356,7 +2465,7 @@ export default function BookingsScreen() {
     // Call backend to verify check-in
     try {
       setLoading(true);
-      debugLog("📷 Scanning QR code:", {
+      debugLog("ðŸ“· Scanning QR code:", {
         qr_code: data,
         scanner_id: userId,
       });
@@ -2372,8 +2481,8 @@ export default function BookingsScreen() {
 
       setLoading(false);
 
-      debugLog("📷 Check-in response:", response);
-      debugLog("📷 Check-in error:", error);
+      debugLog("ðŸ“· Check-in response:", response);
+      debugLog("ðŸ“· Check-in error:", error);
 
       if (error) {
         console.error("Check-in error:", error);
@@ -2403,9 +2512,9 @@ export default function BookingsScreen() {
     ? applicationData[activeAppTab as keyof typeof applicationData] || []
     : activeTab === "Active Musicians"
       ? data.ActiveMusicians
-      : activeTab === "Project Apps"
+      : activeTab === "Applications"
         ? projectApps
-        : activeTab === "Project Invites"
+        : activeTab === "Sent Invites"
           ? projectInvites
           : data[activeTab as keyof typeof data] || [];
 
@@ -2617,7 +2726,7 @@ export default function BookingsScreen() {
             </Text>
           </View>
         )}
-        {tab === "Project Apps" && projectApps.length > 0 && (
+        {tab === "Applications" && projectApps.length > 0 && (
           <View
             style={{
               marginLeft: 6,
@@ -2638,7 +2747,7 @@ export default function BookingsScreen() {
             </Text>
           </View>
         )}
-        {tab === "Project Invites" && projectInvites.length > 0 && (
+        {tab === "Sent Invites" && projectInvites.length > 0 && (
           <View
             style={{
               marginLeft: 6,
@@ -2693,8 +2802,8 @@ export default function BookingsScreen() {
             ) : (
               // Default tabs for other users (musicians, studio-owners)
               [
-                "Pending", "Upcoming", "Ongoing", "Review", "Deals",
-                ...(userRole === "musician" || userRole === "producer" ? ["Project Apps", "Project Invites"] as Tab[] : []),
+                "Pending", "Upcoming", "Ongoing", "Review",
+                ...(userRole === "producer" ? ["Applications", "Sent Invites"] as Tab[] : []),
                 "History",
               ].map(
                 (tab) => renderTab(tab as Tab),
@@ -2965,14 +3074,18 @@ export default function BookingsScreen() {
                         ? "No completed gigs"
                         : "No items"
                     : userRole === "studio-owner" && activeTab === "Pending" && pendingPermitStudios.length > 0
-                      ? "No pending booking requests below"
-                      : `No ${activeTab.toLowerCase()} bookings`}
+                      ? "No pending items below"
+                      : activeTab === "Pending"
+                        ? "No pending items"
+                        : activeTab === "History"
+                          ? "No history yet"
+                          : `No ${activeTab.toLowerCase()} bookings`}
               </Text>
                 {userRole === "studio-owner" && activeTab === "Pending" && pendingPermitStudios.length > 0 && (
                   <Text
                     style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                   >
-                    Permit review items are listed above. New booking requests will appear here.
+                    Permit review items are listed above. New pending items will appear here.
                   </Text>
                 )}
               {userRole === "venue-owner" && activeTab === "Applicants" && (
@@ -3006,7 +3119,7 @@ export default function BookingsScreen() {
 
                 return (
                   <TouchableOpacity
-                    activeOpacity={0.8}
+                    activeOpacity={1}
                     key={item.id}
                     onPress={() => {
                       router.push({
@@ -3073,14 +3186,18 @@ export default function BookingsScreen() {
                 };
                 const mStatusColor = matchStatusColors[item.status] || colors.textSecondary;
                 const isInvite = item.match_type === "invite";
+                const isPending = item.status === "pending";
+                const isProducerView = userRole === "producer";
 
                 return (
-                  <View
+                  <TouchableOpacity
+                    activeOpacity={0.8}
                     key={item.match_id || item.id}
                     style={[
                       styles.cardContainer,
                       { backgroundColor: colors.card, borderColor: colors.border },
                     ]}
+                    onPress={() => router.push({ pathname: "/producer_project_details", params: { project_id: item.project_id } })}
                   >
                     <View style={{ padding: scale(16) }}>
                       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: moderateScale(8) }}>
@@ -3115,8 +3232,59 @@ export default function BookingsScreen() {
                       <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
                         {new Date(item.created_at).toLocaleDateString()}
                       </Text>
+
+                      {/* Action buttons for pending items */}
+                      {isPending && (
+                        <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(10) }}>
+                          {isProducerView && !isInvite && (
+                            <>
+                              <TouchableOpacity activeOpacity={1}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#10B981", paddingVertical: scale(8), borderRadius: scale(8) }}
+                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "accept", item.match_type); }}
+                              >
+                                <Ionicons name="checkmark" size={16} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Accept</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity activeOpacity={1}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#EF4444", paddingVertical: scale(8), borderRadius: scale(8) }}
+                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "reject", item.match_type); }}
+                              >
+                                <Ionicons name="close" size={16} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Reject</Text>
+                              </TouchableOpacity>
+                            </>
+                          )}
+                          {!isProducerView && !isInvite && (
+                            <TouchableOpacity activeOpacity={1}
+                              style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, borderWidth: 1, borderColor: "#EF4444", paddingVertical: scale(8), borderRadius: scale(8) }}
+                              onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "withdraw", item.match_type); }}
+                            >
+                              <Ionicons name="arrow-undo" size={16} color="#EF4444" />
+                              <Text style={{ color: "#EF4444", fontSize: moderateScale(12), fontWeight: "600" }}>Withdraw</Text>
+                            </TouchableOpacity>
+                          )}
+                          {!isProducerView && isInvite && (
+                            <>
+                              <TouchableOpacity activeOpacity={1}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#10B981", paddingVertical: scale(8), borderRadius: scale(8) }}
+                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "accept", item.match_type); }}
+                              >
+                                <Ionicons name="checkmark" size={16} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Accept</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity activeOpacity={1}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#EF4444", paddingVertical: scale(8), borderRadius: scale(8) }}
+                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "reject", item.match_type); }}
+                              >
+                                <Ionicons name="close" size={16} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Decline</Text>
+                              </TouchableOpacity>
+                            </>
+                          )}
+                        </View>
+                      )}
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 );
               }
 
@@ -4261,7 +4429,7 @@ export default function BookingsScreen() {
                                             { color: colors.textSecondary },
                                           ]}
                                         >
-                                          Recording • {recordingSongCount} song
+                                          Recording â€¢ {recordingSongCount} song
                                           {recordingSongCount > 1 ? "s" : ""}
                                         </Text>
                                       </View>
@@ -4279,7 +4447,7 @@ export default function BookingsScreen() {
                                             { color: colors.textSecondary },
                                           ]}
                                         >
-                                          Rule • {recordingRuleLabel}
+                                          Rule â€¢ {recordingRuleLabel}
                                         </Text>
                                       </View>
                                     ) : null}
@@ -4297,11 +4465,11 @@ export default function BookingsScreen() {
                                           ]}
                                         >
                                           {requiredBlocks
-                                            ? `Need ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""} • `
+                                            ? `Need ${requiredBlocks} block${requiredBlocks > 1 ? "s" : ""} â€¢ `
                                             : ""}
                                           Min {formatRecordingHours(requiredTotalHours)}h
                                           {selectedTotalHours
-                                            ? ` • Selected ${formatRecordingHours(selectedTotalHours)}h`
+                                            ? ` â€¢ Selected ${formatRecordingHours(selectedTotalHours)}h`
                                             : ""}
                                         </Text>
                                       </View>
@@ -4412,7 +4580,7 @@ export default function BookingsScreen() {
                                     { color: "#F59E0B" },
                                   ]}
                                 >
-                                  Balance: ₱
+                                  Balance: â‚±
                                   {item.remaining_balance?.toLocaleString()}
                                 </Text>
                               </View>
@@ -4623,7 +4791,7 @@ export default function BookingsScreen() {
                               flex: 1,
                             }}
                           >
-                            {/* Row 1 — Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
+                            {/* Row 1 â€” Details + Pay Now (hidden when fully paid & awaiting confirmation) */}
                             <View style={{ flexDirection: "row", gap: scale(8) }}>
                               {/* Details Button */}
                               <TouchableOpacity activeOpacity={1}
@@ -4648,7 +4816,7 @@ export default function BookingsScreen() {
                                 </Text>
                               </TouchableOpacity>
 
-                              {/* Pay Now / Pay Balance — only when payment is not fully settled */}
+                              {/* Pay Now / Pay Balance â€” only when payment is not fully settled */}
                               {item.payment_status !== "paid" && (
                                 <TouchableOpacity activeOpacity={1}
                                   onPress={() => showPaymentOptions(item)}
@@ -4672,7 +4840,7 @@ export default function BookingsScreen() {
                                     ]}
                                   >
                                     {item.payment_type === "downpayment" && item.remaining_balance > 0
-                                      ? `Pay Balance ₱${item.remaining_balance?.toLocaleString()}`
+                                      ? `Pay Balance â‚±${item.remaining_balance?.toLocaleString()}`
                                       : "Pay Now"}
                                   </Text>
                                 </TouchableOpacity>
@@ -4951,7 +5119,7 @@ export default function BookingsScreen() {
                                           },
                                         ]}
                                       >
-                                        Pay Remaining ₱{item.remaining_balance?.toLocaleString()}
+                                        Pay Remaining â‚±{item.remaining_balance?.toLocaleString()}
                                       </Text>
                                     </TouchableOpacity>
                                   ) : null}
@@ -4986,7 +5154,7 @@ export default function BookingsScreen() {
                                           },
                                         ]}
                                       >
-                                        Clear Balance ₱{item.remaining_balance?.toLocaleString()} (F2F)
+                                        Clear Balance â‚±{item.remaining_balance?.toLocaleString()} (F2F)
                                       </Text>
                                     </TouchableOpacity>
                                   ) : null}
@@ -5139,7 +5307,7 @@ export default function BookingsScreen() {
                   : modalMode === "renew"
                     ? `Would you like to send a contract renewal offer to ${selectedItem?.customer_name || "this musician"}? They will receive a notification and can accept or decline the offer.`
                     : modalMode === "clear_balance"
-                      ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
+                      ? `Mark â‚±${selectedItem?.remaining_balance?.toLocaleString() || 0} as paid via face-to-face payment? This amount will be credited to your wallet.`
                       : modalMode === "report_access"
                         ? "Please describe the issue so we can notify the studio owner and review this booking case."
                       : modalMode === "late_confirm"
@@ -5179,14 +5347,14 @@ export default function BookingsScreen() {
 
                             if (isFullyPaid) {
                               const paidAmount = selectedItem?.payment_amount || selectedItem?.total_cost || 0;
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your paid amount of ₱${paidAmount.toLocaleString()} will be forfeited.`;
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your paid amount of â‚±${paidAmount.toLocaleString()} will be forfeited.`;
                             }
 
                             if (isPartialPaid) {
                               const paidPortion =
                                 (selectedItem?.payment_amount || selectedItem?.total_cost || 0) -
                                 (selectedItem?.remaining_balance || 0);
-                              return `Cancellation Policy: Booking cancellations are non-refundable. Your downpayment of ₱${Math.max(0, paidPortion).toLocaleString()} will be forfeited.`;
+                              return `Cancellation Policy: Booking cancellations are non-refundable. Your downpayment of â‚±${Math.max(0, paidPortion).toLocaleString()} will be forfeited.`;
                             }
 
                             return "Cancellation Policy: Booking cancellations are non-refundable. Any amount already paid will be forfeited.";
@@ -5213,7 +5381,7 @@ export default function BookingsScreen() {
                   : modalMode === "renew"
                     ? "Send Renewal Offer"
                     : modalMode === "clear_balance"
-                        ? `Mark ₱${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
+                        ? `Mark â‚±${selectedItem?.remaining_balance?.toLocaleString() || 0} as Paid`
                         : modalMode === "report_access"
                           ? "Submit Report"
                         : modalMode === "late_confirm"
@@ -5258,10 +5426,10 @@ export default function BookingsScreen() {
           }
 
           if (selectedItem) {
-            debugLog("🔍 Modal onConfirm - selectedItem:", selectedItem);
-            debugLog("🔍 Modal onConfirm - modalMode:", modalMode);
+            debugLog("ðŸ” Modal onConfirm - selectedItem:", selectedItem);
+            debugLog("ðŸ” Modal onConfirm - modalMode:", modalMode);
             debugLog(
-              "🔍 Modal onConfirm - selectedItem.type_id:",
+              "ðŸ” Modal onConfirm - selectedItem.type_id:",
               selectedItem.type_id,
             );
 
@@ -5353,9 +5521,9 @@ export default function BookingsScreen() {
               });
             }
 
-            debugLog("🔍 Modal onConfirm - Final status:", status);
+            debugLog("ðŸ” Modal onConfirm - Final status:", status);
             debugLog(
-              "🔍 Modal onConfirm - Calling handleStatusUpdate with:",
+              "ðŸ” Modal onConfirm - Calling handleStatusUpdate with:",
               {
                 id: selectedItem.id,
                 status,
@@ -5427,7 +5595,7 @@ export default function BookingsScreen() {
           >
             {/* Close button - absolutely positioned inside the card */}
             <TouchableOpacity
-              activeOpacity={0.7}
+              activeOpacity={1}
               onPress={() => setShowPaymentOptionModal(false)}
               style={styles.modalCloseIcon}
             >
@@ -5443,7 +5611,7 @@ export default function BookingsScreen() {
                 { color: colors.textSecondary },
               ]}
             >
-              Total Amount: ₱
+              Total Amount: â‚±
               {(
                 paymentItem?.payment_amount ||
                 paymentItem?.total_cost ||
@@ -5480,7 +5648,7 @@ export default function BookingsScreen() {
                       { color: colors.primary },
                     ]}
                   >
-                    ₱
+                    â‚±
                     {(
                       paymentItem?.payment_amount ||
                       paymentItem?.total_cost ||
@@ -5528,7 +5696,7 @@ export default function BookingsScreen() {
                       { color: colors.primary },
                     ]}
                   >
-                    ₱
+                    â‚±
                     {Math.round(
                       (paymentItem?.payment_amount ||
                         paymentItem?.total_cost ||
@@ -5543,7 +5711,7 @@ export default function BookingsScreen() {
                   { color: colors.textSecondary },
                 ]}
               >
-                Pay half now, remaining ₱
+                Pay half now, remaining â‚±
                 {Math.round(
                   (paymentItem?.payment_amount ||
                     paymentItem?.total_cost ||

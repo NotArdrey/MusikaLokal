@@ -152,7 +152,7 @@ export default function CreatePlaylistScreen() {
         <Text style={[styles.label, { color: colors.text }]}>Visibility</Text>
         <View style={styles.visibilityRow}>
           {(["public", "private"] as const).map((v) => (
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               key={v}
               style={[
                 styles.visibilityPill,
@@ -181,7 +181,7 @@ export default function CreatePlaylistScreen() {
           ))}
         </View>
 
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={1}
           style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}
           onPress={handleSave}
           disabled={saving}

@@ -52,6 +52,10 @@ export default function ProducerProjectDetailsScreen() {
   const [inviteRoleId, setInviteRoleId] = useState<string | null>(null);
   const [inviteMessage, setInviteMessage] = useState("");
   const [inviting, setInviting] = useState(false);
+  const [musicianSearch, setMusicianSearch] = useState("");
+  const [musicianResults, setMusicianResults] = useState<any[]>([]);
+  const [searchingMusicians, setSearchingMusicians] = useState(false);
+  const [selectedMusician, setSelectedMusician] = useState<any>(null);
 
   const isOwner = project?.owner_id === userId;
 
@@ -113,7 +117,7 @@ export default function ProducerProjectDetailsScreen() {
           action: "apply_to_project",
           project_id,
           role_id: applyRoleId,
-          message: applyMessage.trim() || null,
+          cover_message: applyMessage.trim() || null,
         },
       });
       if (data?.success) {
@@ -147,8 +151,9 @@ export default function ProducerProjectDetailsScreen() {
   };
 
   const handleInvite = async () => {
-    if (!inviteeId.trim()) {
-      setAlert({ type: "warning", title: "Missing User", message: "Please enter a musician user ID." });
+    const targetId = selectedMusician?.id || inviteeId.trim();
+    if (!targetId) {
+      setAlert({ type: "warning", title: "Missing User", message: "Please search and select a musician to invite." });
       return;
     }
     setInviting(true);
@@ -157,7 +162,7 @@ export default function ProducerProjectDetailsScreen() {
         body: {
           action: "invite_musician",
           project_id,
-          invitee_id: inviteeId.trim(),
+          invitee_id: targetId,
           role_id: inviteRoleId || null,
           message: inviteMessage.trim() || null,
         },
@@ -168,6 +173,9 @@ export default function ProducerProjectDetailsScreen() {
         setInviteeId("");
         setInviteMessage("");
         setInviteRoleId(null);
+        setSelectedMusician(null);
+        setMusicianSearch("");
+        setMusicianResults([]);
         fetchProject();
       } else {
         setAlert({ type: "error", title: "Error", message: data?.error || "Failed to invite" });
@@ -176,6 +184,51 @@ export default function ProducerProjectDetailsScreen() {
       setAlert({ type: "error", title: "Error", message: e.message });
     } finally {
       setInviting(false);
+    }
+  };
+
+  const handleSearchMusicians = async (query: string) => {
+    setMusicianSearch(query);
+    if (query.length < 2) { setMusicianResults([]); return; }
+    setSearchingMusicians(true);
+    try {
+      const { data } = await supabase.functions.invoke("manage-producer-network", {
+        body: { action: "search_musicians", query, limit: 10 },
+      });
+      setMusicianResults(data?.data || []);
+    } catch { setMusicianResults([]); }
+    finally { setSearchingMusicians(false); }
+  };
+
+  const handleWithdrawApplication = async (applicationId: string) => {
+    try {
+      const { data } = await supabase.functions.invoke("manage-producer-network", {
+        body: { action: "withdraw_application", application_id: applicationId },
+      });
+      if (data?.success) {
+        showTopToast({ type: "success", title: "Withdrawn", message: "Your application has been withdrawn." });
+        fetchProject();
+      } else {
+        setAlert({ type: "error", title: "Error", message: data?.error || "Failed to withdraw" });
+      }
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Error", message: e.message });
+    }
+  };
+
+  const handleRespondToInvite = async (inviteId: string, accept: boolean) => {
+    try {
+      const { data } = await supabase.functions.invoke("manage-producer-network", {
+        body: { action: accept ? "accept_invite" : "reject_invite", invite_id: inviteId },
+      });
+      if (data?.success) {
+        showTopToast({ type: "success", title: accept ? "Accepted" : "Declined", message: accept ? "You have joined this project!" : "Invite declined." });
+        fetchProject();
+      } else {
+        setAlert({ type: "error", title: "Error", message: data?.error || "Failed to respond" });
+      }
+    } catch (e: any) {
+      setAlert({ type: "error", title: "Error", message: e.message });
     }
   };
 
@@ -205,8 +258,10 @@ export default function ProducerProjectDetailsScreen() {
     );
   }
 
-  const openRoles = project.roles?.filter((r: any) => r.status === "open") || [];
+  const openRoles = project.roles?.filter((r: any) => r.filled_slots < r.max_slots) || [];
   const pendingApps = project.applications?.filter((a: any) => a.status === "pending") || [];
+  const myApplication = project.applications?.find((a: any) => a.applicant_id === userId);
+  const myInvite = project.invites?.find((i: any) => i.invitee_id === userId);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -267,11 +322,11 @@ export default function ProducerProjectDetailsScreen() {
                 <Text style={[styles.roleStatus, {
                   color: role.status === "filled" ? "#22c55e" : role.status === "open" ? colors.primary : colors.textSecondary
                 }]}>
-                  {role.status} {role.filled_by_name ? `• ${role.filled_by_name}` : ""}
+                  {role.status} {role.filled_by_name ? `â€¢ ${role.filled_by_name}` : ""}
                 </Text>
               </View>
               {!isOwner && role.status === "open" && (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[styles.applyRoleBtn, { borderColor: colors.primary }]}
                   onPress={() => { setApplyRoleId(role.id); setShowApplyModal(true); }}
                 >
@@ -288,18 +343,18 @@ export default function ProducerProjectDetailsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Actions</Text>
             <View style={styles.actionRow}>
               {project.status === "draft" && (
-                <TouchableOpacity style={[styles.actionBtn, { backgroundColor: "#22c55e" }]} onPress={handlePublish}>
+                <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: "#22c55e" }]} onPress={handlePublish}>
                   <Ionicons name="rocket" size={16} color="#fff" />
                   <Text style={styles.actionBtnText}>Publish</Text>
                 </TouchableOpacity>
               )}
               {project.status === "published" && (
-                <TouchableOpacity style={[styles.actionBtn, { backgroundColor: "#ef4444" }]} onPress={handleArchive}>
+                <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: "#ef4444" }]} onPress={handleArchive}>
                   <Ionicons name="archive" size={16} color="#fff" />
                   <Text style={styles.actionBtnText}>Archive</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.actionBtn, { backgroundColor: colors.primary }]}
                 onPress={() => setShowInviteModal(true)}
               >
@@ -319,26 +374,26 @@ export default function ProducerProjectDetailsScreen() {
             {pendingApps.map((app: any) => (
               <View key={app.id} style={[styles.appCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                 <CachedImage
-                  uri={app.applicant_avatar || "https://via.placeholder.com/40" }
+                  uri={app.applicant?.avatar_url || app.applicant_avatar || "https://via.placeholder.com/40" }
                   style={styles.appAvatar}
                 />
                 <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={[styles.appName, { color: colors.text }]}>{app.applicant_name}</Text>
+                  <Text style={[styles.appName, { color: colors.text }]}>{app.applicant?.full_name || app.applicant_name}</Text>
                   <Text style={[styles.appRole, { color: colors.textSecondary }]}>
                     Applied for: {app.role_title || "Unspecified role"}
                   </Text>
-                  {app.message && (
-                    <Text style={[styles.appMsg, { color: colors.textSecondary }]} numberOfLines={2}>{app.message}</Text>
+                  {(app.cover_message || app.message) && (
+                    <Text style={[styles.appMsg, { color: colors.textSecondary }]} numberOfLines={2}>{app.cover_message || app.message}</Text>
                   )}
                 </View>
                 <View style={styles.appActions}>
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     style={[styles.appActionBtn, { backgroundColor: "#22c55e" }]}
                     onPress={() => handleReviewApplication(app.id, "accepted")}
                   >
                     <Ionicons name="checkmark" size={18} color="#fff" />
                   </TouchableOpacity>
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     style={[styles.appActionBtn, { backgroundColor: "#ef4444" }]}
                     onPress={() => handleReviewApplication(app.id, "rejected")}
                   >
@@ -347,6 +402,64 @@ export default function ProducerProjectDetailsScreen() {
                 </View>
               </View>
             ))}
+          </View>
+        )}
+
+        {/* My Application Status (musician view) */}
+        {!isOwner && myApplication && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Application</Text>
+            <View style={[styles.roleCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.roleName, { color: colors.text }]}>
+                  Status: <Text style={{ color: myApplication.status === "accepted" ? "#22c55e" : myApplication.status === "rejected" ? "#ef4444" : "#f59e0b", textTransform: "capitalize" }}>{myApplication.status}</Text>
+                </Text>
+                {myApplication.cover_message && (
+                  <Text style={[styles.roleDesc, { color: colors.textSecondary }]} numberOfLines={2}>{myApplication.cover_message}</Text>
+                )}
+              </View>
+              {myApplication.status === "pending" && (
+                <TouchableOpacity activeOpacity={1}
+                  style={[styles.applyRoleBtn, { borderColor: "#ef4444" }]}
+                  onPress={() => handleWithdrawApplication(myApplication.id)}
+                >
+                  <Text style={{ color: "#ef4444", fontSize: moderateScale(12), fontWeight: "600" }}>Withdraw</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* Invite Response (musician view) */}
+        {!isOwner && myInvite && myInvite.status === "pending" && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>You're Invited!</Text>
+            <View style={[styles.appCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.appName, { color: colors.text }]}>
+                  {myInvite.message || "The producer has invited you to join this project."}
+                </Text>
+                {myInvite.expires_at && (
+                  <Text style={[styles.appRole, { color: colors.textSecondary }]}>
+                    Expires: {new Date(myInvite.expires_at).toLocaleDateString()}
+                  </Text>
+                )}
+              </View>
+              <View style={styles.appActions}>
+                <TouchableOpacity activeOpacity={1}
+                  style={[styles.appActionBtn, { backgroundColor: "#22c55e" }]}
+                  onPress={() => handleRespondToInvite(myInvite.id, true)}
+                >
+                  <Ionicons name="checkmark" size={18} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity activeOpacity={1}
+                  style={[styles.appActionBtn, { backgroundColor: "#ef4444" }]}
+                  onPress={() => handleRespondToInvite(myInvite.id, false)}
+                >
+                  <Ionicons name="close" size={18} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         )}
 
@@ -359,11 +472,34 @@ export default function ProducerProjectDetailsScreen() {
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Apply to Project</Text>
-              <TouchableOpacity onPress={() => setShowApplyModal(false)}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowApplyModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <Text style={[styles.inputLabel, { color: colors.text }]}>Message (optional)</Text>
+            {/* Role selector */}
+            {openRoles.length > 0 && (
+              <>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Select Role</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                  {openRoles.map((r: any) => (
+                    <TouchableOpacity activeOpacity={1}
+                      key={r.id}
+                      style={[
+                        styles.rolePill,
+                        { borderColor: applyRoleId === r.id ? colors.primary : colors.border,
+                          backgroundColor: applyRoleId === r.id ? colors.primary + "20" : "transparent" },
+                      ]}
+                      onPress={() => setApplyRoleId(applyRoleId === r.id ? null : r.id)}
+                    >
+                      <Text style={{ color: applyRoleId === r.id ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>
+                        {r.role_title || r.instrument || r.title}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+            <Text style={[styles.inputLabel, { color: colors.text }]}>Cover Message (optional)</Text>
             <TextInput
               style={[styles.input, styles.textArea, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
               placeholder="Introduce yourself..."
@@ -372,10 +508,10 @@ export default function ProducerProjectDetailsScreen() {
               onChangeText={setApplyMessage}
               multiline
             />
-            <TouchableOpacity
-              style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: applying ? 0.6 : 1 }]}
+            <TouchableOpacity activeOpacity={1}
+              style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: applying || !applyRoleId ? 0.6 : 1 }]}
               onPress={handleApply}
-              disabled={applying}
+              disabled={applying || !applyRoleId}
             >
               {applying ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Submit Application</Text>}
             </TouchableOpacity>
@@ -389,24 +525,53 @@ export default function ProducerProjectDetailsScreen() {
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite Musician</Text>
-              <TouchableOpacity onPress={() => setShowInviteModal(false)}>
+              <TouchableOpacity activeOpacity={1} onPress={() => { setShowInviteModal(false); setSelectedMusician(null); setMusicianSearch(""); setMusicianResults([]); }}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <Text style={[styles.inputLabel, { color: colors.text }]}>Musician User ID</Text>
-            <TextInput
-              style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
-              placeholder="Enter user ID"
-              placeholderTextColor={colors.textSecondary}
-              value={inviteeId}
-              onChangeText={setInviteeId}
-            />
+            <Text style={[styles.inputLabel, { color: colors.text }]}>Search Musician</Text>
+            {selectedMusician ? (
+              <View style={[styles.roleCard, { backgroundColor: colors.surface, borderColor: colors.primary, marginBottom: 12 }]}>
+                <CachedImage uri={selectedMusician.avatar_url || "https://via.placeholder.com/32"} style={{ width: 32, height: 32, borderRadius: 16, marginRight: 10 }} />
+                <Text style={[styles.roleName, { color: colors.text, flex: 1 }]}>{selectedMusician.full_name}</Text>
+                <TouchableOpacity activeOpacity={1} onPress={() => { setSelectedMusician(null); setMusicianSearch(""); }}>
+                  <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <TextInput
+                  style={[styles.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surface }]}
+                  placeholder="Search by name or email..."
+                  placeholderTextColor={colors.textSecondary}
+                  value={musicianSearch}
+                  onChangeText={handleSearchMusicians}
+                />
+                {searchingMusicians && <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 6 }} />}
+                {musicianResults.length > 0 && (
+                  <ScrollView style={{ maxHeight: 150, marginTop: 6 }}>
+                    {musicianResults.map((m: any) => (
+                      <TouchableOpacity activeOpacity={1} key={m.id}
+                        style={[styles.roleCard, { backgroundColor: colors.surface, borderColor: colors.border, marginBottom: 4 }]}
+                        onPress={() => { setSelectedMusician(m); setInviteeId(m.id); setMusicianResults([]); }}
+                      >
+                        <CachedImage uri={m.avatar_url || "https://via.placeholder.com/28"} style={{ width: 28, height: 28, borderRadius: 14, marginRight: 8 }} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.roleName, { color: colors.text }]}>{m.full_name}</Text>
+                          {m.role && <Text style={{ color: colors.textSecondary, fontSize: moderateScale(11) }}>{m.role}</Text>}
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
+              </>
+            )}
             {openRoles.length > 0 && (
               <>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>For Role (optional)</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
                   {openRoles.map((r: any) => (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={r.id}
                       style={[
                         styles.rolePill,
@@ -416,7 +581,7 @@ export default function ProducerProjectDetailsScreen() {
                       onPress={() => setInviteRoleId(inviteRoleId === r.id ? null : r.id)}
                     >
                       <Text style={{ color: inviteRoleId === r.id ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>
-                        {r.instrument || r.title}
+                        {r.role_title || r.instrument || r.title}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -432,10 +597,10 @@ export default function ProducerProjectDetailsScreen() {
               onChangeText={setInviteMessage}
               multiline
             />
-            <TouchableOpacity
-              style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: inviting ? 0.6 : 1 }]}
+            <TouchableOpacity activeOpacity={1}
+              style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: inviting || !selectedMusician ? 0.6 : 1 }]}
               onPress={handleInvite}
-              disabled={inviting}
+              disabled={inviting || !selectedMusician}
             >
               {inviting ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Send Invite</Text>}
             </TouchableOpacity>

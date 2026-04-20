@@ -589,11 +589,11 @@ export default function GroupDetailsScreen() {
             <Text
               style={[styles.headerLocation, { color: colors.textSecondary }]}
             >
-              {group?.genre || "Genre N/A"} •{" "}
+              {group?.genre || "Genre N/A"} â€¢{" "}
               {group?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(group?.latitude, group?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
                 onPress={handleNavigateToGroup}
               >
@@ -864,7 +864,7 @@ export default function GroupDetailsScreen() {
                                 ]}
                               >
                                 {memberInstrument}
-                                {memberInstrument && memberRole ? " • " : ""}
+                                {memberInstrument && memberRole ? " â€¢ " : ""}
                                 {memberRole}
                               </Text>
                             )}
@@ -994,7 +994,7 @@ export default function GroupDetailsScreen() {
                         <Text
                           style={{ color: colors.textSecondary, marginBottom: 8 }}
                         >
-                          Payout: ₱{Number(app.gig?.budget || 0).toLocaleString()}
+                          Payout: â‚±{Number(app.gig?.budget || 0).toLocaleString()}
                         </Text>
                         <Text style={{ color: colors.textSecondary }}>
                           Applied on:{" "}

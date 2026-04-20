@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
     Platform,
     Pressable,
     ScrollView,
@@ -13,12 +14,26 @@ import {
 } from "react-native";
 import { PH_MUSIC_GROUP_TYPES } from "../constants/groupTypes";
 import { useAuth } from "../context/AuthContext";
+import { showTopToast } from "../context/TopToastContext";
 import { useTheme } from "../context/ThemeContext";
+import { supabase } from "../../lib/supabase";
 import { getGigApplicationDeadlineInfo } from "../utils/gigApplication";
 import CachedImage from "./CachedImage";
 import PagerView from "./PagerView";
 
 const debugLog = (..._args: unknown[]) => { };
+
+const getFavoriteTargetType = (
+  listingType?: string,
+): "group" | "studio" | "gig" | "profile" | "project" | null => {
+  const normalized = (listingType || "").toLowerCase();
+  if (normalized === "group") return "group";
+  if (normalized === "artist" || normalized === "musician") return "profile";
+  if (normalized === "studio" || normalized === "venue") return "studio";
+  if (normalized === "gig") return "gig";
+  if (normalized === "project" || normalized === "producer project") return "project";
+  return null;
+};
 
 interface ListingCardProps {
   item: any;
@@ -29,6 +44,7 @@ interface ListingCardProps {
   style?: any;
   hasGroups?: boolean;
   showGigSummary?: boolean;
+  actionSlot?: React.ReactNode;
 }
 
 const ListingCard: React.FC<ListingCardProps> = ({
@@ -40,10 +56,12 @@ const ListingCard: React.FC<ListingCardProps> = ({
   style,
   hasGroups,
   showGigSummary = true,
+  actionSlot,
 }) => {
   const { colors, isDark } = useTheme();
   const { userRole, userId } = useAuth(); // To avoid showing warning to owners
-  const [isLiked, setIsLiked] = useState(false);
+  const [isBookmarked, setIsBookmarked] = useState(false);
+  const [bookmarkBusy, setBookmarkBusy] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const horizontalWebScrollRef = useRef<ScrollView | null>(null);
   const verticalWebScrollRef = useRef<ScrollView | null>(null);
@@ -56,6 +74,11 @@ const ListingCard: React.FC<ListingCardProps> = ({
       userRole === "venue-owner" &&
       (item.type === "Group" || item.type === "Artist"),
     [item.type, userRole],
+  );
+
+  const favoriteTargetType = useMemo(
+    () => getFavoriteTargetType(item?.type),
+    [item?.type],
   );
 
   // Group Warning Logic
@@ -193,10 +216,10 @@ const ListingCard: React.FC<ListingCardProps> = ({
       nextBadgeLabel = "Artist";
       nextBadgeColor = "#EC4899";
     } else if (normalizedType === "Production") {
-      nextBadgeLabel = "Production";
+      nextBadgeLabel = "Production Team";
       nextBadgeColor = "#F97316";
     } else if (normalizedType === "Project") {
-      nextBadgeLabel = "Project";
+      nextBadgeLabel = "Producer Project";
       nextBadgeColor = "#6366F1";
     } else {
       nextBadgeLabel = normalizedType;
@@ -217,9 +240,104 @@ const ListingCard: React.FC<ListingCardProps> = ({
     }
   };
 
-  const toggleLike = useCallback(() => {
-    setIsLiked((prev) => !prev);
-  }, []);
+  useEffect(() => {
+    let isMounted = true;
+
+    const syncBookmarkState = async () => {
+      if (!favoriteTargetType || !item?.id || !userId) {
+        if (isMounted) {
+          setIsBookmarked(false);
+        }
+        return;
+      }
+
+      try {
+        const { count, error } = await supabase
+          .from("favorites")
+          .select("id", { count: "exact", head: true })
+          .eq(`${favoriteTargetType}_id`, item.id)
+          .eq("user_id", userId);
+
+        if (error) throw error;
+        if (isMounted) {
+          setIsBookmarked((count || 0) > 0);
+        }
+      } catch {
+        if (isMounted) {
+          setIsBookmarked(false);
+        }
+      }
+    };
+
+    void syncBookmarkState();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [favoriteTargetType, item?.id, userId]);
+
+  const handleBookmarkAction = useCallback(
+    async (e: any) => {
+      e?.stopPropagation?.();
+
+      if (bookmarkBusy) {
+        return;
+      }
+
+      if (!favoriteTargetType || !item?.id) {
+        showTopToast({
+          type: "info",
+          title: "Bookmark unavailable",
+          message: "Bookmarking is currently available for artists, groups, studios, gigs, and producer projects.",
+        });
+        return;
+      }
+
+      if (!userId) {
+        showTopToast({
+          type: "warning",
+          title: "Login required",
+          message: "Please sign in to bookmark listings.",
+        });
+        return;
+      }
+
+      const previousState = isBookmarked;
+      const optimisticState = !previousState;
+
+      setBookmarkBusy(true);
+      setIsBookmarked(optimisticState);
+
+      try {
+        const { data, error } = await supabase.functions.invoke("manage-details", {
+          body: {
+            action: "toggle_favorite",
+            type: favoriteTargetType,
+            id: item.id,
+            userId,
+          },
+        });
+
+        if (error) throw error;
+
+        setIsBookmarked(
+          typeof data?.is_favorited === "boolean"
+            ? data.is_favorited
+            : optimisticState,
+        );
+      } catch (error: any) {
+        setIsBookmarked(previousState);
+        showTopToast({
+          type: "error",
+          title: "Bookmark failed",
+          message: error?.message || "Unable to update bookmark right now.",
+        });
+      } finally {
+        setBookmarkBusy(false);
+      }
+    },
+    [bookmarkBusy, favoriteTargetType, isBookmarked, item?.id, userId],
+  );
 
   const handleInviteAction = useCallback(
     (e: any) => {
@@ -513,13 +631,22 @@ const ListingCard: React.FC<ListingCardProps> = ({
               </TouchableOpacity>
             )}
 
-            {/* Like Button Glass */}
-            <TouchableOpacity activeOpacity={1} style={styles.glassIconBtn} onPress={toggleLike}>
-              <Ionicons
-                name={isLiked ? "heart" : "heart-outline"}
-                size={20}
-                color={isLiked ? "#EF4444" : "#FFF"}
-              />
+            {/* Bookmark Button Glass */}
+            <TouchableOpacity
+              activeOpacity={1}
+              disabled={bookmarkBusy}
+              style={styles.glassIconBtn}
+              onPress={handleBookmarkAction}
+            >
+              {bookmarkBusy ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Ionicons
+                  name={isBookmarked ? "bookmark" : "bookmark-outline"}
+                  size={20}
+                  color={isBookmarked ? colors.primary : "#FFF"}
+                />
+              )}
             </TouchableOpacity>
           </View>
 
@@ -997,12 +1124,21 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   <Ionicons name="chatbubble-ellipses" size={18} color="#FFF" />
                 </TouchableOpacity>
               )}
-              <TouchableOpacity activeOpacity={1} style={styles.iconBtn} onPress={toggleLike}>
-                <Ionicons
-                  name={isLiked ? "heart" : "heart-outline"}
-                  size={20}
-                  color={isLiked ? "#EF4444" : "#000"}
-                />
+              <TouchableOpacity
+                activeOpacity={1}
+                disabled={bookmarkBusy}
+                style={styles.iconBtn}
+                onPress={handleBookmarkAction}
+              >
+                {bookmarkBusy ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons
+                    name={isBookmarked ? "bookmark" : "bookmark-outline"}
+                    size={20}
+                    color={isBookmarked ? colors.primary : "#0F172A"}
+                  />
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -1011,23 +1147,8 @@ const ListingCard: React.FC<ListingCardProps> = ({
         {/* Info Section */}
         <View style={styles.info}>
           {/* Type & Pax Badges (Moved from Image Overlay) */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "flex-start",
-              marginBottom: 6,
-            }}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                flexWrap: "wrap",
-                flex: 1,
-                paddingRight: 8,
-              }}
-            >
+          <View style={styles.metaHeaderRow}>
+            <View style={styles.metaHeaderLeft}>
               <View
                 style={[
                   styles.tagBadge,
@@ -1052,6 +1173,26 @@ const ListingCard: React.FC<ListingCardProps> = ({
                   </Text>
                 </View>
               )}
+
+              {item.rating > 0 && (item.review_count || 0) > 0 && (
+                <View style={styles.ratingInlineRow}>
+                  <Ionicons name="star" size={14} color="#FBBF24" />
+                  <Text style={[styles.ratingText, { color: colors.textSecondary }]}>
+                    {item.rating.toFixed(1)}
+                  </Text>
+                </View>
+              )}
+
+            </View>
+
+            {actionSlot ? (
+              <View style={styles.metaHeaderRight}>
+                {actionSlot}
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.metaBadgeFlow}>
               {/* Special Schedule Badge */}
               {item.has_special_dates &&
                 (item.type === "Studio" || item.hourly_rate) && (
@@ -1231,14 +1372,6 @@ const ListingCard: React.FC<ListingCardProps> = ({
                     </Text>
                   </View>
                 )}
-            </View>
-
-            {item.rating > 0 && (item.review_count || 0) > 0 && (
-              <View style={styles.ratingBadge}>
-                <Ionicons name="star" size={12} color="#FBBF24" />
-                <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
-              </View>
-            )}
           </View>
 
           <View>
@@ -1375,21 +1508,19 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: 20,
     marginRight: 0,
-    borderRadius: 24,
+    borderRadius: 26,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.05)",
-    // Modern Shadow
+    borderColor: "rgba(15,23,42,0.08)",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 }, // Slightly softer
-    shadowOpacity: 0.1, // Reduced opacity
-    shadowRadius: 10,
-    elevation: 4, // Reduced elevation for Android
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 5,
   },
   cardContent: {
-    // flex: 1 removed to allow auto-height for vertical cards
-    borderRadius: 24, // Matches card
-    overflow: "hidden", // Clips content
+    borderRadius: 26,
+    overflow: "hidden",
     position: "relative",
   },
   // --- Immersive Styles ---
@@ -1446,15 +1577,19 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontFamily: "Poppins_600SemiBold",
     fontSize: 11,
+    lineHeight: 13,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   glassIconBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#111827", // Solid heavy dark for button too
+    backgroundColor: "#111827",
     alignItems: "center",
     justifyContent: "center",
-    // Removed border
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
   },
   tagBadge: {
     alignSelf: "flex-start",
@@ -1463,6 +1598,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
     marginBottom: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
   // Smaller variant used in vertical list cards
   tagBadgeSmall: {
@@ -1475,6 +1612,9 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 10,
     fontFamily: "Poppins_600SemiBold",
+    lineHeight: 12,
+    includeFontPadding: false,
+    textAlignVertical: "center",
     textTransform: "uppercase",
   },
 
@@ -1510,27 +1650,29 @@ const styles = StyleSheet.create({
   },
   topActions: {
     position: "absolute",
-    top: 12,
-    left: 12,
-    right: 12,
+    top: 14,
+    left: 14,
+    right: 14,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     zIndex: 10,
-    gap: 12, // Added gap to separate rating and heart
+    gap: 10,
   },
   ratingBadge: {
-    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    backgroundColor: "rgba(255, 255, 255, 0.97)",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 20,
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.6)",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
     elevation: 2,
   },
   ratingText: {
@@ -1539,21 +1681,60 @@ const styles = StyleSheet.create({
     color: "#1F2937",
   },
   iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "rgba(255, 255, 255, 0.95)",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.24)",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
     elevation: 2,
   },
   info: {
-    padding: 16,
-    gap: 8, // Better separation
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
+    gap: 10,
+  },
+  metaHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 6,
+  },
+  metaHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    flex: 1,
+    minWidth: 0,
+  },
+  metaHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 8,
+    flexShrink: 0,
+  },
+  metaBadgeFlow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  ratingInlineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    minHeight: 26,
+    marginLeft: 2,
   },
   title: {
     fontFamily: "Poppins_600SemiBold",
@@ -1577,10 +1758,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginTop: 10, // More separation for price
-    paddingTop: 10,
+    marginTop: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
-    borderColor: "rgba(0,0,0,0.05)", // Subtle separator
+    borderColor: "rgba(15,23,42,0.08)",
   },
   price: {
     fontFamily: "Poppins_600SemiBold",

@@ -64,7 +64,7 @@ export default function ShopScreen() {
 
   const formatPrice = (price: number | null) => {
     if (!price) return "Free";
-    return `₱${price.toLocaleString()}`;
+    return `â‚±${price.toLocaleString()}`;
   };
 
   if (isGuest) {
@@ -97,7 +97,7 @@ export default function ShopScreen() {
 
       {/* Categories */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRow} contentContainerStyle={{ paddingHorizontal: 16 }}>
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={1}
           style={[styles.categoryPill, {
             borderColor: !category ? colors.primary : colors.border,
             backgroundColor: !category ? colors.primary + "20" : "transparent",
@@ -107,7 +107,7 @@ export default function ShopScreen() {
           <Text style={{ color: !category ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>All</Text>
         </TouchableOpacity>
         {categories.map((c) => (
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             key={c}
             style={[styles.categoryPill, {
               borderColor: category === c ? colors.primary : colors.border,
@@ -133,7 +133,7 @@ export default function ShopScreen() {
         ) : products.length > 0 ? (
           <View style={styles.grid}>
             {products.map((product) => (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 key={product.id}
                 style={[styles.productCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
                 onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}

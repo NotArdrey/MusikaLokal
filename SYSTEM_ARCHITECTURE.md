@@ -151,13 +151,14 @@ Primary feature areas include:
 - authentication and onboarding: [mobile/app/index.tsx](mobile/app/index.tsx), [mobile/app/signup.tsx](mobile/app/signup.tsx), [mobile/app/forget_password.tsx](mobile/app/forget_password.tsx), [mobile/app/change_password.tsx](mobile/app/change_password.tsx)
 - discovery and home: [mobile/app/home.tsx](mobile/app/home.tsx), [mobile/app/feed.tsx](mobile/app/feed.tsx), [mobile/app/ai_suggestions.tsx](mobile/app/ai_suggestions.tsx)
 - listings and ownership flows: [mobile/app/add_gig.tsx](mobile/app/add_gig.tsx), [mobile/app/add_studio.tsx](mobile/app/add_studio.tsx), [mobile/app/add_group.tsx](mobile/app/add_group.tsx), [mobile/app/manage_gig.tsx](mobile/app/manage_gig.tsx), [mobile/app/manage_studio.tsx](mobile/app/manage_studio.tsx), [mobile/app/manage_group.tsx](mobile/app/manage_group.tsx)
-- bookings and wallet: [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/wallet.tsx](mobile/app/wallet.tsx), [mobile/app/payment-result.tsx](mobile/app/payment-result.tsx)
-- messaging and notifications: [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/notifications.tsx](mobile/app/notifications.tsx)
+- bookings and wallet: [mobile/app/bookings.tsx](mobile/app/bookings.tsx), [mobile/app/wallet.tsx](mobile/app/wallet.tsx), [mobile/app/payment-result.tsx](mobile/app/payment-result.tsx). [mobile/app/bookings.tsx](mobile/app/bookings.tsx) also serves as a role-aware activity inbox for producer project applications, sent invites, and commercial deals, with open deals folded into Pending and closed deals folded into History. Match cards are navigable (tap to open project details) and include inline action buttons (accept/reject/withdraw/decline).
+- messaging and notifications: [mobile/app/chat.tsx](mobile/app/chat.tsx), [mobile/app/notifications.tsx](mobile/app/notifications.tsx). Chat route accepts `dealId` and `producerProjectId` params for context-scoped conversations.
+- commercial deals: [mobile/app/deal_details.tsx](mobile/app/deal_details.tsx) — deal negotiation with accept/reject/counter/dispute actions, settlement recording modal (gross revenue input → split calculation), and "Message" button for contextual deal chat. [mobile/app/production_team.tsx](mobile/app/production_team.tsx) — production team management with "Propose Venue Deal" flow (searches venue owner by email, creates partnership proposal with revenue split).
 - profile and policy screens: [mobile/app/profile.tsx](mobile/app/profile.tsx), [mobile/app/settings.tsx](mobile/app/settings.tsx), [mobile/app/account_details.tsx](mobile/app/account_details.tsx), [mobile/app/identity_verification.tsx](mobile/app/identity_verification.tsx)
-- Phase 2 producer network: [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx), [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx)
+- Phase 2 producer network: [mobile/app/producer_projects.tsx](mobile/app/producer_projects.tsx), [mobile/app/producer_project_details.tsx](mobile/app/producer_project_details.tsx). Project details now include role selector in apply modal, musician search-based invite flow, withdraw application, and accept/decline invite with expiry display.
 - Phase 2 social feed: [mobile/app/post_details.tsx](mobile/app/post_details.tsx)
 - Phase 2 playlists: [mobile/app/create_playlist.tsx](mobile/app/create_playlist.tsx), [mobile/app/playlist_details.tsx](mobile/app/playlist_details.tsx)
-- Phase 2 marketplace: [mobile/app/seller_hub.tsx](mobile/app/seller_hub.tsx), [mobile/app/product_details.tsx](mobile/app/product_details.tsx), [mobile/app/orders.tsx](mobile/app/orders.tsx)
+- Phase 2 marketplace: [mobile/app/marketplace.tsx](mobile/app/marketplace.tsx), [mobile/app/product_details.tsx](mobile/app/product_details.tsx). Legacy surfaces such as [mobile/app/seller_hub.tsx](mobile/app/seller_hub.tsx) and [mobile/app/orders.tsx](mobile/app/orders.tsx) still exist in the repo, but they are no longer the primary mobile marketplace path.
 
 ### Mobile composition model
 
@@ -210,6 +211,16 @@ Supporting utilities:
 - [mobile/src/utils/screenCache.ts](mobile/src/utils/screenCache.ts): screen cache used by chat and home flows
 - [mobile/src/utils/offlineInstrumentRecommender.ts](mobile/src/utils/offlineInstrumentRecommender.ts): local fallback recommender
 
+### Mobile bookings aggregation architecture
+
+[mobile/app/bookings.tsx](mobile/app/bookings.tsx) is no longer just a booking-status screen. It is a role-aware activity surface that merges multiple backend domains into one shell:
+
+- standard studio booking and gig application lifecycle items
+- producer-network inbox items from [mobile/supabase/functions/manage-producer-network](mobile/supabase/functions/manage-producer-network), exposed as producer-only `Applications` and `Sent Invites` tabs
+- commercial agreement items from [mobile/supabase/functions/manage-deals](mobile/supabase/functions/manage-deals), folded into `Pending` while action is still required and into `History` once closed
+
+Architecturally, commercial deals are still a distinct workflow for venue partnerships and recording deals, but they no longer have their own tab. The current mobile client uses the bookings screen as a unified activity container where `Pending` represents action-needed items, `Upcoming` / `Ongoing` / `Review` remain the live booking workflow, and `History` holds closed activity. One current nuance in the implementation is that approved gig applications are still mixed into `Upcoming` and `Ongoing`, so the screen remains broader than a pure bookings-only surface.
+
 ### Mobile chat architecture
 
 Chat is implemented directly on Supabase tables and Realtime subscriptions.
@@ -225,6 +236,8 @@ Patterns used:
 - group conversation bootstrapping through database-backed helpers referenced from the hook
 - realtime channels for conversation-list refresh and per-conversation message streams
 - local screen caching to reduce remount cost
+- contextual conversations: conversations table supports `deal_id` (FK→venue_partnership_deals) and `producer_project_id` (FK→producer_projects) columns for context-scoped 1-on-1 chats. `getOrCreateConversation` accepts `dealId` and `producerProjectId` options and performs context-aware lookup so deals/projects get dedicated conversations rather than reusing generic 1-on-1 threads.
+- deal workflow system messages: edge functions insert `message_type: "system"` messages on deal creation, acceptance, and settlement to provide an audit trail within the conversation.
 
 ### Mobile home and recommendation architecture
 
@@ -244,7 +257,7 @@ The home screen landscape changed in Phase 2. There are now two distinct home-ar
 
 The feed data is served by the `manage-social-feed` Edge Function (actions: `get_feed`, `create_post`, `react_to_post`, `remove_reaction`, `follow`, `unfollow`).
 
-**home.tsx — marketplace discovery hub**
+**home.tsx — discovery and search hub**
 
 [mobile/app/home.tsx](mobile/app/home.tsx) remains the Explore / discovery entry point. It combines:
 
@@ -255,6 +268,22 @@ The feed data is served by the `manage-social-feed` Edge Function (actions: `get
 - cached results for fast remount behavior
 
 This is not a purely backend-ranked feed. The client participates in recommendation shaping.
+
+### Mobile marketplace architecture
+
+The current mobile marketplace is a chat-first classifieds flow rather than a native checkout flow.
+
+Current behavior:
+
+- sellers manage listings from [mobile/app/marketplace.tsx](mobile/app/marketplace.tsx) through Browse and Sell tabs
+- listing creation supports direct photo uploads through [mobile/src/components/ImageUploader.tsx](mobile/src/components/ImageUploader.tsx), with thumbnail selection before publish
+- buyers open [mobile/app/product_details.tsx](mobile/app/product_details.tsx) and contact sellers through [mobile/app/chat.tsx](mobile/app/chat.tsx) instead of placing an in-app order
+- sellers control a lightweight Facebook Marketplace-style lifecycle using `draft`, `active`, and `sold_out` status transitions, including mark-sold and relist actions
+
+Important system nuance:
+
+- [mobile/supabase/functions/manage-marketplace](mobile/supabase/functions/manage-marketplace) and the marketplace schema still support richer commerce capabilities such as orders, shipping profiles, fulfillments, and entitlements
+- the current mobile client intentionally uses only the listing, media, browse, seller-inventory, and sold-state parts of that backend contract, while negotiation and conversion happen in chat
 
 ### Mobile-specific platform features
 
@@ -398,10 +427,11 @@ Important domains:
 - verification and onboarding: [mobile/supabase/functions/create-didit-session](mobile/supabase/functions/create-didit-session), [mobile/supabase/functions/create-address-verification](mobile/supabase/functions/create-address-verification), [mobile/supabase/functions/verify-identity](mobile/supabase/functions/verify-identity), [mobile/supabase/functions/didit-webhook](mobile/supabase/functions/didit-webhook), [mobile/supabase/functions/verification-redirect](mobile/supabase/functions/verification-redirect), [mobile/supabase/functions/login-redirect](mobile/supabase/functions/login-redirect), [mobile/supabase/functions/create-unverified-user](mobile/supabase/functions/create-unverified-user)
 - AI and recommendation: [mobile/supabase/functions/home-feed](mobile/supabase/functions/home-feed), [mobile/supabase/functions/instrument-suggestions](mobile/supabase/functions/instrument-suggestions), [mobile/supabase/functions/upload-safety-screen](mobile/supabase/functions/upload-safety-screen)
 - storage lifecycle: [mobile/supabase/functions/upload-file](mobile/supabase/functions/upload-file), [mobile/supabase/functions/setup-storage](mobile/supabase/functions/setup-storage), [mobile/supabase/functions/delete-studio-with-storage](mobile/supabase/functions/delete-studio-with-storage)
-- Phase 2 producer network: [mobile/supabase/functions/manage-producer-network](mobile/supabase/functions/manage-producer-network) — create/publish/archive projects, apply/review/withdraw applications, invite musicians, save talent, browse projects and match scores
+- Phase 2 producer network: [mobile/supabase/functions/manage-producer-network](mobile/supabase/functions/manage-producer-network) — create/publish/archive projects, apply/review/withdraw applications, invite musicians (with search_musicians discovery), accept/reject invites with expiry enforcement, save talent, browse projects and match scores. Slot acceptance uses atomic `increment_role_filled_slot` RPC with `FOR UPDATE` locking. Invite rejection and application withdrawal now notify the other party. Applications use `cover_message` (not `message`) as the payload field.
+- Phase 2 commercial deals: [mobile/supabase/functions/manage-deals](mobile/supabase/functions/manage-deals) — venue partnership and recording deal lifecycle (create, counter, accept, reject, settle, dispute), production team CRUD, settlement calculation via `calculate_deal_settlement` RPC. Deal creation, acceptance, and settlement insert system messages into contextual deal conversations via `insertDealSystemMessage` helper.
 - Phase 2 social feed: [mobile/supabase/functions/manage-social-feed](mobile/supabase/functions/manage-social-feed) — follow/unfollow, create/update/delete posts, get_feed (public + following), post reactions, comments, reporting, user post history
 - Phase 2 playlists and radio: [mobile/supabase/functions/manage-playlists](mobile/supabase/functions/manage-playlists) — CRUD playlists, manage items and teaser assets, external links, record play events, CRUD radio stations and time-slot schedules
-- Phase 2 marketplace: [mobile/supabase/functions/manage-marketplace](mobile/supabase/functions/manage-marketplace) — create/publish/update products, browse products, create/update orders, order status lifecycle, fulfillments, shipping profiles, seller dashboard metrics
+- Phase 2 marketplace: [mobile/supabase/functions/manage-marketplace](mobile/supabase/functions/manage-marketplace) — create/publish/update products, attach and normalize product media, browse products, fetch product details, list seller inventory, mark products sold, relist products, and still expose order, fulfillment, and shipping actions for richer commerce clients
 
 ### Web-only administrative backend additions
 
@@ -439,6 +469,11 @@ The backend does not read only from raw tables. It also relies on computed views
 - conversations_display_projection
 
 These views allow the UI to fetch presentation-ready aggregates without duplicating every join in the client.
+
+Marketplace-specific examples now also include:
+
+- products_with_summary
+- orders_with_summary
 
 ## 8. Data Architecture
 
@@ -502,7 +537,7 @@ This domain handles booking lifecycle, revenue collection, balance tracking, and
 
 ### Messaging and notification domain
 
-- conversations
+- conversations (includes `deal_id` FK→venue_partnership_deals, `producer_project_id` FK→producer_projects for context-scoped conversations)
 - conversation_participants
 - messages
 - message_reactions
@@ -561,13 +596,13 @@ This domain powers the teaser playlist product and the radio station scheduling 
 - products
 - product_variants
 - product_media
-- marketplace_orders
+- orders
 - order_items
 - order_fulfillments
 - shipping_profiles
-- digital_entitlements
+- user_entitlements
 
-This domain powers the merchandise and digital-drop commerce layer. Physical products have variant, stock, and shipping profile support. Digital products generate entitlements for gated-content access.
+This domain supports a broader merchandise and digital-drop commerce schema, but the current mobile client uses it as a lighter chat-first listings system. Sellers publish photo-backed listings, buyers message sellers directly, and seller-side lifecycle is currently driven by product statuses such as `draft`, `active`, and `sold_out`. Order, shipping, fulfillment, and entitlement tables remain available for richer commerce flows and alternate clients.
 
 ## 9. End-to-End Flow Architecture
 
@@ -594,6 +629,7 @@ Typical examples:
 - profile fetch and mutation from account pages invoke manage-profile
 - detail pages invoke manage-details for enriched listing payloads and favorite behavior
 - chat hooks read and write conversations directly, then subscribe to Realtime channels
+- marketplace listing creation, seller inventory refresh, and sold or relist actions from [mobile/app/marketplace.tsx](mobile/app/marketplace.tsx) and [mobile/app/product_details.tsx](mobile/app/product_details.tsx) invoke `manage-marketplace`, while buyer conversion continues in [mobile/app/chat.tsx](mobile/app/chat.tsx) instead of `create_order`
 
 ## 9.2 Admin flow
 
@@ -686,6 +722,6 @@ Key tables: `playlists`, `playlist_items`, `playlist_teaser_assets`, `playlist_e
 
 **Workstream D — Merchandise and Digital Marketplace** (`manage-marketplace`)
 
-Sellers list physical merchandise and digital drops with variants, limited-edition flags, and per-product media. Buyers place orders through a wallet-backed checkout flow. Orders proceed through a fulfillment and shipping profile lifecycle. Digital purchases generate entitlements for gated content. A seller dashboard aggregates revenue and order metrics.
+Phase 2 introduced a general marketplace backend with products, variants, media, orders, shipping, and entitlements. The current mobile client now consumes that backend as a lighter Facebook Marketplace-style flow: sellers create photo-backed listings, buyers message sellers directly, and sellers manage publish, sold, and relist states from the mobile UI. Richer order and fulfillment capabilities remain in the backend contract for future or alternate clients.
 
-Key tables: `products`, `product_variants`, `product_media`, `marketplace_orders`, `order_items`, `order_fulfillments`, `shipping_profiles`, `digital_entitlements`
+Key tables: `products`, `product_variants`, `product_media`, `orders`, `order_items`, `order_fulfillments`, `shipping_profiles`, `user_entitlements`

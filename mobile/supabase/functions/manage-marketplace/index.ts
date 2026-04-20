@@ -14,6 +14,58 @@ function jsonResponse(body: any, status = 200) {
   });
 }
 
+function toNumber(value: unknown): number | null {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : null;
+}
+
+function normalizeProductRecord(product: any) {
+  if (!product) return product;
+
+  const basePrice = toNumber(product.price ?? product.base_price) ?? 0;
+  const coverImageUrl = typeof product?.cover_image_url === "string" && product.cover_image_url.trim().length > 0
+    ? product.cover_image_url
+    : typeof product?.primary_image === "string" && product.primary_image.trim().length > 0
+      ? product.primary_image
+      : null;
+
+  return {
+    ...product,
+    price: basePrice,
+    base_price: basePrice,
+    cover_image_url: coverImageUrl,
+    primary_image: coverImageUrl,
+  };
+}
+
+function normalizeVariantRecord(variant: any, fallbackPrice: number) {
+  if (!variant) return variant;
+
+  const variantPrice = toNumber(variant.price ?? variant.price_override) ?? fallbackPrice;
+
+  return {
+    ...variant,
+    label: variant.label ?? variant.variant_label ?? variant.sku ?? null,
+    price: variantPrice,
+    stock_qty: variant.stock_qty ?? variant.stock_quantity ?? null,
+  };
+}
+
+function normalizeMediaRecord(media: any) {
+  if (!media) return media;
+
+  const url = typeof media?.url === "string" && media.url.trim().length > 0
+    ? media.url
+    : typeof media?.storage_path === "string" && media.storage_path.trim().length > 0
+      ? media.storage_path
+      : null;
+
+  return {
+    ...media,
+    url,
+  };
+}
+
 function extractAccessToken(authHeader: string): string | null {
   const trimmed = (authHeader || "").trim();
   if (!trimmed) return null;
@@ -115,15 +167,15 @@ Deno.serve(async (req: Request) => {
         const mediaRows = media.map((m: any, i: number) => ({
           product_id: product.id,
           media_type: m.media_type || "image",
-          storage_path: m.storage_path,
+          storage_path: m.storage_path || m.url,
           mime_type: m.mime_type || null,
           display_order: i,
-          is_primary: i === 0,
+          is_primary: m.is_primary === true || i === 0,
         }));
         await supabaseAdmin.from("product_media").insert(mediaRows);
       }
 
-      return jsonResponse({ success: true, data: product });
+      return jsonResponse({ success: true, data: normalizeProductRecord(product) });
     }
 
     // ── update_product ──────────────────────────────────────────────
@@ -154,7 +206,7 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+      return jsonResponse({ success: true, data: normalizeProductRecord(data) });
     }
 
     // ── publish_product ─────────────────────────────────────────────
@@ -180,7 +232,63 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+      return jsonResponse({ success: true, data: normalizeProductRecord(data) });
+    }
+
+    // ── mark_product_sold ──────────────────────────────────────────
+    if (action === "mark_product_sold") {
+      const { product_id } = params;
+      if (!product_id) return jsonResponse({ error: "product_id is required" }, 400);
+
+      const { data: prod } = await supabaseAdmin
+        .from("products")
+        .select("seller_id, status")
+        .eq("id", product_id)
+        .single();
+
+      if (!prod) return jsonResponse({ error: "Product not found" }, 404);
+      if (prod.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (prod.status !== "active") {
+        return jsonResponse({ error: "Only live products can be marked sold" }, 400);
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from("products")
+        .update({ status: "sold_out" })
+        .eq("id", product_id)
+        .select()
+        .single();
+
+      if (error) return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ success: true, data: normalizeProductRecord(data) });
+    }
+
+    // ── relist_product ─────────────────────────────────────────────
+    if (action === "relist_product") {
+      const { product_id } = params;
+      if (!product_id) return jsonResponse({ error: "product_id is required" }, 400);
+
+      const { data: prod } = await supabaseAdmin
+        .from("products")
+        .select("seller_id, status")
+        .eq("id", product_id)
+        .single();
+
+      if (!prod) return jsonResponse({ error: "Product not found" }, 404);
+      if (prod.seller_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (!["sold_out", "archived"].includes(prod.status)) {
+        return jsonResponse({ error: "Only sold or archived products can be relisted" }, 400);
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from("products")
+        .update({ status: "active" })
+        .eq("id", product_id)
+        .select()
+        .single();
+
+      if (error) return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ success: true, data: normalizeProductRecord(data) });
     }
 
     // ── get_product_details ─────────────────────────────────────────
@@ -213,9 +321,17 @@ Deno.serve(async (req: Request) => {
         .select("*")
         .eq("seller_id", product.seller_id);
 
+      const normalizedProduct = normalizeProductRecord(product);
+      const fallbackPrice = normalizedProduct?.price ?? 0;
+
       return jsonResponse({
         success: true,
-        data: { ...product, variants: variants || [], media: media || [], shipping_profiles: shipping || [] },
+        data: {
+          ...normalizedProduct,
+          variants: (variants || []).map((variant: any) => normalizeVariantRecord(variant, fallbackPrice)),
+          media: (media || []).map((item: any) => normalizeMediaRecord(item)),
+          shipping_profiles: shipping || [],
+        },
       });
     }
 
@@ -228,7 +344,7 @@ Deno.serve(async (req: Request) => {
         .order("created_at", { ascending: false });
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+      return jsonResponse({ success: true, data: (data || []).map((item: any) => normalizeProductRecord(item)) });
     }
 
     // ── browse_products (shop) ──────────────────────────────────────
@@ -251,7 +367,7 @@ Deno.serve(async (req: Request) => {
 
       const { data, error } = await query;
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+      return jsonResponse({ success: true, data: (data || []).map((item: any) => normalizeProductRecord(item)) });
     }
 
     // ── create_order (checkout) ─────────────────────────────────────

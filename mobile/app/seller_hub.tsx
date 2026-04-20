@@ -79,8 +79,8 @@ export default function SellerHubScreen() {
   const onRefresh = () => { setRefreshing(true); fetchData(); };
 
   const formatPrice = (price: number | null) => {
-    if (!price) return "₱0";
-    return `₱${price.toLocaleString()}`;
+    if (!price) return "â‚±0";
+    return `â‚±${price.toLocaleString()}`;
   };
 
   const handleAddProduct = async () => {
@@ -151,7 +151,7 @@ export default function SellerHubScreen() {
       {/* Tabs */}
       <View style={[styles.tabRow, { borderBottomWidth: 1, borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
         {(["dashboard", "products", "orders"] as SellerTab[]).map((t) => (
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             key={t}
             style={[styles.tab, tab === t && { borderBottomColor: colors.primary, borderBottomWidth: 2, borderBottomLeftRadius: 1, borderBottomRightRadius: 1 }]}
             onPress={() => setTab(t)}
@@ -211,7 +211,7 @@ export default function SellerHubScreen() {
             {/* Products */}
             {tab === "products" && (
               <>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[styles.addBtn, { backgroundColor: colors.primary }]}
                   onPress={() => setShowAddProduct(true)}
                 >
@@ -220,7 +220,7 @@ export default function SellerHubScreen() {
                 </TouchableOpacity>
                 {products.length > 0 ? (
                   products.map((p) => (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={p.id}
                       style={[styles.productCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
                       onPress={() => router.push({ pathname: "/product_details", params: { product_id: p.id } })}
@@ -248,7 +248,7 @@ export default function SellerHubScreen() {
                           </Text>
                         </View>
                         {p.status === "draft" && (
-                          <TouchableOpacity
+                          <TouchableOpacity activeOpacity={1}
                             style={{ marginTop: 6 }}
                             onPress={() => handlePublishProduct(p.id)}
                           >
@@ -279,7 +279,7 @@ export default function SellerHubScreen() {
                       </View>
                     </View>
                     <Text style={[styles.orderBuyer, { color: colors.textSecondary }]}>
-                      {o.buyer_name || "Buyer"} • {new Date(o.created_at).toLocaleDateString()}
+                      {o.buyer_name || "Buyer"} â€¢ {new Date(o.created_at).toLocaleDateString()}
                     </Text>
                     <Text style={[styles.orderTotal, { color: colors.text }]}>{formatPrice(o.total_amount)}</Text>
                   </View>
@@ -303,7 +303,7 @@ export default function SellerHubScreen() {
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Add Product</Text>
-              <TouchableOpacity onPress={() => setShowAddProduct(false)}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowAddProduct(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
@@ -324,7 +324,7 @@ export default function SellerHubScreen() {
             onChangeText={setNewDescription}
             multiline
           />
-          <Text style={[styles.inputLabel, { color: colors.text }]}>Price (₱)</Text>
+          <Text style={[styles.inputLabel, { color: colors.text }]}>Price (â‚±)</Text>
           <TextInput
             style={[styles.input, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
             placeholder="0.00"
@@ -344,7 +344,7 @@ export default function SellerHubScreen() {
           <Text style={[styles.inputLabel, { color: colors.text }]}>Type</Text>
           <View style={styles.typeRow}>
             {(["physical", "digital"] as const).map((t) => (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 key={t}
                 style={[styles.typePill, {
                   borderColor: newProductType === t ? colors.primary : colors.border,
@@ -363,7 +363,7 @@ export default function SellerHubScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: adding ? 0.6 : 1 }]}
             onPress={handleAddProduct}
             disabled={adding}

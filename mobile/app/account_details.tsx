@@ -54,7 +54,7 @@ export default function AccountDetailsScreen() {
 
     if (profile?.is_verified) {
       if (hasValidExpiry && expiryDate) {
-        return `Verified • Expires ${expiryDate.toLocaleDateString()}`;
+        return `Verified â€¢ Expires ${expiryDate.toLocaleDateString()}`;
       }
       return 'Verified';
     }
@@ -85,7 +85,7 @@ export default function AccountDetailsScreen() {
     <TouchableOpacity
       onPress={onPress}
       disabled={!onPress}
-      activeOpacity={onPress ? 0.7 : 1}
+      activeOpacity={1}
       style={[
         styles.itemRow,
         !isLast && { borderBottomWidth: 1 },

@@ -21,6 +21,7 @@ interface AlertState {
 const TEMP_LOGIN_PASSWORD = 'pass123';
 const TEMP_LOGIN_OPTIONS = [
   { label: 'Login as Musician', email: 'musician@test.com' },
+  { label: 'Login as Production', email: 'producer1@test.com' },
   { label: 'Login as Studio', email: 'studio@test.com' },
   { label: 'Login as Venue', email: 'venue2@test.com' },
 ] as const;
@@ -135,7 +136,7 @@ export default function LoginScreen() {
       // (which handles its own flow via accountCreated)
       showAlert(
         'success',
-        'Verification Successful! 🎉',
+        'Verification Successful! ðŸŽ‰',
         'Your identity has been verified. You can now log in.'
       );
     }
@@ -504,7 +505,7 @@ export default function LoginScreen() {
               </Text>
               <View style={styles.tempLoginButtonList}>
                 {TEMP_LOGIN_OPTIONS.map((option) => (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     key={option.email}
                     onPress={() => handleTemporaryLogin(option.email)}
                     disabled={loading}
