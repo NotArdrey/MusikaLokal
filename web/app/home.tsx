@@ -7,21 +7,21 @@ import {
   ActivityIndicator,
   Dimensions,
   InteractionManager,
+  Platform,
   RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import CustomAlert from "../src/components/CustomAlert";
-import Header from "../src/components/header";
 import ListingDetailsSheet from "../src/components/ListingDetailsSheet";
-import Navbar from "../src/components/navbar";
 import { ProfileCompletionBanner } from "../src/components/ProfileCompletionBanner";
 import RecentlyViewedSheet from "../src/components/RecentlyViewedSheet";
 import SearchBottomSheet from "../src/components/SearchBottomSheet";
@@ -357,7 +357,29 @@ export default function HomeScreen() {
   const { colors, isDark } = useTheme();
   const { userRole, userId, isGuest, roleResolved } = useAuth();
   const insets = useSafeAreaInsets();
+  const { width: viewportWidth } = useWindowDimensions();
   const params = useLocalSearchParams<{ reopenListingId?: string }>();
+  const isWebDesktop = Platform.OS === "web" && viewportWidth >= 768;
+  const frameHorizontalPadding = isWebDesktop ? 20 : 24;
+  const feedCardWidth = isWebDesktop ? 248 : 280;
+  const compactCardWidth = isWebDesktop ? 248 : 240;
+  const quickActionWidth = isWebDesktop ? 92 : 84;
+  const snapInterval = feedCardWidth + 16;
+  const compactSnapInterval = compactCardWidth + 16;
+  const quickAccessModules = [
+    { label: "Discover", icon: "compass-outline" as const, route: "/discover", color: "#3b82f6" },
+    { label: "Projects", icon: "people-outline" as const, route: "/producer_projects", color: "#8b5cf6" },
+    { label: "Shop", icon: "bag-handle-outline" as const, route: "/shop", color: "#22c55e" },
+    { label: "Orders", icon: "receipt-outline" as const, route: "/orders", color: "#eab308" },
+    { label: "Seller Hub", icon: "storefront-outline" as const, route: "/seller_hub", color: "#ec4899" },
+  ] as const;
+  const pageFrameStyle = useMemo(
+    () =>
+      isWebDesktop
+        ? ({ alignSelf: "center", width: "100%", maxWidth: 1240 } as const)
+        : null,
+    [isWebDesktop],
+  );
 
   const homeCacheBaseParams = useMemo(
     () => ({
@@ -506,9 +528,6 @@ export default function HomeScreen() {
     message: string;
     buttons?: any[];
   }>({ type: "info", title: "", message: "" });
-
-  // Scroll State for Sticky Header
-  const [isScrolled, setIsScrolled] = useState(false);
 
   const applyHomeFeedSnapshot = useCallback((snapshot: HomeFeedCachePayload) => {
     setFeatured(Array.isArray(snapshot.featured) ? snapshot.featured : []);
@@ -1791,14 +1810,8 @@ export default function HomeScreen() {
     const heroImage =
       "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?q=80&w=2560&auto=format&fit=crop";
 
-    // Dynamic Search Text
-    const isOwner = userRole === "venue-owner" || userRole === "studio-owner";
-    const searchPlaceholder = isOwner
-      ? "Find musicians, bands..."
-      : "Search studios and gigs...";
-
     return (
-      <View style={styles.heroContainer}>
+      <View style={[styles.heroContainer, isWebDesktop && styles.heroContainerWeb]}>
         <CachedImage
           uri={heroImage}
           style={styles.heroImage}
@@ -1817,28 +1830,9 @@ export default function HomeScreen() {
         />
 
         {/* Content within Hero */}
-        <View style={styles.heroContent}>
+        <View style={[styles.heroContent, isWebDesktop && styles.heroContentWeb]}>
           <Text style={styles.heroGreeting}>Hey {userName}</Text>
           <Text style={styles.heroSubtitle}>Ready to make some noise?</Text>
-
-          <TouchableOpacity 
-            activeOpacity={0.85}
-            style={styles.modernSearchCard}
-            onPress={openSearchSheet}
-          >
-            <View style={styles.modernSearchLeft}>
-              <View style={styles.modernSearchIconWrapper}>
-                <Ionicons name="search" size={20} color="#FFF" />
-              </View>
-              <View style={styles.modernSearchTexts}>
-                <Text style={styles.modernSearchPlaceholder}>{searchPlaceholder}</Text>
-                <Text style={styles.modernSearchSub}>Tap to explore by location or rate</Text>
-              </View>
-            </View>
-            <View style={styles.modernSearchFilterBtn}>
-              <Ionicons name="options-outline" size={20} color="#0F172A" />
-            </View>
-          </TouchableOpacity>
         </View>
       </View>
     );
@@ -1901,7 +1895,7 @@ export default function HomeScreen() {
             flexDirection: "row",
             justifyContent: "space-between",
             alignItems: "flex-end",
-            paddingHorizontal: 24,
+            paddingHorizontal: frameHorizontalPadding,
             marginBottom: 16,
           }}
         >
@@ -1937,12 +1931,12 @@ export default function HomeScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{
-            paddingLeft: 24,
-            paddingRight: 24,
+            paddingLeft: frameHorizontalPadding,
+            paddingRight: frameHorizontalPadding,
             paddingVertical: 8,
           }}
           decelerationRate="fast"
-          snapToInterval={280 + 16}
+          snapToInterval={snapInterval}
         >
           {topItems.map((item) => {
             const priceLabel = getTopPickPrice(item);
@@ -1953,7 +1947,10 @@ export default function HomeScreen() {
                 onPress={() => handleCardPress(item)}
                 style={[
                   styles.newArrivalCard,
-                  { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                  {
+                    width: feedCardWidth,
+                    backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                  },
                 ]}
               >
                 {/* Image Section */}
@@ -2178,7 +2175,7 @@ export default function HomeScreen() {
             flexDirection: "row",
             justifyContent: "space-between",
             alignItems: "flex-end",
-            paddingHorizontal: 24,
+            paddingHorizontal: frameHorizontalPadding,
             marginBottom: 16,
           }}
         >
@@ -2214,12 +2211,12 @@ export default function HomeScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{
-            paddingLeft: 24,
-            paddingRight: 24,
+            paddingLeft: frameHorizontalPadding,
+            paddingRight: frameHorizontalPadding,
             paddingVertical: 8,
           }}
           decelerationRate="fast"
-          snapToInterval={280 + 16}
+          snapToInterval={snapInterval}
         >
           {newArrivals.map((item) => {
             const priceLabel = getPriceLabel(item);
@@ -2230,7 +2227,10 @@ export default function HomeScreen() {
                 onPress={() => handleCardPress(item)}
                 style={[
                   styles.newArrivalCard,
-                  { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                  {
+                    width: feedCardWidth,
+                    backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                  },
                 ]}
               >
                 {/* Image Section */}
@@ -2359,14 +2359,14 @@ export default function HomeScreen() {
     if (uniqueItems.length === 0) {
       return (
         <View style={styles.sectionContainer}>
-          <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+          <View style={{ paddingHorizontal: frameHorizontalPadding, marginBottom: 16 }}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               For You
             </Text>
           </View>
           <View
             style={{
-              paddingHorizontal: 24,
+              paddingHorizontal: frameHorizontalPadding,
               paddingVertical: 40,
               alignItems: "center",
             }}
@@ -2396,7 +2396,7 @@ export default function HomeScreen() {
             flexDirection: "row",
             justifyContent: "space-between",
             alignItems: "center",
-            paddingHorizontal: 24,
+            paddingHorizontal: frameHorizontalPadding,
             marginBottom: 16,
           }}
         >
@@ -2430,7 +2430,7 @@ export default function HomeScreen() {
 
         {/* Featured Large Card - New Design */}
         {uniqueItems[0] && (
-          <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
+          <View style={{ paddingHorizontal: frameHorizontalPadding, marginBottom: 24 }}>
             <TouchableOpacity
               activeOpacity={1}
               onPress={() => handleCardPress(uniqueItems[0])}
@@ -2525,12 +2525,12 @@ export default function HomeScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{
-            paddingLeft: 24,
-            paddingRight: 24,
+            paddingLeft: frameHorizontalPadding,
+            paddingRight: frameHorizontalPadding,
             paddingVertical: 16,
           }} // Added paddingVertical for shadows
           decelerationRate="fast"
-          snapToInterval={280 + 16}
+          snapToInterval={snapInterval}
         >
           {uniqueItems.slice(1, 11).map((item, index) => (
             <TouchableOpacity
@@ -2539,7 +2539,10 @@ export default function HomeScreen() {
               onPress={() => handleCardPress(item)}
               style={[
                 styles.forYouCard,
-                { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                {
+                  width: feedCardWidth,
+                  backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                },
               ]}
             >
               {/* Image Section */}
@@ -2742,11 +2745,6 @@ export default function HomeScreen() {
           translucent
           backgroundColor="transparent"
         />
-        
-        {/* Mock Header space */}
-        <View style={{ position: "absolute", top: insets.top + 8, left: 16, zIndex: 100 }}>
-           <Skeleton width={180} height={32} borderRadius={8} />
-        </View>
 
         <View>
           {/* Hero Skeleton */}
@@ -2762,9 +2760,13 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+        <ScrollView
+          style={pageFrameStyle || undefined}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: isWebDesktop ? 56 : 100 }}
+        >
           {/* Highlight/Featured Mocks */}
-          <View style={{ marginTop: 32, paddingHorizontal: 24 }}>
+          <View style={{ marginTop: 32, paddingHorizontal: frameHorizontalPadding }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
                <Skeleton width={120} height={24} />
                <Skeleton width={60} height={20} />
@@ -2772,14 +2774,14 @@ export default function HomeScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {[1, 2, 3].map((_, i) => (
                 <View key={i} style={{ marginRight: 20 }}>
-                  <Skeleton width={width * 0.7} height={moderateScale(320)} borderRadius={24} />
+                  <Skeleton width={feedCardWidth} height={moderateScale(320)} borderRadius={24} />
                 </View>
               ))}
             </ScrollView>
           </View>
           
           {/* Another row Mock */}
-          <View style={{ marginTop: 32, paddingHorizontal: 24 }}>
+          <View style={{ marginTop: 32, paddingHorizontal: frameHorizontalPadding }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
                <Skeleton width={140} height={24} />
                <Skeleton width={60} height={20} />
@@ -2787,13 +2789,12 @@ export default function HomeScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {[1, 2, 3].map((_, i) => (
                 <View key={i} style={{ marginRight: 20 }}>
-                  <Skeleton width={width * 0.65} height={moderateScale(240)} borderRadius={20} />
+                  <Skeleton width={compactCardWidth} height={moderateScale(240)} borderRadius={20} />
                 </View>
               ))}
             </ScrollView>
           </View>
         </ScrollView>
-        <Navbar />
       </View>
     );
   }
@@ -2806,40 +2807,30 @@ export default function HomeScreen() {
         backgroundColor="transparent"
       />
 
-      <View
-        style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 100 }}
-      >
-        <Header title="MusikaLokal" transparent={!isScrolled} />
-      </View>
-
       <ScrollView
+        style={pageFrameStyle || undefined}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 180 }}
+        contentContainerStyle={{ paddingBottom: isWebDesktop ? 56 : 180 }}
         bounces={true}
-        onScroll={(e) => {
-          const contentOffsetY = e.nativeEvent.contentOffset.y;
-          setIsScrolled(contentOffsetY > 50);
-        }}
-        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
             tintColor={colors.primary}
-            progressViewOffset={insets.top + 60} // Push refresh spinner below header
+            progressViewOffset={insets.top + 8}
           />
         }
       >
         {renderHero()}
 
-        <View style={{ paddingHorizontal: 24, marginTop: 8 }}>
+        <View style={{ paddingHorizontal: frameHorizontalPadding, marginTop: 8 }}>
           <ProfileCompletionBanner />
         </View>
 
         {userId && (
           <View
             style={{
-              marginHorizontal: 24,
+              marginHorizontal: frameHorizontalPadding,
               marginTop: 10,
               paddingHorizontal: 12,
               paddingVertical: 10,
@@ -2870,11 +2861,87 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* Quick Access Modules */}
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: frameHorizontalPadding, marginBottom: 12, textAlign: isWebDesktop ? "center" : "left" }]}>Explore More</Text>
+          {isWebDesktop ? (
+            <View style={[styles.quickAccessDesktopRow, { paddingHorizontal: frameHorizontalPadding }]}>
+              {quickAccessModules.map((mod, index) => (
+                <TouchableOpacity
+                  key={mod.label}
+                  style={[
+                    styles.quickAccessCard,
+                    {
+                      width: quickActionWidth,
+                      marginRight: index === quickAccessModules.length - 1 ? 0 : 20,
+                    },
+                  ]}
+                  onPress={() => router.push(mod.route as any)}
+                >
+                  <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "14", borderColor: mod.color + "2D" }]}>
+                    <Ionicons name={mod.icon} size={20} color={mod.color} />
+                  </View>
+                  <Text
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                    maxFontSizeMultiplier={1}
+                    style={[
+                      styles.quickAccessLabel,
+                      {
+                        color: colors.textSecondary,
+                        fontSize: 11.8,
+                        lineHeight: 14,
+                      },
+                    ]}
+                  >
+                    {mod.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: frameHorizontalPadding - 4 }}>
+              {quickAccessModules.map((mod) => (
+                <TouchableOpacity
+                  key={mod.label}
+                  style={[
+                    styles.quickAccessCard,
+                    {
+                      width: quickActionWidth,
+                      marginRight: 14,
+                    },
+                  ]}
+                  onPress={() => router.push(mod.route as any)}
+                >
+                  <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "14", borderColor: mod.color + "2D" }]}>
+                    <Ionicons name={mod.icon} size={20} color={mod.color} />
+                  </View>
+                  <Text
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                    maxFontSizeMultiplier={1}
+                    style={[
+                      styles.quickAccessLabel,
+                      {
+                        color: colors.textSecondary,
+                        fontSize: moderateScale(11.1),
+                        lineHeight: 14,
+                      },
+                    ]}
+                  >
+                    {mod.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+
         {/* AI Recommendation Comparison Toggle */}
         {showForYouAiCard && userId && (
           <View
             style={{
-              marginHorizontal: 24,
+              marginHorizontal: frameHorizontalPadding,
               marginTop: 20,
               marginBottom: 8,
               padding: 16,
@@ -3078,31 +3145,6 @@ export default function HomeScreen() {
 
         {renderSmartFeed()}
 
-        {/* Phase 2: Quick Access Modules */}
-        <View style={styles.sectionContainer}>
-          <Text style={[styles.sectionTitle, { color: colors.text, paddingHorizontal: 24, marginBottom: 12 }]}>Explore More</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20 }}>
-            {([
-              { label: "Discover", icon: "compass-outline" as const, route: "/home", color: "#3b82f6" },
-              { label: "Projects", icon: "people-outline" as const, route: "/producer_projects", color: "#8b5cf6" },
-              { label: "Shop", icon: "bag-handle-outline" as const, route: "/shop", color: "#22c55e" },
-              { label: "Orders", icon: "receipt-outline" as const, route: "/orders", color: "#eab308" },
-              { label: "Seller Hub", icon: "storefront-outline" as const, route: "/seller_hub", color: "#ec4899" },
-            ] as const).map((mod) => (
-              <TouchableOpacity
-                key={mod.label}
-                style={[styles.quickAccessCard, { backgroundColor: mod.color + "14" }]}
-                onPress={() => router.push(mod.route as any)}
-              >
-                <View style={[styles.quickAccessIcon, { backgroundColor: mod.color + "22" }]}>
-                  <Ionicons name={mod.icon} size={22} color={mod.color} />
-                </View>
-                <Text style={{ color: colors.text, fontSize: moderateScale(12), fontWeight: "600", marginTop: 6 }}>{mod.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
         {/* Recently Viewed Section - Custom Cards */}
         {recentlyViewed.length > 0 && (
           <View style={styles.sectionContainer}>
@@ -3111,7 +3153,7 @@ export default function HomeScreen() {
                 flexDirection: "row",
                 justifyContent: "space-between",
                 alignItems: "center",
-                paddingHorizontal: 24,
+                paddingHorizontal: frameHorizontalPadding,
                 marginBottom: 12,
               }}
             >
@@ -3134,12 +3176,12 @@ export default function HomeScreen() {
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{
-                paddingLeft: 24,
-                paddingRight: 24,
+                paddingLeft: frameHorizontalPadding,
+                paddingRight: frameHorizontalPadding,
                 paddingVertical: 8,
               }}
               decelerationRate="fast"
-              snapToInterval={240 + 16}
+              snapToInterval={compactSnapInterval}
             >
               {recentlyViewed.map((item) => (
                 <TouchableOpacity
@@ -3148,7 +3190,10 @@ export default function HomeScreen() {
                   onPress={() => handleCardPress(item)}
                   style={[
                     styles.recentlyViewedCard,
-                    { backgroundColor: isDark ? "#1F2937" : "#FFFFFF" },
+                    {
+                      width: compactCardWidth,
+                      backgroundColor: isDark ? "#1F2937" : "#FFFFFF",
+                    },
                   ]}
                 >
                   {/* Image Section */}
@@ -3251,8 +3296,6 @@ export default function HomeScreen() {
         )}
       </ScrollView>
 
-      <Navbar />
-
       <ListingDetailsSheet
         ref={bottomSheetRef}
         listingId={selectedListingId}
@@ -3311,6 +3354,11 @@ const styles = StyleSheet.create({
     width: "100%",
     position: "relative",
   },
+  heroContainerWeb: {
+    marginTop: 12,
+    borderRadius: 20,
+    overflow: "hidden",
+  },
   heroImage: {
     width: "100%",
     height: "100%",
@@ -3325,6 +3373,11 @@ const styles = StyleSheet.create({
     left: 24, // Standardized alignment
     right: 24, // Standardized alignment
     zIndex: 10,
+  },
+  heroContentWeb: {
+    left: 20,
+    right: 20,
+    bottom: 18,
   },
   heroGreeting: {
     fontFamily: "Poppins_700Bold",
@@ -3607,6 +3660,7 @@ const styles = StyleSheet.create({
   // New Arrivals Section
   newArrivalCard: {
     width: 280,
+    minHeight: 266,
     borderRadius: 20,
     overflow: "hidden",
     marginRight: 16,
@@ -3700,6 +3754,7 @@ const styles = StyleSheet.create({
   // Recently Viewed Section
   recentlyViewedCard: {
     width: 240,
+    minHeight: 212,
     borderRadius: 16,
     overflow: "hidden",
     marginRight: 16,
@@ -3711,7 +3766,7 @@ const styles = StyleSheet.create({
   },
   recentlyViewedImageContainer: {
     width: "100%",
-    height: 100,
+    height: 110,
     position: "relative",
   },
   recentlyViewedImage: {
@@ -3739,6 +3794,7 @@ const styles = StyleSheet.create({
   },
   recentlyViewedDetails: {
     padding: 12,
+    minHeight: 100,
   },
   recentlyViewedName: {
     fontFamily: "Poppins_600SemiBold",
@@ -3773,6 +3829,7 @@ const styles = StyleSheet.create({
   // For You Section (Custom Card)
   forYouCard: {
     width: 280,
+    minHeight: 266,
     borderRadius: 20,
     overflow: "hidden",
     marginRight: 16,
@@ -3848,17 +3905,34 @@ const styles = StyleSheet.create({
   },
   quickAccessCard: {
     width: 90,
-    paddingVertical: 14,
-    borderRadius: 16,
+    paddingTop: 4,
+    paddingBottom: 4,
+    minHeight: 82,
+    borderRadius: 10,
+    borderWidth: 0,
     alignItems: "center",
-    marginRight: 10,
+    justifyContent: "flex-start",
+    marginRight: 14,
   },
   quickAccessIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  quickAccessDesktopRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "flex-start",
+  },
+  quickAccessLabel: {
+    fontFamily: "Poppins_600SemiBold",
+    marginTop: 8,
+    textAlign: "center",
+    width: "100%",
+    letterSpacing: 0,
   },
 });
 

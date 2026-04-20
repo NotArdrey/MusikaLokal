@@ -422,7 +422,7 @@ export default function SidebarNav() {
         }
 
         return [
-            { id: 'home', icon: 'home', label: 'Home', route: '/feed' },
+            { id: 'home', icon: 'home', label: 'Home', route: '/home' },
             { id: 'discover', icon: 'compass', label: 'Discover', route: '/discover' },
             { id: 'ai-suggest', icon: 'sparkles', label: 'AI Discovery', route: '/ai_suggestions' },
             { id: 'activity', icon: 'calendar', label: 'Activity', route: '/bookings' },

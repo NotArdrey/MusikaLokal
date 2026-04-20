@@ -20,7 +20,6 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
-import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
@@ -36,7 +35,7 @@ type Tab = "browse" | "my_projects" | "applications" | "invites";
 
 export default function ProducerProjectsScreen() {
   const { colors, isDark } = useTheme();
-  const { session, userId, userRole, isGuest } = useAuth();
+  const { session, userRole, isGuest } = useAuth();
   const { width } = useWindowDimensions();
   const isWebDesktop = Platform.OS === "web" && width >= 768;
   const isProducer = userRole === "producer";
@@ -62,6 +61,10 @@ export default function ProducerProjectsScreen() {
   const bg = isWebDesktop ? (isDark ? "#0F172A" : "#F1F5F9") : colors.background;
   const cardBg = isWebDesktop ? (isDark ? "#1E293B" : "#FFFFFF") : colors.surface;
   const borderCol = isWebDesktop ? (isDark ? "#334155" : "#E2E8F0") : colors.border;
+  const frameMaxWidth = 980;
+  const framePad = isWebDesktop ? 20 : 16;
+  const panelBg = isWebDesktop ? (isDark ? "#111C33" : "#FFFFFF") : cardBg;
+  const panelBorder = isWebDesktop ? (isDark ? "#24344F" : "#E2E8F0") : borderCol;
 
   const fetchData = useCallback(async () => {
     if (!session) return;
@@ -122,10 +125,17 @@ export default function ProducerProjectsScreen() {
     !searchQuery || p.title?.toLowerCase().includes(searchQuery.toLowerCase()) || p.genre?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const renderEmpty = (message: string) => (
+    <View style={styles.emptyWrap}>
+      <Ionicons name="cube-outline" size={46} color={isDark ? "#334155" : "#CBD5E1"} />
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{message}</Text>
+    </View>
+  );
+
   const renderProjectCard = (item: any) => (
     <TouchableOpacity
       key={item.id}
-      style={[styles.card, { backgroundColor: cardBg, borderColor: borderCol, maxWidth: isWebDesktop ? 600 : undefined }]}
+      style={[styles.card, { backgroundColor: cardBg, borderColor: borderCol }]}
       onPress={() => router.push({ pathname: "/producer_project_details", params: { project_id: item.id } })}
     >
       {item.cover_image_url ? (
@@ -172,15 +182,26 @@ export default function ProducerProjectsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
       <Header title="Producer Projects" onBackPress={() => router.back()} />
-      <View style={[styles.tabRow, { borderBottomColor: borderCol }]}>
-        {tabs.map((t) => (
-          <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]} onPress={() => setTab(t.key)}>
-            <Text style={[styles.tabText, { color: tab === t.key ? colors.primary : colors.textSecondary }]}>{t.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      <ScrollView style={styles.content} contentContainerStyle={isWebDesktop ? { alignItems: "center" } : undefined} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.primary} />}>
-        <View style={isWebDesktop ? { width: "100%", maxWidth: 800, paddingHorizontal: 16 } : { paddingHorizontal: 16 }}>
+      <View style={[styles.pageWrap, isWebDesktop && styles.pageWrapWeb]}>
+        <View style={[styles.pageFrame, { maxWidth: frameMaxWidth, paddingHorizontal: framePad }]}>
+          <View style={[styles.tabRow, { borderColor: panelBorder, backgroundColor: panelBg }]}>
+            {tabs.map((t) => (
+              <TouchableOpacity
+                key={t.key}
+                style={[
+                  styles.tab,
+                  tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2, backgroundColor: colors.primary + "14" },
+                ]}
+                onPress={() => setTab(t.key)}
+              >
+                <Text style={[styles.tabText, { color: tab === t.key ? colors.primary : colors.textSecondary, fontFamily: tab === t.key ? "Poppins_700Bold" : "Poppins_500Medium" }]} numberOfLines={1}>
+                  {t.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <ScrollView style={[styles.content, { borderColor: panelBorder, backgroundColor: panelBg }]} contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 100 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.primary} />}>
           {tab === "browse" && (
             <View style={[styles.searchBar, { backgroundColor: cardBg, borderColor: borderCol }]}>
               <Ionicons name="search" size={18} color={colors.textSecondary} />
@@ -191,14 +212,14 @@ export default function ProducerProjectsScreen() {
             <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 40 }} />
           ) : (
             <>
-              {tab === "browse" && (filteredProjects.length > 0 ? filteredProjects.map(renderProjectCard) : <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No projects found</Text>)}
+              {tab === "browse" && (filteredProjects.length > 0 ? filteredProjects.map(renderProjectCard) : renderEmpty("No projects found"))}
               {tab === "my_projects" && isProducer && (
                 <>
                   <TouchableOpacity style={[styles.createButton, { backgroundColor: colors.primary }]} onPress={() => setShowCreateModal(true)}>
                     <Ionicons name="add" size={20} color="#fff" />
                     <Text style={styles.createButtonText}>Create Project</Text>
                   </TouchableOpacity>
-                  {myProjects.length > 0 ? myProjects.map(renderProjectCard) : <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No projects yet</Text>}
+                  {myProjects.length > 0 ? myProjects.map(renderProjectCard) : renderEmpty("No projects yet")}
                 </>
               )}
               {tab === "applications" && (applications.length > 0 ? applications.map((m) => (
@@ -207,19 +228,19 @@ export default function ProducerProjectsScreen() {
                   <Text style={[styles.matchProject, { color: colors.textSecondary }]}>{m.project_title}</Text>
                   <Text style={[styles.matchStatus, { color: m.status === "pending" ? "#f59e0b" : "#22c55e" }]}>{m.status}</Text>
                 </View>
-              )) : <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No applications</Text>)}
+              )) : renderEmpty("No applications"))}
               {tab === "invites" && (invites.length > 0 ? invites.map((m) => (
                 <View key={m.match_id} style={[styles.matchCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
                   <Text style={[styles.matchName, { color: colors.text }]}>{m.musician_name || m.producer_name}</Text>
                   <Text style={[styles.matchProject, { color: colors.textSecondary }]}>{m.project_title}</Text>
                   <Text style={[styles.matchStatus, { color: m.status === "pending" ? "#f59e0b" : "#22c55e" }]}>{m.status}</Text>
                 </View>
-              )) : <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No invites</Text>)}
+              )) : renderEmpty("No invites"))}
             </>
           )}
-          <View style={{ height: 100 }} />
+          </ScrollView>
         </View>
-      </ScrollView>
+      </View>
       <Modal visible={showCreateModal} transparent animationType="slide" onRequestClose={() => setShowCreateModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: cardBg }]}>
@@ -249,14 +270,17 @@ export default function ProducerProjectsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  pageWrap: { flex: 1 },
+  pageWrapWeb: { alignItems: "center" },
+  pageFrame: { width: "100%", flex: 1 },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center" as const, alignItems: "center" as const },
   modalBox: { borderRadius: 16, padding: 24, width: "90%" as any, maxWidth: 480, maxHeight: "80%" as any },
   modalHeader: { flexDirection: "row" as const, justifyContent: "space-between" as const, alignItems: "center" as const, marginBottom: 16 },
-  tabRow: { flexDirection: "row", paddingHorizontal: 16, borderBottomWidth: 1 },
-  tab: { paddingVertical: 12, marginRight: 20 },
-  tabText: { fontSize: moderateScale(13), fontWeight: "600" },
-  content: { flex: 1, paddingTop: 12 },
-  searchBar: { flexDirection: "row", alignItems: "center", padding: 10, borderRadius: 10, borderWidth: 1, marginBottom: 12 },
+  tabRow: { flexDirection: "row", borderWidth: 1, borderRadius: 14, marginTop: 10, overflow: "hidden" },
+  tab: { flex: 1, minHeight: 46, alignItems: "center", justifyContent: "center" },
+  tabText: { fontSize: moderateScale(12.5), textAlign: "center" },
+  content: { flex: 1, marginTop: 10, borderWidth: 1, borderRadius: 14 },
+  searchBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, minHeight: 48, borderRadius: 12, borderWidth: 1, marginBottom: 12 },
   searchInput: { flex: 1, marginLeft: 8, fontSize: moderateScale(14) },
   card: { borderRadius: 12, borderWidth: 1, marginBottom: 12, overflow: "hidden" },
   cardImage: { width: "100%", height: 120 },
@@ -273,7 +297,8 @@ const styles = StyleSheet.create({
   matchStatus: { fontSize: moderateScale(11), marginTop: 4, fontWeight: "500" },
   createButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginBottom: 16, gap: 6 },
   createButtonText: { color: "#fff", fontSize: moderateScale(15), fontWeight: "700" },
-  emptyText: { textAlign: "center", marginTop: 40, fontSize: moderateScale(14) },
+  emptyWrap: { minHeight: 320, alignItems: "center", justifyContent: "center" },
+  emptyText: { textAlign: "center", marginTop: 10, fontSize: moderateScale(14), fontFamily: "Poppins_500Medium" },
   inputLabel: { fontSize: moderateScale(13), fontWeight: "600", marginBottom: 6, marginTop: 12 },
   input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
   submitBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginTop: 20 },
