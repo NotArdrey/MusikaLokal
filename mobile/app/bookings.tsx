@@ -1572,6 +1572,44 @@ export default function BookingsScreen() {
     );
   };
 
+  // Producer project match actions (accept/reject/withdraw/decline)
+  const handleMatchAction = async (matchId: string, action: "accept" | "reject" | "withdraw", matchType: string) => {
+    try {
+      let actionName: string;
+      let bodyKey: string;
+      if (action === "accept") {
+        actionName = matchType === "invite" ? "accept_invite" : "review_application";
+        bodyKey = matchType === "invite" ? "invite_id" : "application_id";
+      } else if (action === "reject") {
+        actionName = matchType === "invite" ? "reject_invite" : "review_application";
+        bodyKey = matchType === "invite" ? "invite_id" : "application_id";
+      } else {
+        actionName = "withdraw_application";
+        bodyKey = "application_id";
+      }
+
+      const body: any = { action: actionName, [bodyKey]: matchId };
+      if (actionName === "review_application") {
+        body.decision = action === "accept" ? "accepted" : "rejected";
+      }
+
+      const { data } = await supabase.functions.invoke("manage-producer-network", { body });
+      if (data?.success) {
+        showTopToast({
+          type: "success",
+          title: action === "accept" ? "Accepted" : action === "reject" ? "Rejected" : "Withdrawn",
+          message: `Action completed successfully.`,
+        });
+        // Refresh the list
+        if (userId) fetchBookings(userId);
+      } else {
+        showTopToast({ type: "error", title: "Error", message: data?.error || "Action failed" });
+      }
+    } catch (e: any) {
+      showTopToast({ type: "error", title: "Error", message: e.message || "Action failed" });
+    }
+  };
+
   const handleConfirmBooking = async (bookingId: string) => {
     // Open modal instead of confirming immediately
     setModalMode("confirm");
@@ -3148,14 +3186,18 @@ export default function BookingsScreen() {
                 };
                 const mStatusColor = matchStatusColors[item.status] || colors.textSecondary;
                 const isInvite = item.match_type === "invite";
+                const isPending = item.status === "pending";
+                const isProducerView = userRole === "producer";
 
                 return (
-                  <View
+                  <TouchableOpacity
+                    activeOpacity={0.8}
                     key={item.match_id || item.id}
                     style={[
                       styles.cardContainer,
                       { backgroundColor: colors.card, borderColor: colors.border },
                     ]}
+                    onPress={() => router.push({ pathname: "/producer_project_details", params: { project_id: item.project_id } })}
                   >
                     <View style={{ padding: scale(16) }}>
                       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: moderateScale(8) }}>
@@ -3190,8 +3232,59 @@ export default function BookingsScreen() {
                       <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
                         {new Date(item.created_at).toLocaleDateString()}
                       </Text>
+
+                      {/* Action buttons for pending items */}
+                      {isPending && (
+                        <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(10) }}>
+                          {isProducerView && !isInvite && (
+                            <>
+                              <TouchableOpacity activeOpacity={1}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#10B981", paddingVertical: scale(8), borderRadius: scale(8) }}
+                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "accept", item.match_type); }}
+                              >
+                                <Ionicons name="checkmark" size={16} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Accept</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity activeOpacity={1}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#EF4444", paddingVertical: scale(8), borderRadius: scale(8) }}
+                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "reject", item.match_type); }}
+                              >
+                                <Ionicons name="close" size={16} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Reject</Text>
+                              </TouchableOpacity>
+                            </>
+                          )}
+                          {!isProducerView && !isInvite && (
+                            <TouchableOpacity activeOpacity={1}
+                              style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, borderWidth: 1, borderColor: "#EF4444", paddingVertical: scale(8), borderRadius: scale(8) }}
+                              onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "withdraw", item.match_type); }}
+                            >
+                              <Ionicons name="arrow-undo" size={16} color="#EF4444" />
+                              <Text style={{ color: "#EF4444", fontSize: moderateScale(12), fontWeight: "600" }}>Withdraw</Text>
+                            </TouchableOpacity>
+                          )}
+                          {!isProducerView && isInvite && (
+                            <>
+                              <TouchableOpacity activeOpacity={1}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#10B981", paddingVertical: scale(8), borderRadius: scale(8) }}
+                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "accept", item.match_type); }}
+                              >
+                                <Ionicons name="checkmark" size={16} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Accept</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity activeOpacity={1}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#EF4444", paddingVertical: scale(8), borderRadius: scale(8) }}
+                                onPress={(e) => { e.stopPropagation(); handleMatchAction(item.match_id, "reject", item.match_type); }}
+                              >
+                                <Ionicons name="close" size={16} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>Decline</Text>
+                              </TouchableOpacity>
+                            </>
+                          )}
+                        </View>
+                      )}
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 );
               }
 

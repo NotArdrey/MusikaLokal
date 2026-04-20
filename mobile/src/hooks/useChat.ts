@@ -63,6 +63,8 @@ export interface Conversation {
     gig_id: string | null;
     group_id: string | null;
     studio_id: string | null;
+    deal_id: string | null;
+    producer_project_id: string | null;
     // Group chat fields
     is_group: boolean;
     group_name: string | null;
@@ -151,6 +153,8 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
             gigId?: string;
             groupId?: string;
             studioId?: string;
+            dealId?: string;
+            producerProjectId?: string;
         }
     ) => {
         if (!otherUserId || !currentUserId) {
@@ -192,11 +196,21 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                     .map(([conversationId]) => conversationId);
 
                 if (matchedConversationIds.length > 0) {
-                    const { data: existingConversations, error: existingError } = await supabase
+                    let existingQuery = supabase
                         .from('conversations')
                         .select('*')
                         .eq('is_group', false)
-                        .in('id', matchedConversationIds)
+                        .in('id', matchedConversationIds);
+
+                    // Context-aware lookup: match on deal or project if provided
+                    if (options?.dealId) {
+                        existingQuery = existingQuery.eq('deal_id', options.dealId);
+                    }
+                    if (options?.producerProjectId) {
+                        existingQuery = existingQuery.eq('producer_project_id', options.producerProjectId);
+                    }
+
+                    const { data: existingConversations, error: existingError } = await existingQuery
                         .order('updated_at', { ascending: false })
                         .limit(1);
 
@@ -222,6 +236,8 @@ export function useConversation(otherUserId: string | null, currentUserId: strin
                     gig_id: options?.gigId || null,
                     group_id: options?.groupId || null,
                     studio_id: options?.studioId || null,
+                    deal_id: options?.dealId || null,
+                    producer_project_id: options?.producerProjectId || null,
                 })
                 ;
 
