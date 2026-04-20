@@ -24,6 +24,12 @@ function extractAccessToken(authHeader: string): string | null {
   return trimmed;
 }
 
+type FollowTargetType = "profile" | "group";
+
+function normalizeFollowTargetType(value: unknown): FollowTargetType {
+  return value === "group" ? "group" : "profile";
+}
+
 async function insertNotification(
   supabaseAdmin: any,
   payload: {
@@ -75,12 +81,59 @@ Deno.serve(async (req: Request) => {
     // ── follow ──────────────────────────────────────────────────────
     if (action === "follow") {
       const { target_id } = params;
+      const targetType = normalizeFollowTargetType(params?.target_type);
       if (!target_id) return jsonResponse({ error: "target_id is required" }, 400);
-      if (target_id === uid) return jsonResponse({ error: "Cannot follow yourself" }, 400);
+
+      let notificationUserId: string | null = null;
+      let notificationTitle = "New Follower";
+      let notificationMessage = "";
+      let activityTargetUserId: string | null = null;
+      let activityMetadata: Record<string, any> = { followed_type: targetType };
+
+      if (targetType === "profile") {
+        if (target_id === uid) return jsonResponse({ error: "Cannot follow yourself" }, 400);
+
+        const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
+          .from("profiles")
+          .select("id")
+          .eq("id", target_id)
+          .single();
+
+        if (targetProfileError || !targetProfile) {
+          return jsonResponse({ error: "Profile not found" }, 404);
+        }
+
+        notificationUserId = target_id;
+        activityTargetUserId = target_id;
+      } else {
+        const { data: targetGroup, error: targetGroupError } = await supabaseAdmin
+          .from("groups")
+          .select("id, name, owner_id, group_type")
+          .eq("id", target_id)
+          .single();
+
+        if (targetGroupError || !targetGroup) {
+          return jsonResponse({ error: "Group not found" }, 404);
+        }
+
+        if (targetGroup.owner_id === uid) {
+          return jsonResponse({ error: "Cannot follow your own group" }, 400);
+        }
+
+        notificationUserId = targetGroup.owner_id || null;
+        notificationTitle = "New Group Follower";
+        notificationMessage = `started following ${targetGroup.name || "your group"}`;
+        activityTargetUserId = targetGroup.owner_id || null;
+        activityMetadata = {
+          ...activityMetadata,
+          group_id: targetGroup.id,
+          group_type: targetGroup.group_type || null,
+        };
+      }
 
       const { data, error } = await supabaseAdmin
         .from("follows")
-        .insert({ follower_id: uid, followed_id: target_id })
+        .insert({ follower_id: uid, followed_id: target_id, followed_type: targetType })
         .select()
         .single();
 
@@ -91,19 +144,25 @@ Deno.serve(async (req: Request) => {
 
       const { data: follower } = await supabaseAdmin.from("profiles").select("full_name, avatar_url").eq("id", uid).single();
 
-      await insertNotification(supabaseAdmin, {
-        user_id: target_id,
-        type: "follow",
-        title: "New Follower",
-        message: `${follower?.full_name || "Someone"} started following you`,
-        image: follower?.avatar_url || null,
-        meta: { event_type: "follow", follower_id: uid },
-      });
+      if (notificationUserId) {
+        await insertNotification(supabaseAdmin, {
+          user_id: notificationUserId,
+          type: "follow",
+          title: notificationTitle,
+          message:
+            targetType === "profile"
+              ? `${follower?.full_name || "Someone"} started following you`
+              : `${follower?.full_name || "Someone"} ${notificationMessage}`,
+          image: follower?.avatar_url || null,
+          meta: { event_type: "follow", follower_id: uid, ...activityMetadata },
+        });
+      }
 
       await supabaseAdmin.from("social_activity_events").insert({
         event_type: "follow",
         actor_id: uid,
-        target_user_id: target_id,
+        target_user_id: activityTargetUserId,
+        metadata: activityMetadata,
       });
 
       return jsonResponse({ success: true, data });
@@ -112,20 +171,42 @@ Deno.serve(async (req: Request) => {
     // ── unfollow ────────────────────────────────────────────────────
     if (action === "unfollow") {
       const { target_id } = params;
+      const targetType = normalizeFollowTargetType(params?.target_type);
       if (!target_id) return jsonResponse({ error: "target_id is required" }, 400);
+
+      let activityTargetUserId: string | null = null;
+      const activityMetadata: Record<string, any> = { followed_type: targetType };
+
+      if (targetType === "group") {
+        const { data: targetGroup } = await supabaseAdmin
+          .from("groups")
+          .select("id, owner_id, group_type")
+          .eq("id", target_id)
+          .maybeSingle();
+
+        activityTargetUserId = targetGroup?.owner_id || null;
+        if (targetGroup?.id) {
+          activityMetadata.group_id = targetGroup.id;
+          activityMetadata.group_type = targetGroup.group_type || null;
+        }
+      } else {
+        activityTargetUserId = target_id;
+      }
 
       const { error } = await supabaseAdmin
         .from("follows")
         .delete()
         .eq("follower_id", uid)
-        .eq("followed_id", target_id);
+        .eq("followed_id", target_id)
+        .eq("followed_type", targetType);
 
       if (error) return jsonResponse({ error: error.message }, 500);
 
       await supabaseAdmin.from("social_activity_events").insert({
         event_type: "unfollow",
         actor_id: uid,
-        target_user_id: target_id,
+        target_user_id: activityTargetUserId,
+        metadata: activityMetadata,
       });
 
       return jsonResponse({ success: true });
@@ -134,6 +215,7 @@ Deno.serve(async (req: Request) => {
     // ── get_follow_status ───────────────────────────────────────────
     if (action === "get_follow_status") {
       const { target_id } = params;
+      const targetType = normalizeFollowTargetType(params?.target_type);
       if (!target_id) return jsonResponse({ error: "target_id is required" }, 400);
 
       const { data: followRow } = await supabaseAdmin
@@ -141,20 +223,28 @@ Deno.serve(async (req: Request) => {
         .select("id")
         .eq("follower_id", uid)
         .eq("followed_id", target_id)
+        .eq("followed_type", targetType)
         .maybeSingle();
 
-      const { data: counts } = await supabaseAdmin
-        .from("follow_counts")
-        .select("follower_count, following_count")
-        .eq("user_id", target_id)
-        .single();
+      const { count: followerCount } = await supabaseAdmin
+        .from("follows")
+        .select("id", { count: "exact", head: true })
+        .eq("followed_id", target_id)
+        .eq("followed_type", targetType);
+
+      const { count: followingCount } = targetType === "profile"
+        ? await supabaseAdmin
+            .from("follows")
+            .select("id", { count: "exact", head: true })
+            .eq("follower_id", target_id)
+        : { count: 0 };
 
       return jsonResponse({
         success: true,
         data: {
           is_following: !!followRow,
-          follower_count: counts?.follower_count || 0,
-          following_count: counts?.following_count || 0,
+          follower_count: followerCount || 0,
+          following_count: followingCount || 0,
         },
       });
     }
@@ -272,7 +362,8 @@ Deno.serve(async (req: Request) => {
         const { data: following } = await supabaseAdmin
           .from("follows")
           .select("followed_id")
-          .eq("follower_id", uid);
+          .eq("follower_id", uid)
+          .eq("followed_type", "profile");
 
         const followedIds = (following || []).map((f: any) => f.followed_id);
         followedIds.push(uid); // Include own posts
@@ -521,31 +612,115 @@ Deno.serve(async (req: Request) => {
 
     // ── get_followers / get_following ────────────────────────────────
     if (action === "get_followers") {
-      const { target_user_id } = params;
-      const targetId = target_user_id || uid;
+      const targetType = normalizeFollowTargetType(params?.target_type);
+      const targetId = params?.target_user_id || params?.target_id || uid;
 
-      const { data, error } = await supabaseAdmin
+      const { data: rows, error } = await supabaseAdmin
         .from("follows")
-        .select("*, follower:profiles!follower_id(id, full_name, avatar_url, role)")
+        .select("*")
         .eq("followed_id", targetId)
+        .eq("followed_type", targetType)
         .order("created_at", { ascending: false });
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+
+      const followerIds = Array.from(
+        new Set(
+          (rows || [])
+            .map((row: any) => row?.follower_id)
+            .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+        ),
+      );
+
+      const { data: followerProfiles } = followerIds.length > 0
+        ? await supabaseAdmin
+            .from("profiles")
+            .select("id, full_name, avatar_url, role")
+            .in("id", followerIds)
+        : { data: [] };
+
+      const followerById = new Map(
+        (followerProfiles || []).map((profile: any) => [profile.id, profile]),
+      );
+
+      const enriched = (rows || []).map((row: any) => ({
+        ...row,
+        followed_type: normalizeFollowTargetType(row?.followed_type),
+        follower: followerById.get(row?.follower_id) || null,
+      }));
+
+      return jsonResponse({ success: true, data: enriched });
     }
 
     if (action === "get_following") {
-      const { target_user_id } = params;
-      const targetId = target_user_id || uid;
+      const targetId = params?.target_user_id || params?.target_id || uid;
 
-      const { data, error } = await supabaseAdmin
+      const { data: rows, error } = await supabaseAdmin
         .from("follows")
-        .select("*, followed:profiles!followed_id(id, full_name, avatar_url, role)")
+        .select("*")
         .eq("follower_id", targetId)
         .order("created_at", { ascending: false });
 
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ success: true, data });
+
+      const followedProfileIds = Array.from(
+        new Set(
+          (rows || [])
+            .filter((row: any) => normalizeFollowTargetType(row?.followed_type) === "profile")
+            .map((row: any) => row?.followed_id)
+            .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+        ),
+      );
+
+      const followedGroupIds = Array.from(
+        new Set(
+          (rows || [])
+            .filter((row: any) => normalizeFollowTargetType(row?.followed_type) === "group")
+            .map((row: any) => row?.followed_id)
+            .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+        ),
+      );
+
+      const [{ data: followedProfiles }, { data: followedGroups }] = await Promise.all([
+        followedProfileIds.length > 0
+          ? supabaseAdmin
+              .from("profiles")
+              .select("id, full_name, avatar_url, role")
+              .in("id", followedProfileIds)
+          : Promise.resolve({ data: [] }),
+        followedGroupIds.length > 0
+          ? supabaseAdmin
+              .from("groups_with_stats")
+              .select("id, name, images, group_type, genre, location, owner_id")
+              .in("id", followedGroupIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const profileById = new Map(
+        (followedProfiles || []).map((profile: any) => [profile.id, profile]),
+      );
+      const groupById = new Map(
+        (followedGroups || []).map((group: any) => [group.id, group]),
+      );
+
+      const enriched = (rows || []).map((row: any) => {
+        const followedType = normalizeFollowTargetType(row?.followed_type);
+
+        return {
+          ...row,
+          followed_type: followedType,
+          followed:
+            followedType === "profile"
+              ? profileById.get(row?.followed_id) || null
+              : null,
+          followed_group:
+            followedType === "group"
+              ? groupById.get(row?.followed_id) || null
+              : null,
+        };
+      });
+
+      return jsonResponse({ success: true, data: enriched });
     }
 
     return jsonResponse({ error: `Unknown action: ${action}` }, 400);

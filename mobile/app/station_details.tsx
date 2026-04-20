@@ -138,7 +138,7 @@ export default function StationDetailsScreen() {
         {/* Owner actions */}
         {isOwner && (
           <View style={styles.section}>
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.editBtn, { backgroundColor: colors.primary }]}
               onPress={() => {/* Future: edit station modal */}}
             >

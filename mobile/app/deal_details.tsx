@@ -241,13 +241,13 @@ export default function DealDetailsScreen() {
       {term.fixed_fee > 0 && (
         <View style={styles.termRow}>
           <Text style={[styles.termKey, { color: colors.textSecondary }]}>Fixed Fee</Text>
-          <Text style={[styles.termValue, { color: colors.text }]}>₱{term.fixed_fee?.toLocaleString()}</Text>
+          <Text style={[styles.termValue, { color: colors.text }]}>â‚±{term.fixed_fee?.toLocaleString()}</Text>
         </View>
       )}
       {term.deposit_amount > 0 && (
         <View style={styles.termRow}>
           <Text style={[styles.termKey, { color: colors.textSecondary }]}>Deposit</Text>
-          <Text style={[styles.termValue, { color: colors.text }]}>₱{term.deposit_amount?.toLocaleString()}</Text>
+          <Text style={[styles.termValue, { color: colors.text }]}>â‚±{term.deposit_amount?.toLocaleString()}</Text>
         </View>
       )}
       {term.event_date && (
@@ -444,7 +444,7 @@ export default function DealDetailsScreen() {
                 )}
                 <View style={styles.termRow}>
                   <Text style={[styles.termKey, { color: colors.textSecondary }]}>Price</Text>
-                  <Text style={[styles.termValue, { color: colors.text }]}>₱{pkg.price?.toLocaleString()}</Text>
+                  <Text style={[styles.termValue, { color: colors.text }]}>â‚±{pkg.price?.toLocaleString()}</Text>
                 </View>
               </View>
             ))}
@@ -468,7 +468,7 @@ export default function DealDetailsScreen() {
         <View style={{ marginTop: moderateScale(24), gap: moderateScale(12), paddingBottom: moderateScale(100) }}>
           {(canAcceptOrReject || canAcceptRecording) && (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: "#10B981" }]}
               onPress={() => {
                 setConfirmAction("accept");
@@ -483,7 +483,7 @@ export default function DealDetailsScreen() {
 
           {canCounter && (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: "#3B82F6" }]}
               onPress={() => {
                 // Pre-fill with latest terms
@@ -507,7 +507,7 @@ export default function DealDetailsScreen() {
 
           {canAcceptOrReject && (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: "#EF4444" }]}
               onPress={() => {
                 setConfirmAction("reject");
@@ -522,7 +522,7 @@ export default function DealDetailsScreen() {
 
           {canDispute && (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               style={[styles.actionBtn, { backgroundColor: "#F59E0B" }]}
               onPress={() => {
                 setConfirmAction("dispute");
@@ -607,7 +607,7 @@ export default function DealDetailsScreen() {
                 placeholderTextColor={colors.textSecondary}
               />
               <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary }}>
-                Fixed Fee (₱)
+                Fixed Fee (â‚±)
               </Text>
               <TextInput
                 value={counterFixedFee}
@@ -618,7 +618,7 @@ export default function DealDetailsScreen() {
                 placeholderTextColor={colors.textSecondary}
               />
               <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary }}>
-                Deposit Amount (₱)
+                Deposit Amount (â‚±)
               </Text>
               <TextInput
                 value={counterDeposit}
@@ -641,10 +641,10 @@ export default function DealDetailsScreen() {
               />
             </View>
             <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: scale(10), marginTop: moderateScale(16) }}>
-              <TouchableOpacity onPress={() => setShowCounterModal(false)} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.inputBackground }}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowCounterModal(false)} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.inputBackground }}>
                 <Text style={{ color: colors.text, fontFamily: "Poppins_500Medium" }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleCounter} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.primary }}>
+              <TouchableOpacity activeOpacity={1} onPress={handleCounter} style={{ paddingVertical: 10, paddingHorizontal: 18, borderRadius: 8, backgroundColor: colors.primary }}>
                 <Text style={{ color: "#fff", fontFamily: "Poppins_500Medium" }}>Submit</Text>
               </TouchableOpacity>
             </View>

@@ -675,13 +675,13 @@ export default function StudioDetailsScreen() {
             : "Rate";
   const studioRateDisplay =
     hasRehearsalRate && hasRecordingRate
-      ? `₱${rehearsalRateValue.toLocaleString()}/hr | ₱${recordingRateValue.toLocaleString()}/song`
+      ? `â‚±${rehearsalRateValue.toLocaleString()}/hr | â‚±${recordingRateValue.toLocaleString()}/song`
       : hasRecordingRate
-        ? `₱${recordingRateValue.toLocaleString()}/song`
+        ? `â‚±${recordingRateValue.toLocaleString()}/song`
         : hasRehearsalRate
-          ? `₱${rehearsalRateValue.toLocaleString()}/hr`
+          ? `â‚±${rehearsalRateValue.toLocaleString()}/hr`
           : hourlyRateValue > 0
-            ? `₱${hourlyRateValue.toLocaleString()}/hr`
+            ? `â‚±${hourlyRateValue.toLocaleString()}/hr`
             : "N/A";
 
   // Show loading while checking authorization
@@ -753,7 +753,7 @@ export default function StudioDetailsScreen() {
               {studio?.address || "Location N/A"}
             </Text>
             {hasValidCoordinates(studio?.latitude, studio?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
                 onPress={handleNavigateToStudio}
               >
@@ -1092,7 +1092,7 @@ export default function StudioDetailsScreen() {
                       studio.instruments.map((item: any, i: number) => {
                         const name = item?.name || item;
                         const quantity = item?.quantity
-                          ? ` ×${item.quantity}`
+                          ? ` Ã—${item.quantity}`
                           : "";
                         return (
                           <View
@@ -1668,7 +1668,7 @@ export default function StudioDetailsScreen() {
                                 { color: colors.primary },
                               ]}
                             >
-                              ₱
+                              â‚±
                               {(
                                 booking.total_price ||
                                 booking.final_price ||
@@ -1878,7 +1878,7 @@ export default function StudioDetailsScreen() {
                     <Text style={{ fontFamily: "Poppins_600SemiBold", fontSize: 16, color: colors.text }}>
                       Cancellation Policy
                     </Text>
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => {
                         if (cancellationPolicy) {
                           setPolicyForm({
@@ -1929,11 +1929,11 @@ export default function StudioDetailsScreen() {
                     <ActivityIndicator size="small" color={colors.primary} />
                   ) : recordingDeals.length === 0 ? (
                     <Text style={{ fontFamily: "Poppins_400Regular", color: colors.textSecondary, fontSize: 13 }}>
-                      No recording deals for this studio yet. Recording deals can be created from the Bookings → Deals tab.
+                      No recording deals for this studio yet. Recording deals can be created from the Bookings â†’ Deals tab.
                     </Text>
                   ) : (
                     recordingDeals.map((deal: any) => (
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         key={deal.id}
                         onPress={() => router.push({ pathname: "/deal_details" as any, params: { id: deal.id, type: "recording" } })}
                         style={[styles.reviewCard, { backgroundColor: colors.surface, marginBottom: 10 }]}
@@ -2110,13 +2110,13 @@ export default function StudioDetailsScreen() {
               </View>
             ))}
             <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => setPolicyModalVisible(false)}
                 style={{ flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center" }}
               >
                 <Text style={{ fontFamily: "Poppins_500Medium", color: colors.text }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={handleSavePolicy}
                 disabled={savingPolicy}
                 style={{ flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.primary, alignItems: "center", opacity: savingPolicy ? 0.6 : 1 }}

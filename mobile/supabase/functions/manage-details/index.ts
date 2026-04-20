@@ -9,7 +9,7 @@ const corsHeaders = {
 }
 
 type NormalizedReportTargetType = 'group' | 'studio' | 'gig' | 'profile'
-type FavoriteTargetType = 'group' | 'studio' | 'gig' | 'profile'
+type FavoriteTargetType = 'group' | 'studio' | 'gig' | 'profile' | 'project'
 
 const reportTargetTableMap: Record<NormalizedReportTargetType, string> = {
     group: 'groups',
@@ -23,6 +23,7 @@ const favoriteTargetColumnMap: Record<FavoriteTargetType, string> = {
     studio: 'studio_id',
     gig: 'gig_id',
     profile: 'profile_id',
+    project: 'project_id',
 }
 
 const uuidPattern =
@@ -47,7 +48,8 @@ const normalizeFavoriteTargetType = (rawType: unknown): FavoriteTargetType | nul
 
     if (value === 'venue') return 'studio'
     if (value === 'artist' || value === 'user') return 'profile'
-    if (value === 'group' || value === 'studio' || value === 'gig' || value === 'profile') {
+    if (value === 'producer project' || value === 'producer_project') return 'project'
+    if (value === 'group' || value === 'studio' || value === 'gig' || value === 'profile' || value === 'project') {
         return value
     }
 

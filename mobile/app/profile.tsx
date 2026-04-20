@@ -28,6 +28,7 @@ import { useAuth } from "../src/context/AuthContext";
 import { useTheme } from "../src/context/ThemeContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const PROFILE_CONTENT_HORIZONTAL_PADDING = 24;
 const GRID_GAP = 8;
 const NUM_COLUMNS = 3;
 const SECTION_SIDE_MARGIN = 16;
@@ -45,13 +46,28 @@ const ITEM_SIZE = Math.floor(
 
 const TIKTOK_GRID_GAP = 2;
 const TIKTOK_NUM_COLUMNS = 3;
-const TIKTOK_ITEM_SIZE = Math.floor((SCREEN_WIDTH - TIKTOK_GRID_GAP * (TIKTOK_NUM_COLUMNS - 1)) / TIKTOK_NUM_COLUMNS);
+const TIKTOK_ITEM_SIZE = Math.floor(
+  (
+    SCREEN_WIDTH -
+    PROFILE_CONTENT_HORIZONTAL_PADDING * 2 -
+    TIKTOK_GRID_GAP * (TIKTOK_NUM_COLUMNS - 1)
+  ) /
+    TIKTOK_NUM_COLUMNS
+);
 
-const EMPTY_BOOKMARKS = {
+const createEmptyBookmarks = () => ({
   studios: [] as any[],
   gigs: [] as any[],
   musicians: [] as any[],
-};
+  productions: [] as any[],
+});
+
+const normalizeBookmarkBuckets = (value: any) => ({
+  studios: Array.isArray(value?.studios) ? value.studios : [],
+  gigs: Array.isArray(value?.gigs) ? value.gigs : [],
+  musicians: Array.isArray(value?.musicians) ? value.musicians : [],
+  productions: Array.isArray(value?.productions) ? value.productions : [],
+});
 
 const sanitizeAvatarUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
@@ -107,14 +123,14 @@ export default function ProfileScreen() {
     upcoming: any[];
     done: any[];
   }>({ active: [], upcoming: [], done: [] });
-  const [bookmarkedListings, setBookmarkedListings] = useState(EMPTY_BOOKMARKS);
+  const [bookmarkedListings, setBookmarkedListings] = useState(() => createEmptyBookmarks());
   const [loadingBookmarks, setLoadingBookmarks] = useState(false);
   const [gigSearchQuery, setGigSearchQuery] = useState("");
   const [updatingGigVisibility, setUpdatingGigVisibility] = useState(false);
   const [supportsGigVisibilityPreference, setSupportsGigVisibilityPreference] = useState(true);
   const [activeTab, setActiveTab] = useState<"about" | "gigs" | "bookmarks" | "playlists">("about");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians">("all");
+  const [bookmarkFilter, setBookmarkFilter] = useState<"all" | "studios" | "gigs" | "musicians" | "productions">("all");
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
   const profileFetchInFlightRef = useRef(false);
@@ -220,9 +236,18 @@ export default function ProfileScreen() {
     };
   }, [gigSearchQuery, gigTimeline]);
 
+  const safeBookmarkedListings = useMemo(
+    () => normalizeBookmarkBuckets(bookmarkedListings),
+    [bookmarkedListings],
+  );
+
   const resolveBookmarkImage = (entry: any): string | null => {
     if (Array.isArray(entry?.images) && typeof entry.images[0] === "string") {
       return entry.images[0];
+    }
+
+    if (typeof entry?.cover_image_url === "string" && entry.cover_image_url.trim().length > 0) {
+      return entry.cover_image_url;
     }
 
     if (typeof entry?.image === "string" && entry.image.trim().length > 0) {
@@ -241,7 +266,7 @@ export default function ProfileScreen() {
     shouldLoad: boolean,
   ) => {
     if (!shouldLoad) {
-      setBookmarkedListings(EMPTY_BOOKMARKS);
+      setBookmarkedListings(createEmptyBookmarks());
       setLoadingBookmarks(false);
       return;
     }
@@ -251,7 +276,7 @@ export default function ProfileScreen() {
     try {
       const { data: favoritesData, error: favoritesError } = await supabase
         .from("favorites")
-        .select("group_id, profile_id, studio_id, gig_id, created_at")
+        .select("group_id, profile_id, studio_id, gig_id, project_id, created_at")
         .eq("user_id", viewerId)
         .order("created_at", { ascending: false });
 
@@ -270,8 +295,11 @@ export default function ProfileScreen() {
       const gigIds = favorites
         .map((entry: any) => entry.gig_id)
         .filter((value: any): value is string => typeof value === "string");
+      const projectIds = favorites
+        .map((entry: any) => entry.project_id)
+        .filter((value: any): value is string => typeof value === "string");
 
-      const [groupsResult, profilesResult, studiosResult, gigsResult] = await Promise.all([
+      const [groupsResult, profilesResult, studiosResult, gigsResult, projectsResult] = await Promise.all([
         groupIds.length > 0
           ? supabase
             .from("groups_with_stats")
@@ -296,17 +324,25 @@ export default function ProfileScreen() {
             .select("id, name, location, event_date, images")
             .in("id", gigIds)
           : Promise.resolve({ data: [] as any[], error: null }),
+        projectIds.length > 0
+          ? supabase
+            .from("producer_projects_with_summary")
+            .select("id, title, genre, location, cover_image_url, owner_name")
+            .in("id", projectIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
       ]);
 
       if (groupsResult.error) throw groupsResult.error;
       if (profilesResult.error) throw profilesResult.error;
       if (studiosResult.error) throw studiosResult.error;
       if (gigsResult.error) throw gigsResult.error;
+      if (projectsResult.error) throw projectsResult.error;
 
       const groupById = new Map((groupsResult.data || []).map((entry: any) => [entry.id, entry]));
       const profileById = new Map((profilesResult.data || []).map((entry: any) => [entry.id, entry]));
       const studioById = new Map((studiosResult.data || []).map((entry: any) => [entry.id, entry]));
       const gigById = new Map((gigsResult.data || []).map((entry: any) => [entry.id, entry]));
+      const projectById = new Map((projectsResult.data || []).map((entry: any) => [entry.id, entry]));
 
       const musicians = favorites
         .map((entry: any) => {
@@ -372,14 +408,27 @@ export default function ProfileScreen() {
           type: "Gig",
         }));
 
-      setBookmarkedListings({
+      const productions = favorites
+        .filter((entry: any) => !!entry.project_id)
+        .map((entry: any) => projectById.get(entry.project_id))
+        .filter(Boolean)
+        .map((entry: any) => ({
+          id: entry.id,
+          name: entry.title || "Untitled Production",
+          subtitle: entry.location || entry.genre || entry.owner_name || "Producer Project",
+          image: resolveBookmarkImage(entry),
+          type: "Production",
+        }));
+
+      setBookmarkedListings(normalizeBookmarkBuckets({
         studios: studios.slice(0, 8),
         gigs: gigs.slice(0, 8),
         musicians: musicians.slice(0, 8),
-      });
+        productions: productions.slice(0, 8),
+      }));
     } catch (bookmarkError) {
       console.log("Error fetching bookmarks:", bookmarkError);
-      setBookmarkedListings(EMPTY_BOOKMARKS);
+      setBookmarkedListings(createEmptyBookmarks());
     } finally {
       setLoadingBookmarks(false);
     }
@@ -419,7 +468,7 @@ export default function ProfileScreen() {
           error,
         } = await supabase.auth.getUser();
         if (error) {
-          console.log("❌ Profile - Auth error while resolving current user:", error.message);
+          console.log("âŒ Profile - Auth error while resolving current user:", error.message);
         }
         if (user?.id) {
           resolvedCurrentUserId = user.id;
@@ -427,22 +476,22 @@ export default function ProfileScreen() {
       }
 
       let targetId = normalizedParamUserId || resolvedCurrentUserId;
-      console.log("👤 Profile - Param userId:", normalizedParamUserId);
-      console.log("👤 Profile - Context userId:", currentUserId);
-      console.log("👤 Profile - Resolved userId:", resolvedCurrentUserId);
+      console.log("ðŸ‘¤ Profile - Param userId:", normalizedParamUserId);
+      console.log("ðŸ‘¤ Profile - Context userId:", currentUserId);
+      console.log("ðŸ‘¤ Profile - Resolved userId:", resolvedCurrentUserId);
 
       // If still no targetId, try to get from auth directly
       if (!targetId) {
-        console.log("⚠️ Profile - No userId, fetching from auth...");
+        console.log("âš ï¸ Profile - No userId, fetching from auth...");
         const {
           data: { user },
           error,
         } = await supabase.auth.getUser();
         if (error) {
-          console.log("❌ Profile - Auth error:", error.message);
+          console.log("âŒ Profile - Auth error:", error.message);
         }
         if (user) {
-          console.log("✅ Profile - Got user from auth:", user.id);
+          console.log("âœ… Profile - Got user from auth:", user.id);
           targetId = user.id;
         }
       }
@@ -452,7 +501,7 @@ export default function ProfileScreen() {
           setIsOwner(false);
           setGigStats({ active: 0, upcoming: 0, done: 0 });
           setGigTimeline({ active: [], upcoming: [], done: [] });
-          setBookmarkedListings(EMPTY_BOOKMARKS);
+          setBookmarkedListings(createEmptyBookmarks());
           setLoadingBookmarks(false);
           setProfile({
             full_name: "Guest User",
@@ -465,13 +514,13 @@ export default function ProfileScreen() {
           return;
         }
 
-        console.log("❌ Profile - No user ID available, redirecting to login");
+        console.log("âŒ Profile - No user ID available, redirecting to login");
         // No user logged in and no userId param - redirect to login
         router.replace("/");
         return;
       }
 
-      console.log("🎯 Profile - Fetching profile for:", targetId);
+      console.log("ðŸŽ¯ Profile - Fetching profile for:", targetId);
 
       // Check ownership
       const ownership = resolvedCurrentUserId && targetId === resolvedCurrentUserId;
@@ -712,7 +761,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    router.replace("/home");
+    router.replace("/feed");
   }, []);
 
   const handleHeaderBack = useCallback(() => {
@@ -736,8 +785,14 @@ export default function ProfileScreen() {
     navigateBackToPreviousOrHome();
   }, [navigateBackToPreviousOrHome, params.returnListingId, params.returnToHome]);
 
-  const openBookmarkedListing = async (itemId: string) => {
+  const openBookmarkedListing = async (item: any) => {
+    const itemId = item?.id;
     if (!itemId) return;
+
+    if (item?.type === "Production") {
+      router.push({ pathname: "/producer_project_details", params: { project_id: itemId } });
+      return;
+    }
 
     try {
       await AsyncStorage.setItem("pending_reopen_listing_id", itemId);
@@ -745,7 +800,7 @@ export default function ProfileScreen() {
       // Continue navigation even if cache write fails.
     }
 
-    router.push("/home");
+    router.push("/feed");
   };
 
   const submitProfileReport = async (reason: string, details?: string) => {
@@ -825,9 +880,9 @@ export default function ProfileScreen() {
           ? "video/mp4"
           : `image/${fileExt === "jpg" ? "jpeg" : fileExt}`);
 
-      console.log("📤 Uploading portfolio media...");
-      console.log("📍 File URI:", file.uri);
-      console.log("📁 File name:", fileName);
+      console.log("ðŸ“¤ Uploading portfolio media...");
+      console.log("ðŸ“ File URI:", file.uri);
+      console.log("ðŸ“ File name:", fileName);
 
       const base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' });
       const bytes = base64ToUint8Array(base64);
@@ -840,7 +895,7 @@ export default function ProfileScreen() {
         });
 
       if (uploadError) {
-        console.error("❌ Upload failed:", uploadError);
+        console.error("âŒ Upload failed:", uploadError);
         throw new Error(uploadError.message || "Upload failed");
       }
 
@@ -849,7 +904,7 @@ export default function ProfileScreen() {
         .from("portfolio")
         .getPublicUrl(fileName);
 
-      console.log("✅ Uploaded:", urlData.publicUrl);
+      console.log("âœ… Uploaded:", urlData.publicUrl);
 
       const { data: lastPortfolioRow, error: portfolioFetchError } = await supabase
         .from("profile_portfolio_urls")
@@ -956,7 +1011,7 @@ export default function ProfileScreen() {
           {...(!isOwner ? { onBackPress: handleHeaderBack } : {})}
           rightComponent={(isOwner || isGuest) ? (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
               onPress={() => openDrawer("header-menu-button")}
               style={[
@@ -968,7 +1023,7 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={1}
               hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
               onPress={openReportModal}
               style={[
@@ -1032,7 +1087,7 @@ export default function ProfileScreen() {
                       ? profile.role.charAt(0).toUpperCase() +
                       profile.role.slice(1)
                       : "User"}{" "}
-              • {profile?.location || "Unknown"}
+              â€¢ {profile?.location || "Unknown"}
             </Text>
 
             <View style={styles.genreRow}>
@@ -1124,23 +1179,23 @@ export default function ProfileScreen() {
 
             {/* TAB NAVIGATION */}
             <View style={[styles.tabContainer, { borderBottomColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)" }]}>
-              <TouchableOpacity onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("about")} style={[styles.tabButton, activeTab === "about" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                 <Ionicons name={activeTab === "about" ? "grid" : "grid-outline"} size={22} color={activeTab === "about" ? colors.text : colors.textSecondary} />
               </TouchableOpacity>
               
               {profile?.role === "musician" && profile?.show_gig_statuses !== false && (
-                <TouchableOpacity onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("gigs")} style={[styles.tabButton, activeTab === "gigs" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                   <Ionicons name={activeTab === "gigs" ? "mic" : "mic-outline"} size={22} color={activeTab === "gigs" ? colors.text : colors.textSecondary} />
                 </TouchableOpacity>
               )}
               
               {isOwner && !isGuest && (
-                <TouchableOpacity onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+                <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("bookmarks")} style={[styles.tabButton, activeTab === "bookmarks" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                   <Ionicons name={activeTab === "bookmarks" ? "bookmark" : "bookmark-outline"} size={22} color={activeTab === "bookmarks" ? colors.text : colors.textSecondary} />
                 </TouchableOpacity>
               )}
 
-              <TouchableOpacity onPress={() => setActiveTab("playlists")} style={[styles.tabButton, activeTab === "playlists" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setActiveTab("playlists")} style={[styles.tabButton, activeTab === "playlists" && { borderBottomColor: colors.text, borderBottomWidth: 2 }]}>
                 <Ionicons name={activeTab === "playlists" ? "musical-notes" : "musical-notes-outline"} size={22} color={activeTab === "playlists" ? colors.text : colors.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -1207,10 +1262,10 @@ export default function ProfileScreen() {
                                   year: "numeric",
                                 })
                                 : "Date TBA"}
-                              {" • "}
+                              {" â€¢ "}
                               {gig.location || "Location TBA"}
                             </Text>
-                            <Text style={[styles.gigCardBudget, { color: colors.primary }]}>Budget: ₱{Number(gig.budget || 0).toLocaleString()}</Text>
+                            <Text style={[styles.gigCardBudget, { color: colors.primary }]}>Budget: â‚±{Number(gig.budget || 0).toLocaleString()}</Text>
                           </View>
                         ))}
                       </ScrollView>
@@ -1234,10 +1289,10 @@ export default function ProfileScreen() {
                 ) : (
                   <>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 8, gap: 12, flexGrow: 0 }} style={{ maxHeight: 60, marginBottom: 8 }}>
-                       {['all', 'studios', 'gigs', 'musicians'].map((key) => {
+                       {['all', 'studios', 'gigs', 'musicians', 'productions'].map((key) => {
                           const isActive = bookmarkFilter === key;
                           return (
-                            <TouchableOpacity key={key} onPress={() => setBookmarkFilter(key as any)} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: isActive ? colors.primary : isDark ? "#1E293B" : "#F3F4F6", justifyContent: "center" }}>
+                            <TouchableOpacity activeOpacity={1} key={key} onPress={() => setBookmarkFilter(key as any)} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: isActive ? colors.primary : isDark ? "#1E293B" : "#F3F4F6", justifyContent: "center" }}>
                                <Text style={{ color: isActive ? "#fff" : colors.textSecondary, fontFamily: "Poppins_500Medium" }}>{key.charAt(0).toUpperCase() + key.slice(1)}</Text>
                             </TouchableOpacity>
                           )
@@ -1246,12 +1301,17 @@ export default function ProfileScreen() {
 
                     <View style={{ paddingHorizontal: 16, gap: 12, paddingBottom: 24 }}>
                       {(() => {
-                         const filterToKey: any = { 'studios': 'studios', 'gigs': 'gigs', 'musicians': 'musicians' };
+                         const filterToKey: any = { 'studios': 'studios', 'gigs': 'gigs', 'musicians': 'musicians', 'productions': 'productions' };
                          let displayedItems: any[] = [];
                          if (bookmarkFilter === "all") {
-                            displayedItems = [...bookmarkedListings.studios, ...bookmarkedListings.gigs, ...bookmarkedListings.musicians];
+                           displayedItems = [
+                             ...safeBookmarkedListings.studios,
+                             ...safeBookmarkedListings.gigs,
+                             ...safeBookmarkedListings.musicians,
+                             ...safeBookmarkedListings.productions,
+                           ];
                          } else {
-                            displayedItems = bookmarkedListings[filterToKey[bookmarkFilter] as keyof typeof bookmarkedListings];
+                            displayedItems = safeBookmarkedListings[filterToKey[bookmarkFilter] as keyof typeof safeBookmarkedListings] || [];
                          }
 
                          if (displayedItems.length === 0) {
@@ -1263,13 +1323,13 @@ export default function ProfileScreen() {
                          }
 
                          return displayedItems.map((item, index) => {
-                             let icon = item.type === "Studio" ? "business-outline" : item.type === "Gig" ? "mic-outline" : "people-outline";
+                             let icon = item.type === "Studio" ? "business-outline" : item.type === "Gig" ? "mic-outline" : item.type === "Production" ? "albums-outline" : "people-outline";
 
                              return (
                                 <TouchableOpacity
                                   key={`${item.type}-${item.id}-${index}`}
                                   activeOpacity={1}
-                                  onPress={() => openBookmarkedListing(item.id)}
+                                  onPress={() => openBookmarkedListing(item)}
                                   style={[
                                     styles.bookmarkCard,
                                     { backgroundColor: colors.surface, borderColor: colors.border, width: "100%", flexDirection: "row", padding: 12, gap: 12 },
@@ -1311,7 +1371,7 @@ export default function ProfileScreen() {
             {activeTab === "playlists" && (
               <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
                 {isOwner && !isGuest && (
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
@@ -1336,7 +1396,7 @@ export default function ProfileScreen() {
                   </View>
                 ) : userPlaylists.length > 0 ? (
                   userPlaylists.map((pl: any) => (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={pl.id}
                       style={{
                         flexDirection: "row",
@@ -1366,7 +1426,7 @@ export default function ProfileScreen() {
                           <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{pl.genre}</Text>
                         )}
                         <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
-                          {pl.item_count || 0} track{(pl.item_count || 0) !== 1 ? "s" : ""} • {pl.visibility === "private" ? "Private" : "Public"}
+                          {pl.item_count || 0} track{(pl.item_count || 0) !== 1 ? "s" : ""} â€¢ {pl.visibility === "private" ? "Private" : "Public"}
                         </Text>
                       </View>
                       <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
@@ -1405,7 +1465,7 @@ export default function ProfileScreen() {
                         ]}
                         onPress={addMediaToPortfolio}
                         disabled={uploading}
-                        activeOpacity={0.8}
+                        activeOpacity={1}
                       >
                         <Ionicons
                           name={uploading ? "cloud-upload-outline" : "add"}
@@ -1419,11 +1479,11 @@ export default function ProfileScreen() {
                     )}
 
                     {(profile?.portfolio_urls || []).map((url: string, i: number) => (
-                      <TouchableOpacity
+                      <TouchableOpacity activeOpacity={1}
                         key={i}
                         style={[styles.gridItemTikTok, { borderColor: colors.border }]}
                         onPress={() => openMediaViewer(url)}
-                        activeOpacity={0.85}
+                        activeOpacity={1}
                       >
                         {isVideo(url) ? (
                           <View
@@ -1523,7 +1583,7 @@ export default function ProfileScreen() {
               { backgroundColor: colors.background, borderLeftColor: colors.border },
             ]}
           >
-            {/* Drawer top — avatar + name */}
+            {/* Drawer top â€” avatar + name */}
             <View style={[styles.drawerTop, { borderBottomColor: colors.border }]}>
               <Image
                 source={profile?.avatar_url ? { uri: profile.avatar_url } : DEFAULT_AVATAR}
@@ -1537,7 +1597,7 @@ export default function ProfileScreen() {
                   {profile?.role ? profile.role.replace("-", " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) : ""}
                 </Text>
               </View>
-              <TouchableOpacity activeOpacity={0.7} onPress={() => closeDrawer("drawer-close-button")} style={styles.drawerCloseBtn}>
+              <TouchableOpacity activeOpacity={1} onPress={() => closeDrawer("drawer-close-button")} style={styles.drawerCloseBtn}>
                 <Ionicons name="close" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -1547,7 +1607,7 @@ export default function ProfileScreen() {
                 {isOwner ? (
                   MENU_ITEMS.map((item) => (
                     <TouchableOpacity
-                      activeOpacity={0.7}
+                      activeOpacity={1}
                       key={item.label}
                       onPress={() => {
                         console.log("[ProfileMenu][mobile] Drawer menu item selected", {
@@ -1570,7 +1630,7 @@ export default function ProfileScreen() {
                   ))
                 ) : isGuest ? (
                   <TouchableOpacity
-                    activeOpacity={0.7}
+                    activeOpacity={1}
                     onPress={() => {
                       console.log("[ProfileMenu][mobile] Guest drawer settings selected", {
                         timestamp: new Date().toISOString(),
@@ -1663,7 +1723,7 @@ const styles = StyleSheet.create({
     paddingBottom: 220,
   },
   headerProfile: {
-    paddingHorizontal: 24,
+    paddingHorizontal: PROFILE_CONTENT_HORIZONTAL_PADDING,
     paddingTop: 8,
     paddingBottom: 24,
     alignItems: "center",
@@ -1985,6 +2045,8 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   mediaSectionTikTok: {
+    width: "100%",
+    alignSelf: "stretch",
     marginTop: 8,
     marginBottom: 0,
     marginHorizontal: 0,
@@ -2119,6 +2181,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   mediaGridTikTok: {
+    width: "100%",
+    alignSelf: "stretch",
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "flex-start",

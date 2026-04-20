@@ -747,10 +747,15 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 2,
         borderRadius: 6,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     tagText: {
         fontSize: 10,
         fontFamily: 'Poppins_500Medium',
+        lineHeight: 12,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
         textTransform: 'capitalize',
     },
     errorContainer: {

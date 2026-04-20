@@ -1,7 +1,7 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -18,6 +18,7 @@ import { supabase } from "../lib/supabase";
 import CachedImage from "../src/components/CachedImage";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
+import ImageUploader from "../src/components/ImageUploader";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
@@ -31,30 +32,40 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+const MARKETPLACE_CATEGORIES = [
+  { value: "apparel", label: "Apparel" },
+  { value: "accessories", label: "Accessories" },
+  { value: "vinyl", label: "Vinyl" },
+  { value: "cd", label: "CD" },
+  { value: "poster", label: "Poster" },
+  { value: "sticker", label: "Sticker" },
+  { value: "digital", label: "Digital" },
+  { value: "bundle", label: "Bundle" },
+  { value: "other", label: "Other" },
+];
 
-type MarketTab = "browse" | "my_orders" | "seller";
+type MarketTab = "browse" | "sell";
+
+const getCategoryLabel = (category: string | null | undefined) => {
+  if (!category) return null;
+  const match = MARKETPLACE_CATEGORIES.find((option) => option.value === category);
+  return match?.label || category;
+};
+
+const getProductImage = (product: any) => product?.cover_image_url || product?.primary_image || null;
 
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
-  const { session, userId, userRole, isGuest } = useAuth();
+  const { session, userRole, isGuest, userId } = useAuth();
   const isSeller = userRole === "producer" || userRole === "musician";
 
   const [tab, setTab] = useState<MarketTab>("browse");
 
   // Browse state
   const [products, setProducts] = useState<any[]>([]);
+  const [sellerProducts, setSellerProducts] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
-  const categories = ["Merch", "Vinyl", "Digital", "Instruments", "Tickets"];
-
-  // Orders state
-  const [myOrders, setMyOrders] = useState<any[]>([]);
-  const [sellerOrders, setSellerOrders] = useState<any[]>([]);
-
-  // Seller state
-  const [dashboard, setDashboard] = useState<any>(null);
-  const [sellerProducts, setSellerProducts] = useState<any[]>([]);
-  const [sellerTab, setSellerTab] = useState<"dashboard" | "products" | "orders">("dashboard");
 
   // Add product modal
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -62,98 +73,144 @@ export default function MarketplaceScreen() {
   const [newDescription, setNewDescription] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [newCategory, setNewCategory] = useState("");
-  const [newProductType, setNewProductType] = useState<"physical" | "digital">("physical");
+  const [listingImages, setListingImages] = useState<string[]>([]);
+  const [listingThumbnailIndex, setListingThumbnailIndex] = useState(0);
   const [adding, setAdding] = useState(false);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
 
   const fetchAll = useCallback(async () => {
-    if (!session) return;
+    if (!session) {
+      setProducts([]);
+      setSellerProducts([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
       const browseBody: any = { action: "browse_products", limit: 40 };
       if (category) browseBody.category = category;
-      if (searchQuery.trim()) browseBody.search = searchQuery.trim();
 
-      const promises: Promise<any>[] = [
-        supabase.functions.invoke("manage-marketplace", { body: browseBody }),
-        supabase.functions.invoke("manage-marketplace", { body: { action: "list_my_orders" } }),
-      ];
+      const promises: Promise<any>[] = [supabase.functions.invoke("manage-marketplace", { body: browseBody })];
 
       if (isSeller) {
-        promises.push(
-          supabase.functions.invoke("manage-marketplace", { body: { action: "get_seller_dashboard" } }),
-          supabase.functions.invoke("manage-marketplace", { body: { action: "list_my_products" } }),
-          supabase.functions.invoke("manage-marketplace", { body: { action: "list_seller_orders" } }),
-        );
+        promises.push(supabase.functions.invoke("manage-marketplace", { body: { action: "list_my_products" } }));
       }
 
       const results = await Promise.all(promises);
-      if (results[0]?.data?.data) setProducts(results[0].data.data);
-      if (results[1]?.data?.data) setMyOrders(results[1].data.data);
-      if (isSeller && results.length > 2) {
-        if (results[2]?.data?.data) setDashboard(results[2].data.data);
-        if (results[3]?.data?.data) setSellerProducts(results[3].data.data);
-        if (results[4]?.data?.data) setSellerOrders(results[4].data.data);
-      }
+      setProducts(results[0]?.data?.data || []);
+      setSellerProducts(isSeller ? results[1]?.data?.data || [] : []);
     } catch (e: any) {
       console.error("Marketplace fetch error:", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [session, category, searchQuery, isSeller]);
+  }, [session, category, isSeller]);
 
-  useFocusEffect(useCallback(() => { fetchAll(); }, [fetchAll]));
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    fetchAll();
+  }, [fetchAll]));
 
   const onRefresh = () => { setRefreshing(true); fetchAll(); };
 
-  const formatPrice = (price: number | null) => {
-    if (!price) return "Free";
-    return `₱${price.toLocaleString()}`;
+  const filteredProducts = useMemo(() => {
+    const needle = searchQuery.trim().toLowerCase();
+    if (!needle) return products;
+
+    return products.filter((product) =>
+      [product?.title, product?.seller_name, product?.category, product?.product_type]
+        .filter((value): value is string => typeof value === "string")
+        .some((value) => value.toLowerCase().includes(needle)),
+    );
+  }, [products, searchQuery]);
+
+  const listingStats = useMemo(() => ({
+    total: sellerProducts.length,
+    live: sellerProducts.filter((item) => item?.status === "active").length,
+    sold: sellerProducts.filter((item) => item?.status === "sold_out").length,
+  }), [sellerProducts]);
+
+  const formatPrice = (price: number | string | null | undefined) => {
+    const amount = Number(price ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) return "Free";
+    return `â‚±${amount.toLocaleString()}`;
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "paid": return "#3b82f6";
-      case "processing": return "#f59e0b";
-      case "shipped": return "#8b5cf6";
-      case "delivered": return "#22c55e";
-      case "cancelled": case "refunded": return "#ef4444";
-      default: return "#6b7280";
-    }
-  };
+  const resetCreateListingForm = useCallback(() => {
+    setNewTitle("");
+    setNewDescription("");
+    setNewPrice("");
+    setNewCategory("");
+    setListingImages([]);
+    setListingThumbnailIndex(0);
+  }, []);
 
   const handleAddProduct = async () => {
     if (!newTitle.trim()) {
-      setAlert({ type: "warning", title: "Missing Title", message: "Enter a product title." });
+      setAlert({ type: "warning", title: "Missing Title", message: "Enter a listing title." });
       return;
     }
+
     const price = parseFloat(newPrice);
     if (newPrice && isNaN(price)) {
       setAlert({ type: "warning", title: "Invalid Price", message: "Enter a valid price." });
       return;
     }
+
     setAdding(true);
     try {
+      const orderedImages = listingImages.length > 0
+        ? [
+            listingImages[listingThumbnailIndex] || listingImages[0],
+            ...listingImages.filter((_, index) => index !== listingThumbnailIndex),
+          ].filter((imageUrl, index, array) => Boolean(imageUrl) && array.indexOf(imageUrl) === index)
+        : [];
+
       const { data } = await supabase.functions.invoke("manage-marketplace", {
         body: {
           action: "create_product",
           title: newTitle.trim(),
           description: newDescription.trim() || null,
-          price: price || 0,
-          category: newCategory.trim() || null,
-          product_type: newProductType,
+          base_price: price || 0,
+          category: newCategory || null,
+          currency: "PHP",
+          media: orderedImages.map((imageUrl) => ({
+            media_type: "image",
+            storage_path: imageUrl,
+          })),
         },
       });
+
       if (data?.success) {
-        showTopToast({ type: "success", title: "Product Created", message: "Your product has been created as a draft." });
+        const createdProductId = data?.data?.id;
+        let listingIsLive = false;
+
+        if (createdProductId) {
+          const { data: publishData } = await supabase.functions.invoke("manage-marketplace", {
+            body: { action: "publish_product", product_id: createdProductId },
+          });
+          listingIsLive = Boolean(publishData?.success);
+        }
+
+        showTopToast({
+          type: "success",
+          title: listingIsLive ? "Listing Live" : "Listing Saved",
+          message: listingIsLive
+            ? "Buyers can now message you about this item."
+            : "Your listing was saved. Publish it from Sell when you're ready.",
+        });
         setShowAddProduct(false);
-        setNewTitle(""); setNewDescription(""); setNewPrice(""); setNewCategory("");
+        resetCreateListingForm();
+        setTab("sell");
         fetchAll();
       } else {
-        setAlert({ type: "error", title: "Error", message: data?.error || "Failed to create product" });
+        setAlert({ type: "error", title: "Error", message: data?.error || "Failed to create listing" });
       }
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
@@ -162,18 +219,39 @@ export default function MarketplaceScreen() {
     }
   };
 
-  const handlePublishProduct = async (productId: string) => {
+  const handleListingStatus = async (productId: string, action: "publish_product" | "mark_product_sold" | "relist_product") => {
+    setStatusUpdatingId(productId);
     try {
       const { data } = await supabase.functions.invoke("manage-marketplace", {
-        body: { action: "publish_product", product_id: productId },
+        body: { action, product_id: productId },
       });
+
       if (data?.success) {
-        showTopToast({ type: "success", title: "Published", message: "Product is now live." });
+        const title = action === "mark_product_sold"
+          ? "Marked as Sold"
+          : action === "relist_product"
+            ? "Listing Relisted"
+            : "Published";
+        const message = action === "mark_product_sold"
+          ? "This listing is now hidden from buyers."
+          : action === "relist_product"
+            ? "Buyers can message you about this item again."
+            : "Product is now live.";
+        showTopToast({ type: "success", title, message });
         fetchAll();
+        return;
       }
+
+      setAlert({ type: "error", title: "Error", message: data?.error || "Unable to update listing" });
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
+    } finally {
+      setStatusUpdatingId(null);
     }
+  };
+
+  const handlePublishProduct = async (productId: string) => {
+    handleListingStatus(productId, "publish_product");
   };
 
   if (isGuest) {
@@ -188,8 +266,7 @@ export default function MarketplaceScreen() {
 
   const tabs: { key: MarketTab; label: string; icon: string }[] = [
     { key: "browse", label: "Browse", icon: "storefront-outline" },
-    { key: "my_orders", label: "My Orders", icon: "receipt-outline" },
-    ...(isSeller ? [{ key: "seller" as MarketTab, label: "Seller Hub", icon: "briefcase-outline" }] : []),
+    ...(isSeller ? [{ key: "sell" as MarketTab, label: "Sell", icon: "pricetags-outline" }] : []),
   ];
 
   // ==========================================
@@ -197,23 +274,51 @@ export default function MarketplaceScreen() {
   // ==========================================
   const renderBrowse = () => (
     <>
+      <View style={[styles.introCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.introEyebrow, { color: colors.primary }]}>Marketplace</Text>
+          <Text style={[styles.introTitle, { color: colors.text }]}>Browse listings and message sellers directly.</Text>
+          <Text style={[styles.introSubtitle, { color: colors.textSecondary }]}> 
+            {isSeller
+              ? "Post merch, gear, and digital drops. Buyers contact you through chat instead of checking out in-app."
+              : "Open any listing to ask questions, negotiate, and arrange the sale with the seller."}
+          </Text>
+        </View>
+
+        {isSeller ? (
+          <TouchableOpacity activeOpacity={1}
+            style={[styles.introAction, { backgroundColor: colors.primary }]}
+            onPress={() => {
+              setTab("sell");
+              setShowAddProduct(true);
+            }}
+          >
+            <Ionicons name="add" size={16} color="#fff" />
+            <Text style={styles.introActionText}>Create listing</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={[styles.introIconWrap, { backgroundColor: colors.primary + "14" }]}>
+            <Ionicons name="chatbubbles-outline" size={22} color={colors.primary} />
+          </View>
+        )}
+      </View>
+
       {/* Search */}
       <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
         <Ionicons name="search" size={18} color={colors.textSecondary} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
-          placeholder="Search products..."
+          placeholder="Search listings..."
           placeholderTextColor={colors.textSecondary}
           value={searchQuery}
           onChangeText={setSearchQuery}
-          onSubmitEditing={() => { setLoading(true); fetchAll(); }}
           returnKeyType="search"
         />
       </View>
 
       {/* Categories */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRow} contentContainerStyle={{ paddingHorizontal: 0 }}>
-        <TouchableOpacity
+        <TouchableOpacity activeOpacity={1}
           style={[styles.categoryPill, {
             borderColor: !category ? colors.primary : colors.border,
             backgroundColor: !category ? colors.primary + "20" : "transparent",
@@ -222,30 +327,30 @@ export default function MarketplaceScreen() {
         >
           <Text style={{ color: !category ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>All</Text>
         </TouchableOpacity>
-        {categories.map((c) => (
-          <TouchableOpacity
-            key={c}
+        {MARKETPLACE_CATEGORIES.map((c) => (
+          <TouchableOpacity activeOpacity={1}
+            key={c.value}
             style={[styles.categoryPill, {
-              borderColor: category === c ? colors.primary : colors.border,
-              backgroundColor: category === c ? colors.primary + "20" : "transparent",
+              borderColor: category === c.value ? colors.primary : colors.border,
+              backgroundColor: category === c.value ? colors.primary + "20" : "transparent",
             }]}
-            onPress={() => setCategory(category === c ? null : c)}
+            onPress={() => setCategory(category === c.value ? null : c.value)}
           >
-            <Text style={{ color: category === c ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>{c}</Text>
+            <Text style={{ color: category === c.value ? colors.primary : colors.textSecondary, fontSize: moderateScale(12) }}>{c.label}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
 
-      {products.length > 0 ? (
+      {filteredProducts.length > 0 ? (
         <View style={styles.grid}>
-          {products.map((product) => (
-            <TouchableOpacity
+          {filteredProducts.map((product) => (
+            <TouchableOpacity activeOpacity={1}
               key={product.id}
               style={[styles.productCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
               onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
             >
-              {product.cover_image_url ? (
-                <CachedImage uri={product.cover_image_url} style={styles.productImage} />
+              {getProductImage(product) ? (
+                <CachedImage uri={getProductImage(product)} style={styles.productImage} />
               ) : (
                 <View style={[styles.productImagePlaceholder, { backgroundColor: colors.primary + "10" }]}>
                   <Ionicons name="bag-outline" size={28} color={colors.primary} />
@@ -257,11 +362,17 @@ export default function MarketplaceScreen() {
                   {product.seller_name || "Seller"}
                 </Text>
                 <Text style={[styles.productPrice, { color: colors.primary }]}>{formatPrice(product.price)}</Text>
-                {product.variant_count > 0 && (
-                  <Text style={[styles.variantCount, { color: colors.textSecondary }]}>
-                    {product.variant_count} variant{product.variant_count > 1 ? "s" : ""}
-                  </Text>
-                )}
+                <View style={styles.cardFooterRow}>
+                  {getCategoryLabel(product.category) ? (
+                    <Text style={[styles.variantCount, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {getCategoryLabel(product.category)}
+                    </Text>
+                  ) : <View />}
+                  <View style={[styles.chatHint, { backgroundColor: colors.primary + "12" }]}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={12} color={colors.primary} />
+                    <Text style={[styles.chatHintText, { color: colors.primary }]}>Message</Text>
+                  </View>
+                </View>
               </View>
             </TouchableOpacity>
           ))}
@@ -269,183 +380,109 @@ export default function MarketplaceScreen() {
       ) : (
         <View style={styles.emptyContainer}>
           <Ionicons name="cube-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No products found</Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No listings found</Text>
         </View>
       )}
     </>
   );
 
   // ==========================================
-  // My Orders Tab Content
+  // Sell Tab Content
   // ==========================================
-  const renderMyOrders = () => (
+  const renderSell = () => (
     <>
-      {myOrders.length > 0 ? (
-        myOrders.map((order) => (
-          <TouchableOpacity
-            key={order.id}
-            style={[styles.orderCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
-            onPress={() => router.push({ pathname: "/deal_details", params: { order_id: order.id } })}
+      <View style={styles.sellStatsRow}>
+        {[
+          { label: "All", value: listingStats.total, icon: "apps-outline", tone: colors.primary },
+          { label: "Live", value: listingStats.live, icon: "radio-outline", tone: "#10B981" },
+          { label: "Sold", value: listingStats.sold, icon: "checkmark-circle-outline", tone: "#F97316" },
+        ].map((stat) => (
+          <View
+            key={stat.label}
+            style={[styles.sellStatCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
           >
-            <View style={styles.orderHeader}>
-              <Text style={[styles.orderNumber, { color: colors.text }]}>#{order.order_number || "..."}</Text>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) + "20" }]}>
-                <Text style={{ color: getStatusColor(order.status), fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
-                  {order.status}
-                </Text>
-              </View>
-            </View>
-            <Text style={[styles.orderDate, { color: colors.textSecondary }]}>
-              {new Date(order.created_at).toLocaleDateString()}
-            </Text>
-            <View style={styles.orderFooter}>
-              <Text style={[styles.orderItems, { color: colors.textSecondary }]}>
-                {order.item_count || 0} item{(order.item_count || 0) > 1 ? "s" : ""}
-              </Text>
-              <Text style={[styles.orderTotal, { color: colors.text }]}>{formatPrice(order.total_amount)}</Text>
-            </View>
-          </TouchableOpacity>
-        ))
-      ) : (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="receipt-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No orders yet</Text>
-        </View>
-      )}
-    </>
-  );
-
-  // ==========================================
-  // Seller Hub Tab Content
-  // ==========================================
-  const renderSeller = () => (
-    <>
-      {/* Seller sub-tabs */}
-      <View style={[styles.subTabRow, { borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
-        {(["dashboard", "products", "orders"] as const).map((t) => (
-          <TouchableOpacity
-            key={t}
-            style={[styles.subTab, sellerTab === t && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
-            onPress={() => setSellerTab(t)}
-          >
-            <Text style={[styles.subTabText, { color: sellerTab === t ? colors.primary : colors.textSecondary }]}>
-              {t === "dashboard" ? "Dashboard" : t === "products" ? "Products" : "Sales"}
-            </Text>
-          </TouchableOpacity>
+            <Ionicons name={stat.icon as any} size={18} color={stat.tone} />
+            <Text style={[styles.sellStatValue, { color: colors.text }]}>{stat.value}</Text>
+            <Text style={[styles.sellStatLabel, { color: colors.textSecondary }]}>{stat.label}</Text>
+          </View>
         ))}
       </View>
 
-      {/* Dashboard */}
-      {sellerTab === "dashboard" && dashboard && (
-        <View style={styles.statGrid}>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-            <Ionicons name="bag-check" size={24} color="#22c55e" />
-            <Text style={[styles.statValue, { color: colors.text }]}>{dashboard.total_orders || 0}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total Orders</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-            <Ionicons name="cash" size={24} color={colors.primary} />
-            <Text style={[styles.statValue, { color: colors.text }]}>{formatPrice(dashboard.total_revenue)}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Revenue</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-            <Ionicons name="cube" size={24} color="#8b5cf6" />
-            <Text style={[styles.statValue, { color: colors.text }]}>{dashboard.active_products || 0}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Active Products</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-            <Ionicons name="time" size={24} color="#f59e0b" />
-            <Text style={[styles.statValue, { color: colors.text }]}>{dashboard.pending_orders || 0}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Pending</Text>
-          </View>
-        </View>
-      )}
-      {sellerTab === "dashboard" && !dashboard && (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="analytics-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Start selling to see your dashboard stats</Text>
-        </View>
-      )}
+      <TouchableOpacity activeOpacity={1}
+        style={[styles.addBtn, { backgroundColor: colors.primary }]}
+        onPress={() => setShowAddProduct(true)}
+      >
+        <Ionicons name="add" size={20} color="#fff" />
+        <Text style={styles.addBtnText}>Create Listing</Text>
+      </TouchableOpacity>
 
-      {/* Products */}
-      {sellerTab === "products" && (
-        <>
-          <TouchableOpacity
-            style={[styles.addBtn, { backgroundColor: colors.primary }]}
-            onPress={() => setShowAddProduct(true)}
-          >
-            <Ionicons name="add" size={20} color="#fff" />
-            <Text style={styles.addBtnText}>Add Product</Text>
-          </TouchableOpacity>
-          {sellerProducts.length > 0 ? (
-            sellerProducts.map((p) => (
-              <TouchableOpacity
-                key={p.id}
-                style={[styles.sellerProductCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
-                onPress={() => router.push({ pathname: "/product_details", params: { product_id: p.id } })}
-              >
-                {p.cover_image_url ? (
-                  <CachedImage uri={p.cover_image_url} style={styles.productThumb} />
-                ) : (
-                  <View style={[styles.productThumbPlaceholder, { backgroundColor: colors.primary + "10" }]}>
-                    <Ionicons name="bag-outline" size={20} color={colors.primary} />
-                  </View>
-                )}
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={[styles.sellerProductTitle, { color: colors.text }]} numberOfLines={1}>{p.title}</Text>
-                  <Text style={[styles.sellerProductPrice, { color: colors.primary }]}>{formatPrice(p.price)}</Text>
-                </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <View style={[styles.statusBadge, {
-                    backgroundColor: p.status === "active" ? "#22c55e20" : "#f59e0b20"
-                  }]}>
-                    <Text style={{
-                      color: p.status === "active" ? "#22c55e" : "#f59e0b",
-                      fontSize: moderateScale(10)
-                    }}>
-                      {p.status}
-                    </Text>
-                  </View>
-                  {p.status === "draft" && (
-                    <TouchableOpacity style={{ marginTop: 6 }} onPress={() => handlePublishProduct(p.id)}>
-                      <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>Publish</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="cube-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No products yet. Add your first!</Text>
-            </View>
-          )}
-        </>
-      )}
+      {sellerProducts.length > 0 ? (
+        sellerProducts.map((product) => {
+          const isLive = product.status === "active";
+          const isSold = product.status === "sold_out";
+          const isBusy = statusUpdatingId === product.id;
+          const statusColor = isLive ? "#22c55e" : isSold ? "#f97316" : "#f59e0b";
+          const statusLabel = isLive ? "Live" : isSold ? "Sold" : product.status || "Draft";
+          const categoryLabel = getCategoryLabel(product.category);
 
-      {/* Seller Orders */}
-      {sellerTab === "orders" && (
-        sellerOrders.length > 0 ? (
-          sellerOrders.map((o) => (
-            <View key={o.id} style={[styles.orderCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
-              <View style={styles.orderHeader}>
-                <Text style={[styles.orderNumber, { color: colors.text }]}>#{o.order_number}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(o.status) + "20" }]}>
-                  <Text style={{ color: getStatusColor(o.status), fontSize: moderateScale(10) }}>{o.status}</Text>
+          return (
+            <TouchableOpacity activeOpacity={1}
+              key={product.id}
+              style={[styles.sellerProductCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
+              onPress={() => router.push({ pathname: "/product_details", params: { product_id: product.id } })}
+            >
+              {getProductImage(product) ? (
+                <CachedImage uri={getProductImage(product)} style={styles.productThumb} />
+              ) : (
+                <View style={[styles.productThumbPlaceholder, { backgroundColor: colors.primary + "10" }]}>
+                  <Ionicons name="bag-outline" size={20} color={colors.primary} />
                 </View>
+              )}
+
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={[styles.sellerProductTitle, { color: colors.text }]} numberOfLines={1}>{product.title}</Text>
+                <Text style={[styles.sellerProductPrice, { color: colors.primary }]}>{formatPrice(product.price)}</Text>
+                <Text style={[styles.sellerProductMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+                  {categoryLabel || "General listing"}
+                </Text>
               </View>
-              <Text style={[styles.orderDate, { color: colors.textSecondary }]}>
-                {o.buyer_name || "Buyer"} • {new Date(o.created_at).toLocaleDateString()}
-              </Text>
-              <Text style={[styles.orderTotal, { color: colors.text }]}>{formatPrice(o.total_amount)}</Text>
-            </View>
-          ))
-        ) : (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="receipt-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
-            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No sales received yet</Text>
-          </View>
-        )
+
+              <View style={{ alignItems: "flex-end", gap: 8 }}>
+                <View style={[styles.statusBadge, { backgroundColor: statusColor + "20" }]}> 
+                  <Text style={{ color: statusColor, fontSize: moderateScale(10), fontFamily: "Poppins_600SemiBold", textTransform: "capitalize" }}>
+                    {statusLabel}
+                  </Text>
+                </View>
+                {product.status === "draft" && (
+                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => handlePublishProduct(product.id)}>
+                    <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
+                      {isBusy ? "Updating..." : "Publish"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {isLive && (
+                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => handleListingStatus(product.id, "mark_product_sold")}>
+                    <Text style={{ color: "#F97316", fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
+                      {isBusy ? "Updating..." : "Mark Sold"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {isSold && (
+                  <TouchableOpacity activeOpacity={1} disabled={isBusy} onPress={() => handleListingStatus(product.id, "relist_product")}>
+                    <Text style={{ color: colors.primary, fontSize: moderateScale(11), fontFamily: "Poppins_600SemiBold" }}>
+                      {isBusy ? "Updating..." : "Relist"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </TouchableOpacity>
+          );
+        })
+      ) : (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="pricetags-outline" size={48} color={isDark ? "#334155" : "#E2E8F0"} />
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No listings yet. Create your first one.</Text>
+        </View>
       )}
     </>
   );
@@ -457,7 +494,7 @@ export default function MarketplaceScreen() {
       {/* Main Tabs */}
       <View style={[styles.tabRow, { borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
         {tabs.map((t) => (
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             key={t.key}
             style={[styles.mainTab, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
             onPress={() => setTab(t.key)}
@@ -486,8 +523,7 @@ export default function MarketplaceScreen() {
         ) : (
           <>
             {tab === "browse" && renderBrowse()}
-            {tab === "my_orders" && renderMyOrders()}
-            {tab === "seller" && renderSeller()}
+            {tab === "sell" && renderSell()}
           </>
         )}
 
@@ -495,20 +531,45 @@ export default function MarketplaceScreen() {
       </ScrollView>
 
       {/* Add Product Modal */}
-      <Modal visible={showAddProduct} transparent animationType="slide" onRequestClose={() => setShowAddProduct(false)}>
+      <Modal
+        visible={showAddProduct}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setShowAddProduct(false);
+          resetCreateListingForm();
+        }}
+      >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Add Product</Text>
-              <TouchableOpacity onPress={() => setShowAddProduct(false)}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Create Listing</Text>
+              <TouchableOpacity activeOpacity={1}
+                onPress={() => {
+                  setShowAddProduct(false);
+                  resetCreateListingForm();
+                }}
+              >
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Photos</Text>
+              <ImageUploader
+                images={listingImages}
+                onImagesChange={setListingImages}
+                thumbnailIndex={listingThumbnailIndex}
+                onThumbnailChange={setListingThumbnailIndex}
+                maxImages={10}
+                bucketName="listings"
+                userId={userId || session?.user?.id || "marketplace-user"}
+                folder="marketplace"
+              />
+
               <Text style={[styles.inputLabel, { color: colors.text }]}>Title *</Text>
               <TextInput
                 style={[styles.input, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
-                placeholder="Product title"
+                placeholder="What are you selling?"
                 placeholderTextColor={colors.textSecondary}
                 value={newTitle}
                 onChangeText={setNewTitle}
@@ -516,13 +577,13 @@ export default function MarketplaceScreen() {
               <Text style={[styles.inputLabel, { color: colors.text }]}>Description</Text>
               <TextInput
                 style={[styles.input, styles.textArea, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
-                placeholder="Product description..."
+                placeholder="Add details buyers should know..."
                 placeholderTextColor={colors.textSecondary}
                 value={newDescription}
                 onChangeText={setNewDescription}
                 multiline
               />
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Price (₱)</Text>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Price (â‚±)</Text>
               <TextInput
                 style={[styles.input, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
                 placeholder="0.00"
@@ -532,41 +593,40 @@ export default function MarketplaceScreen() {
                 keyboardType="decimal-pad"
               />
               <Text style={[styles.inputLabel, { color: colors.text }]}>Category</Text>
-              <TextInput
-                style={[styles.input, { color: colors.text, borderColor: isDark ? "#334155" : "#E2E8F0", backgroundColor: colors.surface }]}
-                placeholder="e.g. Merch, Vinyl, Digital"
-                placeholderTextColor={colors.textSecondary}
-                value={newCategory}
-                onChangeText={setNewCategory}
-              />
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Type</Text>
-              <View style={styles.typeRow}>
-                {(["physical", "digital"] as const).map((t) => (
-                  <TouchableOpacity
-                    key={t}
-                    style={[styles.typePill, {
-                      borderColor: newProductType === t ? colors.primary : colors.border,
-                      backgroundColor: newProductType === t ? colors.primary + "20" : "transparent",
-                    }]}
-                    onPress={() => setNewProductType(t)}
-                  >
-                    <Ionicons
-                      name={t === "physical" ? "cube-outline" : "cloud-download-outline"}
-                      size={14}
-                      color={newProductType === t ? colors.primary : colors.textSecondary}
-                    />
-                    <Text style={{ color: newProductType === t ? colors.primary : colors.textSecondary, fontSize: moderateScale(12), marginLeft: 6 }}>
-                      {t === "physical" ? "Physical" : "Digital"}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <TouchableOpacity
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modalCategoryRow}>
+                {MARKETPLACE_CATEGORIES.map((option) => {
+                  const isSelected = newCategory === option.value;
+                  return (
+                    <TouchableOpacity activeOpacity={1}
+                      key={option.value}
+                      style={[
+                        styles.modalCategoryPill,
+                        {
+                          borderColor: isSelected ? colors.primary : isDark ? "#334155" : "#E2E8F0",
+                          backgroundColor: isSelected ? colors.primary + "16" : "transparent",
+                        },
+                      ]}
+                      onPress={() => setNewCategory(isSelected ? "" : option.value)}
+                    >
+                      <Text
+                        style={{
+                          color: isSelected ? colors.primary : colors.textSecondary,
+                          fontSize: moderateScale(12),
+                          fontFamily: "Poppins_500Medium",
+                        }}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: adding ? 0.6 : 1 }]}
                 onPress={handleAddProduct}
                 disabled={adding}
               >
-                {adding ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Create Product</Text>}
+                {adding ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Post Listing</Text>}
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -584,14 +644,26 @@ const styles = StyleSheet.create({
   tabRow: { flexDirection: "row", borderBottomWidth: 1 },
   mainTab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14 },
   mainTabText: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold" },
-  subTabRow: { flexDirection: "row", borderBottomWidth: 1, marginBottom: 12 },
-  subTab: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
-  subTabText: { fontSize: moderateScale(12), fontFamily: "Poppins_600SemiBold" },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
+  introCard: { borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 12, gap: 14 },
+  introEyebrow: { fontSize: moderateScale(11), fontFamily: "Poppins_700Bold", textTransform: "uppercase", letterSpacing: 0.6 },
+  introTitle: { fontSize: moderateScale(18), fontFamily: "Poppins_700Bold", marginTop: 4 },
+  introSubtitle: { fontSize: moderateScale(13), lineHeight: 20, marginTop: 6 },
+  introAction: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999 },
+  introActionText: {
+    color: "#fff",
+    fontSize: moderateScale(13),
+    fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
+  introIconWrap: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", alignSelf: "flex-start" },
   searchBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, borderWidth: 1, marginBottom: 8 },
   searchInput: { flex: 1, marginLeft: 8, fontSize: moderateScale(14) },
   categoryRow: { marginBottom: 12, maxHeight: 44 },
   categoryPill: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6, marginRight: 8 },
+  modalCategoryRow: { gap: 8, paddingVertical: 4, paddingRight: 16 },
+  modalCategoryPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
   productCard: { width: CARD_WIDTH, borderRadius: 12, borderWidth: 1, marginBottom: 14, overflow: "hidden" },
   productImage: { width: "100%", height: CARD_WIDTH },
@@ -601,36 +673,42 @@ const styles = StyleSheet.create({
   productSeller: { fontSize: moderateScale(11), marginTop: 2 },
   productPrice: { fontSize: moderateScale(14), fontFamily: "Poppins_700Bold", marginTop: 4 },
   variantCount: { fontSize: moderateScale(10), marginTop: 2 },
-  orderCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 10 },
-  orderHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  orderNumber: { fontSize: moderateScale(15), fontFamily: "Poppins_700Bold" },
-  orderDate: { fontSize: moderateScale(12), marginTop: 4 },
-  orderFooter: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 10 },
-  orderItems: { fontSize: moderateScale(12) },
-  orderTotal: { fontSize: moderateScale(16), fontFamily: "Poppins_700Bold" },
+  cardFooterRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6, gap: 8 },
+  chatHint: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  chatHintText: { fontSize: moderateScale(10), fontFamily: "Poppins_600SemiBold" },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  statGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 10, marginTop: 4 },
-  statCard: { width: (SCREEN_WIDTH - 48) / 2 - 5, borderRadius: 12, borderWidth: 1, padding: 14, alignItems: "center" },
-  statValue: { fontSize: moderateScale(18), fontFamily: "Poppins_700Bold", marginTop: 8 },
-  statLabel: { fontSize: moderateScale(11), marginTop: 4 },
+  sellStatsRow: { flexDirection: "row", justifyContent: "space-between", gap: 10, marginBottom: 14 },
+  sellStatCard: { flex: 1, borderRadius: 14, borderWidth: 1, paddingVertical: 14, paddingHorizontal: 10, alignItems: "center" },
+  sellStatValue: { fontSize: moderateScale(18), fontFamily: "Poppins_700Bold", marginTop: 8 },
+  sellStatLabel: { fontSize: moderateScale(11), marginTop: 4 },
   addBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginBottom: 16, gap: 6 },
-  addBtnText: { color: "#fff", fontSize: moderateScale(15), fontFamily: "Poppins_700Bold" },
+  addBtnText: {
+    color: "#fff",
+    fontSize: moderateScale(15),
+    fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
   sellerProductCard: { flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 12, borderWidth: 1, marginBottom: 10 },
   productThumb: { width: 56, height: 56, borderRadius: 8 },
   productThumbPlaceholder: { width: 56, height: 56, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   sellerProductTitle: { fontSize: moderateScale(14), fontFamily: "Poppins_600SemiBold" },
   sellerProductPrice: { fontSize: moderateScale(13), marginTop: 2, fontFamily: "Poppins_700Bold" },
+  sellerProductMeta: { fontSize: moderateScale(11), marginTop: 4 },
   emptyContainer: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 400 },
   emptyText: { textAlign: "center", marginTop: 12, fontSize: moderateScale(15), fontFamily: "Poppins_500Medium" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalBox: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: "80%" as any },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  sectionTitle: { fontSize: moderateScale(17), fontFamily: "Poppins_700Bold" },
+  sectionTitle: {
+    fontSize: moderateScale(17),
+    fontFamily: "Poppins_700Bold",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
   inputLabel: { fontSize: moderateScale(13), fontFamily: "Poppins_600SemiBold", marginBottom: 6, marginTop: 12 },
   input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: moderateScale(14) },
   textArea: { minHeight: 80, textAlignVertical: "top" },
-  typeRow: { flexDirection: "row", gap: 10, marginTop: 4 },
-  typePill: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
   submitBtn: { alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginTop: 20, marginBottom: 20 },
   submitBtnText: { color: "#fff", fontSize: moderateScale(15), fontFamily: "Poppins_700Bold" },
 });

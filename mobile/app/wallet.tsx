@@ -482,7 +482,7 @@ export default function WalletScreen() {
   const handleTopUp = async () => {
     const amount = parseFloat(topUpAmount);
     if (!amount || amount < 50) {
-      Alert.alert('Invalid Amount', 'Minimum top-up amount is ₱50.');
+      Alert.alert('Invalid Amount', 'Minimum top-up amount is â‚±50.');
       return;
     }
     try {
@@ -605,7 +605,7 @@ export default function WalletScreen() {
     const amount = parseFloat(withdrawAmount);
 
     if (!amount || amount < 100) {
-      Alert.alert('Invalid Amount', 'Minimum withdrawal amount is ₱100');
+      Alert.alert('Invalid Amount', 'Minimum withdrawal amount is â‚±100');
       return;
     }
 
@@ -617,7 +617,7 @@ export default function WalletScreen() {
     // For refund-based withdrawal
     if (withdrawalMethod === 'refund') {
       if (amount > maxRefundableAmount) {
-        Alert.alert('Amount Too High', `Maximum refundable amount is ₱${maxRefundableAmount.toLocaleString()}`);
+        Alert.alert('Amount Too High', `Maximum refundable amount is â‚±${maxRefundableAmount.toLocaleString()}`);
         return;
       }
 
@@ -642,7 +642,7 @@ export default function WalletScreen() {
         }
 
         Alert.alert(
-          'Withdrawal Successful! 💸',
+          'Withdrawal Successful! ðŸ’¸',
           data?.message || 'The amount will be refunded to your original payment method.',
           [{
             text: 'OK', onPress: () => {
@@ -690,7 +690,7 @@ export default function WalletScreen() {
       const isMockCashout = Boolean((data as any)?.mock_cashout);
 
       Alert.alert(
-        isMockCashout ? 'Mock Cashout Success (Test Mode)' : 'Withdrawal Submitted! ✓',
+        isMockCashout ? 'Mock Cashout Success (Test Mode)' : 'Withdrawal Submitted! âœ“',
         data?.message || (isMockCashout
           ? 'Mock cashout recorded. No real money was transferred.'
           : 'Your payout will be processed within 1-3 business days.'),
@@ -1001,17 +1001,17 @@ export default function WalletScreen() {
               <View style={styles.decoBottomLeft} />
 
               <Text style={styles.balanceLabel}>Current Balance</Text>
-              <Text style={styles.balanceValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              <Text style={styles.balanceValue}>â‚± {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
 
               <View style={styles.balanceRow}>
                 <View>
                   <Text style={styles.balanceSubLabel}>Pending</Text>
-                  <Text style={styles.balanceSubValue}>₱ {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>â‚± {pendingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={[styles.balanceDivider, { backgroundColor: 'rgba(255,255,255,0.2)' }]} />
                 <View>
                   <Text style={styles.balanceSubLabel}>Available</Text>
-                  <Text style={styles.balanceSubValue}>₱ {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.balanceSubValue}>â‚± {balance?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
               </View>
             </View>
@@ -1056,7 +1056,7 @@ export default function WalletScreen() {
                     </View>
                   </View>
                   <Text style={styles.unpaidTotal}>
-                    ₱{unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
+                    â‚±{unpaidBookings.reduce((sum, b) => sum + (b.remaining_balance || 0), 0).toLocaleString()}
                   </Text>
                 </View>
 
@@ -1076,10 +1076,10 @@ export default function WalletScreen() {
                     <View style={styles.unpaidInfo}>
                       <Text style={styles.unpaidName} numberOfLines={1}>{booking.studio?.name}</Text>
                       <Text style={styles.unpaidDate}>
-                        {new Date(booking.booking_date).toLocaleDateString()} • {booking.start_time?.slice(0, 5)}
+                        {new Date(booking.booking_date).toLocaleDateString()} â€¢ {booking.start_time?.slice(0, 5)}
                       </Text>
                       <Text style={styles.unpaidAmount}>
-                        Balance: ₱{booking.remaining_balance?.toLocaleString()}
+                        Balance: â‚±{booking.remaining_balance?.toLocaleString()}
                       </Text>
                     </View>
                     <TouchableOpacity activeOpacity={1}
@@ -1100,7 +1100,7 @@ export default function WalletScreen() {
                 ))}
 
                 <Text style={styles.unpaidWarning}>
-                  ⚠️ Please settle your outstanding balance to continue using the app
+                  âš ï¸ Please settle your outstanding balance to continue using the app
                 </Text>
               </View>
             </View>
@@ -1209,13 +1209,13 @@ export default function WalletScreen() {
                           </View>
                         </View>
                         <Text style={[styles.transactionDate, { color: colors.textSecondary }]}>
-                          {new Date(withdrawal.created_at).toLocaleDateString()} • ****{withdrawal.payout_account_number.slice(-4)}
+                          {new Date(withdrawal.created_at).toLocaleDateString()} â€¢ ****{withdrawal.payout_account_number.slice(-4)}
                         </Text>
                       </View>
                     </View>
                     <View style={styles.withdrawalRight}>
                       <Text style={[styles.transactionAmount, { color: '#D97706' }]}>
-                        -₱{withdrawal.amount.toLocaleString()}
+                        -â‚±{withdrawal.amount.toLocaleString()}
                       </Text>
                       {withdrawal.status === 'pending' && (
                         <TouchableOpacity activeOpacity={1} onPress={() => handleCancelWithdrawal(withdrawal.id)}>
@@ -1236,7 +1236,7 @@ export default function WalletScreen() {
             {/* Filter chips */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
               {txFilterOptions.map((opt) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={opt.key}
                   onPress={() => setTxFilter(opt.key)}
                   style={{
@@ -1299,7 +1299,7 @@ export default function WalletScreen() {
                       </View>
                     </View>
                     <Text style={[styles.transactionAmount, { color: tx.is_credit ? '#10B981' : '#EF4444' }]}>
-                      {tx.is_credit ? '+' : '-'}₱ {tx.amount.toFixed(2)}
+                      {tx.is_credit ? '+' : '-'}â‚± {tx.amount.toFixed(2)}
                     </Text>
                   </View>
                 ))
@@ -1343,7 +1343,7 @@ export default function WalletScreen() {
             <View style={styles.inputSection}>
               <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Add</Text>
               <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
+                <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>â‚±</Text>
                 <TextInput
                   style={[styles.amountInput, { color: colors.text }]}
                   placeholder="0.00"
@@ -1354,7 +1354,7 @@ export default function WalletScreen() {
                 />
               </View>
               <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
-                Minimum top-up: ₱50
+                Minimum top-up: â‚±50
               </Text>
             </View>
 
@@ -1375,7 +1375,7 @@ export default function WalletScreen() {
                     styles.quickAmountText,
                     { color: parseFloat(topUpAmount) === preset ? 'white' : colors.text }
                   ]}>
-                    ₱{preset}
+                    â‚±{preset}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1418,7 +1418,7 @@ export default function WalletScreen() {
               <View>
                 <Text style={[styles.withdrawModalTitle, { color: colors.text }]}>Withdraw Funds</Text>
                 <Text style={[styles.withdrawModalSubtitle, { color: colors.textSecondary }]}>
-                  Available: ₱{balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  Available: â‚±{balance?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </Text>
               </View>
               <TouchableOpacity activeOpacity={1}
@@ -1434,7 +1434,7 @@ export default function WalletScreen() {
               <View style={styles.inputSection}>
                 <Text style={[styles.inputLabel, { color: colors.text }]}>Amount to Withdraw</Text>
                 <View style={[styles.amountInputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>₱</Text>
+                  <Text style={[styles.currencyPrefix, { color: colors.textSecondary }]}>â‚±</Text>
                   <TextInput
                     style={[styles.amountInput, { color: colors.text }]}
                     placeholder="0.00"
@@ -1445,7 +1445,7 @@ export default function WalletScreen() {
                   />
                 </View>
                 <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
-                  Minimum withdrawal: ₱100
+                  Minimum withdrawal: â‚±100
                 </Text>
               </View>
 
@@ -1467,7 +1467,7 @@ export default function WalletScreen() {
                       styles.quickAmountText,
                       { color: parseFloat(withdrawAmount) === amount ? 'white' : colors.text }
                     ]}>
-                      {idx === 3 ? 'Max' : `₱${amount}`}
+                      {idx === 3 ? 'Max' : `â‚±${amount}`}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -1549,7 +1549,7 @@ export default function WalletScreen() {
                 </View>
                 {hasRefundEligiblePayments && maxRefundableAmount > 0 && (
                   <Text style={[styles.inputHint, { color: colors.primary, marginTop: 8 }]}>
-                    💡 Refund available up to ₱{maxRefundableAmount.toLocaleString()} - goes back to your original payment method
+                    ðŸ’¡ Refund available up to â‚±{maxRefundableAmount.toLocaleString()} - goes back to your original payment method
                   </Text>
                 )}
               </View>
@@ -1599,7 +1599,7 @@ export default function WalletScreen() {
                                 {method.bank_name ? ` - ${method.bank_name}` : ''}
                               </Text>
                               <Text style={[styles.payoutMethodAccount, { color: colors.textSecondary }]}>
-                                {method.account_name} • ****{method.account_number.slice(-4)}
+                                {method.account_name} â€¢ ****{method.account_number.slice(-4)}
                               </Text>
                             </View>
                           </View>
@@ -1628,16 +1628,16 @@ export default function WalletScreen() {
                 <View style={[styles.summaryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Withdrawal Amount</Text>
-                    <Text style={[styles.summaryValue, { color: colors.text }]}>₱{parseFloat(withdrawAmount).toLocaleString()}</Text>
+                    <Text style={[styles.summaryValue, { color: colors.text }]}>â‚±{parseFloat(withdrawAmount).toLocaleString()}</Text>
                   </View>
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Processing Fee</Text>
-                    <Text style={[styles.summaryValue, { color: colors.text }]}>₱0.00</Text>
+                    <Text style={[styles.summaryValue, { color: colors.text }]}>â‚±0.00</Text>
                   </View>
                   <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
                   <View style={styles.summaryRow}>
                     <Text style={[styles.summaryLabelBold, { color: colors.text }]}>You'll Receive</Text>
-                    <Text style={[styles.summaryValueBold, { color: colors.primary }]}>₱{parseFloat(withdrawAmount).toLocaleString()}</Text>
+                    <Text style={[styles.summaryValueBold, { color: colors.primary }]}>â‚±{parseFloat(withdrawAmount).toLocaleString()}</Text>
                   </View>
                 </View>
               )}
@@ -1884,7 +1884,7 @@ export default function WalletScreen() {
                     </View>
 
                     <View style={styles.planPriceInfo}>
-                      <Text style={[styles.planPrice, { color: colors.text }]}>₱{plan.price.toLocaleString()}</Text>
+                      <Text style={[styles.planPrice, { color: colors.text }]}>â‚±{plan.price.toLocaleString()}</Text>
                       <Text style={[styles.planPeriod, { color: colors.textSecondary }]}> /month</Text>
                     </View>
 

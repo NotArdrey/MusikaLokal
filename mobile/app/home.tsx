@@ -1822,7 +1822,7 @@ export default function HomeScreen() {
           <Text style={styles.heroSubtitle}>Ready to make some noise?</Text>
 
           <TouchableOpacity 
-            activeOpacity={0.85}
+            activeOpacity={1}
             style={styles.modernSearchCard}
             onPress={openSearchSheet}
           >
@@ -1867,28 +1867,28 @@ export default function HomeScreen() {
         const hasRecordingRate = recordingRate > 0 && !isRehearsalOnlyStudio;
 
         if (hasRehearsalRate && hasRecordingRate) {
-          return `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+          return `â‚±${rehearsalRate.toLocaleString()}/hr | â‚±${recordingRate.toLocaleString()}/song`;
         }
         if (hasRecordingRate) {
-          return `₱${recordingRate.toLocaleString()}/song`;
+          return `â‚±${recordingRate.toLocaleString()}/song`;
         }
         if (hasRehearsalRate) {
-          return `₱${rehearsalRate.toLocaleString()}/hr`;
+          return `â‚±${rehearsalRate.toLocaleString()}/hr`;
         }
         if (item.hourly_rate && item.hourly_rate !== "0") {
-          return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+          return `â‚±${parseInt(item.hourly_rate).toLocaleString()}/hr`;
         }
         return null;
       }
 
       if (item.hourly_rate && item.hourly_rate !== "0") {
-        return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+        return `â‚±${parseInt(item.hourly_rate).toLocaleString()}/hr`;
       }
       if (item.budget && item.budget !== "0") {
-        return `₱${parseInt(item.budget).toLocaleString()}`;
+        return `â‚±${parseInt(item.budget).toLocaleString()}`;
       }
       if (item.rate && item.rate !== "0") {
-        return `₱${parseInt(item.rate).toLocaleString()}`;
+        return `â‚±${parseInt(item.rate).toLocaleString()}`;
       }
       return null;
     };
@@ -2142,31 +2142,31 @@ export default function HomeScreen() {
 
         // Both rates available
         if (hasRehearsalRate && hasRecordingRate) {
-          return `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+          return `â‚±${rehearsalRate.toLocaleString()}/hr | â‚±${recordingRate.toLocaleString()}/song`;
         }
         // Recording only
         if (hasRecordingRate) {
-          return `₱${recordingRate.toLocaleString()}/song`;
+          return `â‚±${recordingRate.toLocaleString()}/song`;
         }
         // Rehearsal only
         if (hasRehearsalRate) {
-          return `₱${rehearsalRate.toLocaleString()}/hr`;
+          return `â‚±${rehearsalRate.toLocaleString()}/hr`;
         }
         // Fallback to hourly_rate
         if (item.hourly_rate && item.hourly_rate !== "0") {
-          return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+          return `â‚±${parseInt(item.hourly_rate).toLocaleString()}/hr`;
         }
         return null;
       }
 
       if (item.hourly_rate && item.hourly_rate !== "0") {
-        return `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+        return `â‚±${parseInt(item.hourly_rate).toLocaleString()}/hr`;
       }
       if (item.budget && item.budget !== "0") {
-        return `₱${parseInt(item.budget).toLocaleString()}`;
+        return `â‚±${parseInt(item.budget).toLocaleString()}`;
       }
       if (item.rate && item.rate !== "0") {
-        return `₱${parseInt(item.rate).toLocaleString()}`;
+        return `â‚±${parseInt(item.rate).toLocaleString()}`;
       }
       return null;
     };
@@ -2275,7 +2275,7 @@ export default function HomeScreen() {
                       {item.type}
                     </Text>
                   </View>
-                  {/* NEW Dot Badge – hidden once the listing has been viewed */}
+                  {/* NEW Dot Badge â€“ hidden once the listing has been viewed */}
                   {!viewedNewArrivals.has(item.id) && (
                     <View style={styles.newArrivalNewBadge}>
                       <View style={styles.newArrivalNewDot} />
@@ -2497,7 +2497,7 @@ export default function HomeScreen() {
                   <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
                     {uniqueItems[0].hourly_rate && (
                       <Text style={styles.featuredPrice}>
-                        ₱{parseInt(uniqueItems[0].hourly_rate).toLocaleString()}
+                        â‚±{parseInt(uniqueItems[0].hourly_rate).toLocaleString()}
                         /hr
                       </Text>
                     )}
@@ -2674,13 +2674,13 @@ export default function HomeScreen() {
 
                       let priceText = null;
                       if (hasRehearsalRate && hasRecordingRate) {
-                        priceText = `₱${rehearsalRate.toLocaleString()}/hr | ₱${recordingRate.toLocaleString()}/song`;
+                        priceText = `â‚±${rehearsalRate.toLocaleString()}/hr | â‚±${recordingRate.toLocaleString()}/song`;
                       } else if (hasRecordingRate) {
-                        priceText = `₱${recordingRate.toLocaleString()}/song`;
+                        priceText = `â‚±${recordingRate.toLocaleString()}/song`;
                       } else if (hasRehearsalRate) {
-                        priceText = `₱${rehearsalRate.toLocaleString()}/hr`;
+                        priceText = `â‚±${rehearsalRate.toLocaleString()}/hr`;
                       } else if (item.hourly_rate && item.hourly_rate !== "0") {
-                        priceText = `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`;
+                        priceText = `â‚±${parseInt(item.hourly_rate).toLocaleString()}/hr`;
                       }
 
                       return priceText ? (
@@ -2705,10 +2705,10 @@ export default function HomeScreen() {
                           ]}
                         >
                           {item.hourly_rate
-                            ? `₱${parseInt(item.hourly_rate).toLocaleString()}/hr`
+                            ? `â‚±${parseInt(item.hourly_rate).toLocaleString()}/hr`
                             : item.budget
-                              ? `₱${parseInt(item.budget).toLocaleString()}`
-                              : `₱${parseInt(item.rate || "0").toLocaleString()}`}
+                              ? `â‚±${parseInt(item.budget).toLocaleString()}`
+                              : `â‚±${parseInt(item.rate || "0").toLocaleString()}`}
                         </Text>
                       );
                     }
@@ -2928,7 +2928,7 @@ export default function HomeScreen() {
                         marginTop: -2,
                       }}
                     >
-                      {`Engine: ${aiFeedProvider}${aiRecommendations.length > 0 ? ` • ${aiRecommendations.length} picks` : ""}`}
+                      {`Engine: ${aiFeedProvider}${aiRecommendations.length > 0 ? ` â€¢ ${aiRecommendations.length} picks` : ""}`}
                     </Text>
                   </View>
                 </View>
@@ -3089,7 +3089,7 @@ export default function HomeScreen() {
               { label: "Orders", icon: "receipt-outline" as const, route: "/orders", color: "#eab308" },
               { label: "Seller Hub", icon: "storefront-outline" as const, route: "/seller_hub", color: "#ec4899" },
             ] as const).map((mod) => (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 key={mod.label}
                 style={[styles.quickAccessCard, { backgroundColor: mod.color + "14" }]}
                 onPress={() => router.push(mod.route as any)}
@@ -3514,6 +3514,9 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontFamily: "Poppins_600SemiBold",
     fontSize: 10,
+    lineHeight: 12,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
 
   // Featured Card (For You)
@@ -3596,11 +3599,16 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   tagText: {
     color: "#FFF",
     fontFamily: "Poppins_600SemiBold",
     fontSize: 10,
+    lineHeight: 12,
+    includeFontPadding: false,
+    textAlignVertical: "center",
     textTransform: "uppercase",
   },
 

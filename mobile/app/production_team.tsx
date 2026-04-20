@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -41,6 +41,8 @@ interface TeamMember {
 export default function ProductionTeamScreen() {
   const { colors, isDark } = useTheme();
   const { isAuthenticated, loading: authLoading, userId } = useRequireAuth();
+  const params = useLocalSearchParams<{ teamId?: string }>();
+  const routeTeamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
 
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,16 +94,7 @@ export default function ProductionTeamScreen() {
     }
   }, [userId]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!authLoading && isAuthenticated) {
-        setLoading(true);
-        fetchTeams();
-      }
-    }, [authLoading, isAuthenticated, fetchTeams])
-  );
-
-  const fetchTeamMembers = async (teamId: string) => {
+  const fetchTeamMembers = useCallback(async (teamId: string) => {
     setLoadingMembers(true);
     try {
       const { data, error } = await supabase
@@ -123,7 +116,49 @@ export default function ProductionTeamScreen() {
     } finally {
       setLoadingMembers(false);
     }
-  };
+  }, []);
+
+  const fetchTeamById = useCallback(async (teamId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("production_teams")
+        .select("id, name, description, logo_url, owner_id, created_at")
+        .eq("id", teamId)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (!data) {
+        showAlert("warning", "Not Found", "Production team not found.");
+        setSelectedTeam(null);
+        return;
+      }
+
+      setSelectedTeam({
+        ...data,
+        member_role: data.owner_id === userId ? "owner" : "viewer",
+      });
+      await fetchTeamMembers(teamId);
+    } catch (e: any) {
+      showAlert("error", "Error", e.message || "Failed to fetch team");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [fetchTeamMembers, userId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!authLoading && isAuthenticated) {
+        setLoading(true);
+        if (routeTeamId) {
+          fetchTeamById(routeTeamId);
+        } else {
+          fetchTeams();
+        }
+      }
+    }, [authLoading, isAuthenticated, fetchTeamById, fetchTeams, routeTeamId])
+  );
 
   const handleCreateTeam = async () => {
     if (!newTeamName.trim()) {
@@ -223,6 +258,11 @@ export default function ProductionTeamScreen() {
   };
 
   const closeTeamDetail = () => {
+    if (routeTeamId) {
+      router.back();
+      return;
+    }
+
     setSelectedTeam(null);
     setTeamMembers([]);
   };
@@ -238,7 +278,7 @@ export default function ProductionTeamScreen() {
     }
   };
 
-  // ── Team Detail View ──
+  // â”€â”€ Team Detail View â”€â”€
   if (selectedTeam) {
     const canManage =
       selectedTeam.member_role === "owner" ||
@@ -246,7 +286,7 @@ export default function ProductionTeamScreen() {
 
     return (
       <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-        <Header title={selectedTeam.name} />
+        <Header title={selectedTeam.name} onBackPress={closeTeamDetail} />
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {/* Team Info */}
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -281,7 +321,7 @@ export default function ProductionTeamScreen() {
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Members</Text>
             {canManage && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 onPress={() => setAddMemberModalVisible(true)}
                 style={[styles.addBtn, { backgroundColor: colors.primary }]}
               >
@@ -323,7 +363,7 @@ export default function ProductionTeamScreen() {
                     </Text>
                   </View>
                   {canManage && member.role !== "owner" && member.user_id !== userId && (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       onPress={() => handleRemoveMember(member.user_id)}
                       style={styles.removeBtn}
                     >
@@ -336,7 +376,7 @@ export default function ProductionTeamScreen() {
           )}
 
           {/* Navigate to deals */}
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[styles.dealsBtn, { backgroundColor: colors.primary }]}
             onPress={() => router.push("/bookings")}
           >
@@ -345,11 +385,13 @@ export default function ProductionTeamScreen() {
           </TouchableOpacity>
 
           {/* Back button */}
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[styles.backBtn, { borderColor: colors.border }]}
             onPress={closeTeamDetail}
           >
-            <Text style={[styles.backBtnText, { color: colors.text }]}>Back to Teams</Text>
+            <Text style={[styles.backBtnText, { color: colors.text }]}>
+              {routeTeamId ? "Back" : "Back to Teams"}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
 
@@ -378,7 +420,7 @@ export default function ProductionTeamScreen() {
             <Text style={[styles.inputLabel, { color: colors.text, marginTop: 12 }]}>Role</Text>
             <View style={styles.roleSelector}>
               {(["member", "manager"] as const).map((r) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={r}
                   onPress={() => setMemberRole(r)}
                   style={[
@@ -401,7 +443,7 @@ export default function ProductionTeamScreen() {
               ))}
             </View>
 
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               onPress={handleAddMember}
               disabled={addingMember}
               style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: addingMember ? 0.6 : 1 }]}
@@ -413,7 +455,7 @@ export default function ProductionTeamScreen() {
               )}
             </TouchableOpacity>
           </View>
-              <TouchableOpacity onPress={() => setAddMemberModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setAddMemberModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
                 <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
               </TouchableOpacity>
             </View>
@@ -432,10 +474,10 @@ export default function ProductionTeamScreen() {
     );
   }
 
-  // ── Teams List View ──
+  // â”€â”€ Teams List View â”€â”€
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-      <Header title="Production Teams" />
+      <Header title="Production Teams" onBackPress={routeTeamId ? () => router.back() : undefined} />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -463,7 +505,7 @@ export default function ProductionTeamScreen() {
           </View>
         ) : (
           teams.map((team) => (
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               key={team.id}
               onPress={() => openTeamDetail(team)}
               style={[styles.teamCard, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -494,7 +536,7 @@ export default function ProductionTeamScreen() {
       </ScrollView>
 
       {/* FAB to create team */}
-      <TouchableOpacity
+      <TouchableOpacity activeOpacity={1}
         style={[styles.fab, { backgroundColor: colors.primary }]}
         onPress={() => setCreateModalVisible(true)}
       >
@@ -532,7 +574,7 @@ export default function ProductionTeamScreen() {
             numberOfLines={3}
           />
 
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             onPress={handleCreateTeam}
             disabled={creating}
             style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: creating ? 0.6 : 1 }]}
@@ -544,7 +586,7 @@ export default function ProductionTeamScreen() {
             )}
           </TouchableOpacity>
         </View>
-            <TouchableOpacity onPress={() => setCreateModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
+            <TouchableOpacity activeOpacity={1} onPress={() => setCreateModalVisible(false)} style={{ marginTop: 8, alignItems: "center" }}>
               <Text style={{ color: colors.textSecondary, fontFamily: "Poppins_500Medium" }}>Close</Text>
             </TouchableOpacity>
           </View>

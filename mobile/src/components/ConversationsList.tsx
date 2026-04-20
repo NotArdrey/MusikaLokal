@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_AVATAR } from '../constants/Images';
 import { useTheme } from '../context/ThemeContext';
 import { Conversation, useConversations } from '../hooks/useChat';
+import Header from './header';
 import { NAVBAR_CLEARANCE } from './navbar';
 import UserSearchModal from './UserSearchModal';
 
@@ -182,37 +183,30 @@ const ConversationsList: React.FC<ConversationsListProps> = ({
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
-            {/* Header */}
             <View
                 style={[
-                    styles.header,
+                    styles.topSection,
                     {
                         backgroundColor: colors.background,
-                        paddingTop: (insets.top || 16) + 12,
                         borderBottomColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)',
                     },
                 ]}
             >
-                <View style={styles.headerTopRow}>
-                    <Text style={[styles.headerTitle, { color: colors.text }]}>Messages</Text>
+                <Header
+                    title="Messages"
+                    rightIconName="create-outline"
+                    rightIconOnPress={() => setShowNewMessageModal(true)}
+                />
+                <View style={styles.searchBarContainer}>
                     <TouchableOpacity
-                        style={styles.composeBtn}
+                        style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
                         onPress={() => setShowNewMessageModal(true)}
                         activeOpacity={0.7}
                     >
-                        <Ionicons name="create-outline" size={26} color={colors.primary} />
+                        <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
+                        <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start new chat…</Text>
                     </TouchableOpacity>
                 </View>
-
-                {/* Search Bar */}
-                <TouchableOpacity
-                    style={[styles.searchBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}
-                    onPress={() => setShowNewMessageModal(true)}
-                    activeOpacity={0.7}
-                >
-                    <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
-                    <Text style={{ color: colors.textSecondary, fontSize: 15 }}>Search or start new chat…</Text>
-                </TouchableOpacity>
             </View>
 
             {/* Content */}
@@ -274,24 +268,12 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    header: {
-        paddingHorizontal: 20,
+    topSection: {
         paddingBottom: 12,
         borderBottomWidth: StyleSheet.hairlineWidth,
     },
-    headerTopRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 12,
-    },
-    headerTitle: {
-        fontSize: 28,
-        fontWeight: '800',
-        letterSpacing: -0.5,
-    },
-    composeBtn: {
-        padding: 4,
+    searchBarContainer: {
+        paddingHorizontal: 20,
     },
     searchBar: {
         flexDirection: 'row',

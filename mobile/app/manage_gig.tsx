@@ -426,13 +426,13 @@ export default function GigDetailsScreen() {
                 : "Date TBA"}
               {gig?.requirements?.event_start_time &&
                 gig?.requirements?.event_end_time
-                ? ` • ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
+                ? ` â€¢ ${gig.requirements.event_start_time} - ${gig.requirements.event_end_time}`
                 : ""}
-              {" • "}
+              {" â€¢ "}
               {gig?.location || "Location N/A"}
             </Text>
             {hasValidCoordinates(gig?.latitude, gig?.longitude) && (
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.navigateButton, { backgroundColor: colors.primary }]}
                 onPress={handleNavigateToGig}
               >
@@ -697,7 +697,7 @@ export default function GigDetailsScreen() {
                       <Text
                         style={[styles.payoutAmount, { color: colors.primary }]}
                       >
-                        ₱{(gig?.budget || 0).toLocaleString()}
+                        â‚±{(gig?.budget || 0).toLocaleString()}
                       </Text>
                     </View>
                   </View>
@@ -984,7 +984,7 @@ export default function GigDetailsScreen() {
                               app.applicant?.genres?.join(", ") ||
                               "Musician"}
                             {(app.group?.location || app.applicant?.location) &&
-                              ` • ${app.group?.location || app.applicant?.location}`}
+                              ` â€¢ ${app.group?.location || app.applicant?.location}`}
                           </Text>
                         </View>
                       </View>
@@ -1446,14 +1446,14 @@ export default function GigDetailsScreen() {
                       {/* View Full Profile Button */}
                       <TouchableOpacity activeOpacity={1}
                         onPress={() => {
-                          console.log("👤 View Profile pressed");
-                          console.log("👤 app.group:", app.group);
-                          console.log("👤 app.applicant:", app.applicant);
-                          console.log("👤 app.applicant_id:", app.applicant_id);
+                          console.log("ðŸ‘¤ View Profile pressed");
+                          console.log("ðŸ‘¤ app.group:", app.group);
+                          console.log("ðŸ‘¤ app.applicant:", app.applicant);
+                          console.log("ðŸ‘¤ app.applicant_id:", app.applicant_id);
 
                           if (app.group?.id) {
                             console.log(
-                              "👤 Navigating to group:",
+                              "ðŸ‘¤ Navigating to group:",
                               app.group.id,
                             );
                             router.push({
@@ -1462,7 +1462,7 @@ export default function GigDetailsScreen() {
                             });
                           } else if (app.applicant?.id) {
                             console.log(
-                              "👤 Navigating to profile with applicant.id:",
+                              "ðŸ‘¤ Navigating to profile with applicant.id:",
                               app.applicant.id,
                             );
                             router.push({
@@ -1471,7 +1471,7 @@ export default function GigDetailsScreen() {
                             });
                           } else if (app.applicant_id) {
                             console.log(
-                              "👤 Navigating to profile with applicant_id:",
+                              "ðŸ‘¤ Navigating to profile with applicant_id:",
                               app.applicant_id,
                             );
                             router.push({
@@ -1479,7 +1479,7 @@ export default function GigDetailsScreen() {
                               params: { userId: app.applicant_id },
                             });
                           } else {
-                            console.log("❌ No ID available for navigation");
+                            console.log("âŒ No ID available for navigation");
                             Alert.alert("Error", "Unable to view profile");
                           }
                         }}

@@ -267,11 +267,11 @@ export default function ProducerProjectDetailsScreen() {
                 <Text style={[styles.roleStatus, {
                   color: role.status === "filled" ? "#22c55e" : role.status === "open" ? colors.primary : colors.textSecondary
                 }]}>
-                  {role.status} {role.filled_by_name ? `• ${role.filled_by_name}` : ""}
+                  {role.status} {role.filled_by_name ? `â€¢ ${role.filled_by_name}` : ""}
                 </Text>
               </View>
               {!isOwner && role.status === "open" && (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[styles.applyRoleBtn, { borderColor: colors.primary }]}
                   onPress={() => { setApplyRoleId(role.id); setShowApplyModal(true); }}
                 >
@@ -288,18 +288,18 @@ export default function ProducerProjectDetailsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Actions</Text>
             <View style={styles.actionRow}>
               {project.status === "draft" && (
-                <TouchableOpacity style={[styles.actionBtn, { backgroundColor: "#22c55e" }]} onPress={handlePublish}>
+                <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: "#22c55e" }]} onPress={handlePublish}>
                   <Ionicons name="rocket" size={16} color="#fff" />
                   <Text style={styles.actionBtnText}>Publish</Text>
                 </TouchableOpacity>
               )}
               {project.status === "published" && (
-                <TouchableOpacity style={[styles.actionBtn, { backgroundColor: "#ef4444" }]} onPress={handleArchive}>
+                <TouchableOpacity activeOpacity={1} style={[styles.actionBtn, { backgroundColor: "#ef4444" }]} onPress={handleArchive}>
                   <Ionicons name="archive" size={16} color="#fff" />
                   <Text style={styles.actionBtnText}>Archive</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity
+              <TouchableOpacity activeOpacity={1}
                 style={[styles.actionBtn, { backgroundColor: colors.primary }]}
                 onPress={() => setShowInviteModal(true)}
               >
@@ -332,13 +332,13 @@ export default function ProducerProjectDetailsScreen() {
                   )}
                 </View>
                 <View style={styles.appActions}>
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     style={[styles.appActionBtn, { backgroundColor: "#22c55e" }]}
                     onPress={() => handleReviewApplication(app.id, "accepted")}
                   >
                     <Ionicons name="checkmark" size={18} color="#fff" />
                   </TouchableOpacity>
-                  <TouchableOpacity
+                  <TouchableOpacity activeOpacity={1}
                     style={[styles.appActionBtn, { backgroundColor: "#ef4444" }]}
                     onPress={() => handleReviewApplication(app.id, "rejected")}
                   >
@@ -359,7 +359,7 @@ export default function ProducerProjectDetailsScreen() {
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Apply to Project</Text>
-              <TouchableOpacity onPress={() => setShowApplyModal(false)}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowApplyModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
@@ -372,7 +372,7 @@ export default function ProducerProjectDetailsScreen() {
               onChangeText={setApplyMessage}
               multiline
             />
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: applying ? 0.6 : 1 }]}
               onPress={handleApply}
               disabled={applying}
@@ -389,7 +389,7 @@ export default function ProducerProjectDetailsScreen() {
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite Musician</Text>
-              <TouchableOpacity onPress={() => setShowInviteModal(false)}>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowInviteModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
@@ -406,7 +406,7 @@ export default function ProducerProjectDetailsScreen() {
                 <Text style={[styles.inputLabel, { color: colors.text }]}>For Role (optional)</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
                   {openRoles.map((r: any) => (
-                    <TouchableOpacity
+                    <TouchableOpacity activeOpacity={1}
                       key={r.id}
                       style={[
                         styles.rolePill,
@@ -432,7 +432,7 @@ export default function ProducerProjectDetailsScreen() {
               onChangeText={setInviteMessage}
               multiline
             />
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: inviting ? 0.6 : 1 }]}
               onPress={handleInvite}
               disabled={inviting}

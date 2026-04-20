@@ -219,7 +219,7 @@ export default function SubmitReviewScreen() {
 
             <View style={styles.starsContainer}>
               {ratingOptions.map((item) => (
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   key={item}
                   onPress={() => setSelectedValue(item)}
                   activeOpacity={1}

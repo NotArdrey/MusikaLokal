@@ -49,6 +49,8 @@ export default function ProducerProjectsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [savedProjectIds, setSavedProjectIds] = useState<Set<string>>(new Set());
+  const [bookmarkBusyById, setBookmarkBusyById] = useState<Record<string, boolean>>({});
 
   // Create project modal
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -95,7 +97,141 @@ export default function ProducerProjectsScreen() {
 
   useFocusEffect(useCallback(() => { fetchData(); }, [fetchData]));
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncSavedProjects = async () => {
+      if (!userId) {
+        setSavedProjectIds(new Set());
+        return;
+      }
+
+      const projectIds = Array.from(
+        new Set(
+          [...projects, ...myProjects]
+            .map((project) => project?.id)
+            .filter((value): value is string => typeof value === "string" && value.length > 0),
+        ),
+      );
+
+      if (projectIds.length === 0) {
+        setSavedProjectIds(new Set());
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("favorites")
+          .select("project_id")
+          .eq("user_id", userId)
+          .in("project_id", projectIds);
+
+        if (error) throw error;
+
+        if (!cancelled) {
+          setSavedProjectIds(
+            new Set(
+              (data || [])
+                .map((row: any) => row?.project_id)
+                .filter((value: any): value is string => typeof value === "string" && value.length > 0),
+            ),
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setSavedProjectIds(new Set());
+        }
+      }
+    };
+
+    void syncSavedProjects();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [myProjects, projects, userId]);
+
   const onRefresh = () => { setRefreshing(true); fetchData(); };
+
+  const handleToggleProjectBookmark = useCallback(async (projectId: string, projectTitle: string, e?: any) => {
+    e?.stopPropagation?.();
+
+    if (!userId) {
+      showTopToast({ type: "warning", title: "Login required", message: "Please sign in to save productions." });
+      return;
+    }
+
+    if (!projectId || bookmarkBusyById[projectId]) {
+      return;
+    }
+
+    const wasSaved = savedProjectIds.has(projectId);
+
+    setBookmarkBusyById((current) => ({ ...current, [projectId]: true }));
+    setSavedProjectIds((current) => {
+      const next = new Set(current);
+      if (wasSaved) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      return next;
+    });
+
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-details", {
+        body: {
+          action: "toggle_favorite",
+          type: "project",
+          id: projectId,
+          userId,
+        },
+      });
+
+      if (error) throw error;
+
+      const nextSaved = typeof data?.is_favorited === "boolean" ? data.is_favorited : !wasSaved;
+      setSavedProjectIds((current) => {
+        const next = new Set(current);
+        if (nextSaved) {
+          next.add(projectId);
+        } else {
+          next.delete(projectId);
+        }
+        return next;
+      });
+
+      showTopToast({
+        type: "success",
+        title: nextSaved ? "Production saved" : "Production removed",
+        message: nextSaved
+          ? `${projectTitle || "Project"} was added to your saved productions.`
+          : `${projectTitle || "Project"} was removed from your saved productions.`,
+      });
+    } catch (error: any) {
+      setSavedProjectIds((current) => {
+        const next = new Set(current);
+        if (wasSaved) {
+          next.add(projectId);
+        } else {
+          next.delete(projectId);
+        }
+        return next;
+      });
+
+      showTopToast({
+        type: "error",
+        title: "Save failed",
+        message: error?.message || "Unable to update the saved production right now.",
+      });
+    } finally {
+      setBookmarkBusyById((current) => {
+        const next = { ...current };
+        delete next[projectId];
+        return next;
+      });
+    }
+  }, [bookmarkBusyById, savedProjectIds, userId]);
 
   const handleCreateProject = async () => {
     if (!newTitle.trim()) {
@@ -133,12 +269,31 @@ export default function ProducerProjectsScreen() {
     p.genre?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const renderProjectCard = (item: any) => (
-    <TouchableOpacity
+  const renderProjectCard = (item: any) => {
+    const isSaved = savedProjectIds.has(item.id);
+    const bookmarkBusy = !!bookmarkBusyById[item.id];
+
+    return (
+    <TouchableOpacity activeOpacity={1}
       key={item.id}
       style={[styles.card, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
       onPress={() => router.push({ pathname: "/producer_project_details", params: { project_id: item.id } })}
     >
+      <TouchableOpacity
+        activeOpacity={1}
+        style={[
+          styles.bookmarkButton,
+          { backgroundColor: isDark ? "rgba(15,23,42,0.92)" : "rgba(255,255,255,0.96)" },
+        ]}
+        onPress={(e) => handleToggleProjectBookmark(item.id, item.title || "Project", e)}
+        disabled={bookmarkBusy}
+      >
+        {bookmarkBusy ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <Ionicons name={isSaved ? "bookmark" : "bookmark-outline"} size={18} color={isSaved ? colors.primary : colors.textSecondary} />
+        )}
+      </TouchableOpacity>
       {item.cover_image_url ? (
         <CachedImage uri={item.cover_image_url } style={styles.cardImage} />
       ) : (
@@ -149,7 +304,7 @@ export default function ProducerProjectsScreen() {
       <View style={styles.cardContent}>
         <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{item.title}</Text>
         <Text style={[styles.cardMeta, { color: colors.textSecondary }]}>
-          {item.owner_name || "Producer"} {item.genre ? `• ${item.genre}` : ""}
+          {item.owner_name || "Producer"} {item.genre ? `â€¢ ${item.genre}` : ""}
         </Text>
         <View style={styles.cardStats}>
           <Text style={[styles.cardStat, { color: colors.textSecondary }]}>
@@ -168,10 +323,11 @@ export default function ProducerProjectsScreen() {
         </View>
       </View>
     </TouchableOpacity>
-  );
+    );
+  };
 
   const renderMatchCard = (item: any) => (
-    <TouchableOpacity
+    <TouchableOpacity activeOpacity={1}
       key={item.match_id}
       style={[styles.matchCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
       onPress={() => router.push({ pathname: "/producer_project_details", params: { project_id: item.project_id } })}
@@ -183,10 +339,10 @@ export default function ProducerProjectsScreen() {
       <View style={{ flex: 1, marginLeft: 12 }}>
         <Text style={[styles.matchName, { color: colors.text }]}>{item.musician_name}</Text>
         <Text style={[styles.matchProject, { color: colors.textSecondary }]} numberOfLines={1}>
-          {item.project_title} {item.role_title ? `• ${item.role_title}` : ""}
+          {item.project_title} {item.role_title ? `â€¢ ${item.role_title}` : ""}
         </Text>
         <Text style={[styles.matchType, { color: item.match_type === "invite" ? colors.primary : "#f59e0b" }]}>
-          {item.match_type === "invite" ? "Invite" : "Application"} • {item.status}
+          {item.match_type === "invite" ? "Invite" : "Application"} â€¢ {item.status}
         </Text>
       </View>
     </TouchableOpacity>
@@ -222,7 +378,7 @@ export default function ProducerProjectsScreen() {
       {/* Tabs */}
       <View style={[styles.tabRow, { borderBottomWidth: 1, borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
         {tabs.map((t) => (
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             key={t.key}
             style={[styles.tab, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2, borderBottomLeftRadius: 1, borderBottomRightRadius: 1 }]}
             onPress={() => setTab(t.key)}
@@ -269,7 +425,7 @@ export default function ProducerProjectsScreen() {
 
             {tab === "my_projects" && isProducer && (
               <>
-                <TouchableOpacity
+                <TouchableOpacity activeOpacity={1}
                   style={[styles.createButton, { backgroundColor: colors.primary }]}
                   onPress={() => setShowCreateModal(true)}
                 >
@@ -315,7 +471,7 @@ export default function ProducerProjectsScreen() {
           <View style={[styles.modalBox, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
               <Text style={{ color: colors.text, fontSize: moderateScale(17), fontFamily: "Poppins_700Bold" }}>Create Project</Text>
-              <TouchableOpacity onPress={() => setShowCreateModal(false)}><Ionicons name="close" size={24} color={colors.textSecondary} /></TouchableOpacity>
+              <TouchableOpacity activeOpacity={1} onPress={() => setShowCreateModal(false)}><Ionicons name="close" size={24} color={colors.textSecondary} /></TouchableOpacity>
             </View>
           <Text style={[styles.inputLabel, { color: colors.text }]}>Title *</Text>
           <TextInput
@@ -351,7 +507,7 @@ export default function ProducerProjectsScreen() {
             value={newLocation}
             onChangeText={setNewLocation}
           />
-          <TouchableOpacity
+          <TouchableOpacity activeOpacity={1}
             style={[styles.submitButton, { backgroundColor: colors.primary, opacity: creating ? 0.6 : 1 }]}
             onPress={handleCreateProject}
             disabled={creating}
@@ -384,6 +540,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, marginLeft: 8, fontSize: moderateScale(14) },
   loadingWrap: { paddingTop: 12 },
   card: { borderRadius: 12, borderWidth: 1, marginBottom: 12, overflow: "hidden" },
+  bookmarkButton: { position: "absolute", top: 10, right: 10, width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", zIndex: 2 },
   cardImage: { width: "100%", height: 120 },
   cardImagePlaceholder: { width: "100%", height: 120, alignItems: "center", justifyContent: "center" },
   cardContent: { padding: 12 },

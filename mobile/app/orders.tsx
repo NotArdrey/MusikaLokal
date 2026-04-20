@@ -65,8 +65,8 @@ export default function OrdersScreen() {
   const onRefresh = () => { setRefreshing(true); fetchOrders(); };
 
   const formatPrice = (price: number | null) => {
-    if (!price) return "₱0";
-    return `₱${price.toLocaleString()}`;
+    if (!price) return "â‚±0";
+    return `â‚±${price.toLocaleString()}`;
   };
 
   const getStatusColor = (status: string) => {
@@ -81,7 +81,7 @@ export default function OrdersScreen() {
   };
 
   const renderOrder = (order: any, isSelling = false) => (
-    <TouchableOpacity
+    <TouchableOpacity activeOpacity={1}
       key={order.id}
       style={[styles.orderCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}
       onPress={() => router.push({ pathname: "/deal_details", params: { order_id: order.id } })}
@@ -131,7 +131,7 @@ export default function OrdersScreen() {
       {tabs.length > 1 && (
         <View style={[styles.tabRow, { borderBottomWidth: 1, borderBottomColor: isDark ? "#334155" : "#E2E8F0" }]}>
           {tabs.map((t) => (
-            <TouchableOpacity
+            <TouchableOpacity activeOpacity={1}
               key={t.key}
               style={[styles.tab, tab === t.key && { borderBottomColor: colors.primary, borderBottomWidth: 2, borderBottomLeftRadius: 1, borderBottomRightRadius: 1 }]}
               onPress={() => setTab(t.key)}
