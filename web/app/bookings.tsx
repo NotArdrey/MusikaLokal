@@ -58,6 +58,160 @@ const moderateScale = (size: number, factor = 0.3) => {
   return size + (scaled - size) * factor;
 };
 
+const REQUEST_PLACEHOLDER_IMAGE =
+  "https://images.unsplash.com/photo-1633332755192-727a05c4013d?w=400&h=400&fit=crop";
+
+const VISIBLE_CONNECTION_REQUEST_STATUSES = [
+  "pending",
+  "accepted",
+  "approved",
+  "connected",
+  "rejected",
+  "declined",
+  "cancelled",
+];
+
+const toStartCase = (value: string) =>
+  value
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+const formatConnectionEntityType = (value: unknown) =>
+  toStartCase(String(value || "connection").replace(/_/g, " "));
+
+const buildConnectionRequestTypeLabel = (eventDetails: any) => {
+  const senderType = String(eventDetails?.sender_entity_type || "").trim().toLowerCase();
+  const receiverType = String(eventDetails?.receiver_entity_type || "").trim().toLowerCase();
+
+  if (senderType === "production_team" && receiverType === "venue") {
+    return "Production Team Application";
+  }
+
+  if (senderType === "venue" && receiverType === "production_team") {
+    return "Venue Invite";
+  }
+
+  if (senderType === "production_team" && (receiverType === "musician" || receiverType === "group")) {
+    return "Production Team Invite";
+  }
+
+  if ((senderType === "musician" || senderType === "group") && receiverType === "production_team") {
+    return "Production Team Application";
+  }
+
+  return `${formatConnectionEntityType(senderType || receiverType)} Request`;
+};
+
+const getConnectionRequestStatusLabel = (status: unknown) => {
+  const normalized = String(status || "pending").trim().toLowerCase();
+
+  if (!normalized || normalized === "pending") {
+    return "Pending";
+  }
+
+  if (["accepted", "approved", "connected"].includes(normalized)) {
+    return "Accepted";
+  }
+
+  if (["rejected", "declined", "cancelled"].includes(normalized)) {
+    return "Declined";
+  }
+
+  return toStartCase(normalized.replace(/_/g, " "));
+};
+
+const getConnectionRequestStatusColors = (status: unknown) => {
+  const normalized = String(status || "pending").trim().toLowerCase();
+
+  if (["accepted", "approved", "connected"].includes(normalized)) {
+    return { backgroundColor: "#10B98120", textColor: "#10B981" };
+  }
+
+  if (["rejected", "declined", "cancelled"].includes(normalized)) {
+    return { backgroundColor: "#EF444420", textColor: "#EF4444" };
+  }
+
+  return { backgroundColor: "#F59E0B20", textColor: "#F59E0B" };
+};
+
+const toNonEmptyString = (value: unknown) => {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
+const extractConnectionRequestDetails = (eventDetails: any, attachmentUrl: unknown) => {
+  const requestDetails =
+    eventDetails?.request_details && typeof eventDetails.request_details === "object"
+      ? eventDetails.request_details
+      : {};
+  const requestKind =
+    toNonEmptyString(requestDetails?.request_kind) ||
+    toNonEmptyString(eventDetails?.request_kind) ||
+    "application";
+  const normalizedAttachmentUrl = toNonEmptyString(attachmentUrl);
+
+  return {
+    requestKind,
+    pitchMessage:
+      toNonEmptyString(requestDetails?.pitch_message) ||
+      toNonEmptyString(eventDetails?.pitch_message),
+    applicationContext:
+      toNonEmptyString(requestDetails?.application_context) ||
+      toNonEmptyString(eventDetails?.application_context),
+    contextLabel:
+      toNonEmptyString(requestDetails?.context_label) ||
+      toNonEmptyString(eventDetails?.context_label) ||
+      "Application Context",
+    cvUrl:
+      toNonEmptyString(requestDetails?.cv_url) ||
+      (requestKind === "application" ? normalizedAttachmentUrl : null),
+    videoUrl:
+      toNonEmptyString(requestDetails?.video_url) ||
+      toNonEmptyString(eventDetails?.video_url),
+    contractUrl:
+      toNonEmptyString(requestDetails?.contract_url) ||
+      (requestKind === "invite" ? normalizedAttachmentUrl : null),
+    slotType:
+      toNonEmptyString(requestDetails?.slot_type) ||
+      toNonEmptyString(eventDetails?.slot_type),
+    rosterEntryName:
+      toNonEmptyString(requestDetails?.roster_entry_name) ||
+      toNonEmptyString(eventDetails?.roster_entry_name),
+    rosterEntryKind:
+      toNonEmptyString(requestDetails?.roster_entry_kind) ||
+      toNonEmptyString(eventDetails?.roster_entry_kind),
+  };
+};
+
+const buildConnectionRequestDetailLines = (item: any) =>
+  [
+    item?.request_context_label && item?.counterparty_name
+      ? `${item.request_context_label}: ${item.counterparty_name}`
+      : null,
+    item?.message ? `Pitch: ${item.message}` : "Pitch: No pitch provided.",
+    item?.request_application_context
+      ? `${item.request_context_title || "Application Context"}: ${item.request_application_context}`
+      : null,
+    item?.request_slot_type
+      ? `Slot / Role: ${formatConnectionEntityType(item.request_slot_type)}`
+      : null,
+    item?.request_roster_entry_name
+      ? `Featured Performer: ${item.request_roster_entry_name}`
+      : null,
+    item?.request_contract_url
+      ? "Contract: Attached"
+      : null,
+    item?.request_cv_url
+      ? "CV / Resume: Attached"
+      : null,
+    item?.request_video_url
+      ? "Video / Reel: Attached"
+      : null,
+    `Status: ${item?.status || "Pending"}`,
+  ].filter(Boolean);
+
 type Tab =
   | "Applicants"
   | "Active Musicians"
@@ -168,6 +322,7 @@ export default function BookingsScreen() {
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const [locallyReportedLateBookings, setLocallyReportedLateBookings] = useState<Record<string, boolean>>({});
   const [locallyReportedAccessIssueBookings, setLocallyReportedAccessIssueBookings] = useState<Record<string, boolean>>({});
+  const [requestActionId, setRequestActionId] = useState<string | null>(null);
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState<{
     type: AlertType;
@@ -412,6 +567,30 @@ export default function BookingsScreen() {
             schema: "public",
             table: "notifications",
             filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            queueRealtimeRefresh();
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "booking_requests",
+            filter: `sender_id=eq.${userId}`,
+          },
+          () => {
+            queueRealtimeRefresh();
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "booking_requests",
+            filter: `receiver_id=eq.${userId}`,
           },
           () => {
             queueRealtimeRefresh();
@@ -829,10 +1008,117 @@ export default function BookingsScreen() {
 
       const effectiveBookings = fallbackBookings || bookings;
 
+      let connectionRequestItems: any[] = [];
+      try {
+        const { data: requestRows, error: requestError } = await supabase
+          .from("booking_requests")
+          .select(
+            "id, created_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url",
+          )
+          .or(`sender_id.eq.${targetUserId},receiver_id.eq.${targetUserId}`)
+          .in("status", VISIBLE_CONNECTION_REQUEST_STATUSES)
+          .order("created_at", { ascending: false });
+
+        if (requestError) {
+          debugLog("Error fetching connection requests:", requestError);
+        } else if ((requestRows || []).length > 0) {
+          const profileIds = [...new Set(
+            (requestRows || [])
+              .flatMap((request: any) => [request.sender_id, request.receiver_id])
+              .filter(Boolean),
+          )];
+
+          const profileMap = new Map<string, any>();
+
+          if (profileIds.length > 0) {
+            const { data: profileRows, error: profileError } = await supabase
+              .from("profiles")
+              .select("id, full_name, avatar_url")
+              .in("id", profileIds);
+
+            if (profileError) {
+              debugLog("Error fetching connection request profiles:", profileError);
+            } else {
+              (profileRows || []).forEach((profile: any) => {
+                if (profile?.id) {
+                  profileMap.set(profile.id, profile);
+                }
+              });
+            }
+          }
+
+          connectionRequestItems = (requestRows || []).map((request: any) => {
+            const eventDetails = request.event_details || {};
+            const requestDetails = extractConnectionRequestDetails(
+              eventDetails,
+              request.attachment_url,
+            );
+            const senderEntityName =
+              eventDetails.sender_entity_name ||
+              profileMap.get(request.sender_id)?.full_name ||
+              "User";
+            const receiverEntityName =
+              eventDetails.receiver_entity_name ||
+              profileMap.get(request.receiver_id)?.full_name ||
+              "User";
+            const isIncoming = request.receiver_id === targetUserId;
+            const counterpartyId = isIncoming ? request.sender_id : request.receiver_id;
+            const counterpartyProfile = counterpartyId ? profileMap.get(counterpartyId) : null;
+            const counterpartyName = isIncoming ? senderEntityName : receiverEntityName;
+
+            return {
+              id: request.id,
+              type_id: "booking_request",
+              created_at: request.created_at,
+              raw_date: request.created_at,
+              date: new Date(request.created_at).toLocaleDateString(),
+              name: counterpartyName,
+              image: counterpartyProfile?.avatar_url || REQUEST_PLACEHOLDER_IMAGE,
+              status: getConnectionRequestStatusLabel(request.status),
+              raw_status: request.status,
+              type: buildConnectionRequestTypeLabel(eventDetails),
+              message: requestDetails.pitchMessage || request.message || "",
+              action: "View Request",
+              sender_id: request.sender_id,
+              receiver_id: request.receiver_id,
+              counterparty_id: counterpartyId || null,
+              counterparty_name: counterpartyProfile?.full_name || counterpartyName,
+              counterparty_avatar: counterpartyProfile?.avatar_url || null,
+              request_direction: isIncoming ? "incoming" : "outgoing",
+              request_context_label: isIncoming ? "From" : "To",
+              sender_entity_name: senderEntityName,
+              sender_entity_type: eventDetails.sender_entity_type || null,
+              receiver_entity_name: receiverEntityName,
+              receiver_entity_type: eventDetails.receiver_entity_type || null,
+              group_id: request.group_id || null,
+              studio_id: request.studio_id || null,
+              production_team_id: eventDetails.production_team_id || null,
+              listing_id: eventDetails.listing_id || null,
+              listing_type: eventDetails.listing_type || null,
+              request_kind: requestDetails.requestKind,
+              request_application_context: requestDetails.applicationContext,
+              request_context_title: requestDetails.contextLabel,
+              request_contract_url: requestDetails.contractUrl,
+              request_cv_url: requestDetails.cvUrl,
+              request_video_url: requestDetails.videoUrl,
+              request_slot_type: requestDetails.slotType,
+              request_roster_entry_name: requestDetails.rosterEntryName,
+              request_roster_entry_kind: requestDetails.rosterEntryKind,
+              attachment_url: request.attachment_url || null,
+              route_path: eventDetails.route || null,
+              route_params: eventDetails.route_params || null,
+            };
+          });
+        }
+      } catch (requestFetchError) {
+        debugLog("Error building connection requests:", requestFetchError);
+      }
+
       if (!effectiveBookings) throw error || new Error("Failed to fetch bookings");
 
       const combinedBookingItems = [
         ...(effectiveBookings?.Pending || []),
+        ...connectionRequestItems,
         ...(effectiveBookings?.Upcoming || []),
         ...(effectiveBookings?.Ongoing || []),
         ...(effectiveBookings?.Review || []),
@@ -904,24 +1190,45 @@ export default function BookingsScreen() {
           };
         });
 
+      const normalizeStatus = (status?: string | null) =>
+        String(status || "").trim().toLowerCase();
+
       // Separate Items Logic
 
       // 1. Applicants (Pending Gig items)
-      const rawPending = attachLateReportMeta(effectiveBookings?.Pending || []);
+      const pendingConnectionRequestItems = connectionRequestItems.filter(
+        (item: any) => normalizeStatus(item.raw_status) === "pending",
+      );
+      const resolvedConnectionRequests = connectionRequestItems.filter(
+        (item: any) => normalizeStatus(item.raw_status) !== "pending",
+      );
+      const rawPending = attachLateReportMeta([
+        ...(effectiveBookings?.Pending || []),
+        ...pendingConnectionRequestItems,
+      ]);
       const pendingGigApplications = rawPending.filter(
         (item: any) => item.type_id === "gig_application",
       );
+      const pendingConnectionRequests = rawPending.filter(
+        (item: any) => item.type_id === "booking_request",
+      );
 
-      const applicants = role === "venue-owner" ? pendingGigApplications : [];
+      const applicants =
+        role === "venue-owner"
+          ? [...pendingGigApplications, ...pendingConnectionRequests]
+          : [];
 
       const studioPending = rawPending.filter(
-        (item: any) => item.type_id !== "gig_application",
+        (item: any) =>
+          item.type_id !== "gig_application" && item.type_id !== "booking_request",
       );
 
       const pendingItems =
-        role === "musician"
-          ? [...pendingGigApplications, ...studioPending]
-          : studioPending;
+        role === "venue-owner"
+          ? []
+          : role === "musician"
+            ? [...pendingGigApplications, ...pendingConnectionRequests, ...studioPending]
+            : [...pendingConnectionRequests, ...studioPending];
 
       pendingItems.sort(
         (a: any, b: any) =>
@@ -998,16 +1305,19 @@ export default function BookingsScreen() {
 
         return false;
       });
-      const normalizeStatus = (status?: string | null) =>
-        String(status || "").trim().toLowerCase();
-
       const terminalGigApplications = rawReview.filter((item: any) => {
         if (item.type_id !== "gig_application") return false;
         const status = normalizeStatus(item.status);
         return ["completed", "fired", "declined", "rejected", "cancelled"].includes(status);
       });
 
-      const historyItems = [...cancelledFromUpcoming, ...alreadyReviewedCompleted, ...terminalGigApplications, ...expiredPendingStudioItems]
+      const historyItems = [
+        ...cancelledFromUpcoming,
+        ...alreadyReviewedCompleted,
+        ...terminalGigApplications,
+        ...expiredPendingStudioItems,
+        ...(role === "venue-owner" ? [] : resolvedConnectionRequests),
+      ]
         .filter(
           (item: any, index: number, arr: any[]) =>
             arr.findIndex((candidate: any) => candidate.id === item.id && candidate.type_id === item.type_id) === index,
@@ -1020,23 +1330,29 @@ export default function BookingsScreen() {
       );
 
       // 5. Review - role-aware unreviewed items
-      const unreviewedItems = rawReview.filter((item: any) => {
-        if (role === "venue-owner") {
-          // For venue owners, Review tab = Completed tab: fired musicians + completed contracts.
-          // Shows gig applications with status "Fired" or "Completed" (never "Accepted").
-          return item.type_id === "gig_application" &&
-            (item.status === "Fired" || item.status === "Completed");
-        }
+      const unreviewedItems = [
+        ...rawReview.filter((item: any) => {
+          if (role === "venue-owner") {
+            // For venue owners, Review tab = Completed tab: fired musicians + completed contracts.
+            // Shows gig applications with status "Fired" or "Completed" (never "Accepted").
+            return item.type_id === "gig_application" &&
+              (item.status === "Fired" || item.status === "Completed");
+          }
 
-        if (item.type_id === "gig_application") return false;
+          if (item.type_id === "gig_application") return false;
 
-        if (role === "studio-owner") {
-          return item.reviewed_by_owner !== true;
-        }
+          if (role === "studio-owner") {
+            return item.reviewed_by_owner !== true;
+          }
 
-        // Default/musician flow
-        return item.reviewed_by_customer !== true;
-      });
+          // Default/musician flow
+          return item.reviewed_by_customer !== true;
+        }),
+        ...(role === "venue-owner" ? resolvedConnectionRequests : []),
+      ].filter(
+        (item: any, index: number, arr: any[]) =>
+          arr.findIndex((candidate: any) => candidate.id === item.id && candidate.type_id === item.type_id) === index,
+      );
 
       // Sort lists
       applicants.sort(
@@ -1048,6 +1364,11 @@ export default function BookingsScreen() {
         (a: any, b: any) =>
           new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
       ); // Closest gig first
+      unreviewedItems.sort(
+        (a: any, b: any) =>
+          new Date(b.created_at || b.raw_date).getTime() -
+          new Date(a.created_at || a.raw_date).getTime(),
+      );
 
       // 6. Fetch commercial deals
       let dealsItems: any[] = [];
@@ -1345,8 +1666,170 @@ export default function BookingsScreen() {
   }
 
   const handleDetailsPress = (item: any) => {
+    if (item?.type_id === "booking_request") {
+      const detailButtons = [
+        item?.request_contract_url
+          ? {
+              text: "Open Contract",
+              onPress: () => openConnectionRequestLink(item.request_contract_url, "Contract"),
+            }
+          : null,
+        item?.request_cv_url
+          ? {
+              text: "Open CV",
+              onPress: () => openConnectionRequestLink(item.request_cv_url, "CV"),
+            }
+          : null,
+        item?.request_video_url
+          ? {
+              text: "Open Video",
+              onPress: () => openConnectionRequestLink(item.request_video_url, "Video"),
+            }
+          : null,
+        {
+          text: "Close",
+          style: item?.request_contract_url || item?.request_cv_url || item?.request_video_url ? "cancel" : "default",
+        },
+      ].filter(Boolean);
+
+      showAlert(
+        "info",
+        item?.type || "Connection Request",
+        buildConnectionRequestDetailLines(item).join("\n\n"),
+        detailButtons,
+      );
+      return;
+    }
+
     setSelectedItem(item);
     bookingDetailsRef.current?.present();
+  };
+
+  const canRespondToConnectionRequest = (item: any) => {
+    if (item?.type_id !== "booking_request") return false;
+    if (!userId) return false;
+    if (item?.request_direction !== "incoming") return false;
+
+    return item?.receiver_id === userId;
+  };
+
+  const handleConnectionRequestDecision = async (
+    item: any,
+    nextStatus: "accepted" | "declined",
+  ) => {
+    if (!userId) {
+      showAlert("info", "Sign in required", "Please sign in to manage requests.");
+      return;
+    }
+
+    if (!canRespondToConnectionRequest(item)) {
+      showAlert(
+        "warning",
+        "Action unavailable",
+        "Only the request recipient can respond to this connection request.",
+      );
+      return;
+    }
+
+    setRequestActionId(item.id);
+
+    try {
+      const { data: updatedRequest, error: updateError } = await supabase
+        .from("booking_requests")
+        .update({ status: nextStatus })
+        .eq("id", item.id)
+        .eq("receiver_id", userId)
+        .eq("status", "pending")
+        .select("id")
+        .maybeSingle();
+
+      if (updateError) throw updateError;
+
+      if (!updatedRequest) {
+        await fetchBookings(userId);
+        showAlert(
+          "warning",
+          "Request already updated",
+          "This connection request is no longer pending.",
+        );
+        return;
+      }
+
+      const responderName = item.receiver_entity_name || "The recipient";
+      const requestTypeLabel = String(item.type || "connection request").toLowerCase();
+      const counterpartyName = item.counterparty_name || item.name || "this user";
+
+      const { error: notificationError } = await supabase.from("notifications").insert({
+        user_id: item.sender_id,
+        type: "info",
+        title: `${responderName} ${nextStatus === "accepted" ? "accepted" : "declined"} your request`,
+        message: `Your ${requestTypeLabel} was ${nextStatus === "accepted" ? "accepted" : "declined"} by ${responderName}.`,
+        meta: {
+          type: "listing_connection_request_status",
+          request_id: item.id,
+          request_status: nextStatus,
+          sender_entity_type: item.sender_entity_type || null,
+          sender_entity_name: item.sender_entity_name || null,
+          receiver_entity_type: item.receiver_entity_type || null,
+          receiver_entity_name: item.receiver_entity_name || null,
+          listing_id: item.listing_id || null,
+          listing_type: item.listing_type || null,
+          production_team_id: item.production_team_id || null,
+          route: item.route_path || null,
+          route_params: item.route_params || null,
+        },
+      });
+
+      if (notificationError) {
+        console.warn("Failed to create connection request status notification:", notificationError);
+      }
+
+      await fetchBookings(userId);
+
+      showAlert(
+        "success",
+        nextStatus === "accepted" ? "Request accepted" : "Request declined",
+        nextStatus === "accepted"
+          ? `You accepted the connection request from ${counterpartyName}.`
+          : `You declined the connection request from ${counterpartyName}.`,
+      );
+    } catch (decisionError) {
+      debugLog("Error updating connection request:", decisionError);
+      showAlert(
+        "error",
+        "Unable to update request",
+        (decisionError as any)?.message || "Failed to update the connection request. Please try again.",
+      );
+    } finally {
+      setRequestActionId(null);
+    }
+  };
+
+  const promptConnectionRequestDecision = (
+    item: any,
+    nextStatus: "accepted" | "declined",
+  ) => {
+    const counterpartyName = item?.counterparty_name || item?.name || "this user";
+    const requestTypeLabel = String(item?.type || "connection request").toLowerCase();
+    const isAccept = nextStatus === "accepted";
+
+    showAlert(
+      isAccept ? "info" : "warning",
+      isAccept ? "Accept Request" : "Decline Request",
+      isAccept
+        ? `Accept the ${requestTypeLabel} from ${counterpartyName}?`
+        : `Decline the ${requestTypeLabel} from ${counterpartyName}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: isAccept ? "Accept" : "Decline",
+          style: isAccept ? "default" : "destructive",
+          onPress: () => {
+            void handleConnectionRequestDecision(item, nextStatus);
+          },
+        },
+      ],
+    );
   };
 
   const handleRemovePermitListing = (listing: any) => {
@@ -1467,6 +1950,22 @@ export default function BookingsScreen() {
       viewMode === "applications" &&
       activeAppTab === "Completed");
 
+  const openConnectionRequestLink = useCallback(
+    (url: string | null | undefined, label: string) => {
+      const normalizedUrl = String(url || "").trim();
+      if (!normalizedUrl) return;
+
+      void Linking.openURL(normalizedUrl).catch(() => {
+        showAlert(
+          "error",
+          "Unable to open link",
+          `We couldn't open the ${label.toLowerCase()} link.`,
+        );
+      });
+    },
+    [showAlert],
+  );
+
   const shouldShowLateReportDot = (item: any) => {
     if (item?.type_id !== "studio_booking") return false;
 
@@ -1527,6 +2026,10 @@ export default function BookingsScreen() {
   };
 
   const shouldShowMessageForItem = (item: any) => {
+    if (item.type_id === "booking_request") {
+      return !!item.counterparty_id;
+    }
+
     if (isReviewOrCompletedContext) return false;
 
     if (item.type_id === "studio_booking") {
@@ -1608,6 +2111,14 @@ export default function BookingsScreen() {
             }
           }
         }
+      } else if (item.type_id === "booking_request") {
+        chatContext.bookingRequestId = item.id;
+        if (item.production_team_id) chatContext.productionTeamId = item.production_team_id;
+        if (item.listing_id) chatContext.listingId = item.listing_id;
+
+        recipientId = item.counterparty_id || null;
+        recipientName = item.counterparty_name || item.name || "User";
+        recipientAvatar = item.counterparty_avatar || null;
       }
 
       if (!recipientId) {
@@ -2630,7 +3141,6 @@ export default function BookingsScreen() {
                           backgroundColor: pageCardBackground,
                           borderColor: borderSoft,
                           borderWidth: 1,
-                          borderWidth: 1,
                           marginBottom: 0,
                         },
                       ]}
@@ -2845,7 +3355,7 @@ export default function BookingsScreen() {
                 <Text
                   style={[styles.emptySubtitle, { color: colors.textSecondary, marginTop: 8, textAlign: "center", paddingHorizontal: 24 }]}
                 >
-                  When musicians apply to your gigs, they'll appear here
+                  Gig applications and direct connection requests will appear here
                 </Text>
               )}
             </View>
@@ -2924,6 +3434,270 @@ export default function BookingsScreen() {
                       <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
                         {new Date(item.updated_at || item.created_at).toLocaleDateString()}
                       </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }
+
+              // ==========================================
+              // 0.75. CONNECTION REQUEST CARD
+              // ==========================================
+              if (item.type_id === "booking_request") {
+                const canRespond = canRespondToConnectionRequest(item);
+                const isRequestActionPending = requestActionId === item.id;
+                const requestStatusColors = getConnectionRequestStatusColors(
+                  item.raw_status || item.status,
+                );
+                const connectionMetaLine = [
+                  item.request_slot_type
+                    ? `Slot: ${formatConnectionEntityType(item.request_slot_type)}`
+                    : null,
+                  item.request_roster_entry_name
+                    ? `Performer: ${item.request_roster_entry_name}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" • ");
+
+                return (
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    key={item.id}
+                    onPress={() => handleDetailsPress(item)}
+                    style={[
+                      styles.cardContainer,
+                      isWebDesktop && styles.cardContainerWeb,
+                      isWebDesktop && styles.gridItemWeb,
+                      {
+                        backgroundColor: pageCardBackground,
+                        borderColor: borderSoft,
+                        borderWidth: 1,
+                      },
+                    ]}
+                  >
+                    <View style={{ padding: scale(16) }}>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: moderateScale(8), gap: scale(8) }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: scale(8), flex: 1 }}>
+                          <Ionicons
+                            name={item.request_direction === "incoming" ? "mail-unread-outline" : "paper-plane-outline"}
+                            size={moderateScale(20)}
+                            color={colors.primary}
+                          />
+                          <Text style={{ fontSize: moderateScale(16), fontWeight: "700", color: colors.text, flex: 1 }} numberOfLines={1}>
+                            {item.name || item.counterparty_name || "Connection Request"}
+                          </Text>
+                        </View>
+                        <View style={{ backgroundColor: requestStatusColors.backgroundColor, paddingHorizontal: scale(10), paddingVertical: scale(4), borderRadius: moderateScale(12) }}>
+                          <Text style={{ fontSize: moderateScale(12), fontWeight: "600", color: requestStatusColors.textColor }}>
+                            {item.status}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={{ fontSize: moderateScale(13), color: colors.textSecondary, marginBottom: moderateScale(4) }}>
+                        {item.type}
+                      </Text>
+                      <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary, marginBottom: moderateScale(4) }}>
+                        {item.request_context_label} {item.counterparty_name || item.name}
+                      </Text>
+                      {connectionMetaLine ? (
+                        <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary, marginBottom: moderateScale(4) }}>
+                          {connectionMetaLine}
+                        </Text>
+                      ) : null}
+                      {item.message ? (
+                        <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary, fontStyle: "italic" }} numberOfLines={3}>
+                          "{item.message}"
+                        </Text>
+                      ) : null}
+                      {item.request_application_context ? (
+                        <Text style={{ fontSize: moderateScale(12), color: colors.textSecondary, marginTop: moderateScale(6) }} numberOfLines={2}>
+                          {item.request_context_title || "Application Context"}: {item.request_application_context}
+                        </Text>
+                      ) : null}
+                      <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary, marginTop: moderateScale(6) }}>
+                        {new Date(item.created_at || item.raw_date).toLocaleDateString()}
+                      </Text>
+
+                      {(item.request_contract_url || item.request_cv_url || item.request_video_url) && (
+                        <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(8) }}>
+                          {item.request_contract_url ? (
+                            <TouchableOpacity
+                              activeOpacity={0.9}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                openConnectionRequestLink(item.request_contract_url, "Contract");
+                              }}
+                              style={{
+                                flex: 1,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 4,
+                                borderWidth: 1,
+                                borderColor: colors.border,
+                                paddingVertical: scale(8),
+                                borderRadius: scale(8),
+                              }}
+                            >
+                              <Ionicons name="document-attach-outline" size={16} color={colors.textSecondary} />
+                              <Text style={{ color: colors.textSecondary, fontSize: moderateScale(12), fontWeight: "600" }}>
+                                Open Contract
+                              </Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          {item.request_cv_url ? (
+                            <TouchableOpacity
+                              activeOpacity={0.9}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                openConnectionRequestLink(item.request_cv_url, "CV");
+                              }}
+                              style={{
+                                flex: 1,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 4,
+                                borderWidth: 1,
+                                borderColor: colors.border,
+                                paddingVertical: scale(8),
+                                borderRadius: scale(8),
+                              }}
+                            >
+                              <Ionicons name="document-text-outline" size={16} color={colors.textSecondary} />
+                              <Text style={{ color: colors.textSecondary, fontSize: moderateScale(12), fontWeight: "600" }}>
+                                Open CV
+                              </Text>
+                            </TouchableOpacity>
+                          ) : null}
+                          {item.request_video_url ? (
+                            <TouchableOpacity
+                              activeOpacity={0.9}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                openConnectionRequestLink(item.request_video_url, "Video");
+                              }}
+                              style={{
+                                flex: 1,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 4,
+                                borderWidth: 1,
+                                borderColor: colors.border,
+                                paddingVertical: scale(8),
+                                borderRadius: scale(8),
+                              }}
+                            >
+                              <Ionicons name="play-circle-outline" size={16} color={colors.textSecondary} />
+                              <Text style={{ color: colors.textSecondary, fontSize: moderateScale(12), fontWeight: "600" }}>
+                                Open Video
+                              </Text>
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
+                      )}
+
+                      <View style={{ flexDirection: "row", gap: scale(8), marginTop: moderateScale(10) }}>
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          onPress={() => handleDetailsPress(item)}
+                          style={{
+                            flex: 1,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 4,
+                            borderWidth: 1,
+                            borderColor: colors.border,
+                            paddingVertical: scale(8),
+                            borderRadius: scale(8),
+                          }}
+                        >
+                          <Ionicons name="eye-outline" size={16} color={colors.textSecondary} />
+                          <Text style={{ color: colors.textSecondary, fontSize: moderateScale(12), fontWeight: "600" }}>
+                            View Request
+                          </Text>
+                        </TouchableOpacity>
+                        {shouldShowMessageForItem(item) && (
+                          <TouchableOpacity
+                            activeOpacity={1}
+                            onPress={() => handleMessagePress(item)}
+                            style={{
+                              flex: 1,
+                              flexDirection: "row",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 4,
+                              backgroundColor: colors.primary,
+                              paddingVertical: scale(8),
+                              borderRadius: scale(8),
+                            }}
+                          >
+                            <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
+                            <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>
+                              Message
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      {canRespond && (
+                        <View style={{ marginTop: moderateScale(8), gap: moderateScale(8) }}>
+                          {isRequestActionPending && (
+                            <Text style={{ fontSize: moderateScale(11), color: colors.textSecondary }}>
+                              Updating request...
+                            </Text>
+                          )}
+                          <View style={{ flexDirection: "row", gap: scale(8) }}>
+                            <TouchableOpacity
+                              activeOpacity={isRequestActionPending ? 1 : 0.9}
+                              disabled={isRequestActionPending}
+                              onPress={() => promptConnectionRequestDecision(item, "declined")}
+                              style={{
+                                flex: 1,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 4,
+                                borderWidth: 1,
+                                borderColor: "#EF4444",
+                                backgroundColor: pageCardBackground,
+                                paddingVertical: scale(8),
+                                borderRadius: scale(8),
+                                opacity: isRequestActionPending ? 0.6 : 1,
+                              }}
+                            >
+                              <Ionicons name="close-outline" size={16} color="#EF4444" />
+                              <Text style={{ color: "#EF4444", fontSize: moderateScale(12), fontWeight: "600" }}>
+                                Decline
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              activeOpacity={isRequestActionPending ? 1 : 0.9}
+                              disabled={isRequestActionPending}
+                              onPress={() => promptConnectionRequestDecision(item, "accepted")}
+                              style={{
+                                flex: 1,
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 4,
+                                backgroundColor: "#10B981",
+                                paddingVertical: scale(8),
+                                borderRadius: scale(8),
+                                opacity: isRequestActionPending ? 0.6 : 1,
+                              }}
+                            >
+                              <Ionicons name="checkmark-outline" size={16} color="#fff" />
+                              <Text style={{ color: "#fff", fontSize: moderateScale(12), fontWeight: "600" }}>
+                                Accept
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      )}
                     </View>
                   </TouchableOpacity>
                 );

@@ -58,8 +58,8 @@ const getProductImage = (product: any) => product?.cover_image_url || product?.p
 export default function MarketplaceScreen() {
   const { colors, isDark } = useTheme();
   const { contentBottomPadding } = useBottomBarClearance(24);
-  const { session, userRole, isGuest, userId } = useAuth();
-  const isSeller = userRole === "producer" || userRole === "musician";
+  const { session, isGuest, userId } = useAuth();
+  const canSell = Boolean(session);
 
   const [tab, setTab] = useState<MarketTab>("browse");
 
@@ -90,7 +90,7 @@ export default function MarketplaceScreen() {
     const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
 
     if (error) {
-      console.error("manage-marketplace failed", {
+      console.warn("manage-marketplace failed", {
         message: error.message,
         status: (error as any).status,
         code: (error as any).code,
@@ -120,20 +120,20 @@ export default function MarketplaceScreen() {
 
       const promises: Promise<any>[] = [invokeMarketplace(browseBody)];
 
-      if (isSeller) {
+      if (canSell) {
         promises.push(invokeMarketplace({ action: "list_my_products" }));
       }
 
       const results = await Promise.all(promises);
       setProducts(results[0]?.data || []);
-      setSellerProducts(isSeller ? results[1]?.data || [] : []);
+      setSellerProducts(canSell ? results[1]?.data || [] : []);
     } catch (e: any) {
-      console.error("Marketplace fetch error:", e);
+      console.warn("Marketplace fetch failed", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [session, category, invokeMarketplace, isSeller]);
+  }, [session, category, invokeMarketplace, canSell]);
 
   useFocusEffect(useCallback(() => {
     setLoading(true);
@@ -353,7 +353,7 @@ export default function MarketplaceScreen() {
 
   const tabs: { key: MarketTab; label: string; icon: string }[] = [
     { key: "browse", label: "Browse", icon: "storefront-outline" },
-    ...(isSeller ? [{ key: "sell" as MarketTab, label: "Sell", icon: "pricetags-outline" }] : []),
+    ...(canSell ? [{ key: "sell" as MarketTab, label: "Sell", icon: "pricetags-outline" }] : []),
   ];
 
   // ==========================================
@@ -366,13 +366,13 @@ export default function MarketplaceScreen() {
           <Text style={[styles.introEyebrow, { color: colors.primary }]}>Marketplace</Text>
           <Text style={[styles.introTitle, { color: colors.text }]}>Browse listings and message sellers directly.</Text>
           <Text style={[styles.introSubtitle, { color: colors.textSecondary }]}> 
-            {isSeller
+            {canSell
               ? "Post merch, gear, and digital drops. Buyers contact you through chat instead of checking out in-app."
               : "Open any listing to ask questions, negotiate, and arrange the sale with the seller."}
           </Text>
         </View>
 
-        {isSeller ? (
+        {canSell ? (
           <TouchableOpacity activeOpacity={1}
             style={[styles.introAction, { backgroundColor: colors.primary }]}
             onPress={() => {
@@ -618,8 +618,8 @@ export default function MarketplaceScreen() {
           ))
         ) : (
           <>
-            {tab === "browse" && renderBrowse()}
-            {tab === "sell" && renderSell()}
+                  {tab === "browse" && renderBrowse()}
+                  {tab === "sell" && renderSell()}
           </>
         )}
 

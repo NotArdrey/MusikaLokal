@@ -101,8 +101,14 @@ const isAdminRole = (role: unknown): boolean => {
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
-  const { setGuestMode } = useAuth();
+  const { session, loading: authLoading, setGuestMode } = useAuth();
   const { verified, accountCreated, email: createdEmail, verification_error } = useLocalSearchParams();
+
+  useEffect(() => {
+    if (!authLoading && session) {
+      router.replace('/feed' as any);
+    }
+  }, [authLoading, session]);
 
   // ... (existing initializeAuth is fine)
 
@@ -450,8 +456,7 @@ export default function LoginScreen() {
             router.replace('/identity_verification' as any);
             return;
           } else {
-            // Verified & Profile Exists -> Allow Entry
-            console.log('Verification passed. Redirecting to Feed.');
+            console.log('Verification passed. Redirecting to: /feed');
             router.replace('/feed' as any);
           }
         }

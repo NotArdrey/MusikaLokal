@@ -9,6 +9,7 @@ import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { resolveRoleManageRoute } from '../src/utils/roleRouting';
 
 export default function ManageScreen() {
     const { colors } = useTheme();
@@ -86,14 +87,10 @@ export default function ManageScreen() {
     };
 
     const handleRedirect = (role: string) => {
-        if (role === 'studio-owner') {
-            router.replace('/my_studio');
-        } else if (role === 'musician' || role === 'manager' || role === 'musician-member') {
-            router.replace('/my_group');
-        } else if (role === 'venue-owner') {
-            router.replace('/my_venue');
-        } else if (role === 'producer') {
-            router.replace('/my_production');
+        const destination = resolveRoleManageRoute(role);
+
+        if (destination !== '/manage') {
+            router.replace(destination as any);
         } else {
             setLoading(false);
         }
@@ -101,7 +98,7 @@ export default function ManageScreen() {
 
     if (loading) {
         return (
-            <View style={[styles.flex1, { backgroundColor: colors.background }]}> 
+            <View style={[styles.flex1, { backgroundColor: colors.background }]}>
                 <Header title="Manage" />
                 <View style={styles.manageSkeletonContainer}>
                     <Skeleton width="72%" height={26} borderRadius={8} />

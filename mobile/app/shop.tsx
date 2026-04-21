@@ -81,6 +81,21 @@ export default function ShopScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Header title="Shop" onBackPress={() => router.back()} />
 
+      <View style={[styles.introCard, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0" }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.introEyebrow, { color: colors.primary }]}>Marketplace</Text>
+          <Text style={[styles.introTitle, { color: colors.text }]}>Browse listings or open Seller Hub to post your own.</Text>
+          <Text style={[styles.introSubtitle, { color: colors.textSecondary }]}>Every signed-in account can sell merch, gear, and digital drops.</Text>
+        </View>
+        <TouchableOpacity activeOpacity={1}
+          style={[styles.introAction, { backgroundColor: colors.primary }]}
+          onPress={() => router.push("/seller_hub")}
+        >
+          <Ionicons name="storefront-outline" size={16} color="#fff" />
+          <Text style={styles.introActionText}>Seller Hub</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Search */}
       <View style={[styles.searchBar, { backgroundColor: colors.surface, borderColor: isDark ? "#334155" : "#E2E8F0", marginHorizontal: 16, marginTop: 12 }]}>
         <Ionicons name="search" size={18} color={colors.textSecondary} />
@@ -177,6 +192,12 @@ export default function ShopScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  introCard: { borderWidth: 1, borderRadius: 18, padding: 16, marginHorizontal: 16, marginTop: 12, marginBottom: 4, gap: 14 },
+  introEyebrow: { fontSize: moderateScale(11), fontFamily: "Poppins_700Bold", textTransform: "uppercase", letterSpacing: 0.6 },
+  introTitle: { fontSize: moderateScale(18), fontFamily: "Poppins_700Bold", marginTop: 4 },
+  introSubtitle: { fontSize: moderateScale(13), lineHeight: 20, marginTop: 6 },
+  introAction: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999 },
+  introActionText: { color: "#fff", fontSize: moderateScale(13), fontFamily: "Poppins_700Bold", includeFontPadding: false, textAlignVertical: "center" },
   searchBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, borderWidth: 1 },
   searchInput: { flex: 1, marginLeft: 8, fontSize: moderateScale(14) },
   categoryRow: { marginTop: 12, maxHeight: 44 },

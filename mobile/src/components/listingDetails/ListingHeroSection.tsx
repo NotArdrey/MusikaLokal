@@ -15,6 +15,7 @@ interface ListingHeroSectionProps {
   onToggleFavorite: () => void;
   onReport?: () => void;
   onShare?: () => void;
+  onChat?: () => void;
 }
 
 const ListingHeroSection = ({
@@ -28,6 +29,7 @@ const ListingHeroSection = ({
   onToggleFavorite,
   onReport,
   onShare,
+  onChat,
 }: ListingHeroSectionProps) => {
   const actionIconStyle = {
     lineHeight: 22,
@@ -60,6 +62,16 @@ const ListingHeroSection = ({
               name="flag-outline"
               size={22}
               color="#EF4444"
+              style={actionIconStyle}
+            />
+          </TouchableOpacity>
+        ) : null}
+        {onChat ? (
+          <TouchableOpacity activeOpacity={1} onPress={onChat} style={styles.roundBtn}>
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={22}
+              color="#000"
               style={actionIconStyle}
             />
           </TouchableOpacity>

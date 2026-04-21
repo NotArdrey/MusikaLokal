@@ -50,6 +50,7 @@ export default function PlaylistDetailsScreen() {
 
   // Add track modal state
   const [addTrackVisible, setAddTrackVisible] = useState(false);
+  const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [newTrackTitle, setNewTrackTitle] = useState("");
   const [newTrackArtist, setNewTrackArtist] = useState("");
   const [newTrackAudioUrl, setNewTrackAudioUrl] = useState("");
@@ -68,7 +69,7 @@ export default function PlaylistDetailsScreen() {
       });
       if (data?.data) setPlaylist(data.data);
     } catch (e: any) {
-      console.error("PlaylistDetails fetch error:", e);
+      console.warn("PlaylistDetails fetch failed", e);
     } finally {
       setLoading(false);
     }
@@ -78,6 +79,7 @@ export default function PlaylistDetailsScreen() {
 
   const resetAddTrackForm = useCallback(() => {
     setAddTrackVisible(false);
+    setEditingTrackId(null);
     setNewTrackTitle("");
     setNewTrackArtist("");
     setNewTrackAudioUrl("");
@@ -89,10 +91,10 @@ export default function PlaylistDetailsScreen() {
     if (!playlist) return;
     try {
       await supabase.functions.invoke("manage-playlists", {
-        body: { action: "record_play_event", playlist_id: playlist.id },
+        body: { action: "record_play_event", playlist_id: playlist.id, event_type: "teaser_play" },
       });
     } catch (e: any) {
-      console.error("Play record error:", e);
+      console.warn("Play record failed", e);
     }
   };
 
@@ -124,7 +126,21 @@ export default function PlaylistDetailsScreen() {
     }
   };
 
-  const handleAddTrack = async () => {
+  const openEditTrackModal = useCallback((item: any) => {
+    setEditingTrackId(item.id);
+    setNewTrackTitle(item.title || "");
+    setNewTrackArtist(item.artist_name || "");
+    setNewTrackAudioUrl(item.audio_url || "");
+    setNewTrackDurationSeconds(
+      typeof item.duration_seconds === "number" && Number.isFinite(item.duration_seconds)
+        ? String(item.duration_seconds)
+        : "",
+    );
+    setNewTrackAudioFile(null);
+    setAddTrackVisible(true);
+  }, []);
+
+  const handleSaveTrack = async () => {
     if (!newTrackTitle.trim()) {
       setAlert({ type: "warning", title: "Missing Title", message: "Please enter a track title." });
       return;
@@ -148,8 +164,8 @@ export default function PlaylistDetailsScreen() {
 
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
         body: {
-          action: "add_playlist_item",
-          playlist_id: playlist.id,
+          action: editingTrackId ? "update_playlist_item" : "add_playlist_item",
+          ...(editingTrackId ? { item_id: editingTrackId } : { playlist_id: playlist.id }),
           title: newTrackTitle.trim(),
           artist_name: newTrackArtist.trim() || null,
           audio_url: sourceUrl,
@@ -162,11 +178,19 @@ export default function PlaylistDetailsScreen() {
       }
 
       if (data?.success) {
-        showTopToast({ type: "success", title: "Track Added", message: "Track added to playlist." });
+        showTopToast({
+          type: "success",
+          title: editingTrackId ? "Track Updated" : "Track Added",
+          message: editingTrackId ? "Track changes saved." : "Track added to playlist.",
+        });
         resetAddTrackForm();
         fetchPlaylist();
       } else {
-        setAlert({ type: "error", title: "Error", message: data?.error || "Failed to add track" });
+        setAlert({
+          type: "error",
+          title: "Error",
+          message: data?.error || (editingTrackId ? "Failed to update track" : "Failed to add track"),
+        });
       }
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
@@ -269,6 +293,7 @@ export default function PlaylistDetailsScreen() {
   const items = playlist.items || [];
   const teaserAssets = playlist.teaser_assets || [];
   const externalLinks = playlist.external_links || [];
+  const isEditingTrack = editingTrackId !== null;
   const canReportPlaylist = !isOwner && !!userId && !isGuest;
   const reportHeaderAction = canReportPlaylist ? (
     <TouchableOpacity
@@ -355,9 +380,14 @@ export default function PlaylistDetailsScreen() {
                   </Text>
                 )}
                 {isOwner && (
-                  <TouchableOpacity activeOpacity={1} onPress={() => handleRemoveItem(item.id)} style={{ marginLeft: 10 }}>
-                    <Ionicons name="remove-circle-outline" size={20} color="#ef4444" />
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 10, gap: 10 }}>
+                    <TouchableOpacity activeOpacity={0.8} onPress={() => openEditTrackModal(item)}>
+                      <Ionicons name="create-outline" size={18} color={colors.primary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity activeOpacity={0.8} onPress={() => handleRemoveItem(item.id)}>
+                      <Ionicons name="remove-circle-outline" size={20} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
             ))
@@ -444,7 +474,7 @@ export default function PlaylistDetailsScreen() {
       <Modal visible={addTrackVisible} transparent animationType="slide" onRequestClose={resetAddTrackForm}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalSheet, { backgroundColor: colors.card || colors.background, borderColor: colors.border }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Add Track</Text>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>{isEditingTrack ? "Edit Track" : "Add Track"}</Text>
 
             <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Title *</Text>
             <TextInput
@@ -528,10 +558,10 @@ export default function PlaylistDetailsScreen() {
               <TouchableOpacity
                 activeOpacity={0.8}
                 style={[styles.modalBtn, { backgroundColor: colors.primary, flex: 1 }]}
-                onPress={handleAddTrack}
+                onPress={handleSaveTrack}
                 disabled={addingTrack}
               >
-                {addingTrack ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700", fontSize: moderateScale(14) }}>Add</Text>}
+                {addingTrack ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700", fontSize: moderateScale(14) }}>{isEditingTrack ? "Save" : "Add"}</Text>}
               </TouchableOpacity>
             </View>
           </View>

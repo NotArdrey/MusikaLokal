@@ -36,7 +36,7 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
     );
 
     const isMyListingPath = useMemo(
-        () => pathname === "/my_group" || pathname === "/my_venue" || pathname === "/my_studio",
+        () => pathname === "/my_group" || pathname === "/my_venue" || pathname === "/my_studio" || pathname === "/my_production",
         [pathname],
     );
 
@@ -49,9 +49,10 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
     const notifVisible = isMainNavPath && !isGuest && !isWebDesktop;
     const addbtnvisible = isMyListingPath;
 
-    const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group'>(() => {
+    const btn = useMemo<'/add_gig' | '/add_studio' | '/add_group' | '/add_production'>(() => {
         if (pathname === "/my_venue") return '/add_gig';
         if (pathname === "/my_studio") return '/add_studio';
+        if (pathname === "/my_production") return '/add_production';
         return '/add_group';
     }, [pathname]);
 
@@ -156,7 +157,7 @@ function Header({ title, transparent, onBackPress, hideBackButton = false, leftC
                     </View>
                 ) : addbtnvisible ? (
                     <TouchableOpacity activeOpacity={1}
-                        onPress={() => router.push(btn)}
+                        onPress={() => router.push(btn as any)}
                         style={[styles.addButton, {
                             backgroundColor: isDark ? colors.surface : '#F3F4F6',
                             padding: isWebDesktop ? 12 : 8,

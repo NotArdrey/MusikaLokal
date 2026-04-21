@@ -628,7 +628,7 @@ export default function ProductionTeamScreen() {
   // ── Teams List View ──
   return (
     <View style={[styles.flex1, { backgroundColor: colors.background }]}>
-      <Header title="Production Teams" />
+      <Header title="My Production" />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -649,7 +649,7 @@ export default function ProductionTeamScreen() {
         ) : teams.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="people-outline" size={56} color={colors.textSecondary} />
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>No Production Teams</Text>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>No production teams yet</Text>
             <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
               Create a team to start proposing venue partnership deals.
             </Text>

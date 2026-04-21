@@ -48,6 +48,71 @@ create policy team_orders_policy on orders
   using ((select is_team_member(team_id)));
 ```
 
+Avoid self-referential policy checks on the same table:
+
+```sql
+-- Incorrect: this policy reads the same table it protects.
+-- On SELECT, Postgres can recurse back into the same policy evaluation.
+create policy team_members_manage on public.team_members
+  for all
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.team_members tm2
+      where tm2.team_id = team_members.team_id
+        and tm2.user_id = (select auth.uid())
+        and tm2.role in ('owner', 'manager')
+    )
+  );
+
+-- Correct: keep read access separate, and push mutation authorization
+-- into a SECURITY DEFINER helper to avoid recursive policy evaluation.
+create or replace function public.can_manage_team_members(target_team_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.teams t
+    where t.id = target_team_id
+      and t.owner_id = (select auth.uid())
+  )
+  or exists (
+    select 1
+    from public.team_members tm
+    where tm.team_id = target_team_id
+      and tm.user_id = (select auth.uid())
+      and tm.role in ('owner', 'manager')
+  );
+$$;
+
+create policy team_members_select on public.team_members
+  for select
+  to authenticated
+  using (true);
+
+create policy team_members_insert on public.team_members
+  for insert
+  to authenticated
+  with check ((select public.can_manage_team_members(team_id)));
+
+create policy team_members_update on public.team_members
+  for update
+  to authenticated
+  using ((select public.can_manage_team_members(team_id)))
+  with check ((select public.can_manage_team_members(team_id)));
+
+create policy team_members_delete on public.team_members
+  for delete
+  to authenticated
+  using ((select public.can_manage_team_members(team_id)));
+```
+
+If a policy must check membership or role data from the same table it protects, prefer a helper function or a different source table for the authorization decision. Do not put that lookup directly inside a `FOR ALL` policy on the same relation.
+
 Always add indexes on columns used in RLS policies:
 
 ```sql

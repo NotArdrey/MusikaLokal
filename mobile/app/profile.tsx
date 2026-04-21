@@ -1098,6 +1098,62 @@ export default function ProfileScreen() {
   const viewedProfileId = typeof profile?.id === "string" ? profile.id.trim() : "";
   const profileFollowKey = buildSocialFollowKey("profile", viewedProfileId);
   const canFollowProfile = !isGuest && !isOwner && viewedProfileId.length > 0;
+  const handleDeletePlaylist = async (playlistId: string, playlistTitle: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body: { action: "delete_playlist", playlist_id: playlistId },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || "Failed to delete playlist.");
+      }
+
+      setUserPlaylists((prev) => prev.filter((playlist) => playlist.id !== playlistId));
+      setRadioPlaylistIds((prev) => {
+        if (!prev.has(playlistId)) {
+          return prev;
+        }
+
+        const next = new Set(prev);
+        next.delete(playlistId);
+        return next;
+      });
+
+      if (viewedProfileId) {
+        void fetchStation(viewedProfileId);
+      }
+
+      showTopToast({
+        type: "success",
+        title: "Playlist Deleted",
+        message: `${playlistTitle || "Playlist"} was removed.`,
+      });
+    } catch (error: any) {
+      showAlert("warning", "Delete Failed", error?.message || "Failed to delete playlist.");
+    }
+  };
+
+  const promptDeletePlaylist = (playlist: any) => {
+    showAlert(
+      "warning",
+      "Delete Playlist",
+      `Delete \"${playlist?.title || "this playlist"}\"? This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void handleDeletePlaylist(playlist.id, playlist.title || "Playlist");
+          },
+        },
+      ],
+    );
+  };
   const mediaSummary =
     portfolioCount > 0
       ? `${portfolioCount} ${portfolioCount === 1 ? "item" : "items"} in ${isOwner ? "your" : "this"} portfolio`
@@ -1965,8 +2021,6 @@ export default function ProfileScreen() {
                       <View
                         key={pl.id}
                         style={{
-                          flexDirection: "row",
-                          alignItems: "center",
                           padding: 12,
                           borderRadius: 16,
                           borderWidth: 1,
@@ -1975,82 +2029,122 @@ export default function ProfileScreen() {
                           marginBottom: 10,
                         }}
                       >
-                        <TouchableOpacity
-                          activeOpacity={0.82}
-                          style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
-                          onPress={() => router.push({ pathname: "/playlist_details" as any, params: { playlist_id: pl.id } })}
-                        >
-                          <View
-                            style={{
-                              width: 50,
-                              height: 50,
-                              borderRadius: 14,
-                              alignItems: "center",
-                              justifyContent: "center",
-                              backgroundColor: isOnRadio ? "#22C55E20" : colors.primary + "15",
-                              marginRight: 12,
-                            }}
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                          <TouchableOpacity
+                            activeOpacity={0.82}
+                            style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
+                            onPress={() => router.push({ pathname: "/playlist_details" as any, params: { playlist_id: pl.id } })}
                           >
-                            <Ionicons name={isOnRadio ? "radio" : "musical-notes"} size={20} color={isOnRadio ? "#22C55E" : colors.primary} />
-                          </View>
-
-                          <View style={{ flex: 1, minWidth: 0 }}>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                              <Text style={{ fontSize: 14, fontFamily: "Poppins_600SemiBold", color: colors.text, flexShrink: 1 }} numberOfLines={1}>
-                                {pl.title}
-                              </Text>
-                              {isOnRadio && (
-                                <View style={{
-                                  backgroundColor: "#22C55E",
-                                  paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4,
-                                }}>
-                                  <Text style={{ fontSize: 9, fontFamily: "Poppins_600SemiBold", color: "#fff" }}>ON AIR</Text>
-                                </View>
-                              )}
+                            <View
+                              style={{
+                                width: 50,
+                                height: 50,
+                                borderRadius: 14,
+                                alignItems: "center",
+                                justifyContent: "center",
+                                backgroundColor: isOnRadio ? "#22C55E20" : colors.primary + "15",
+                                marginRight: 12,
+                              }}
+                            >
+                              <Ionicons name={isOnRadio ? "radio" : "musical-notes"} size={20} color={isOnRadio ? "#22C55E" : colors.primary} />
                             </View>
 
-                            {pl.genre && (
-                              <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{pl.genre}</Text>
-                            )}
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                <Text style={{ fontSize: 14, fontFamily: "Poppins_600SemiBold", color: colors.text, flexShrink: 1 }} numberOfLines={1}>
+                                  {pl.title}
+                                </Text>
+                                {isOnRadio && (
+                                  <View style={{
+                                    backgroundColor: "#22C55E",
+                                    paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4,
+                                  }}>
+                                    <Text style={{ fontSize: 9, fontFamily: "Poppins_600SemiBold", color: "#fff" }}>ON AIR</Text>
+                                  </View>
+                                )}
+                              </View>
 
-                            <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
-                              {playlistTrackCount} track{playlistTrackCount !== 1 ? "s" : ""} {"\u2022"} {pl.visibility === "private" ? "Private" : "Public"}
-                            </Text>
-                          </View>
+                              {pl.genre && (
+                                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>{pl.genre}</Text>
+                              )}
 
-                          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={{ marginLeft: 10 }} />
-                        </TouchableOpacity>
-
-                        {canManageStations && (
-                          <TouchableOpacity
-                            activeOpacity={0.6}
-                            style={{
-                              minWidth: 96,
-                              minHeight: 36,
-                              borderRadius: 999,
-                              alignItems: "center",
-                              justifyContent: "center",
-                              backgroundColor: isOnRadio ? "#22C55E20" : (isDark ? "#334155" : "#F1F5F9"),
-                              marginLeft: 8,
-                              paddingHorizontal: 12,
-                            }}
-                            onPress={() => handleToggleRadio(pl.id)}
-                            disabled={isToggling}
-                          >
-                            {isToggling ? (
-                              <ActivityIndicator size="small" color={colors.primary} />
-                            ) : (
-                              <Text
-                                style={{
-                                  color: isOnRadio ? "#22C55E" : colors.textSecondary,
-                                  fontSize: 11,
-                                  fontFamily: "Poppins_600SemiBold",
-                                }}
-                              >
-                                {isOnRadio ? "On Radio" : "Add to Radio"}
+                              <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
+                                {playlistTrackCount} track{playlistTrackCount !== 1 ? "s" : ""} {"\u2022"} {pl.visibility === "private" ? "Private" : "Public"}
                               </Text>
-                            )}
+                            </View>
+
+                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={{ marginLeft: 10 }} />
                           </TouchableOpacity>
+
+                          {canManageStations && (
+                            <TouchableOpacity
+                              activeOpacity={0.6}
+                              style={{
+                                minWidth: 96,
+                                minHeight: 36,
+                                borderRadius: 999,
+                                alignItems: "center",
+                                justifyContent: "center",
+                                backgroundColor: isOnRadio ? "#22C55E20" : (isDark ? "#334155" : "#F1F5F9"),
+                                marginLeft: 8,
+                                paddingHorizontal: 12,
+                              }}
+                              onPress={() => handleToggleRadio(pl.id)}
+                              disabled={isToggling}
+                            >
+                              {isToggling ? (
+                                <ActivityIndicator size="small" color={colors.primary} />
+                              ) : (
+                                <Text
+                                  style={{
+                                    color: isOnRadio ? "#22C55E" : colors.textSecondary,
+                                    fontSize: 11,
+                                    fontFamily: "Poppins_600SemiBold",
+                                  }}
+                                >
+                                  {isOnRadio ? "On Radio" : "Add to Radio"}
+                                </Text>
+                              )}
+                            </TouchableOpacity>
+                          )}
+                        </View>
+
+                        {isOwner && !isGuest && (
+                          <View style={{ flexDirection: "row", gap: 8, marginTop: 12, paddingLeft: 62 }}>
+                            <TouchableOpacity
+                              activeOpacity={0.85}
+                              onPress={() => router.push({ pathname: "/create_playlist" as any, params: { edit_id: pl.id } })}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 6,
+                                paddingHorizontal: 12,
+                                paddingVertical: 8,
+                                borderRadius: 999,
+                                backgroundColor: colors.primary,
+                              }}
+                            >
+                              <Ionicons name="create-outline" size={14} color="#fff" />
+                              <Text style={{ color: "#fff", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>Edit Playlist</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              activeOpacity={0.85}
+                              onPress={() => promptDeletePlaylist(pl)}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 6,
+                                paddingHorizontal: 12,
+                                paddingVertical: 8,
+                                borderRadius: 999,
+                                backgroundColor: isDark ? "rgba(239,68,68,0.16)" : "#FEE2E2",
+                              }}
+                            >
+                              <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                              <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>Delete Playlist</Text>
+                            </TouchableOpacity>
+                          </View>
                         )}
 
                       </View>

@@ -43,7 +43,7 @@ export default function ProductDetailsScreen() {
     const { data, error } = await supabase.functions.invoke("manage-marketplace", { body });
 
     if (error) {
-      console.error("manage-marketplace failed", {
+      console.warn("manage-marketplace failed", {
         message: error.message,
         status: (error as any).status,
         code: (error as any).code,
@@ -69,7 +69,7 @@ export default function ProductDetailsScreen() {
         }
       }
     } catch (e: any) {
-      console.error("ProductDetails fetch error:", e);
+      console.warn("ProductDetails fetch failed", e);
     } finally {
       setLoading(false);
     }

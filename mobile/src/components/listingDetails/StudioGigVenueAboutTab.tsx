@@ -32,6 +32,7 @@ interface StudioGigVenueAboutTabProps {
   calculateCompletion: () => number;
   handleProfileNavigation: () => void;
   promotions?: any[];
+  connectionPanel?: React.ReactNode;
 }
 
 const StudioGigVenueAboutTab = ({
@@ -48,6 +49,7 @@ const StudioGigVenueAboutTab = ({
   calculateCompletion,
   handleProfileNavigation,
   promotions = [],
+  connectionPanel,
 }: StudioGigVenueAboutTabProps) => {
   const parsedCompletionRate = Number(group.completion_rate);
   const baseCompletionRate = Number.isFinite(parsedCompletionRate)
@@ -215,6 +217,7 @@ const StudioGigVenueAboutTab = ({
 
   return (
     <View style={styles.tabContent}>
+    {connectionPanel ? <View style={{ marginBottom: 24 }}>{connectionPanel}</View> : null}
     {group.type === "Gig" && (
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>{labels.aboutTitle}</Text>
@@ -808,46 +811,6 @@ const StudioGigVenueAboutTab = ({
             {managerId === currentUserId ? "Manage Profile" : "Visit Profile"}
           </Text>
         </TouchableOpacity>
-      </View>
-    )}
-
-    {group.type === "Gig" && (
-      <View
-        style={[
-          styles.dealCard,
-          {
-            backgroundColor: isDark ? "#1e293b" : "#ECFDF5",
-            borderColor: isDark ? "#064e3b" : "#10B981",
-          },
-        ]}
-      >
-        <Text
-          style={{
-            fontFamily: "Poppins_600SemiBold",
-            color: isDark ? "#6ee7b7" : "#047857",
-            marginBottom: 8,
-          }}
-        >
-          The Deal
-        </Text>
-        <Text
-          style={{
-            fontFamily: "Poppins_500Medium",
-            color: isDark ? "#d1fae5" : "#065F46",
-          }}
-        >
-          Guarantee + Door Split
-        </Text>
-        <Text
-          style={{
-            fontFamily: "Poppins_400Regular",
-            color: isDark ? "#d1fae5" : "#065F46",
-            fontSize: 13,
-            marginTop: 4,
-          }}
-        >
-          45 min set • Meal Included
-        </Text>
       </View>
     )}
 

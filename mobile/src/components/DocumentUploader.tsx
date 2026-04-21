@@ -13,7 +13,7 @@ interface DocumentUploaderProps {
 
 const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label = 'Upload Document', existingUrl }) => {
     const { colors, isDark } = useTheme();
-    const [fileName, setFileName] = useState<string | null>(existingUrl ? 'Current CV' : null);
+    const [fileName, setFileName] = useState<string | null>(existingUrl ? 'Current document' : null);
     const [alertVisible, setAlertVisible] = useState(false);
     const [alertConfig, setAlertConfig] = useState<{
         type: AlertType;
@@ -64,7 +64,7 @@ const DocumentUploader: React.FC<DocumentUploaderProps> = ({ onFileSelect, label
                     onPress={pickDocument}
                 >
                     <Ionicons name="cloud-upload-outline" size={24} color={colors.primary} />
-                    <Text style={[styles.uploadText, { color: colors.text }]}>Select PDF Resume/CV</Text>
+                    <Text style={[styles.uploadText, { color: colors.text }]}>Select PDF Document</Text>
                 </TouchableOpacity>
             ) : (
                 <View style={[styles.fileContainer, { backgroundColor: isDark ? '#374151' : '#F3F4F6', borderColor: colors.primary }]}>

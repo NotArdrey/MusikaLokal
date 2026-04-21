@@ -112,6 +112,20 @@ export default function ShopScreen() {
       <View style={[styles.pageWrap, isWebDesktop && styles.pageWrapWeb]}>
         <View style={[styles.pageFrame, { maxWidth: frameMaxWidth, paddingHorizontal: framePad }]}>
           <View style={[styles.panelBody, { borderColor: panelBorder, backgroundColor: panelBg }]}>
+            <View style={[styles.introCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.introEyebrow, { color: colors.primary }]}>Marketplace</Text>
+                <Text style={[styles.introTitle, { color: colors.text }]}>Browse listings or open Seller Hub to post your own.</Text>
+                <Text style={[styles.introSubtitle, { color: colors.textSecondary }]}>Every signed-in account can sell merch, gear, and digital drops.</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => router.push("/seller_hub")}
+                style={[styles.introAction, { backgroundColor: colors.primary }]}
+              >
+                <Ionicons name="storefront-outline" size={16} color="#fff" />
+                <Text style={styles.introActionText}>Seller Hub</Text>
+              </TouchableOpacity>
+            </View>
             <View style={[styles.searchRow, { borderColor: borderCol, backgroundColor: cardBg }]}>
             <Ionicons name="search" size={18} color={colors.textSecondary} />
             <TextInput style={{ flex: 1, color: colors.text, fontSize: moderateScale(14), marginLeft: 8, paddingVertical: 8 }} placeholder="Search products..." placeholderTextColor={colors.textSecondary} value={search} onChangeText={setSearch} onSubmitEditing={fetchProducts} returnKeyType="search" />
@@ -175,6 +189,12 @@ const styles = StyleSheet.create({
   pageWrapWeb: { alignItems: "center" },
   pageFrame: { width: "100%", flex: 1 },
   panelBody: { flex: 1, marginTop: 10, borderWidth: 1, borderRadius: 14, overflow: "hidden" },
+  introCard: { borderWidth: 1, borderRadius: 18, padding: 16, marginTop: 14, marginHorizontal: 14, marginBottom: 2, gap: 14 },
+  introEyebrow: { fontSize: moderateScale(11), fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6 },
+  introTitle: { fontSize: moderateScale(18), fontWeight: "700", marginTop: 4 },
+  introSubtitle: { fontSize: moderateScale(13), lineHeight: 20, marginTop: 6 },
+  introAction: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999 },
+  introActionText: { color: "#fff", fontSize: moderateScale(13), fontWeight: "700" },
   searchRow: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, marginTop: 12, marginBottom: 10, marginHorizontal: 14 },
   catPill: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18, borderWidth: 1, marginRight: 8 },
   productCard: { borderRadius: 12, borderWidth: 1, overflow: "hidden" },

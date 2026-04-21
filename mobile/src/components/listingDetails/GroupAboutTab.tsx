@@ -22,6 +22,7 @@ interface GroupAboutTabProps {
   calculateCompletion: () => number;
   sheetRef?: any;
   listingId?: string | null;
+  connectionPanel?: React.ReactNode;
 }
 
 const GroupAboutTab = ({
@@ -34,6 +35,7 @@ const GroupAboutTab = ({
   calculateCompletion,
   sheetRef,
   listingId,
+  connectionPanel,
 }: GroupAboutTabProps) => {
   const completionRate = calculateCompletion();
   const [groupPlaylists, setGroupPlaylists] = useState<any[]>([]);
@@ -215,6 +217,8 @@ const GroupAboutTab = ({
           </TouchableOpacity>
         )}
       </View>
+
+      {connectionPanel ? <View style={{ marginBottom: 24 }}>{connectionPanel}</View> : null}
 
       <View style={{ flexDirection: "row", gap: 12, marginBottom: 24 }}>
         <View

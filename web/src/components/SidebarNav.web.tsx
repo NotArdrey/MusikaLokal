@@ -7,6 +7,7 @@ import CustomAlert, { AlertType } from './CustomAlert';
 import { DEFAULT_AVATAR } from '../constants/Images';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { resolveRoleManageRoute } from '../utils/roleRouting';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -37,19 +38,19 @@ const REPORTS_SECTION_ITEMS: {
     description: string;
     icon: string;
 }[] = [
-    {
-        key: 'reports_list',
-        label: 'User Reports',
-        description: 'Moderation queue for reported users and listings',
-        icon: 'document-text-outline',
-    },
-    {
-        key: 'booking_incidents',
-        label: 'Booking Incidents',
-        description: 'Disputes, refund reviews, and booking escalations',
-        icon: 'alert-circle-outline',
-    },
-];
+        {
+            key: 'reports_list',
+            label: 'User Reports',
+            description: 'Moderation queue for reported users and listings',
+            icon: 'document-text-outline',
+        },
+        {
+            key: 'booking_incidents',
+            label: 'Booking Incidents',
+            description: 'Disputes, refund reviews, and booking escalations',
+            icon: 'alert-circle-outline',
+        },
+    ];
 
 const resolveAdminTab = (pathname: string): AdminTab => {
     if (pathname.startsWith('/admin/permits')) return 'permits';
@@ -71,7 +72,7 @@ const getBrowserSearch = () => {
 
 export default function SidebarNav() {
     const { colors, isDark } = useTheme();
-    const { isGuest, userRole, session, setGuestMode } = useAuth();
+    const { isAdmin, isGuest, roleResolved, session, setGuestMode, userRole } = useAuth();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
     const [activeReportsSection, setActiveReportsSection] = useState<ReportsSection>(() => resolveReportsSection(getBrowserSearch()));
@@ -147,41 +148,28 @@ export default function SidebarNav() {
         }
     }, []);
 
-    const fetchUserRole = useCallback(async () => {
+    useEffect(() => {
         if (isGuest || !session?.user?.id) {
             setManageRoute('/manage');
+            return;
+        }
+
+        if (!roleResolved) {
+            setManageRoute('/manage');
+            return;
+        }
+
+        setManageRoute(resolveRoleManageRoute(userRole, { adminRoute: isAdmin ? '/admin' : undefined }));
+    }, [isAdmin, isGuest, roleResolved, session?.user?.id, userRole]);
+
+    const refreshSidebarState = useCallback(async () => {
+        if (isGuest || !session?.user?.id) {
             setAvatarUrl(null);
             setHasUnreadNotifications(false);
             return;
         }
 
         const userId = session.user.id;
-
-        try {
-            const { data, error } = await supabase.functions.invoke('manage-profile', {
-                body: { action: 'fetch', userId }
-            });
-
-            if (!error && data?.role) {
-                if (data.role === 'studio-owner') {
-                    setManageRoute('/my_studio');
-                } else if (data.role === 'musician' || data.role === 'manager' || data.role === 'musician-member') {
-                    setManageRoute('/my_group');
-                } else if (data.role === 'venue-owner') {
-                    setManageRoute('/my_venue');
-                } else if (data.role === 'producer') {
-                    setManageRoute('/production_team');
-                } else if (data.role === 'admin') {
-                    setManageRoute('/admin');
-                } else {
-                    setManageRoute('/manage');
-                }
-            } else {
-                setManageRoute('/manage');
-            }
-        } catch {
-            setManageRoute('/manage');
-        }
 
         try {
             const { data: profile } = await supabase
@@ -199,8 +187,8 @@ export default function SidebarNav() {
     }, [fetchUnreadCount, isGuest, session?.user?.id]);
 
     useEffect(() => {
-        fetchUserRole();
-    }, [fetchUserRole]);
+        refreshSidebarState();
+    }, [refreshSidebarState]);
 
     const fetchNotifications = useCallback(async () => {
         if (isGuest || !session?.user?.id) {
@@ -403,6 +391,8 @@ export default function SidebarNav() {
             pathname.includes('my_studio') ||
             pathname.includes('my_venue') ||
             pathname.includes('my_group') ||
+            pathname.includes('my_production') ||
+            pathname.includes('production_team') ||
             pathname.includes('manage_') ||
             pathname.includes('edit_') ||
             pathname.includes('add_')
@@ -659,7 +649,7 @@ export default function SidebarNav() {
                                     <Text style={[styles.notificationPanelTitle, { color: colors.text }]}>Notifications</Text>
                                     {panelUnreadCount > 0 && (
                                         <View style={[styles.notificationCountBadge, { backgroundColor: `${colors.primary}20` }]}>
-                                            <Text style={[styles.notificationCountText, { color: colors.primary }]}> 
+                                            <Text style={[styles.notificationCountText, { color: colors.primary }]}>
                                                 {panelUnreadCount}
                                             </Text>
                                         </View>
@@ -861,77 +851,77 @@ export default function SidebarNav() {
                                         </TouchableOpacity>
                                     </View>
 
-                                        <Animated.View
-                                            style={[
-                                                styles.subNavContainer,
-                                                {
-                                                    borderLeftColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.09)',
-                                                    overflow: 'hidden',
-                                                    marginTop: submenuMarginTop,
-                                                    maxHeight: submenuHeight,
-                                                    opacity: submenuOpacity,
-                                                },
-                                            ]}
-                                        >
-                                            {REPORTS_SECTION_ITEMS.map((subItem) => {
-                                                const subActive = activeReportsSection === subItem.key && isActive;
+                                    <Animated.View
+                                        style={[
+                                            styles.subNavContainer,
+                                            {
+                                                borderLeftColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.09)',
+                                                overflow: 'hidden',
+                                                marginTop: submenuMarginTop,
+                                                maxHeight: submenuHeight,
+                                                opacity: submenuOpacity,
+                                            },
+                                        ]}
+                                    >
+                                        {REPORTS_SECTION_ITEMS.map((subItem) => {
+                                            const subActive = activeReportsSection === subItem.key && isActive;
 
-                                                return (
-                                                    <TouchableOpacity
-                                                        key={subItem.key}
+                                            return (
+                                                <TouchableOpacity
+                                                    key={subItem.key}
+                                                    style={[
+                                                        styles.subNavItem,
+                                                        {
+                                                            backgroundColor: subActive
+                                                                ? (isDark ? 'rgba(59,130,246,0.22)' : '#DBEAFE')
+                                                                : (isDark ? 'rgba(255,255,255,0.015)' : 'rgba(255,255,255,0.8)'),
+                                                            borderColor: subActive
+                                                                ? (isDark ? 'rgba(96,165,250,0.45)' : '#93C5FD')
+                                                                : 'transparent',
+                                                        },
+                                                    ]}
+                                                    onPress={() => handleReportsNavigation(subItem.key)}
+                                                    activeOpacity={0.85}
+                                                >
+                                                    <View style={styles.subNavItemMain}>
+                                                        <Ionicons
+                                                            name={subItem.icon as any}
+                                                            size={18}
+                                                            color={subActive ? colors.primary : colors.textSecondary}
+                                                            style={{ width: 24 }}
+                                                        />
+                                                        <View style={styles.subNavTextBlock}>
+                                                            <Text
+                                                                style={[
+                                                                    styles.subNavLabel,
+                                                                    { color: subActive ? colors.primary : colors.text },
+                                                                    subActive && { fontFamily: 'Poppins_600SemiBold' },
+                                                                ]}
+                                                            >
+                                                                {subItem.label}
+                                                            </Text>
+                                                            <Text
+                                                                style={[styles.subNavDescription, { color: colors.textSecondary }]}
+                                                            >
+                                                                {subItem.description}
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+
+                                                    <View
                                                         style={[
-                                                            styles.subNavItem,
+                                                            styles.subNavStatusDot,
                                                             {
-                                                                backgroundColor: subActive
-                                                                    ? (isDark ? 'rgba(59,130,246,0.22)' : '#DBEAFE')
-                                                                    : (isDark ? 'rgba(255,255,255,0.015)' : 'rgba(255,255,255,0.8)'),
-                                                                borderColor: subActive
-                                                                    ? (isDark ? 'rgba(96,165,250,0.45)' : '#93C5FD')
-                                                                    : 'transparent',
+                                                                backgroundColor: subActive ? colors.primary : 'transparent',
+                                                                borderColor: subActive ? colors.primary : colors.border,
                                                             },
                                                         ]}
-                                                        onPress={() => handleReportsNavigation(subItem.key)}
-                                                        activeOpacity={0.85}
-                                                    >
-                                                        <View style={styles.subNavItemMain}>
-                                                            <Ionicons
-                                                                name={subItem.icon as any}
-                                                                size={18}
-                                                                color={subActive ? colors.primary : colors.textSecondary}
-                                                                style={{ width: 24 }}
-                                                            />
-                                                            <View style={styles.subNavTextBlock}>
-                                                                <Text
-                                                                    style={[
-                                                                        styles.subNavLabel,
-                                                                        { color: subActive ? colors.primary : colors.text },
-                                                                        subActive && { fontFamily: 'Poppins_600SemiBold' },
-                                                                    ]}
-                                                                >
-                                                                    {subItem.label}
-                                                                </Text>
-                                                                <Text
-                                                                    style={[styles.subNavDescription, { color: colors.textSecondary }]}
-                                                                >
-                                                                    {subItem.description}
-                                                                </Text>
-                                                            </View>
-                                                        </View>
-
-                                                        <View
-                                                            style={[
-                                                                styles.subNavStatusDot,
-                                                                {
-                                                                    backgroundColor: subActive ? colors.primary : 'transparent',
-                                                                    borderColor: subActive ? colors.primary : colors.border,
-                                                                },
-                                                            ]}
-                                                        />
-                                                    </TouchableOpacity>
-                                                );
-                                            })}
-                                        </Animated.View>
-                                    </View>
+                                                    />
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </Animated.View>
+                                </View>
                             );
                         }
 

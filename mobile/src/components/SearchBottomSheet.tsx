@@ -489,11 +489,14 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 }
               }
 
-              if (table === "groups_with_stats" && qData.length > 0) {
+              if (
+                ["groups_with_stats", "studios_with_stats", "gigs_with_stats", "production_teams"].includes(table) &&
+                qData.length > 0
+              ) {
                 const ownerIds = Array.from(
                   new Set(
                     qData
-                      .map((item: any) => item?.owner_id)
+                      .map((item: any) => item?.owner_id || item?.organizer_id)
                       .filter((value: any): value is string => typeof value === "string" && value.length > 0),
                   ),
                 );
@@ -557,9 +560,7 @@ const SearchBottomSheet = forwardRef<BottomSheetModal, SearchBottomSheetProps>(
                 location: item.location || item.address || item.description,
                 image: item.images?.[0] || item.image || item.avatar_url || item.logo_url || item.cover_image_url,
                 owner_avatar_url:
-                  table === "groups_with_stats"
-                    ? ownerAvatarById.get(item.owner_id) || null
-                    : null,
+                  ownerAvatarById.get(item.owner_id || item.organizer_id) || null,
                 genre:
                   item.genre ||
                   (table === "profiles"

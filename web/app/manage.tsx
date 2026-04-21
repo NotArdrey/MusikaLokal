@@ -7,6 +7,7 @@ import Header from '../src/components/header';
 import Navbar from '../src/components/navbar';
 import { useAuth } from '../src/context/AuthContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { resolveRoleManageRoute } from '../src/utils/roleRouting';
 
 export default function ManageScreen() {
     const { colors, isDark } = useTheme();
@@ -110,16 +111,10 @@ export default function ManageScreen() {
     };
 
     const handleRedirect = (role: string) => {
-        if (role === 'studio-owner') {
-            router.replace('/my_studio');
-        } else if (role === 'musician' || role === 'manager' || role === 'musician-member') {
-            router.replace('/my_group');
-        } else if (role === 'venue-owner') {
-            router.replace('/my_venue');
-        } else if (role === 'producer') {
-            router.replace('/production_team');
-        } else if (role === 'admin') {
-            router.replace('/admin');
+        const destination = resolveRoleManageRoute(role, { adminRoute: '/admin' });
+
+        if (destination !== '/manage') {
+            router.replace(destination as any);
         } else {
             setLoading(false);
         }

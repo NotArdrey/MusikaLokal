@@ -31,6 +31,16 @@ function extractAccessToken(authHeader: string): string | null {
   return trimmed;
 }
 
+const PUBLIC_ACTIONS = new Set([
+  "browse_playlists",
+  "browse_stations",
+  "get_playlist_details",
+  "get_station_details",
+  "list_user_playlists",
+  "list_user_stations",
+  "record_play_event",
+]);
+
 function normalizeOptionalDurationSeconds(value: unknown): number | null {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -289,10 +299,6 @@ Deno.serve(async (req: Request) => {
     const authHeader = req.headers.get("Authorization") || "";
     const accessToken = extractAccessToken(authHeader);
 
-    if (!accessToken) {
-      return jsonResponse({ error: "Missing authorization header" }, 401);
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
@@ -302,17 +308,39 @@ Deno.serve(async (req: Request) => {
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
-    const {
-      data: { user: authUser },
-      error: authErr,
-    } = await supabaseAdmin.auth.getUser(accessToken);
+    const requestBody = await req.json();
+    const { action: rawAction, ...params } = requestBody ?? {};
+    const action = typeof rawAction === "string" ? rawAction.trim() : "";
 
-    if (authErr || !authUser) {
+    if (!action) {
+      return jsonResponse({ error: "action is required" }, 400);
+    }
+
+    const requiresAuth = !PUBLIC_ACTIONS.has(action);
+    let authUser: any = null;
+
+    if (accessToken) {
+      const {
+        data: { user },
+        error: authErr,
+      } = await supabaseAdmin.auth.getUser(accessToken);
+
+      if (authErr || !user) {
+        if (requiresAuth) {
+          return jsonResponse({ error: "Invalid token" }, 401);
+        }
+      } else {
+        authUser = user;
+      }
+    } else if (requiresAuth) {
+      return jsonResponse({ error: "Missing authorization header" }, 401);
+    }
+
+    if (requiresAuth && !authUser) {
       return jsonResponse({ error: "Invalid token" }, 401);
     }
 
-    const uid = authUser.id;
-    const { action, ...params } = await req.json();
+    const uid = authUser?.id ?? null;
     const stationAdminActions = new Set([
       "create_station",
       "update_station",
@@ -543,6 +571,54 @@ Deno.serve(async (req: Request) => {
           external_link_id: external_link_id || null,
           audio_url: normalizedAudioUrl,
         })
+        .select()
+        .single();
+
+      if (error) return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ success: true, data });
+    }
+
+    // ── update_playlist_item ───────────────────────────────────────
+    if (action === "update_playlist_item") {
+      const { item_id, title, artist_name, duration_seconds, teaser_asset_id, external_link_id, audio_url } = params;
+      if (!item_id || !title) return jsonResponse({ error: "item_id and title are required" }, 400);
+
+      const { data: item } = await supabaseAdmin
+        .from("playlist_items")
+        .select("playlist_id")
+        .eq("id", item_id)
+        .single();
+
+      if (!item) return jsonResponse({ error: "Item not found" }, 404);
+
+      const { data: pl } = await supabaseAdmin
+        .from("playlists")
+        .select("creator_id")
+        .eq("id", item.playlist_id)
+        .single();
+
+      if (!pl || pl.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+
+      let normalizedDuration: number | null;
+      let normalizedAudioUrl: string | null;
+      try {
+        normalizedDuration = normalizeOptionalDurationSeconds(duration_seconds);
+        normalizedAudioUrl = normalizeOptionalAudioUrl(audio_url);
+      } catch (validationError: any) {
+        return jsonResponse({ error: validationError.message || "Invalid track data" }, 400);
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from("playlist_items")
+        .update({
+          title,
+          artist_name: artist_name || null,
+          duration_seconds: normalizedDuration,
+          teaser_asset_id: teaser_asset_id || null,
+          external_link_id: external_link_id || null,
+          audio_url: normalizedAudioUrl,
+        })
+        .eq("id", item_id)
         .select()
         .single();
 

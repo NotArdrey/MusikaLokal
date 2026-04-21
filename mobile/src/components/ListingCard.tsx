@@ -967,6 +967,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                     >
                       <CachedImage
                         uri={img}
+                        fallbackUri={fallbackImageUri}
                         style={styles.image}
                         width={640}
                         height={360}
@@ -989,6 +990,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
                     <View key={index} style={styles.pagerPage}>
                       <CachedImage
                         uri={img}
+                        fallbackUri={fallbackImageUri}
                         style={styles.image}
                         width={640}
                         height={360}
@@ -1017,6 +1019,7 @@ const ListingCard: React.FC<ListingCardProps> = ({
           ) : (
             <CachedImage
               uri={images.length > 0 ? images[0] : undefined}
+              fallbackUri={fallbackImageUri}
               style={styles.image}
               width={640}
               height={360}

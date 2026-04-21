@@ -43,7 +43,7 @@ const TEMP_LOGIN_OPTIONS: TempLoginOption[] = [
     details: 'Producer | producer1@test.com',
     email: 'producer1@test.com',
     expectedRole: 'producer',
-    destinationLabel: 'Production Team',
+    destinationLabel: 'My Production',
   },
   {
     label: 'Login as OneRoots Records',
@@ -98,16 +98,16 @@ const describeOwnerSubscription = (role: string | null | undefined, status: unkn
 
 export default function LoginScreen() {
   const { colors, isDark } = useTheme();
-  const { setGuestMode } = useAuth();
+  const { session, loading: authLoading, setGuestMode } = useAuth();
   const { verified, accountCreated, email: createdEmail, verification_error } = useLocalSearchParams();
   const { width } = Dimensions.get('window');
   const isWebDesktop = Platform.OS === 'web' && width >= 768;
 
-  const resolvePostLoginRoute = (role?: string | null) => {
-    const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : '';
-    if (normalizedRole === 'admin') return '/admin';
-    return '/home';
-  };
+  useEffect(() => {
+    if (!authLoading && session) {
+      router.replace('/home' as any);
+    }
+  }, [authLoading, session]);
 
   const isSchemaQueryError = (errorLike: unknown) => {
     const error = errorLike as { message?: string; details?: string; hint?: string; code?: string } | null;
@@ -459,12 +459,8 @@ export default function LoginScreen() {
             router.replace('/identity_verification' as any);
             return;
           } else {
-            // Verified & Profile Exists -> Allow Entry
-            const postLoginRoute = resolvePostLoginRoute(
-              profile?.role || user.user_metadata?.role,
-            );
-            console.log('Verification passed. Redirecting to:', postLoginRoute);
-            router.replace(postLoginRoute as any);
+            console.log('Verification passed. Redirecting to: /home');
+            router.replace('/home' as any);
           }
         }
       }
@@ -566,20 +562,20 @@ export default function LoginScreen() {
       style={[styles.flex1, themeStyles.container]}
     >
       <ScrollView contentContainerStyle={isWebDesktop ? styles.webScrollContent : styles.scrollContent}>
-          <View style={isWebDesktop ? styles.webContainer : styles.contentContainer}>
-            {/* Left Side Branding (Web Desktop Only) */}
-            {isWebDesktop && (
-              <View style={styles.webLeftPanel}>
-                <AuthMusicHero
-                  title={`Welcome back\nto MusikaLokal.`}
-                  subtitle="Discover, connect, and collaborate with the local music scene."
-                />
-              </View>
-            )}
+        <View style={isWebDesktop ? styles.webContainer : styles.contentContainer}>
+          {/* Left Side Branding (Web Desktop Only) */}
+          {isWebDesktop && (
+            <View style={styles.webLeftPanel}>
+              <AuthMusicHero
+                title={`Welcome back\nto MusikaLokal.`}
+                subtitle="Discover, connect, and collaborate with the local music scene."
+              />
+            </View>
+          )}
 
-            {/* Right Side Form */}
-            <View style={isWebDesktop ? [styles.webRightPanel, { backgroundColor: isDark ? 'rgba(31, 41, 55, 0.85)' : 'rgba(255, 255, 255, 0.85)' }] : null}>
-              <View style={isWebDesktop ? styles.webFormWrapper : null}>
+          {/* Right Side Form */}
+          <View style={isWebDesktop ? [styles.webRightPanel, { backgroundColor: isDark ? 'rgba(31, 41, 55, 0.85)' : 'rgba(255, 255, 255, 0.85)' }] : null}>
+            <View style={isWebDesktop ? styles.webFormWrapper : null}>
               {/* Logo Section (Mobile Only) */}
               {!isWebDesktop && (
                 <View style={styles.logoSection}>
@@ -601,147 +597,147 @@ export default function LoginScreen() {
 
               {/* Form Section */}
               <View style={styles.formContainer}>
-                
+
                 {isWebDesktop && (
-                   <View style={{ marginBottom: 32 }}>
-                      <Text style={[styles.appName, themeStyles.text, { textAlign: 'left', fontSize: 36, marginBottom: 8 }]}>Sign In</Text>
-                      <Text style={[themeStyles.textSecondary, { fontFamily: 'Poppins_400Regular', fontSize: 18 }]}>Please enter your details to continue.</Text>
-                   </View>
+                  <View style={{ marginBottom: 32 }}>
+                    <Text style={[styles.appName, themeStyles.text, { textAlign: 'left', fontSize: 36, marginBottom: 8 }]}>Sign In</Text>
+                    <Text style={[themeStyles.textSecondary, { fontFamily: 'Poppins_400Regular', fontSize: 18 }]}>Please enter your details to continue.</Text>
+                  </View>
                 )}
 
 
-            <View>
-              <Text style={[styles.label, themeStyles.textSecondary]}>
-                Email Address
-              </Text>
-              <View style={[
-                styles.inputContainer,
-                themeStyles.inputContainer,
-                errors.email ? { borderColor: '#EF4444' } : null
-              ]}>
-                <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
-                <TextInput
-                  style={[styles.input, themeStyles.text]}
-                  placeholder="name@email.com"
-                  placeholderTextColor={colors.textSecondary}
-                  value={email}
-                  onChangeText={(text) => {
-                    setEmail(text);
-                    if (errors.email) setErrors({ ...errors, email: undefined });
-                  }}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-              </View>
-              {errors.email && (
-                <Text style={styles.errorText}>{errors.email}</Text>
-              )}
-            </View>
-
-            <View>
-              <Text style={[styles.label, themeStyles.textSecondary]}>
-                Password
-              </Text>
-              <View style={[
-                styles.inputContainer,
-                themeStyles.inputContainer,
-                errors.password ? { borderColor: '#EF4444' } : null
-              ]}>
-                <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
-                <TextInput
-                  style={[styles.input, themeStyles.text]}
-                  placeholder="Enter your password"
-                  placeholderTextColor={colors.textSecondary}
-                  value={password}
-                  onChangeText={(text) => {
-                    setPassword(text);
-                    if (errors.password) setErrors({ ...errors, password: undefined });
-                  }}
-                  secureTextEntry={!showPassword}
-                />
-                <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
-                  <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
-              {errors.password ? (
-                <Text style={styles.errorText}>{errors.password}</Text>
-              ) : (
-                <TouchableOpacity activeOpacity={1} onPress={() => router.push('/forget_password' as any)} style={styles.forgotPasswordButton}>
-                  <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
-                    Forgot Password?
+                <View>
+                  <Text style={[styles.label, themeStyles.textSecondary]}>
+                    Email Address
                   </Text>
-                </TouchableOpacity>
-              )}
-            </View>
+                  <View style={[
+                    styles.inputContainer,
+                    themeStyles.inputContainer,
+                    errors.email ? { borderColor: '#EF4444' } : null
+                  ]}>
+                    <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
+                    <TextInput
+                      style={[styles.input, themeStyles.text]}
+                      placeholder="name@email.com"
+                      placeholderTextColor={colors.textSecondary}
+                      value={email}
+                      onChangeText={(text) => {
+                        setEmail(text);
+                        if (errors.email) setErrors({ ...errors, email: undefined });
+                      }}
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                    />
+                  </View>
+                  {errors.email && (
+                    <Text style={styles.errorText}>{errors.email}</Text>
+                  )}
+                </View>
 
-            <TouchableOpacity
-              onPress={handleLogin}
-              disabled={loading}
-              activeOpacity={1}
-              style={[styles.loginButton, themeStyles.primaryButton, styles.shadow]}
-            >
-              {loading ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <Text style={styles.loginButtonText}>
-                  Sign In
-                </Text>
-              )}
-            </TouchableOpacity>
+                <View>
+                  <Text style={[styles.label, themeStyles.textSecondary]}>
+                    Password
+                  </Text>
+                  <View style={[
+                    styles.inputContainer,
+                    themeStyles.inputContainer,
+                    errors.password ? { borderColor: '#EF4444' } : null
+                  ]}>
+                    <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
+                    <TextInput
+                      style={[styles.input, themeStyles.text]}
+                      placeholder="Enter your password"
+                      placeholderTextColor={colors.textSecondary}
+                      value={password}
+                      onChangeText={(text) => {
+                        setPassword(text);
+                        if (errors.password) setErrors({ ...errors, password: undefined });
+                      }}
+                      secureTextEntry={!showPassword}
+                    />
+                    <TouchableOpacity activeOpacity={1} onPress={() => setShowPassword(!showPassword)}>
+                      <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
+                  {errors.password ? (
+                    <Text style={styles.errorText}>{errors.password}</Text>
+                  ) : (
+                    <TouchableOpacity activeOpacity={1} onPress={() => router.push('/forget_password' as any)} style={styles.forgotPasswordButton}>
+                      <Text style={[styles.forgotPasswordText, themeStyles.primaryText]}>
+                        Forgot Password?
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
 
-            <View style={styles.tempLoginSection}>
-              <Text style={[styles.tempLoginLabel, themeStyles.textSecondary]}>
-                Temporary test logins
-              </Text>
-              <View style={styles.tempLoginButtonList}>
-                {TEMP_LOGIN_OPTIONS.map((option) => (
-                  <TouchableOpacity
-                    key={option.email}
-                    onPress={() => handleTemporaryLogin(option)}
-                    disabled={loading}
-                    activeOpacity={1}
-                    style={[
-                      styles.tempLoginButton,
-                      { borderColor: colors.border, opacity: loading ? 0.6 : 1 },
-                    ]}
-                  >
-                    <Text style={[styles.tempLoginButtonText, themeStyles.primaryText]}>
-                      {option.label}
+                <TouchableOpacity
+                  onPress={handleLogin}
+                  disabled={loading}
+                  activeOpacity={1}
+                  style={[styles.loginButton, themeStyles.primaryButton, styles.shadow]}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Text style={styles.loginButtonText}>
+                      Sign In
                     </Text>
-                    <Text style={[styles.tempLoginButtonDetails, themeStyles.textSecondary]}>
-                      {option.details}
+                  )}
+                </TouchableOpacity>
+
+                <View style={styles.tempLoginSection}>
+                  <Text style={[styles.tempLoginLabel, themeStyles.textSecondary]}>
+                    Temporary test logins
+                  </Text>
+                  <View style={styles.tempLoginButtonList}>
+                    {TEMP_LOGIN_OPTIONS.map((option) => (
+                      <TouchableOpacity
+                        key={option.email}
+                        onPress={() => handleTemporaryLogin(option)}
+                        disabled={loading}
+                        activeOpacity={1}
+                        style={[
+                          styles.tempLoginButton,
+                          { borderColor: colors.border, opacity: loading ? 0.6 : 1 },
+                        ]}
+                      >
+                        <Text style={[styles.tempLoginButtonText, themeStyles.primaryText]}>
+                          {option.label}
+                        </Text>
+                        <Text style={[styles.tempLoginButtonDetails, themeStyles.textSecondary]}>
+                          {option.details}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  onPress={handleContinueAsGuest}
+                  activeOpacity={1}
+                  style={[styles.guestButton, { borderColor: colors.border }]}
+                >
+                  <Text style={[styles.guestButtonText, { color: colors.text }]}>Continue as Guest</Text>
+                </TouchableOpacity>
+
+                {loginMessage && (
+                  <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
+                    <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
+                      {loginMessage.text}
+                    </Text>
+                  </View>
+                )}
+
+                <View style={styles.signupLinkContainer}>
+                  <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
+                    Don't have an account?{' '}
+                  </Text>
+                  <TouchableOpacity activeOpacity={1} onPress={() => router.push('/signup' as any)}>
+                    <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
+                      Create Account
                     </Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <TouchableOpacity
-              onPress={handleContinueAsGuest}
-              activeOpacity={1}
-              style={[styles.guestButton, { borderColor: colors.border }]}
-            >
-              <Text style={[styles.guestButtonText, { color: colors.text }]}>Continue as Guest</Text>
-            </TouchableOpacity>
-
-            {loginMessage && (
-              <View style={{ marginTop: 16, backgroundColor: loginMessage.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', padding: 12, borderRadius: 8 }}>
-                <Text style={{ color: loginMessage.type === 'error' ? '#EF4444' : '#10B981', textAlign: 'center', fontFamily: 'Poppins_500Medium' }}>
-                  {loginMessage.text}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.signupLinkContainer}>
-              <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
-                Don't have an account?{' '}
-              </Text>
-              <TouchableOpacity activeOpacity={1} onPress={() => router.push('/signup' as any)}>
-                <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
-                  Create Account
-                </Text>
-              </TouchableOpacity>
-            </View>
+                </View>
               </View>
             </View>
           </View>

@@ -1,129 +1,162 @@
 ---
 name: supabase-postgres-best-practices
-description: Postgres performance optimization and best practices from Supabase. Use this skill when writing, reviewing, or optimizing Postgres queries, schema designs, or database configurations.
+description: 'Optimize Supabase/Postgres queries, schema designs, migrations, indexes, RLS policies, and performance reviews. Use when writing SQL, reviewing slow queries, diagnosing missing indexes, tuning connection usage, designing tables, handling locking or N+1 patterns, or triaging MusikaLokal Edge Function failures such as Edge Function returned a non-2xx status code, stale router deployments, missing action handlers, and hidden invoke error details.'
+argument-hint: 'Describe the query, schema, migration, RLS policy, or Edge Function failure.'
+user-invocable: true
 license: MIT
 metadata:
   author: supabase
   version: "1.1.0"
   organization: Supabase
   date: January 2026
-  abstract: Comprehensive Postgres performance optimization guide for developers using Supabase and Postgres. Contains performance rules across 8 categories, prioritized by impact from critical (query performance, connection management) to incremental (advanced features). Each rule includes detailed explanations, incorrect vs. correct SQL examples, query plan analysis, and specific performance metrics to guide automated optimization and code generation.
+  abstract: Comprehensive Postgres performance optimization guide for developers using Supabase and Postgres. Contains rules across 8 categories, prioritized by impact from critical concerns such as query performance and connection management to incremental improvements in advanced features.
 ---
 
 # Supabase Postgres Best Practices
 
-Comprehensive performance optimization guide for Postgres, maintained by Supabase. Contains rules across 8 categories, prioritized by impact to guide automated query optimization and schema design.
+Use this skill for repeatable Supabase/Postgres work where the agent needs to choose the right optimization or safety rules, load only the relevant references, and produce concrete SQL or review findings.
 
-## When to Apply
-Don't forget to apply all migrations needed to the supabase database. You can use environment variables to manage different environments.
-Reference these guidelines when:
-- Writing SQL queries or designing schemas
-- Implementing indexes or query optimization
-- Reviewing database performance issues
-- Configuring connection pooling or scaling
-- Optimizing for Postgres-specific features
-- Working with Row-Level Security (RLS)
+use env to access my personal access token and instructions if needed, but prioritize workspace-level references for shared best practices.
 
-## Rule Categories by Priority
+## When to Use
 
-| Priority | Category | Impact | Prefix |
-|----------|----------|--------|--------|
-| 1 | Query Performance | CRITICAL | `query-` |
-| 2 | Connection Management | CRITICAL | `conn-` |
-| 3 | Security & RLS | CRITICAL | `security-` |
-| 4 | Schema Design | HIGH | `schema-` |
-| 5 | Concurrency & Locking | MEDIUM-HIGH | `lock-` |
-| 6 | Data Access Patterns | MEDIUM | `data-` |
-| 7 | Monitoring & Diagnostics | LOW-MEDIUM | `monitor-` |
-| 8 | Advanced Features | LOW | `advanced-` |
+- Write or review SQL queries
+- Design or revise schemas, constraints, and indexes
+- Plan or review Supabase migrations
+- Optimize RLS policies or privilege design
+- Diagnose slow queries, locking, N+1 patterns, or connection pressure
+- Investigate MusikaLokal Edge Function failures that may be masking backend or database errors
+- Triage the exact symptom `Edge Function returned a non-2xx status code`
 
-## How to Use
+## Fast Path For Frequent Non-2xx Errors
 
-Read individual rule files for detailed explanations and SQL examples:
+If the reported symptom is `Edge Function returned a non-2xx status code`, do this before loading deeper Postgres references:
 
-```
-references/query-missing-indexes.md
-references/schema-partial-indexes.md
-references/_sections.md
-```
+1. Identify the invoked function and action name.
+2. Check whether that router action was added or changed recently.
+3. Verify the Edge Function deployment is current.
+4. Verify the action handler exists for the requested action.
+5. Make the caller log the structured `error` fields from `supabase.functions.invoke(...)`.
+6. Only then continue into SQL, schema, RLS, or migration analysis.
 
-Each rule file contains:
-- Brief explanation of why it matters
-- Incorrect SQL example with explanation
-- Correct SQL example with explanation
-- Optional EXPLAIN output or metrics
-- Additional context and references
-- Supabase-specific notes (when applicable)
+## Workflow
 
+1. Classify the task first.
+   - Query plan or missing index problem
+   - Schema or migration design
+   - RLS or privilege review
+   - Connection or concurrency issue
+   - Data access pattern problem
+   - Monitoring or diagnostics task
+   - Edge Function non-2xx symptom in MusikaLokal
+2. Gather the smallest useful context.
+   - Read the current SQL, migration, schema, policy, or function code.
+   - Capture the exact error text and the existing execution path.
+   - For MusikaLokal non-2xx Edge Function errors, verify deployment and router action coverage before assuming a Postgres problem.
+3. Load only the relevant references.
+   - Start with [sections](./references/_sections.md) to map the task to a category.
+   - Then load one or more category files, preferring higher-impact rules first.
+4. Apply the highest-impact rules before incremental tuning.
+   - Query performance: missing, composite, covering, and partial indexes; correct index types
+   - Connection management: pooling, limits, prepared statements, idle timeout
+   - Security and RLS: correctness first, then performance
+   - Schema design: keys, constraints, foreign-key indexes, data types, partitioning
+   - Locking and data access: transaction length, deadlock prevention, batching, pagination, upserts
+   - Monitoring and advanced features: EXPLAIN ANALYZE, pg_stat_statements, JSONB, full-text search
+5. Produce concrete output.
+   - For implementation tasks, provide exact SQL, migration steps, or policy changes.
+   - For reviews, list findings in severity order with the root cause and recommended fix.
+   - Call out tradeoffs, rollout risks, and any migration ordering requirements.
+6. Validate before declaring done.
+   - Check correctness, performance impact, and Supabase compatibility.
+   - Ensure indexes support query predicates and joins.
+   - Ensure RLS policies remain safe and do not introduce accidental full scans.
+   - Ensure migrations are applied to the intended environment and remain idempotent where required.
+   - For non-2xx Edge Function failures, ensure deployment, router action coverage, and structured error logging were checked first.
+   - Recommend measurement with EXPLAIN ANALYZE or pg_stat_statements when performance claims need proof.
 
-# MusikaLokal: Supabase Edge Function Troubleshooting
+## Decision Guide
 
-## 🚨 The Core Issue: "Non-2xx Status Code"
-In the MusikaLokal repository, Edge Function client symptoms often surface as the generic error: `Edge Function returned a non-2xx status code`. 
+### Query and Index Work
 
-Because patched clients in both `mobile/lib/supabase.ts` and `web/lib/supabase.ts` normalize server-side errors, multiple distinct backend failures will collapse into this same generic message unless the caller logs the structured error fields.
+Use these first for slow reads or writes:
 
-## 🔍 Primary Causes to Check First
-Before assuming there is a Postgres or database issue, verify the following:
-1. **Stale Deployments:** Did you recently add a new action to an action-router function (e.g., `manage-playlists`, `manage-social-feed`, `manage-marketplace`)? Confirm the updated Edge Function was successfully deployed.
-2. **Missing Action Handlers:** Ensure the specific action you are trying to invoke actually exists and is properly handled within the router function.
-3. **Hidden Error Details:** Do not just log the `catch` value or use `const { data } = await...` while ignoring the `error` object. This hides critical debugging info like `status`, `code`, `details`, `hint`, and `context`.
+- [Missing indexes](./references/query-missing-indexes.md)
+- [Composite indexes](./references/query-composite-indexes.md)
+- [Covering indexes](./references/query-covering-indexes.md)
+- [Partial indexes](./references/query-partial-indexes.md)
+- [Index types](./references/query-index-types.md)
 
-## 📱💻 Affected Surfaces (Mobile & Web)
-This generic failure pattern frequently occurs across the following areas:
+### Connection and Throughput Work
 
-**Mobile App:**
-* **Playlists & Radio:** `profile.tsx`, `create_playlist.tsx`, `create_station.tsx`, `playlist_details.tsx`, `station_details.tsx`
-* **Social Feed:** `feed.tsx`, `post_details.tsx`
-* **Producer Network:** `producer_projects.tsx`, `producer_project_details.tsx`
-* **Marketplace:** `marketplace.tsx`, `shop.tsx`, `seller_hub.tsx`, `product_details.tsx`, `orders.tsx`
+Use these for serverless pressure, pool exhaustion, or excessive connection churn:
 
-**Web App:**
-* Similar generic failures can recur anywhere the web app utilizes `web/lib/supabase.ts` to invoke Edge Functions.
+- [Connection pooling](./references/conn-pooling.md)
+- [Connection limits](./references/conn-limits.md)
+- [Idle timeout](./references/conn-idle-timeout.md)
+- [Prepared statements](./references/conn-prepared-statements.md)
 
-## 🛠️ Required Debugging Pattern
-To reveal the actual cause of the failure, you **must** implement this structured logging pattern when invoking Edge Functions in this codebase:
+### Security and RLS Work
 
-```typescript
-const { data, error } = await supabase.functions.invoke("manage-social-feed", { body });
+Use these when policies, auth rules, or privilege boundaries are involved:
 
-if (error) {
-  console.error("Edge Function failed:", {
-    message: error.message,
-    status: (error as any).status,
-    code: (error as any).code,
-    details: (error as any).details,
-    hint: (error as any).hint,
-    context: (error as any).context,
-    body,
-  });
-  throw error;
-}
-```
+- [RLS basics](./references/security-rls-basics.md)
+- [RLS performance](./references/security-rls-performance.md)
+- [Privileges](./references/security-privileges.md)
 
-## Another Repository Troubleshooting Note
+### Schema and Migration Work
 
-MusikaLokal has a recurring Supabase Edge Function client symptom that often appears as:
+Use these when changing tables or long-term data shape:
 
-- `Edge Function returned a non-2xx status code`
+- [Primary keys](./references/schema-primary-keys.md)
+- [Constraints](./references/schema-constraints.md)
+- [Foreign key indexes](./references/schema-foreign-key-indexes.md)
+- [Data types](./references/schema-data-types.md)
+- [Partitioning](./references/schema-partitioning.md)
+- [Lowercase identifiers](./references/schema-lowercase-identifiers.md)
 
-In this repo, that message is usually normalized by the patched clients in `mobile/lib/supabase.ts` and `web/lib/supabase.ts`, so multiple server-side failures collapse into the same generic error unless the caller logs the structured error fields.
+### Concurrency and Access Pattern Work
 
-First checks for this codebase:
+Use these for lock contention or inefficient access:
 
-- Confirm the Edge Function was deployed after adding a new action to an action-router function such as `manage-playlists`, `manage-social-feed`, `manage-marketplace`, `manage-producer-network`, `manage-deals`, or `manage-bookings`.
-- Do not assume the problem is Postgres first. In this repo, stale deployments and missing action handlers are a common cause of the same generic non-2xx failure.
-- Do not ignore the returned `error` from `supabase.functions.invoke(...)`. Many screens currently do `const { data } = await ...` and only log the catch value, which hides `status`, `code`, `details`, `hint`, and `context`.
+- [Short transactions](./references/lock-short-transactions.md)
+- [Deadlock prevention](./references/lock-deadlock-prevention.md)
+- [Advisory locks](./references/lock-advisory.md)
+- [SKIP LOCKED](./references/lock-skip-locked.md)
+- [Batch inserts](./references/data-batch-inserts.md)
+- [N+1 queries](./references/data-n-plus-one.md)
+- [Pagination](./references/data-pagination.md)
+- [Upserts](./references/data-upsert.md)
 
-Known screens where this generic failure pattern can recur:
+### Diagnostics and Advanced Features
 
-- Mobile playlist and radio surfaces: `mobile/app/profile.tsx`, `mobile/app/create_playlist.tsx`, `mobile/app/create_station.tsx`, `mobile/app/playlist_details.tsx`, `mobile/app/station_details.tsx`, `mobile/app/feed.tsx`
-- Mobile social feed surfaces: `mobile/app/feed.tsx`, `mobile/app/post_details.tsx`
-- Mobile producer-network surfaces: `mobile/app/producer_projects.tsx`, `mobile/app/producer_project_details.tsx`
-- Mobile marketplace surfaces: `mobile/app/marketplace.tsx`, `mobile/app/shop.tsx`, `mobile/app/seller_hub.tsx`, `mobile/app/product_details.tsx`, `mobile/app/orders.tsx`
-- Web also uses the same normalization pattern via `web/lib/supabase.ts`, so similar generic failures can recur there as well.
+Use these when proving or extending an optimization:
 
-Required debugging pattern for this repo:
+- [EXPLAIN ANALYZE](./references/monitor-explain-analyze.md)
+- [pg_stat_statements](./references/monitor-pg-stat-statements.md)
+- [VACUUM and ANALYZE](./references/monitor-vacuum-analyze.md)
+- [JSONB indexing](./references/advanced-jsonb-indexing.md)
+- [Full-text search](./references/advanced-full-text-search.md)
+
+## MusikaLokal Edge Function Triage
+
+In this repository, the client wrappers can collapse many backend failures into the generic message `Edge Function returned a non-2xx status code`. Use this triage order:
+
+1. Confirm the relevant Edge Function was deployed after any router action changes.
+2. Confirm the requested action exists in the router function.
+3. Inspect the returned `error` object from `supabase.functions.invoke(...)` instead of relying only on the thrown catch value.
+4. Only after those checks should you treat the issue as a likely Postgres or schema problem.
+
+Start with these router functions first when the failure appears after recent feature work:
+
+- `manage-playlists`
+- `manage-social-feed`
+- `manage-marketplace`
+- `manage-producer-network`
+- `manage-deals`
+- `manage-bookings`
+
+Required logging pattern:
 
 ```ts
 const { data, error } = await supabase.functions.invoke("manage-social-feed", { body });
@@ -142,12 +175,23 @@ if (error) {
 }
 ```
 
-Current project-specific takeaway:
+Known affected surfaces include playlist/radio, social feed, producer network, and marketplace flows across the mobile app, with similar behavior possible anywhere the web app uses the shared Supabase wrapper.
 
-- If a new client flow starts failing with this generic message right after adding an action to `manage-playlists`, `manage-social-feed`, or another action-router function, verify deployment before debugging the screen.
+## Completion Checks
+
+- The chosen category and reference files match the actual problem.
+- The solution addresses the root cause, not just a symptom.
+- For non-2xx Edge Function failures, deployment freshness, action existence, and structured error capture were verified before database debugging.
+- SQL and schema changes are concrete and executable.
+- Security and RLS implications are called out explicitly.
+- Performance claims are either justified from known rules or paired with a measurement plan.
+- Supabase deployment or migration steps are included when needed.
 
 ## References
 
+- [Section map](./references/_sections.md)
+- [Contributor guidance](./references/_contributing.md)
+- [Reference template](./references/_template.md)
 - https://www.postgresql.org/docs/current/
 - https://supabase.com/docs
 - https://wiki.postgresql.org/wiki/Performance_Optimization

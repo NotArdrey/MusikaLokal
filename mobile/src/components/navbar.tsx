@@ -1,13 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { router, useFocusEffect, usePathname } from 'expo-router';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { router, usePathname } from 'expo-router';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useBottomOverlay } from '../context/BottomOverlayContext';
 import { useTheme } from '../context/ThemeContext';
+import { resolveRoleManageRoute } from '../utils/roleRouting';
 
 export const NAVBAR_BOTTOM_OFFSET = 24;
 export const NAVBAR_HEIGHT = 84;
@@ -75,53 +75,26 @@ type NavbarProps = {
 
 function Navbar({ global = false }: NavbarProps) {
     const { colors, isDark } = useTheme();
-    const { isGuest } = useAuth();
+    const { isGuest, roleResolved, session, userRole } = useAuth();
     const { isBottomOverlayActive } = useBottomOverlay();
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
     const shouldRenderGlobalNavbar = global && GLOBAL_NAVBAR_ROUTES.has(pathname);
 
-    const fetchUserRole = useCallback(async () => {
-        if (isGuest) return; // Skip for guests
-        try {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session?.access_token) return;
-
-            const tokenExpiry = session.expires_at ? session.expires_at * 1000 : 0;
-            if (tokenExpiry && tokenExpiry < Date.now()) return;
-
-            const { data, error } = await supabase.functions.invoke('manage-profile', {
-                body: { action: 'fetch', userId: session.user.id }
-            });
-
-            if (error) return;
-
-            if (data && data.role) {
-                if (data.role === 'studio-owner') {
-                    setManageRoute('/my_studio');
-                } else if (data.role === 'musician' || data.role === 'manager' || data.role === 'musician-member') {
-                    setManageRoute('/my_group');
-                } else if (data.role === 'venue-owner') {
-                    setManageRoute('/my_venue');
-                } else if (data.role === 'producer') {
-                    setManageRoute('/my_production');
-                } else {
-                    setManageRoute('/manage');
-                }
-            } else {
-                setManageRoute('/manage');
-            }
-        } catch (e) {
+    useEffect(() => {
+        if (isGuest || !session?.user?.id) {
             setManageRoute('/manage');
+            return;
         }
-    }, [isGuest]);
 
-    useFocusEffect(
-        useCallback(() => {
-            fetchUserRole();
-        }, [fetchUserRole])
-    );
+        if (!roleResolved) {
+            setManageRoute('/manage');
+            return;
+        }
+
+        setManageRoute(resolveRoleManageRoute(userRole));
+    }, [isGuest, roleResolved, session?.user?.id, userRole]);
 
     const activeTab = useMemo(() => {
         if (pathname.includes('feed') || pathname.includes('home')) return 'home';
@@ -149,6 +122,7 @@ function Navbar({ global = false }: NavbarProps) {
         if (
             pathname === '/manage' ||
             pathname.startsWith('/manage/') ||
+            pathname.includes('my_production') ||
             pathname.includes('producer_projects') ||
             pathname.includes('producer_project_details') ||
             pathname.includes('my_studio') ||
