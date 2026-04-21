@@ -8,8 +8,8 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
-export const NAVBAR_BOTTOM_OFFSET = 24;
-export const NAVBAR_HEIGHT = 84;
+export const NAVBAR_BOTTOM_OFFSET = Platform.OS === 'web' ? 0 : 24;
+export const NAVBAR_HEIGHT = Platform.OS === 'web' ? 0 : 84;
 export const NAVBAR_CLEARANCE = NAVBAR_BOTTOM_OFFSET + NAVBAR_HEIGHT + 16;
 
 function Navbar() {
@@ -93,6 +93,10 @@ function Navbar() {
         ],
         [manageRoute],
     );
+
+    if (Platform.OS === 'web') {
+        return null;
+    }
 
     return (
         <View style={[styles.navbarWrapper, { bottom: NAVBAR_BOTTOM_OFFSET + insets.bottom }]}>
