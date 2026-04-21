@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import CustomAlert, { AlertType } from '../src/components/CustomAlert';
@@ -16,6 +16,7 @@ interface AlertState {
   title: string;
   message: string;
   buttons: { text: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[];
+  forceModal: boolean;
 }
 
 type TempLoginRole = 'musician' | 'producer' | 'studio-owner' | 'venue-owner';
@@ -163,6 +164,8 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const emailInputRef = useRef<TextInput>(null);
+  const passwordInputRef = useRef<TextInput>(null);
 
   // Verification Modal State
   const [showVerification, setShowVerification] = useState(false);
@@ -176,6 +179,7 @@ export default function LoginScreen() {
     title: '',
     message: '',
     buttons: [{ text: 'OK' }],
+    forceModal: false,
   });
 
   // Helper function to show alert
@@ -183,7 +187,8 @@ export default function LoginScreen() {
     type: AlertType,
     title: string,
     message: string,
-    buttons?: AlertState['buttons']
+    buttons?: AlertState['buttons'],
+    forceModal = false,
   ) => {
     setAlertState({
       visible: true,
@@ -191,11 +196,64 @@ export default function LoginScreen() {
       title,
       message,
       buttons: buttons || [{ text: 'OK' }],
+      forceModal,
     });
   };
 
   const closeAlert = () => {
     setAlertState(prev => ({ ...prev, visible: false }));
+  };
+
+  const focusField = (field: 'email' | 'password') => {
+    setTimeout(() => {
+      if (field === 'password') {
+        passwordInputRef.current?.focus();
+        return;
+      }
+
+      emailInputRef.current?.focus();
+    }, 0);
+  };
+
+  const showValidationAlert = (nextErrors: { email?: string; password?: string }) => {
+    const issues: string[] = [];
+    let primaryField: 'email' | 'password' = 'email';
+
+    if (nextErrors.email) {
+      issues.push(nextErrors.email === 'Email is required.' ? 'Enter your email address.' : nextErrors.email);
+      primaryField = 'email';
+    }
+
+    if (nextErrors.password) {
+      issues.push(nextErrors.password === 'Password is required.' ? 'Enter your password.' : nextErrors.password);
+      if (!nextErrors.email) {
+        primaryField = 'password';
+      }
+    }
+
+    const title = issues.length > 1
+      ? 'Complete Required Fields'
+      : nextErrors.email
+        ? 'Check Your Email'
+        : 'Password Required';
+
+    const message = issues.length > 1
+      ? `We need a few details before you can sign in:\n• ${issues.join('\n• ')}`
+      : issues[0] || 'Please review your login details and try again.';
+
+    showAlert(
+      'warning',
+      title,
+      message,
+      [
+        {
+          text: 'Review fields',
+          onPress: () => focusField(primaryField),
+          style: 'default',
+        },
+      ],
+      true,
+    );
   };
 
   const openTemporaryLoginValidation = async (option: TempLoginOption) => {
@@ -491,6 +549,7 @@ export default function LoginScreen() {
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
+      showValidationAlert(newErrors);
       return;
     }
 
@@ -590,6 +649,7 @@ export default function LoginScreen() {
               ]}>
                 <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
                 <TextInput
+                  ref={emailInputRef}
                   style={[styles.input, themeStyles.text]}
                   placeholder="name@email.com"
                   placeholderTextColor={colors.textSecondary}
@@ -618,6 +678,7 @@ export default function LoginScreen() {
               ]}>
                 <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
                 <TextInput
+                  ref={passwordInputRef}
                   style={[styles.input, themeStyles.text]}
                   placeholder="Enter your password"
                   placeholderTextColor={colors.textSecondary}
@@ -703,7 +764,7 @@ export default function LoginScreen() {
 
             <View style={styles.signupLinkContainer}>
               <Text style={[styles.signupLinkText, themeStyles.textSecondary]}>
-                Don't have an account?{' '}
+                Don&apos;t have an account?{' '}
               </Text>
               <TouchableOpacity activeOpacity={1} onPress={() => router.push('/signup' as any)}>
                 <Text style={[styles.signupLinkHighlight, themeStyles.primaryText]}>
@@ -728,6 +789,7 @@ export default function LoginScreen() {
         title={alertState.title}
         message={alertState.message}
         buttons={alertState.buttons}
+        forceModal={alertState.forceModal}
         onClose={closeAlert}
       />
     </KeyboardAvoidingView>

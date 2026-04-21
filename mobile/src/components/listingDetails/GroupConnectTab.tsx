@@ -27,6 +27,7 @@ interface GroupConnectTabProps {
   renderBookingControls: () => React.ReactNode;
   group: any;
   handleConfirm: (action: () => void, title: string, message: string) => void;
+  connectionPanel?: React.ReactNode;
 }
 
 const GroupConnectTab = ({
@@ -45,6 +46,7 @@ const GroupConnectTab = ({
   renderBookingControls,
   group,
   handleConfirm,
+  connectionPanel,
 }: GroupConnectTabProps) => (
   <View style={styles.tabContent}>
     {(!currentUserRole || currentUserRole === "venue-owner") && (
@@ -272,6 +274,21 @@ const GroupConnectTab = ({
           )}
         </View>
       )}
+
+    {connectionPanel ? (
+      <View
+        style={{
+          marginTop:
+            ((!currentUserRole || currentUserRole === "venue-owner") ||
+              ((!currentUserRole || currentUserRole === "musician") &&
+                group?.requirements?.audition))
+              ? 32
+              : 0,
+        }}
+      >
+        {connectionPanel}
+      </View>
+    ) : null}
   </View>
 );
 

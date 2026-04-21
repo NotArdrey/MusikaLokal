@@ -39,6 +39,17 @@ If the reported symptom is `Edge Function returned a non-2xx status code`, do th
 5. Make the caller log the structured `error` fields from `supabase.functions.invoke(...)`.
 6. Only then continue into SQL, schema, RLS, or migration analysis.
 
+## Fast Path For PGRST204 Schema Cache Errors
+
+If the reported symptom is `PGRST204` with a message like `Could not find the 'column_name' column of 'table_name' in the schema cache`, do this before changing application code:
+
+1. Search the repo migrations for the missing column name.
+2. Check the live table definition in `information_schema.columns` for that table.
+3. Compare the target project's applied migration history with the repo migration that should add the column.
+4. If the migration exists locally but the column is missing live, apply a catch-up migration to the target project.
+5. Re-check the column and any supporting indexes after the migration.
+6. Only treat it as a client/query bug if the live schema already contains the column.
+
 ## Workflow
 
 1. Classify the task first.
@@ -111,6 +122,7 @@ Use these when changing tables or long-term data shape:
 - [Primary keys](./references/schema-primary-keys.md)
 - [Constraints](./references/schema-constraints.md)
 - [Foreign key indexes](./references/schema-foreign-key-indexes.md)
+- [PGRST204 missing columns](./references/schema-pgrst204-missing-columns.md)
 - [Data types](./references/schema-data-types.md)
 - [Partitioning](./references/schema-partitioning.md)
 - [Lowercase identifiers](./references/schema-lowercase-identifiers.md)
@@ -181,6 +193,7 @@ Known affected surfaces include playlist/radio, social feed, producer network, a
 
 - The chosen category and reference files match the actual problem.
 - The solution addresses the root cause, not just a symptom.
+- For `PGRST204` schema cache errors, repo migrations were compared against the live schema before changing application code.
 - For non-2xx Edge Function failures, deployment freshness, action existence, and structured error capture were verified before database debugging.
 - SQL and schema changes are concrete and executable.
 - Security and RLS implications are called out explicitly.

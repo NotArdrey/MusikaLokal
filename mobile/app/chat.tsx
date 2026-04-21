@@ -219,7 +219,7 @@ export default function ChatPage() {
                     onSelectConversation={handleSelectConversation}
                     onNewConversation={() => router.push('/home')}
                 />
-                <Navbar />
+                <Navbar global forceVisible />
             </View>
         );
     }

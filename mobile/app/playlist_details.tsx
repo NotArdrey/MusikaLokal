@@ -1,10 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Audio, type AVPlaybackStatus } from "expo-av";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,6 +21,7 @@ import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import ReportModal from "../src/components/ReportModal";
 import Skeleton from "../src/components/Skeleton";
+import { resolveRadioMediaUrl } from "../src/audio/radioTrackPlayer";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
 import { useAuth } from "../src/context/AuthContext";
@@ -36,6 +40,80 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const moderateScale = (size: number, factor = 0.3) => {
   const scaled = Math.max((SCREEN_WIDTH / 375) * size, size * 0.85);
   return size + (scaled - size) * factor;
+};
+
+const PLAYLIST_ASSET_BUCKET = "playlist-assets";
+const PLAYLIST_ASSET_SIGNED_URL_TTL_SECONDS = 24 * 60 * 60;
+
+const coerceSingleRelation = <T,>(value: T | T[] | null | undefined): T | null => {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return value ?? null;
+};
+
+const dedupeById = (entries: any[]) => {
+  const seen = new Set<string>();
+  const result: any[] = [];
+
+  for (const entry of entries) {
+    if (!entry) continue;
+
+    const key = typeof entry.id === "string" && entry.id.trim().length > 0
+      ? entry.id.trim()
+      : JSON.stringify(entry);
+
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    result.push(entry);
+  }
+
+  return result;
+};
+
+const normalizePlaylistDetails = (rawPlaylist: any) => {
+  const creator = coerceSingleRelation(rawPlaylist?.creator);
+  const items = Array.isArray(rawPlaylist?.items)
+    ? rawPlaylist.items.map((item: any) => ({
+        ...item,
+        teaser: coerceSingleRelation(item?.teaser),
+        external_link: coerceSingleRelation(item?.external_link),
+      }))
+    : [];
+
+  const teaserAssets = dedupeById([
+    ...(Array.isArray(rawPlaylist?.teaser_assets) ? rawPlaylist.teaser_assets : []),
+    ...items.map((item: any) => item?.teaser).filter(Boolean),
+  ]);
+
+  const coverAsset = teaserAssets.find((asset: any) => asset?.asset_type === "cover_art");
+
+  const externalLinks = dedupeById([
+    ...(Array.isArray(rawPlaylist?.external_links) ? rawPlaylist.external_links : []),
+    ...items
+      .map((item: any) => {
+        if (!item?.external_link) return null;
+
+        return {
+          ...item.external_link,
+          linked_item_id: item.external_link.linked_item_id || item.id || null,
+        };
+      })
+      .filter(Boolean),
+  ]);
+
+  return {
+    ...rawPlaylist,
+    cover_url: resolveRadioMediaUrl(
+      rawPlaylist?.cover_image_url || rawPlaylist?.cover_url || coverAsset?.public_url || coverAsset?.url || "",
+    ),
+    creator_name: rawPlaylist?.creator_name || creator?.full_name || rawPlaylist?.owner_name || "Unknown",
+    items,
+    teaser_assets: teaserAssets,
+    external_links: externalLinks,
+  };
 };
 
 export default function PlaylistDetailsScreen() {
@@ -58,22 +136,168 @@ export default function PlaylistDetailsScreen() {
   const [newTrackAudioFile, setNewTrackAudioFile] = useState<PlaylistAudioFile | null>(null);
   const [addingTrack, setAddingTrack] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const previewSoundRef = useRef<Audio.Sound | null>(null);
+  const [resolvedCoverUrl, setResolvedCoverUrl] = useState<string | null>(null);
+  const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
 
   const isOwner = (playlist?.creator_id || playlist?.owner_id) === userId;
+
+  const logPlaylistInvokeError = useCallback((context: string, error: any, body: Record<string, unknown>) => {
+    console.error(`manage-playlists ${context} failed`, {
+      message: error?.message,
+      status: error?.status,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+      context: error?.context,
+      body,
+    });
+  }, []);
+
+  const unloadPreviewSound = useCallback(async () => {
+    const sound = previewSoundRef.current;
+    previewSoundRef.current = null;
+    setActivePreviewUrl(null);
+    setPreviewLoading(false);
+    setPreviewPlaying(false);
+
+    if (!sound) {
+      return;
+    }
+
+    try {
+      sound.setOnPlaybackStatusUpdate(null);
+    } catch {
+      // Ignore cleanup failures for already-disposed sounds.
+    }
+
+    try {
+      await sound.stopAsync();
+    } catch {
+      // Ignore stop failures for already-stopped sounds.
+    }
+
+    try {
+      await sound.unloadAsync();
+    } catch {
+      // Ignore unload failures for already-disposed sounds.
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      void unloadPreviewSound();
+    };
+  }, [unloadPreviewSound]);
+
+  const resolvePlaylistAssetUrl = useCallback(async (asset: any) => {
+    const directUrl = resolveRadioMediaUrl(
+      asset?.public_url || asset?.url || asset?.thumbnail_url || asset?.cover_image_url || "",
+    );
+    if (directUrl) {
+      return directUrl;
+    }
+
+    const storagePath = typeof asset?.storage_path === "string" ? asset.storage_path.trim() : "";
+    if (!storagePath) {
+      return "";
+    }
+
+    const { data, error } = await supabase.storage
+      .from(PLAYLIST_ASSET_BUCKET)
+      .createSignedUrl(storagePath, PLAYLIST_ASSET_SIGNED_URL_TTL_SECONDS);
+
+    if (data?.signedUrl) {
+      return data.signedUrl;
+    }
+
+    if (error) {
+      console.warn("PlaylistDetails signed URL failed", error.message);
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(PLAYLIST_ASSET_BUCKET).getPublicUrl(storagePath);
+
+    return publicUrl || "";
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const resolveCoverImage = async () => {
+      const directCoverUrl = typeof playlist?.cover_url === "string" ? playlist.cover_url.trim() : "";
+      if (directCoverUrl) {
+        if (isActive) {
+          setResolvedCoverUrl(directCoverUrl);
+        }
+        return;
+      }
+
+      const coverAsset = Array.isArray(playlist?.teaser_assets)
+        ? playlist.teaser_assets.find((asset: any) => asset?.asset_type === "cover_art") || null
+        : null;
+
+      if (!coverAsset) {
+        if (isActive) {
+          setResolvedCoverUrl(null);
+        }
+        return;
+      }
+
+      const assetUrl = await resolvePlaylistAssetUrl(coverAsset);
+      if (isActive) {
+        setResolvedCoverUrl(assetUrl || null);
+      }
+    };
+
+    void resolveCoverImage();
+
+    return () => {
+      isActive = false;
+    };
+  }, [playlist, resolvePlaylistAssetUrl]);
+
+  const recordPlaylistEvent = useCallback(async (body: Record<string, unknown>) => {
+    const payload = {
+      action: "record_play_event",
+      platform: Platform.OS,
+      ...body,
+    };
+
+    const { error } = await supabase.functions.invoke("manage-playlists", { body: payload });
+    if (error) {
+      logPlaylistInvokeError("record_play_event", error, payload);
+    }
+  }, [logPlaylistInvokeError]);
 
   const fetchPlaylist = useCallback(async () => {
     if (!playlist_id) return;
     try {
-      const { data } = await supabase.functions.invoke("manage-playlists", {
-        body: { action: "get_playlist_details", playlist_id },
+      const body = { action: "get_playlist_details", playlist_id };
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body,
       });
-      if (data?.data) setPlaylist(data.data);
+
+      if (error) {
+        logPlaylistInvokeError("get_playlist_details", error, body);
+        throw error;
+      }
+
+      if (data?.data) {
+        setPlaylist(normalizePlaylistDetails(data.data));
+      } else {
+        setPlaylist(null);
+      }
     } catch (e: any) {
       console.warn("PlaylistDetails fetch failed", e);
+      setAlert({ type: "error", title: "Playlist Unavailable", message: e?.message || "Failed to load this playlist." });
     } finally {
       setLoading(false);
     }
-  }, [playlist_id]);
+  }, [logPlaylistInvokeError, playlist_id]);
 
   useEffect(() => { fetchPlaylist(); }, [fetchPlaylist]);
 
@@ -87,26 +311,152 @@ export default function PlaylistDetailsScreen() {
     setNewTrackAudioFile(null);
   }, []);
 
-  const handleRecordPlay = async () => {
+  const handlePlayTeaser = useCallback(async (preferredAsset?: any) => {
     if (!playlist) return;
+
+    const playlistItems = Array.isArray(playlist.items) ? playlist.items : [];
+    const playlistTeaserAssets = Array.isArray(playlist.teaser_assets) ? playlist.teaser_assets : [];
+    const fallbackAsset = playlistTeaserAssets.find((asset: any) => (
+      asset?.asset_type === "teaser_clip" || asset?.asset_type === "track_preview"
+    )) || playlistTeaserAssets[0] || null;
+    const selectedAsset = preferredAsset || fallbackAsset;
+
+    const linkedAssetItem = selectedAsset
+      ? playlistItems.find((item: any) => item?.teaser?.id === selectedAsset.id) || null
+      : null;
+
+    const fallbackItem = linkedAssetItem || playlistItems.find((item: any) => {
+      return typeof item?.audio_url === "string" && item.audio_url.trim().length > 0;
+    }) || null;
+
+    let previewUrl = "";
+
     try {
-      await supabase.functions.invoke("manage-playlists", {
-        body: { action: "record_play_event", playlist_id: playlist.id, event_type: "teaser_play" },
+      if (selectedAsset) {
+        previewUrl = await resolvePlaylistAssetUrl(selectedAsset);
+      }
+
+      if (!previewUrl && fallbackItem?.audio_url) {
+        previewUrl = resolveRadioMediaUrl(fallbackItem.audio_url);
+      }
+
+      if (!previewUrl) {
+        setAlert({
+          type: "warning",
+          title: "Teaser Unavailable",
+          message: "Add a teaser clip or track audio before playing a preview.",
+        });
+        return;
+      }
+
+      const existingSound = previewSoundRef.current;
+      if (existingSound && activePreviewUrl === previewUrl) {
+        const status = await existingSound.getStatusAsync();
+        if (status.isLoaded && status.isPlaying) {
+          await existingSound.pauseAsync();
+          setPreviewPlaying(false);
+          return;
+        }
+
+        if (status.isLoaded) {
+          await existingSound.playAsync();
+          setPreviewPlaying(true);
+          return;
+        }
+      }
+
+      await unloadPreviewSound();
+      setPreviewLoading(true);
+
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: previewUrl },
+        { shouldPlay: true, progressUpdateIntervalMillis: 250 },
+      );
+
+      previewSoundRef.current = sound;
+      setActivePreviewUrl(previewUrl);
+      setPreviewLoading(false);
+      setPreviewPlaying(true);
+
+      sound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
+        if (!status.isLoaded) {
+          if (status.error) {
+            console.warn("Playlist teaser playback failed", status.error);
+          }
+          setPreviewLoading(false);
+          setPreviewPlaying(false);
+          return;
+        }
+
+        setPreviewLoading(false);
+        setPreviewPlaying(status.isPlaying);
+
+        if (status.didJustFinish) {
+          void unloadPreviewSound();
+        }
+      });
+
+      void recordPlaylistEvent({
+        playlist_id: playlist.id,
+        item_id: linkedAssetItem?.id || fallbackItem?.id || null,
+        event_type: "teaser_play",
       });
     } catch (e: any) {
-      console.warn("Play record failed", e);
+      await unloadPreviewSound();
+      setAlert({
+        type: "error",
+        title: "Playback Failed",
+        message: e?.message || "We could not start the teaser.",
+      });
     }
-  };
+  }, [activePreviewUrl, playlist, recordPlaylistEvent, resolvePlaylistAssetUrl, unloadPreviewSound]);
+
+  const handleOpenExternalLink = useCallback(async (link: any, itemId?: string | null) => {
+    const rawUrl = typeof link?.url === "string" ? link.url.trim() : "";
+    if (!rawUrl) {
+      setAlert({ type: "warning", title: "Link Unavailable", message: "This playlist link is missing a URL." });
+      return;
+    }
+
+    const normalizedUrl = /^(https?:\/\/|mailto:|tel:)/i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+
+    try {
+      await Linking.openURL(normalizedUrl);
+      if (playlist?.id) {
+        void recordPlaylistEvent({
+          playlist_id: playlist.id,
+          item_id: itemId || link?.linked_item_id || null,
+          event_type: "outbound_click",
+        });
+      }
+    } catch (e: any) {
+      setAlert({
+        type: "error",
+        title: "Link Unavailable",
+        message: e?.message || "We could not open that link.",
+      });
+    }
+  }, [playlist?.id, recordPlaylistEvent]);
 
   const handleRemoveItem = async (itemId: string) => {
     try {
-      const { data } = await supabase.functions.invoke("manage-playlists", {
-        body: { action: "remove_playlist_item", item_id: itemId },
+      const body = { action: "remove_playlist_item", item_id: itemId };
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body,
       });
+
+      if (error) {
+        logPlaylistInvokeError("remove_playlist_item", error, body);
+        throw error;
+      }
+
       if (data?.success) {
         showTopToast({ type: "info", title: "Removed", message: "Track removed from playlist." });
         fetchPlaylist();
+        return;
       }
+
+      throw new Error(data?.error || "Failed to remove track.");
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
     }
@@ -114,13 +464,23 @@ export default function PlaylistDetailsScreen() {
 
   const handleDelete = async () => {
     try {
-      const { data } = await supabase.functions.invoke("manage-playlists", {
-        body: { action: "delete_playlist", playlist_id: playlist.id },
+      const body = { action: "delete_playlist", playlist_id: playlist.id };
+      const { data, error } = await supabase.functions.invoke("manage-playlists", {
+        body,
       });
+
+      if (error) {
+        logPlaylistInvokeError("delete_playlist", error, body);
+        throw error;
+      }
+
       if (data?.success) {
         showTopToast({ type: "info", title: "Deleted", message: "Playlist deleted." });
         router.back();
+        return;
       }
+
+      throw new Error(data?.error || "Failed to delete playlist.");
     } catch (e: any) {
       setAlert({ type: "error", title: "Error", message: e.message });
     }
@@ -297,8 +657,9 @@ export default function PlaylistDetailsScreen() {
   const canReportPlaylist = !isOwner && !!userId && !isGuest;
   const reportHeaderAction = canReportPlaylist ? (
     <TouchableOpacity
-      activeOpacity={1}
+      activeOpacity={0.8}
       onPress={openReportModal}
+      hitSlop={8}
       style={[
         styles.headerReportBtn,
         { backgroundColor: colors.surface, borderColor: colors.border },
@@ -314,8 +675,8 @@ export default function PlaylistDetailsScreen() {
 
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: contentBottomPadding }}>
         {/* Cover */}
-        {playlist.cover_url ? (
-          <CachedImage uri={playlist.cover_url } style={styles.cover} />
+        {resolvedCoverUrl ? (
+          <CachedImage uri={resolvedCoverUrl } style={styles.cover} />
         ) : (
           <View style={[styles.coverPlaceholder, { backgroundColor: colors.primary + "15" }]}>
             <Ionicons name="disc" size={56} color={colors.primary} />
@@ -326,7 +687,7 @@ export default function PlaylistDetailsScreen() {
         <View style={styles.metaSection}>
           <Text style={[styles.title, { color: colors.text }]}>{playlist.title}</Text>
           <Text style={[styles.creator, { color: colors.textSecondary }]}>
-            by {playlist.creator_name || "Unknown"} â€¢ {items.length} tracks
+            by {playlist.creator_name || "Unknown"} - {items.length} tracks
           </Text>
           {playlist.description && (
             <Text style={[styles.description, { color: colors.textSecondary }]}>{playlist.description}</Text>
@@ -344,12 +705,18 @@ export default function PlaylistDetailsScreen() {
         </View>
 
         {/* Play button */}
-        <TouchableOpacity activeOpacity={1}
+        <TouchableOpacity
+          activeOpacity={0.8}
           style={[styles.playBtn, { backgroundColor: colors.primary }]}
-          onPress={handleRecordPlay}
+          onPress={() => void handlePlayTeaser()}
+          disabled={previewLoading}
         >
-          <Ionicons name="play" size={22} color="#fff" />
-          <Text style={styles.playBtnText}>Play Teaser</Text>
+          {previewLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Ionicons name={previewPlaying ? "pause" : "play"} size={22} color="#fff" />
+          )}
+          <Text style={styles.playBtnText}>{previewLoading ? "Loading..." : previewPlaying ? "Pause Teaser" : "Play Teaser"}</Text>
         </TouchableOpacity>
 
         {/* Tracks */}
@@ -357,7 +724,7 @@ export default function PlaylistDetailsScreen() {
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Tracks</Text>
             {isOwner && (
-              <TouchableOpacity activeOpacity={0.8} onPress={() => setAddTrackVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <TouchableOpacity activeOpacity={0.8} hitSlop={8} onPress={() => setAddTrackVisible(true)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
                 <Text style={{ color: colors.primary, fontSize: moderateScale(13), fontWeight: "600" }}>Add Track</Text>
               </TouchableOpacity>
@@ -379,12 +746,22 @@ export default function PlaylistDetailsScreen() {
                     {Math.floor(item.duration_seconds / 60)}:{String(item.duration_seconds % 60).padStart(2, "0")}
                   </Text>
                 )}
+                {item.external_link?.url ? (
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    hitSlop={8}
+                    onPress={() => void handleOpenExternalLink(item.external_link, item.id)}
+                    style={{ marginLeft: 10 }}
+                  >
+                    <Ionicons name="open-outline" size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                ) : null}
                 {isOwner && (
                   <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 10, gap: 10 }}>
-                    <TouchableOpacity activeOpacity={0.8} onPress={() => openEditTrackModal(item)}>
+                    <TouchableOpacity activeOpacity={0.8} hitSlop={8} onPress={() => openEditTrackModal(item)}>
                       <Ionicons name="create-outline" size={18} color={colors.primary} />
                     </TouchableOpacity>
-                    <TouchableOpacity activeOpacity={0.8} onPress={() => handleRemoveItem(item.id)}>
+                    <TouchableOpacity activeOpacity={0.8} hitSlop={8} onPress={() => handleRemoveItem(item.id)}>
                       <Ionicons name="remove-circle-outline" size={20} color="#ef4444" />
                     </TouchableOpacity>
                   </View>
@@ -402,16 +779,24 @@ export default function PlaylistDetailsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Teaser Assets</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {teaserAssets.map((asset: any) => (
-                <View key={asset.id} style={[styles.assetCard, { borderColor: colors.border }]}>
-                  {asset.asset_type === "image" ? (
+                <TouchableOpacity
+                  key={asset.id}
+                  activeOpacity={asset.asset_type === "cover_art" ? 1 : 0.8}
+                  disabled={asset.asset_type === "cover_art"}
+                  onPress={() => void handlePlayTeaser(asset)}
+                  style={[styles.assetCard, { borderColor: colors.border }]}
+                >
+                  {asset.asset_type === "cover_art" && asset.storage_path ? (
+                    <CachedImage uri={resolveRadioMediaUrl(`${PLAYLIST_ASSET_BUCKET}/${asset.storage_path}`)} style={styles.assetImage} />
+                  ) : asset.asset_type === "cover_art" && asset.url ? (
                     <CachedImage uri={asset.url } style={styles.assetImage} />
                   ) : (
                     <View style={[styles.assetImage, { backgroundColor: colors.primary + "10", alignItems: "center", justifyContent: "center" }]}>
-                      <Ionicons name={asset.asset_type === "audio" ? "musical-note" : "videocam"} size={24} color={colors.primary} />
+                      <Ionicons name={asset.asset_type === "track_preview" || asset.asset_type === "teaser_clip" ? "play-circle" : "image-outline"} size={24} color={colors.primary} />
                     </View>
                   )}
                   <Text style={[styles.assetLabel, { color: colors.textSecondary }]}>{asset.label || asset.asset_type}</Text>
-                </View>
+                </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
@@ -423,12 +808,13 @@ export default function PlaylistDetailsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Listen On</Text>
             <View style={styles.linksRow}>
               {externalLinks.map((link: any) => (
-                <TouchableOpacity activeOpacity={1}
+                <TouchableOpacity activeOpacity={0.8}
                   key={link.id}
+                  onPress={() => void handleOpenExternalLink(link)}
                   style={[styles.linkChip, { borderColor: colors.border }]}
                 >
                   <Ionicons name="link" size={14} color={colors.primary} />
-                  <Text style={[styles.linkText, { color: colors.primary }]}>{link.platform}</Text>
+                  <Text style={[styles.linkText, { color: colors.primary }]}>{link.label || link.platform}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -439,14 +825,14 @@ export default function PlaylistDetailsScreen() {
         {isOwner && (
           <View style={styles.section}>
             <View style={styles.ownerActions}>
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity activeOpacity={0.8}
                 style={[styles.actionBtn, { backgroundColor: colors.primary }]}
                 onPress={() => router.push({ pathname: "/create_playlist", params: { edit_id: playlist.id } })}
               >
                 <Ionicons name="create" size={16} color="#fff" />
                 <Text style={styles.actionBtnText}>Edit</Text>
               </TouchableOpacity>
-              <TouchableOpacity activeOpacity={1}
+              <TouchableOpacity activeOpacity={0.8}
                 style={[styles.actionBtn, { backgroundColor: "#ef4444" }]}
                 onPress={handleDelete}
               >

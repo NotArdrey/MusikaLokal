@@ -7,7 +7,7 @@ import {
 } from "@gorhom/bottom-sheet";
 import { BlurView } from "expo-blur";
 import * as ExpoLinking from "expo-linking";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import React, {
     forwardRef,
     useCallback,
@@ -186,6 +186,7 @@ const ListingDetailsSheet = forwardRef<
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [productionTeams, setProductionTeams] = useState<any[]>([]);
   const [loadingProductionTeams, setLoadingProductionTeams] = useState(false);
+  const [hasLoadedProductionTeams, setHasLoadedProductionTeams] = useState(false);
   const [selectedProductionTeamId, setSelectedProductionTeamId] = useState<string | null>(null);
   const [productionRoster, setProductionRoster] = useState<any[]>([]);
   const [selectedProductionRosterId, setSelectedProductionRosterId] = useState<string | null>(null);
@@ -231,6 +232,7 @@ const ListingDetailsSheet = forwardRef<
     currentUserId,
     checkingVenue,
   } = useCurrentUserVenueRole();
+  const activeUserId = userId || currentUserId;
   const selectedProductionTeam = useMemo(
     () => productionTeams.find((team: any) => team.id === selectedProductionTeamId) || null,
     [productionTeams, selectedProductionTeamId],
@@ -410,6 +412,13 @@ const ListingDetailsSheet = forwardRef<
       previousSheetIndex.current = index;
       setSheetIndex(index);
 
+      if (wasHidden && isNowVisible) {
+        const resolvedUserRole = userRole || currentUserRole;
+        if (resolvedUserRole === "producer" && activeUserId) {
+          void fetchProductionTeams();
+        }
+      }
+
       // Refresh studio data when sheet becomes visible (reopened or returned from payment)
       // This ensures calendar availability is up-to-date with edited operating hours and date overrides
       if (
@@ -518,7 +527,7 @@ const ListingDetailsSheet = forwardRef<
         }
       }
     },
-    [listingId, group, bookings],
+    [activeUserId, bookings, currentUserRole, fetchProductionTeams, group, listingId, userRole],
   );
 
   useEffect(() => {
@@ -1154,11 +1163,20 @@ const ListingDetailsSheet = forwardRef<
     }
   };
 
-  const fetchProductionTeams = async () => {
-    if (!userId || userRole !== "producer") {
+  const fetchProductionTeams = useCallback(async () => {
+    const resolvedUserRole = userRole || currentUserRole;
+
+    if (!activeUserId || resolvedUserRole !== "producer") {
+      setProductionTeams([]);
+      setSelectedProductionTeamId(null);
+      setProductionRoster([]);
+      setSelectedProductionRosterId(null);
+      setLoadingProductionTeams(false);
+      setHasLoadedProductionTeams(false);
       return;
     }
 
+    setHasLoadedProductionTeams(false);
     setLoadingProductionTeams(true);
     try {
       const { data, error } = await supabase.functions.invoke("manage-deals", {
@@ -1175,16 +1193,18 @@ const ListingDetailsSheet = forwardRef<
         }
         return teams[0]?.id || null;
       });
+      setHasLoadedProductionTeams(true);
     } catch (err) {
       console.error("Error fetching production teams:", err);
       setProductionTeams([]);
       setSelectedProductionTeamId(null);
       setProductionRoster([]);
       setSelectedProductionRosterId(null);
+      setHasLoadedProductionTeams(true);
     } finally {
       setLoadingProductionTeams(false);
     }
-  };
+  }, [activeUserId, currentUserRole, userRole]);
 
   const fetchOwnedVenues = async () => {
     if (!currentUserId || currentUserRole !== "venue-owner") {
@@ -1458,10 +1478,29 @@ const ListingDetailsSheet = forwardRef<
   }, [group, userId, userRole]);
 
   useEffect(() => {
-    if (userRole === "producer") {
+    const resolvedUserRole = userRole || currentUserRole;
+
+    if (resolvedUserRole === "producer") {
       fetchProductionTeams();
+      return;
     }
-  }, [userRole, userId]);
+
+    setProductionTeams([]);
+    setSelectedProductionTeamId(null);
+    setProductionRoster([]);
+    setSelectedProductionRosterId(null);
+    setLoadingProductionTeams(false);
+    setHasLoadedProductionTeams(false);
+  }, [currentUserRole, fetchProductionTeams, userId, userRole]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const resolvedUserRole = userRole || currentUserRole;
+      if (resolvedUserRole === "producer" && activeUserId) {
+        void fetchProductionTeams();
+      }
+    }, [activeUserId, currentUserRole, fetchProductionTeams, userRole]),
+  );
 
   useEffect(() => {
     if (currentUserRole === "venue-owner") {
@@ -2475,6 +2514,16 @@ const ListingDetailsSheet = forwardRef<
 
   const isGroupListing = group?.type === "Group";
   const effectiveUserRole = userRole || currentUserRole;
+  const hasStructuredConnectionTab =
+    effectiveUserRole === "producer" &&
+    (group?.type === "Group" || group?.type === "Artist" || group?.type === "Venue");
+  const hasGroupConnectContent =
+    group?.type === "Group" &&
+    (!effectiveUserRole ||
+      effectiveUserRole === "venue-owner" ||
+      (effectiveUserRole === "musician" && !!group?.requirements?.audition) ||
+      hasStructuredConnectionTab);
+  const shouldShowConnectTab = hasStructuredConnectionTab || hasGroupConnectContent;
   const canApplyToGroup =
     isGroupListing &&
     group?.open_group_applications === true &&
@@ -2482,8 +2531,23 @@ const ListingDetailsSheet = forwardRef<
     effectiveUserRole === "musician" &&
     group?.owner_id !== userId;
 
+  useEffect(() => {
+    if (activeTab === "Connect" && effectiveUserRole === "producer" && activeUserId) {
+      void fetchProductionTeams();
+    }
+  }, [activeTab, activeUserId, effectiveUserRole, fetchProductionTeams]);
+
   const tabsToRender = useMemo(() => {
     const baseTabs = Array.isArray(labels.tabs) ? [...labels.tabs] : [];
+
+    if (shouldShowConnectTab && !baseTabs.includes("Connect")) {
+      const reviewTabIndex = baseTabs.indexOf("Review");
+      if (reviewTabIndex === -1) {
+        baseTabs.push("Connect");
+      } else {
+        baseTabs.splice(reviewTabIndex, 0, "Connect");
+      }
+    }
 
     if (!isGroupListing) {
       return baseTabs;
@@ -2506,7 +2570,7 @@ const ListingDetailsSheet = forwardRef<
     const nextTabs = [...withoutApply];
     nextTabs.splice(reviewTabIndex, 0, "Apply");
     return nextTabs;
-  }, [canApplyToGroup, isGroupListing, labels.tabs]);
+  }, [canApplyToGroup, isGroupListing, labels.tabs, shouldShowConnectTab]);
 
   const showTabs = hasDefaultTabs && tabsToRender.length > 0;
 
@@ -2846,6 +2910,10 @@ const ListingDetailsSheet = forwardRef<
       requireRosterSelection?: boolean;
       extraMeta?: Record<string, unknown> | null;
     }) => {
+      if (isSendingRequest) {
+        return;
+      }
+
       if (!currentUserId) {
         showSheetAlert("info", "Login Required", "Please sign in to send requests.");
         return;
@@ -2907,47 +2975,47 @@ const ListingDetailsSheet = forwardRef<
         }
       }
 
-      let uploadedDocumentUrl = requestDocumentUrl.trim() || null;
-      if (requestDocumentFile) {
-        try {
-          uploadedDocumentUrl = await uploadListingRequestDocument(
-            currentUserId,
-            requestDocumentFile,
-            request.requestKind === "invite" ? "contracts" : "applications",
-          );
-        } catch (uploadError) {
-          console.error("Error uploading request document:", uploadError);
-          showSheetAlert(
-            "error",
-            "Upload Failed",
-            request.requestKind === "invite"
-              ? "We couldn't upload the contract right now."
-              : "We couldn't upload the CV right now.",
-          );
-          return;
-        }
-      }
-
-      const requestDetails = {
-        pitch_message: normalizedPitchMessage,
-        application_context: normalizedApplicationContext,
-        context_label: request.contextLabel || null,
-        request_kind: request.requestKind,
-        cv_url: request.requestKind === "application" ? uploadedDocumentUrl : null,
-        video_url: request.requestKind === "application" ? normalizedVideoUrl : null,
-        contract_url: request.requestKind === "invite" ? uploadedDocumentUrl : null,
-        slot_type: selectedSlotType || null,
-        roster_entry_id: selectedProductionRosterEntry?.id || null,
-        roster_entry_name:
-          selectedProductionRosterEntry?.display_name ||
-          selectedProductionRosterEntry?.group?.name ||
-          selectedProductionRosterEntry?.full_name ||
-          null,
-        roster_entry_kind: selectedProductionRosterEntry?.entity_kind || null,
-      };
-
       setIsSendingRequest(true);
       try {
+        let uploadedDocumentUrl = requestDocumentUrl.trim() || null;
+        if (requestDocumentFile) {
+          try {
+            uploadedDocumentUrl = await uploadListingRequestDocument(
+              currentUserId,
+              requestDocumentFile,
+              request.requestKind === "invite" ? "contracts" : "applications",
+            );
+          } catch (uploadError) {
+            console.error("Error uploading request document:", uploadError);
+            showSheetAlert(
+              "error",
+              "Upload Failed",
+              request.requestKind === "invite"
+                ? "We couldn't upload the contract right now."
+                : "We couldn't upload the CV right now.",
+            );
+            return;
+          }
+        }
+
+        const requestDetails = {
+          pitch_message: normalizedPitchMessage,
+          application_context: normalizedApplicationContext,
+          context_label: request.contextLabel || null,
+          request_kind: request.requestKind,
+          cv_url: request.requestKind === "application" ? uploadedDocumentUrl : null,
+          video_url: request.requestKind === "application" ? normalizedVideoUrl : null,
+          contract_url: request.requestKind === "invite" ? uploadedDocumentUrl : null,
+          slot_type: selectedSlotType || null,
+          roster_entry_id: selectedProductionRosterEntry?.id || null,
+          roster_entry_name:
+            selectedProductionRosterEntry?.display_name ||
+            selectedProductionRosterEntry?.group?.name ||
+            selectedProductionRosterEntry?.full_name ||
+            null,
+          roster_entry_kind: selectedProductionRosterEntry?.entity_kind || null,
+        };
+
         await submitListingRequest({
           currentUserId,
           receiverUserId: request.receiverUserId,
@@ -2975,8 +3043,8 @@ const ListingDetailsSheet = forwardRef<
 
         setRequestPitchMessage("");
         setRequestApplicationContext("");
-  setRequestDocumentFile(null);
-  setRequestDocumentUrl("");
+        setRequestDocumentFile(null);
+        setRequestDocumentUrl("");
         setRequestVideoUrl("");
         showSheetAlert("success", "Request Sent", "Your structured request has been sent.");
       } catch (error) {
@@ -2997,6 +3065,7 @@ const ListingDetailsSheet = forwardRef<
       requestPitchMessage,
       requestVideoUrl,
       filteredRequestRoster,
+      isSendingRequest,
       selectedProductionRosterEntry,
       selectedProductionTeam,
       selectedSlotType,
@@ -3112,6 +3181,35 @@ const ListingDetailsSheet = forwardRef<
   );
 
   const renderConnectionPanel = () => {
+    const renderProductionTeamSelector = () => {
+      if (loadingProductionTeams || !hasLoadedProductionTeams) {
+        return (
+          <View style={{ paddingVertical: 12, alignItems: "center" }}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        );
+      }
+
+      if (productionTeams.length > 0) {
+        return renderRequestSelectorChips(
+          productionTeams,
+          selectedProductionTeamId,
+          setSelectedProductionTeamId,
+          "people-outline",
+        );
+      }
+
+      return (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => router.push("/my_production")}
+          style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+        >
+          <Text style={styles.primaryBtnText}>Manage Production Teams</Text>
+        </TouchableOpacity>
+      );
+    };
+
     const renderStructuredRequestFields = (options: {
       requestKind: "invite" | "application";
       pitchPlaceholder: string;
@@ -3211,7 +3309,7 @@ const ListingDetailsSheet = forwardRef<
     };
 
     if (group?.type === "Group" || group?.type === "Artist") {
-      if (currentUserRole !== "producer") {
+      if (effectiveUserRole !== "producer") {
         return null;
       }
 
@@ -3219,15 +3317,7 @@ const ListingDetailsSheet = forwardRef<
         <View style={[styles.section, { marginBottom: 0 }]}> 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite To Your Team</Text>
           <Text style={[styles.description, { color: colors.textSecondary }]}>Select one of your production teams and send a structured invite with a pitch, invite context, and a required contract upload.</Text>
-          {productionTeams.length > 0 ? renderRequestSelectorChips(productionTeams, selectedProductionTeamId, setSelectedProductionTeamId, "people-outline") : (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => router.push("/my_production")}
-              style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
-            >
-              <Text style={styles.primaryBtnText}>Create Production Team</Text>
-            </TouchableOpacity>
-          )}
+          {renderProductionTeamSelector()}
           {renderStructuredRequestFields({
             requestKind: "invite",
             pitchPlaceholder: `Tell ${group?.name || "this musician"} what your team needs and why they are a fit.`,
@@ -3240,26 +3330,23 @@ const ListingDetailsSheet = forwardRef<
             disabled={isSendingRequest || loadingProductionTeams}
             style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
           >
-            {isSendingRequest ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>Send Team Invite</Text>}
+            {isSendingRequest ? (
+              <View style={styles.loadingButtonContent}>
+                <ActivityIndicator color="#FFF" />
+                <Text style={styles.primaryBtnText}>Sending Invite...</Text>
+              </View>
+            ) : <Text style={styles.primaryBtnText}>Send Team Invite</Text>}
           </TouchableOpacity>
         </View>
       );
     }
 
-    if (group?.type === "Venue" && currentUserRole === "producer") {
+    if (group?.type === "Venue" && effectiveUserRole === "producer") {
       return (
         <View style={[styles.section, { marginBottom: 0 }]}> 
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Apply As Production Team</Text>
           <Text style={[styles.description, { color: colors.textSecondary }]}>Choose a team and send a structured application with a pitch, slot context, CV upload, and video link.</Text>
-          {productionTeams.length > 0 ? renderRequestSelectorChips(productionTeams, selectedProductionTeamId, setSelectedProductionTeamId, "people-outline") : (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => router.push("/my_production")}
-              style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
-            >
-              <Text style={styles.primaryBtnText}>Create Production Team</Text>
-            </TouchableOpacity>
-          )}
+          {renderProductionTeamSelector()}
           {renderStructuredRequestFields({
             requestKind: "application",
             pitchPlaceholder: `Tell ${group?.name || "this venue"} how your team can help and what you bring.`,
@@ -3274,7 +3361,12 @@ const ListingDetailsSheet = forwardRef<
             disabled={isSendingRequest || loadingProductionTeams}
             style={[styles.primaryBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
           >
-            {isSendingRequest ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>Send Venue Application</Text>}
+            {isSendingRequest ? (
+              <View style={styles.loadingButtonContent}>
+                <ActivityIndicator color="#FFF" />
+                <Text style={styles.primaryBtnText}>Sending Application...</Text>
+              </View>
+            ) : <Text style={styles.primaryBtnText}>Send Venue Application</Text>}
           </TouchableOpacity>
         </View>
       );
@@ -3295,7 +3387,6 @@ const ListingDetailsSheet = forwardRef<
       calculateCompletion={calculateCompletion}
       sheetRef={ref}
       listingId={listingId}
-      connectionPanel={renderConnectionPanel()}
     />
   );
 
@@ -3320,7 +3411,7 @@ const ListingDetailsSheet = forwardRef<
   );
 
   const handleSendBookingRequest = useBookingRequestAction({
-    currentUserRole,
+    currentUserRole: effectiveUserRole,
     userVenues,
     selectedVenueId,
     requestMessage,
@@ -3338,26 +3429,38 @@ const ListingDetailsSheet = forwardRef<
     },
   });
 
-  // Group: Connect Tab
-  const renderGroupConnect = () => (
-    <GroupConnectTab
-      currentUserRole={currentUserRole}
-      userVenues={userVenues}
-      colors={colors}
-      isDark={isDark}
-      styles={styles}
-      selectedVenueId={selectedVenueId}
-      setSelectedVenueId={setSelectedVenueId}
-      checkingVenue={checkingVenue}
-      requestMessage={requestMessage}
-      setRequestMessage={setRequestMessage}
-      handleSendBookingRequest={handleSendBookingRequest}
-      isSendingRequest={isSendingRequest}
-      renderBookingControls={renderBookingControls}
-      group={group}
-      handleConfirm={handleConfirm}
-    />
-  );
+  const renderConnectionTab = () => {
+    const connectionPanel = hasStructuredConnectionTab ? renderConnectionPanel() : null;
+
+    if (group?.type === "Group") {
+      return (
+        <GroupConnectTab
+          currentUserRole={effectiveUserRole}
+          userVenues={userVenues}
+          colors={colors}
+          isDark={isDark}
+          styles={styles}
+          selectedVenueId={selectedVenueId}
+          setSelectedVenueId={setSelectedVenueId}
+          checkingVenue={checkingVenue}
+          requestMessage={requestMessage}
+          setRequestMessage={setRequestMessage}
+          handleSendBookingRequest={handleSendBookingRequest}
+          isSendingRequest={isSendingRequest}
+          renderBookingControls={renderBookingControls}
+          group={group}
+          handleConfirm={handleConfirm}
+          connectionPanel={connectionPanel}
+        />
+      );
+    }
+
+    if (!connectionPanel) {
+      return null;
+    }
+
+    return <View style={styles.tabContent}>{connectionPanel}</View>;
+  };
 
   const renderStudioGigVenueAbout = () => (
     <StudioGigVenueAboutTab
@@ -3374,7 +3477,6 @@ const ListingDetailsSheet = forwardRef<
       calculateCompletion={calculateCompletion}
       handleProfileNavigation={handleProfileNavigation}
       promotions={group?.promotions || []}
-      connectionPanel={renderConnectionPanel()}
     />
   );
 
@@ -3441,6 +3543,7 @@ const ListingDetailsSheet = forwardRef<
               renderGroupAbout={renderGroupAbout}
               renderGroupApply={renderGroupApply}
               renderGroupTimeline={renderGroupTimeline}
+              renderConnectionTab={renderConnectionTab}
               renderReviews={renderReviews}
               renderStudioGigVenueAbout={renderStudioGigVenueAbout}
               renderStudioSetup={renderStudioSetup}
@@ -4117,6 +4220,12 @@ const styles = StyleSheet.create({
     paddingVertical: moderateScale(16),
     borderRadius: moderateScale(16),
     alignItems: "center",
+  },
+  loadingButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
   },
   primaryBtnText: {
     color: "#FFF",

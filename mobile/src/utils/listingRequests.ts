@@ -97,71 +97,56 @@ export const submitListingRequest = async ({
     throw new Error("Message is required.");
   }
 
+  if (!currentUserId.trim()) {
+    throw new Error("Current user is required.");
+  }
+
   const normalizedRoutePath = routePath?.trim() || undefined;
   const normalizedRouteParams = normalizeRouteParams(routeParams);
 
-  const eventDetails = {
-    type: "listing_connection_request",
-    sender_entity_type: senderEntityType,
-    sender_entity_id: senderEntityId || null,
-    sender_entity_name: senderEntityName,
-    receiver_entity_type: receiverEntityType,
-    receiver_entity_id: receiverEntityId || null,
-    receiver_entity_name: receiverEntityName,
-    production_team_id: productionTeamId || null,
-    route: normalizedRoutePath,
-    route_params: normalizedRouteParams,
-    ...(extraMeta || {}),
+  const body = {
+    action: "create_listing_request",
+    currentUserId,
+    receiverUserId,
+    message: normalizedMessage,
+    senderEntityType,
+    senderEntityName,
+    senderEntityId: senderEntityId || null,
+    receiverEntityType,
+    receiverEntityName,
+    receiverEntityId: receiverEntityId || null,
+    groupId: groupId || null,
+    studioId: studioId || null,
+    productionTeamId: productionTeamId || null,
+    notificationTitle,
+    notificationMessage,
+    notificationImage: notificationImage || null,
+    attachmentUrl: attachmentUrl?.trim() || null,
+    routePath: normalizedRoutePath,
+    routeParams: normalizedRouteParams,
+    extraMeta: extraMeta || null,
   };
 
-  const { data: requestRow, error: requestError } = await supabase
-    .from("booking_requests")
-    .insert({
-      sender_id: currentUserId,
-      receiver_id: receiverUserId,
-      group_id: groupId || null,
-      studio_id: studioId || null,
-      message: normalizedMessage,
-      status: "pending",
-      attachment_url: attachmentUrl?.trim() || null,
-      event_details: eventDetails,
-    })
-    .select("id")
-    .single();
-
-  if (requestError) {
-    throw requestError;
-  }
-
-  const notificationMeta = {
-    type: "listing_connection_request",
-    request_id: requestRow?.id || null,
-    sender_entity_type: senderEntityType,
-    sender_entity_id: senderEntityId || null,
-    sender_entity_name: senderEntityName,
-    receiver_entity_type: receiverEntityType,
-    receiver_entity_id: receiverEntityId || null,
-    receiver_entity_name: receiverEntityName,
-    group_id: groupId || null,
-    studio_id: studioId || null,
-    production_team_id: productionTeamId || null,
-    route: normalizedRoutePath,
-    route_params: normalizedRouteParams,
-    ...(extraMeta || {}),
-  };
-
-  const { error: notificationError } = await supabase.from("notifications").insert({
-    user_id: receiverUserId,
-    type: "info",
-    title: notificationTitle,
-    message: notificationMessage,
-    image: notificationImage || null,
-    meta: notificationMeta,
+  const { data, error } = await supabase.functions.invoke("manage-deals", {
+    body,
   });
 
-  if (notificationError) {
-    console.warn("Failed to create listing request notification:", notificationError);
+  if (error) {
+    console.error("create_listing_request failed", {
+      message: error.message,
+      status: (error as any).status,
+      code: (error as any).code,
+      details: (error as any).details,
+      hint: (error as any).hint,
+      context: (error as any).context,
+      body,
+    });
+    throw error;
   }
 
-  return requestRow;
+  if (!data?.success) {
+    throw new Error(data?.error || "Failed to send request.");
+  }
+
+  return data.request || { id: data?.request?.id || null };
 };

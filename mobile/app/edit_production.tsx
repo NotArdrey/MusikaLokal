@@ -7,11 +7,13 @@ import CustomAlert, { AlertType } from '../src/components/CustomAlert';
 import Header from '../src/components/header';
 import ImageUploader from '../src/components/ImageUploader';
 import Navbar from '../src/components/navbar';
+import ProductionInviteSection from '../src/components/ProductionInviteSection';
 import Skeleton from '../src/components/Skeleton';
 import { useBottomBarClearance } from '../src/hooks/useBottomBarClearance';
 import { useAuth, useRequireAuth } from '../src/context/AuthContext';
 import { showTopToast } from '../src/context/TopToastContext';
 import { useTheme } from '../src/context/ThemeContext';
+import { ProductionInviteTarget, sendProductionTeamInvites } from '../src/utils/productionTeamInvites';
 
 type TeamRecord = {
   id: string;
@@ -38,6 +40,8 @@ export default function EditProductionScreen() {
   const [description, setDescription] = useState('');
   const [logoImages, setLogoImages] = useState<string[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
+  const [inviteMessage, setInviteMessage] = useState('');
+  const [selectedInviteTargets, setSelectedInviteTargets] = useState<ProductionInviteTarget[]>([]);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
 
   const hasIncompleteRequiredFields = !logoImages.length || !teamName.trim() || !description.trim();
@@ -132,10 +136,31 @@ export default function EditProductionScreen() {
         throw new Error(data?.error || 'Failed to update production team.');
       }
 
+      const effectiveUserId = userId || session?.user?.id || null;
+      const inviteSummary =
+        effectiveUserId && team.id && selectedInviteTargets.length > 0
+          ? await sendProductionTeamInvites({
+              currentUserId: effectiveUserId,
+              teamId: team.id,
+              teamName: teamName.trim(),
+              teamLogoUrl: primaryLogo,
+              inviteMessage,
+              inviteTargets: selectedInviteTargets,
+            })
+          : null;
+
+      const inviteMessageSummary = inviteSummary
+        ? inviteSummary.failedCount > 0
+          ? `${inviteSummary.sentCount} invite(s) sent, ${inviteSummary.failedCount} failed.`
+          : `${inviteSummary.sentCount} invite(s) sent.`
+        : null;
+
       showTopToast({
         type: 'success',
         title: 'Production Team Updated',
-        message: 'Your production team details have been saved.',
+        message: inviteMessageSummary
+          ? `Your production team details have been saved. ${inviteMessageSummary}`
+          : 'Your production team details have been saved.',
       });
       router.replace({ pathname: '/my_production', params: { refresh: String(Date.now()) } });
     } catch (error: any) {
@@ -195,6 +220,15 @@ export default function EditProductionScreen() {
                 placeholder="Describe your production team's focus, experience, or specialties"
                 placeholderTextColor={colors.textSecondary}
                 multiline
+              />
+
+              <ProductionInviteSection
+                currentUserId={userId || session?.user?.id || null}
+                selectedTargets={selectedInviteTargets}
+                onSelectedTargetsChange={setSelectedInviteTargets}
+                inviteMessage={inviteMessage}
+                onInviteMessageChange={setInviteMessage}
+                disabled={saving}
               />
 
               {hasIncompleteRequiredFields ? (

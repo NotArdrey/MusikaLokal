@@ -200,6 +200,7 @@ export default function ProfileScreen() {
   const [loadingStation, setLoadingStation] = useState(false);
   const [radioPlaylistIds, setRadioPlaylistIds] = useState<Set<string>>(new Set());
   const [togglingRadio, setTogglingRadio] = useState<string | null>(null);
+  const [playlistActionId, setPlaylistActionId] = useState<string | null>(null);
   const [isProfileFollowing, setIsProfileFollowing] = useState(false);
   const [isProfileFollowBusy, setIsProfileFollowBusy] = useState(false);
   const profileFetchInFlightRef = useRef(false);
@@ -542,8 +543,16 @@ export default function ProfileScreen() {
   const handleToggleRadio = useCallback(async (playlistId: string) => {
     setTogglingRadio(playlistId);
     try {
+      const managedProfileId = typeof profile?.id === "string" && profile.id.trim().length > 0
+        ? profile.id.trim()
+        : currentUserId || undefined;
+
       const { data } = await supabase.functions.invoke("manage-playlists", {
-        body: { action: "toggle_radio_slot", playlist_id: playlistId },
+        body: {
+          action: "toggle_radio_slot",
+          playlist_id: playlistId,
+          user_id: managedProfileId,
+        },
       });
       if (data?.success) {
         setRadioPlaylistIds((prev) => {
@@ -590,7 +599,7 @@ export default function ProfileScreen() {
     } finally {
       setTogglingRadio(null);
     }
-  }, [profile?.full_name]);
+  }, [currentUserId, profile?.full_name, profile?.id]);
 
   // Refresh profile data every time the screen comes into focus
   const fetchProfile = useCallback(async () => {
@@ -1098,13 +1107,68 @@ export default function ProfileScreen() {
   const viewedProfileId = typeof profile?.id === "string" ? profile.id.trim() : "";
   const profileFollowKey = buildSocialFollowKey("profile", viewedProfileId);
   const canFollowProfile = !isGuest && !isOwner && viewedProfileId.length > 0;
+
+  const logPlaylistInvokeError = useCallback((context: string, error: any, body: Record<string, unknown>) => {
+    console.error(`manage-playlists ${context} failed`, {
+      message: error?.message,
+      status: error?.status,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+      context: error?.context,
+      body,
+    });
+  }, []);
+
+  const ensurePlaylistMutationSession = useCallback(async () => {
+    if (isGuest) {
+      throw new Error("You need to sign in to manage playlists.");
+    }
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    if (session?.access_token) {
+      return session;
+    }
+
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) {
+      throw refreshError;
+    }
+
+    if (!refreshed.session?.access_token) {
+      throw new Error("Your session expired. Please sign in again.");
+    }
+
+    return refreshed.session;
+  }, [isGuest]);
+
   const handleDeletePlaylist = async (playlistId: string, playlistTitle: string) => {
+    const targetUserId = viewedProfileId || currentUserId || normalizedParamUserId || "";
+
+    if (authLoading) {
+      showAlert("info", "Please Wait", "Your session is still loading. Try again in a moment.");
+      return;
+    }
+
     try {
+      setPlaylistActionId(playlistId);
+      await ensurePlaylistMutationSession();
+
+      const body = { action: "delete_playlist", playlist_id: playlistId };
       const { data, error } = await supabase.functions.invoke("manage-playlists", {
-        body: { action: "delete_playlist", playlist_id: playlistId },
+        body,
       });
 
       if (error) {
+        logPlaylistInvokeError("delete_playlist", error, body);
         throw error;
       }
 
@@ -1127,6 +1191,11 @@ export default function ProfileScreen() {
         void fetchStation(viewedProfileId);
       }
 
+      if (targetUserId) {
+        void fetchPlaylists(targetUserId);
+        void fetchStation(targetUserId);
+      }
+
       showTopToast({
         type: "success",
         title: "Playlist Deleted",
@@ -1134,6 +1203,8 @@ export default function ProfileScreen() {
       });
     } catch (error: any) {
       showAlert("warning", "Delete Failed", error?.message || "Failed to delete playlist.");
+    } finally {
+      setPlaylistActionId(null);
     }
   };
 
@@ -1168,16 +1239,22 @@ export default function ProfileScreen() {
   );
   const hasStation = Boolean(userStation?.id);
   const stationArtworkUrl =
-    sanitizeAvatarUrl(userStation?.creator?.avatar_url) ||
-    profileAvatarUrl;
+    profileAvatarUrl ||
+    sanitizeAvatarUrl(userStation?.managed_profile?.avatar_url) ||
+    sanitizeAvatarUrl(userStation?.creator?.avatar_url);
   const stationName =
     typeof userStation?.name === "string" && userStation.name.trim().length > 0
       ? userStation.name.trim()
       : `${profile?.full_name || "Artist"}'s Radio`;
   const stationCreatorName =
-    typeof userStation?.creator?.full_name === "string" &&
-    userStation.creator.full_name.trim().length > 0
-      ? userStation.creator.full_name.trim()
+    typeof userStation?.managed_profile?.full_name === "string" &&
+    userStation.managed_profile.full_name.trim().length > 0
+      ? userStation.managed_profile.full_name.trim()
+      : typeof profile?.full_name === "string" && profile.full_name.trim().length > 0
+        ? profile.full_name.trim()
+        : typeof userStation?.creator?.full_name === "string" &&
+            userStation.creator.full_name.trim().length > 0
+          ? userStation.creator.full_name.trim()
       : profile?.full_name || "Artist";
   const stationGenre =
     typeof userStation?.genre === "string" && userStation.genre.trim().length > 0
@@ -1298,6 +1375,11 @@ export default function ProfileScreen() {
     }
 
     if (canManageStations) {
+      if (viewedProfileId) {
+        router.push({ pathname: "/create_station" as any, params: { profile_id: viewedProfileId } });
+        return;
+      }
+
       router.push("/create_station" as any);
     }
   };
@@ -2113,7 +2195,16 @@ export default function ProfileScreen() {
                           <View style={{ flexDirection: "row", gap: 8, marginTop: 12, paddingLeft: 62 }}>
                             <TouchableOpacity
                               activeOpacity={0.85}
-                              onPress={() => router.push({ pathname: "/create_playlist" as any, params: { edit_id: pl.id } })}
+                              hitSlop={8}
+                              onPress={() => router.push({
+                                pathname: "/create_playlist" as any,
+                                params: {
+                                  edit_id: pl.id,
+                                  return_to: "profile",
+                                  return_user_id: viewedProfileId || currentUserId || normalizedParamUserId || "",
+                                },
+                              })}
+                              disabled={playlistActionId === pl.id || authLoading}
                               style={{
                                 flexDirection: "row",
                                 alignItems: "center",
@@ -2122,6 +2213,7 @@ export default function ProfileScreen() {
                                 paddingVertical: 8,
                                 borderRadius: 999,
                                 backgroundColor: colors.primary,
+                                opacity: playlistActionId === pl.id || authLoading ? 0.6 : 1,
                               }}
                             >
                               <Ionicons name="create-outline" size={14} color="#fff" />
@@ -2130,7 +2222,9 @@ export default function ProfileScreen() {
 
                             <TouchableOpacity
                               activeOpacity={0.85}
+                              hitSlop={8}
                               onPress={() => promptDeletePlaylist(pl)}
+                              disabled={playlistActionId === pl.id || authLoading}
                               style={{
                                 flexDirection: "row",
                                 alignItems: "center",
@@ -2139,10 +2233,17 @@ export default function ProfileScreen() {
                                 paddingVertical: 8,
                                 borderRadius: 999,
                                 backgroundColor: isDark ? "rgba(239,68,68,0.16)" : "#FEE2E2",
+                                opacity: playlistActionId === pl.id || authLoading ? 0.6 : 1,
                               }}
                             >
-                              <Ionicons name="trash-outline" size={14} color="#EF4444" />
-                              <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>Delete Playlist</Text>
+                              {playlistActionId === pl.id ? (
+                                <ActivityIndicator size="small" color="#EF4444" />
+                              ) : (
+                                <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                              )}
+                              <Text style={{ color: "#EF4444", fontSize: 11, fontFamily: "Poppins_600SemiBold" }}>
+                                {playlistActionId === pl.id ? "Deleting..." : "Delete Playlist"}
+                              </Text>
                             </TouchableOpacity>
                           </View>
                         )}
@@ -2250,7 +2351,7 @@ export default function ProfileScreen() {
                     )}
 
                     {(profile?.portfolio_urls || []).map((url: string, i: number) => (
-                      <TouchableOpacity activeOpacity={1}
+                      <TouchableOpacity
                         key={i}
                         style={[styles.gridItemTikTok, { borderColor: colors.border }]}
                         onPress={() => openMediaViewer(url)}

@@ -19,6 +19,7 @@ interface CustomAlertProps {
   title: string;
   message: string;
   buttons?: AlertButton[];
+  forceModal?: boolean;
   onClose: () => void;
 }
 
@@ -55,11 +56,15 @@ export default function CustomAlert({
   title,
   message,
   buttons = [{ text: "OK", style: "default" }],
+  forceModal = false,
   onClose,
 }: CustomAlertProps) {
   const { colors, isDark } = useTheme();
   const { showToast } = useTopToast();
   const config = alertConfig[type];
+  const hasStructuredMessage = useMemo(() => {
+    return message.includes("\n") || message.includes("•") || message.includes("- ");
+  }, [message]);
 
   const shouldUseTopToast = useMemo(() => {
     const firstButton = buttons[0];
@@ -70,8 +75,8 @@ export default function CustomAlert({
       !firstButton.onPress &&
       (!firstButton.style || firstButton.style === "default");
 
-    return hasSingleButton && isDefaultOkButton;
-  }, [buttons]);
+    return !forceModal && hasSingleButton && isDefaultOkButton;
+  }, [buttons, forceModal]);
 
   useEffect(() => {
     if (!visible || !shouldUseTopToast) return;
@@ -153,7 +158,13 @@ export default function CustomAlert({
           <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
 
           {/* Message */}
-          <Text style={[styles.message, { color: colors.textSecondary }]}>
+          <Text
+            style={[
+              styles.message,
+              { color: colors.textSecondary },
+              hasStructuredMessage ? styles.messageStructured : null,
+            ]}
+          >
             {message}
           </Text>
 
@@ -168,10 +179,11 @@ export default function CustomAlert({
                   style={[
                     styles.button,
                     { backgroundColor: btnStyle.backgroundColor },
+                    buttons.length === 1 ? styles.fullWidthButton : null,
                     buttons.length > 1 && { flex: 1 },
                     index > 0 && { marginLeft: 12 },
                   ]}
-                  activeOpacity={1}
+                  activeOpacity={0.85}
                 >
                   <Text
                     style={[styles.buttonText, { color: btnStyle.textColor }]}
@@ -230,6 +242,10 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     fontFamily: 'Poppins_400Regular',
   },
+  messageStructured: {
+    width: '100%',
+    textAlign: 'left',
+  },
   buttonContainer: {
     flexDirection: 'row',
     width: '100%',
@@ -242,6 +258,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: 100,
+  },
+  fullWidthButton: {
+    width: '100%',
   },
   buttonText: {
     fontSize: 15,

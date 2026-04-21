@@ -170,6 +170,83 @@ async function getRequesterRole(supabaseAdmin: any, authUser: any, uid: string) 
   return profileRole || metadataRole;
 }
 
+function normalizeProfileId(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function resolveManagedProfileId(
+  requesterRole: string | null,
+  uid: string,
+  rawManagedProfileId: unknown,
+) {
+  const normalized = normalizeProfileId(rawManagedProfileId);
+
+  if (requesterRole === "admin") {
+    return normalized || uid;
+  }
+
+  return uid;
+}
+
+async function transferManagedProfileStationsToAdmin(
+  supabaseAdmin: any,
+  adminUserId: string,
+  managedProfileId: string,
+) {
+  const { error } = await supabaseAdmin
+    .from("stations")
+    .update({ creator_id: adminUserId, managed_profile_id: managedProfileId })
+    .eq("managed_profile_id", managedProfileId)
+    .neq("creator_id", adminUserId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function getPrimaryManagedStation(supabaseAdmin: any, managedProfileId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("stations")
+    .select("id, creator_id, managed_profile_id")
+    .eq("managed_profile_id", managedProfileId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function transferStationToAdminIfNeeded(
+  supabaseAdmin: any,
+  station: { id?: string | null; creator_id?: string | null; managed_profile_id?: string | null },
+  adminUserId: string,
+) {
+  const stationId = typeof station?.id === "string" ? station.id : null;
+  const managedProfileId = station?.managed_profile_id || station?.creator_id || null;
+
+  if (!stationId || !managedProfileId || station?.creator_id === adminUserId) {
+    return;
+  }
+
+  const { error } = await supabaseAdmin
+    .from("stations")
+    .update({ creator_id: adminUserId, managed_profile_id: managedProfileId })
+    .eq("id", stationId);
+
+  if (error) {
+    throw error;
+  }
+}
+
 function isSlotScheduledForNow(slot: any, nowMs: number) {
   const startMs = readTimestampMs(slot?.starts_at);
   const endMs = readTimestampMs(slot?.ends_at);
@@ -341,6 +418,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const uid = authUser?.id ?? null;
+    const requesterRole = authUser && uid
+      ? await getRequesterRole(supabaseAdmin, authUser, uid)
+      : null;
     const stationAdminActions = new Set([
       "create_station",
       "update_station",
@@ -350,7 +430,6 @@ Deno.serve(async (req: Request) => {
     ]);
 
     if (stationAdminActions.has(action)) {
-      const requesterRole = await getRequesterRole(supabaseAdmin, authUser, uid);
       if (requesterRole !== "admin") {
         return jsonResponse({ error: "Stations are managed by admins." }, 403);
       }
@@ -495,7 +574,7 @@ Deno.serve(async (req: Request) => {
       const { user_id } = params;
       if (!user_id) return jsonResponse({ error: "user_id is required" }, 400);
 
-      const isOwnProfile = user_id === uid;
+      const isOwnProfile = user_id === uid || requesterRole === "admin";
       let query = supabaseAdmin
         .from("playlists")
         .select("*")
@@ -743,13 +822,50 @@ Deno.serve(async (req: Request) => {
 
     // ── create_station ──────────────────────────────────────────────
     if (action === "create_station") {
-      const { name, description, genre, cover_image_url, rotation_interval_minutes } = params;
+      const {
+        name,
+        description,
+        genre,
+        cover_image_url,
+        rotation_interval_minutes,
+        managed_profile_id,
+      } = params;
       if (!name) return jsonResponse({ error: "name is required" }, 400);
+
+      const managedProfileId = resolveManagedProfileId(requesterRole, uid, managed_profile_id);
+
+      await transferManagedProfileStationsToAdmin(supabaseAdmin, uid, managedProfileId);
+
+      const existingManagedStation = await getPrimaryManagedStation(
+        supabaseAdmin,
+        managedProfileId,
+      );
+
+      if (existingManagedStation?.id) {
+        const { data, error } = await supabaseAdmin
+          .from("stations")
+          .update({
+            creator_id: uid,
+            managed_profile_id: managedProfileId,
+            name,
+            description: description || null,
+            genre: genre || null,
+            cover_image_url: cover_image_url || null,
+            rotation_interval_minutes: normalizeStationRotationIntervalMinutes(rotation_interval_minutes),
+          })
+          .eq("id", existingManagedStation.id)
+          .select()
+          .single();
+
+        if (error) return jsonResponse({ error: error.message }, 500);
+        return jsonResponse({ success: true, data });
+      }
 
       const { data, error } = await supabaseAdmin
         .from("stations")
         .insert({
           creator_id: uid,
+          managed_profile_id: managedProfileId,
           name,
           description: description || null,
           genre: genre || null,
@@ -770,17 +886,22 @@ Deno.serve(async (req: Request) => {
 
       const { data: existing } = await supabaseAdmin
         .from("stations")
-        .select("creator_id")
+        .select("id, creator_id, managed_profile_id")
         .eq("id", station_id)
         .single();
 
       if (!existing) return jsonResponse({ error: "Station not found" }, 404);
+
+      await transferStationToAdminIfNeeded(supabaseAdmin, existing, uid);
 
       const allowed = ["name", "description", "genre", "cover_image_url", "is_active", "rotation_interval_minutes"];
       const patch: Record<string, any> = {};
       for (const key of allowed) {
         if (key in updates) patch[key] = updates[key];
       }
+
+      patch.creator_id = uid;
+      patch.managed_profile_id = existing.managed_profile_id || existing.creator_id;
 
       if ("rotation_interval_minutes" in patch) {
         patch.rotation_interval_minutes = normalizeStationRotationIntervalMinutes(
@@ -806,7 +927,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: station, error: stErr } = await supabaseAdmin
         .from("stations")
-        .select("*, creator:profiles!creator_id(id, full_name, avatar_url)")
+        .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url)")
         .eq("id", station_id)
         .single();
 
@@ -843,11 +964,11 @@ Deno.serve(async (req: Request) => {
       const { user_id } = params;
       if (!user_id) return jsonResponse({ error: "user_id is required" }, 400);
 
-      const isOwnProfile = user_id === uid;
+      const isOwnProfile = user_id === uid || requesterRole === "admin";
       let query = supabaseAdmin
         .from("stations")
-        .select("*, creator:profiles!creator_id(id, full_name, avatar_url)")
-        .eq("creator_id", user_id)
+        .select("*, creator:profiles!creator_id(id, full_name, avatar_url), managed_profile:profiles!managed_profile_id(id, full_name, avatar_url)")
+        .eq("managed_profile_id", user_id)
         .order("created_at", { ascending: false });
 
       // Non-owners only see active stations
@@ -917,8 +1038,26 @@ Deno.serve(async (req: Request) => {
       const { station_id, playlist_id, label, starts_at, ends_at } = params;
       if (!station_id || !playlist_id) return jsonResponse({ error: "station_id and playlist_id are required" }, 400);
 
-      const { data: st } = await supabaseAdmin.from("stations").select("creator_id").eq("id", station_id).single();
+      const { data: st } = await supabaseAdmin
+        .from("stations")
+        .select("id, creator_id, managed_profile_id")
+        .eq("id", station_id)
+        .single();
       if (!st) return jsonResponse({ error: "Station not found" }, 404);
+
+      await transferStationToAdminIfNeeded(supabaseAdmin, st, uid);
+
+      const stationProfileId = st.managed_profile_id || st.creator_id;
+      const { data: playlist } = await supabaseAdmin
+        .from("playlists")
+        .select("creator_id")
+        .eq("id", playlist_id)
+        .single();
+
+      if (!playlist) return jsonResponse({ error: "Playlist not found" }, 404);
+      if (playlist.creator_id !== stationProfileId) {
+        return jsonResponse({ error: "Playlist must belong to the profile this station represents." }, 403);
+      }
 
       const { data: lastSlot } = await supabaseAdmin
         .from("station_playlist_slots")
@@ -960,8 +1099,14 @@ Deno.serve(async (req: Request) => {
 
       if (!slot) return jsonResponse({ error: "Slot not found" }, 404);
 
-      const { data: st } = await supabaseAdmin.from("stations").select("creator_id").eq("id", slot.station_id).single();
+      const { data: st } = await supabaseAdmin
+        .from("stations")
+        .select("id, creator_id, managed_profile_id")
+        .eq("id", slot.station_id)
+        .single();
       if (!st) return jsonResponse({ error: "Station not found" }, 404);
+
+      await transferStationToAdminIfNeeded(supabaseAdmin, st, uid);
 
       const { error } = await supabaseAdmin.from("station_playlist_slots").delete().eq("id", slot_id);
       if (error) return jsonResponse({ error: error.message }, 500);
@@ -969,46 +1114,52 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── toggle_radio_slot ──────────────────────────────────────────
-    // Toggles a playlist on/off the user's radio station.
-    // Auto-creates a station if the user doesn't have one yet.
+    // Toggles a playlist on/off the managed profile's radio station.
+    // Admin station ownership is preserved even when managing another profile.
     if (action === "toggle_radio_slot") {
-      const { playlist_id } = params;
+      const { playlist_id, user_id } = params;
       if (!playlist_id) return jsonResponse({ error: "playlist_id is required" }, 400);
 
-      // Verify playlist exists and belongs to user
+      const managedProfileId = resolveManagedProfileId(requesterRole, uid, user_id);
+
+      // Verify playlist exists and belongs to the profile being managed
       const { data: playlist } = await supabaseAdmin
         .from("playlists")
         .select("id, creator_id")
         .eq("id", playlist_id)
         .single();
       if (!playlist) return jsonResponse({ error: "Playlist not found" }, 404);
-      if (playlist.creator_id !== uid) return jsonResponse({ error: "Forbidden" }, 403);
+      if (playlist.creator_id !== managedProfileId) return jsonResponse({ error: "Forbidden" }, 403);
 
-      // Get or auto-create user's station
-      let { data: stations } = await supabaseAdmin
-        .from("stations")
-        .select("id")
-        .eq("creator_id", uid)
-        .order("created_at")
-        .limit(1);
+      await transferManagedProfileStationsToAdmin(supabaseAdmin, uid, managedProfileId);
+
+      const existingManagedStation = await getPrimaryManagedStation(
+        supabaseAdmin,
+        managedProfileId,
+      );
 
       let stationId: string;
-      if (!stations || stations.length === 0) {
+      if (!existingManagedStation) {
         const { data: profile } = await supabaseAdmin
           .from("profiles")
           .select("full_name")
-          .eq("id", uid)
+          .eq("id", managedProfileId)
           .single();
         const stationName = `${profile?.full_name || "My"}'s Radio`;
         const { data: newStation, error: createErr } = await supabaseAdmin
           .from("stations")
-          .insert({ creator_id: uid, name: stationName, is_active: true })
+          .insert({
+            creator_id: uid,
+            managed_profile_id: managedProfileId,
+            name: stationName,
+            is_active: true,
+          })
           .select("id")
           .single();
         if (createErr) return jsonResponse({ error: createErr.message }, 500);
         stationId = newStation.id;
       } else {
-        stationId = stations[0].id;
+        stationId = existingManagedStation.id;
       }
 
       // Check if slot already exists for this playlist

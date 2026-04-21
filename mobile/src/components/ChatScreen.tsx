@@ -23,6 +23,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { ConversationParticipant, Message, useChat, useGroupParticipants } from '../hooks/useChat';
+import { resolveSupabaseMediaUrl } from '../utils/supabaseMedia';
 import CustomAlert, { AlertType } from './CustomAlert';
 import ReportModal from './ReportModal';
 
@@ -192,6 +193,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     }, [participants]);
 
     const reversedMessages = React.useMemo(() => [...messages].reverse(), [messages]);
+    const resolvedOtherUserAvatar = resolveSupabaseMediaUrl(otherUser?.avatar_url);
+    const resolvedGroupAvatar = resolveSupabaseMediaUrl(groupAvatar);
 
     // Mark messages as read when viewing
     useEffect(() => {
@@ -358,6 +361,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
         // Get sender info from message or participant map
         const senderProfile = item.sender || participantMap.get(item.sender_id);
+        const senderAvatarUrl = resolveSupabaseMediaUrl(senderProfile?.avatar_url);
 
         return (
             <>
@@ -378,9 +382,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                     { marginBottom: isLastInRun ? 8 : 2 },
                 ]}>
                     {!isMe && (
-                        senderProfile?.avatar_url ? (
+                        senderAvatarUrl ? (
                             <Image
-                                source={{ uri: senderProfile.avatar_url }}
+                                source={{ uri: senderAvatarUrl }}
                                 style={styles.avatar}
                             />
                         ) : (
@@ -504,9 +508,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 {/* Messenger-style seen indicator — avatar floats right below the last seen message */}
                 {isMe && index === lastSeenMessageIndex && otherUser && (
                     <View style={styles.seenContainer}>
-                        {otherUser.avatar_url ? (
+                        {resolvedOtherUserAvatar ? (
                             <Image
-                                source={{ uri: otherUser.avatar_url }}
+                                source={{ uri: resolvedOtherUserAvatar }}
                                 style={[styles.seenAvatar, { borderColor: colors.background }]}
                             />
                         ) : (
@@ -537,7 +541,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
     // Get display info based on chat type
     const displayName = isGroupChat ? groupName : otherUser?.full_name;
-    const displayAvatar = isGroupChat ? groupAvatar : otherUser?.avatar_url;
+    const displayAvatar = isGroupChat ? resolvedGroupAvatar : resolvedOtherUserAvatar;
     const displaySubtitle = isGroupChat
         ? `${participants.length} member${participants.length !== 1 ? 's' : ''}`
         : otherUserOnline

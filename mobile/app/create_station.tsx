@@ -29,7 +29,7 @@ const moderateScale = (size: number, factor = 0.3) => {
 export default function CreateStationScreen() {
   const { colors } = useTheme();
   const { session, userRole } = useAuth();
-  const { edit_id } = useLocalSearchParams();
+  const { edit_id, profile_id } = useLocalSearchParams();
   const isEditing = !!edit_id;
   const canManageStations = userRole === "admin";
   const { contentBottomPadding } = useBottomBarClearance(24);
@@ -89,6 +89,14 @@ export default function CreateStationScreen() {
         genre: genre.trim() || null,
         rotation_interval_minutes: normalizedRotationIntervalMinutes,
       };
+      const managedProfileId = typeof profile_id === "string" && profile_id.trim().length > 0
+        ? profile_id.trim()
+        : session?.user?.id || null;
+
+      if (managedProfileId) {
+        body.managed_profile_id = managedProfileId;
+      }
+
       if (isEditing) body.station_id = edit_id;
 
       const { data } = await supabase.functions.invoke("manage-playlists", { body });

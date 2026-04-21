@@ -32,7 +32,6 @@ interface StudioGigVenueAboutTabProps {
   calculateCompletion: () => number;
   handleProfileNavigation: () => void;
   promotions?: any[];
-  connectionPanel?: React.ReactNode;
 }
 
 const StudioGigVenueAboutTab = ({
@@ -49,7 +48,6 @@ const StudioGigVenueAboutTab = ({
   calculateCompletion,
   handleProfileNavigation,
   promotions = [],
-  connectionPanel,
 }: StudioGigVenueAboutTabProps) => {
   const parsedCompletionRate = Number(group.completion_rate);
   const baseCompletionRate = Number.isFinite(parsedCompletionRate)
@@ -217,7 +215,6 @@ const StudioGigVenueAboutTab = ({
 
   return (
     <View style={styles.tabContent}>
-    {connectionPanel ? <View style={{ marginBottom: 24 }}>{connectionPanel}</View> : null}
     {group.type === "Gig" && (
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>{labels.aboutTitle}</Text>

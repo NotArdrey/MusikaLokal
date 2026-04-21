@@ -793,3 +793,1008 @@ BEGIN
   RAISE NOTICE 'These bookings can now be scanned with QR code to check in!';
   RAISE NOTICE '========================================';
 END $$;
+
+-- ============================================================
+-- ACTIVITY TAB COVERAGE SEED
+-- Deterministic demo rows for musician, studio-owner, venue-owner, and producer tabs.
+-- This block uses fixed IDs so reruns refresh the same records instead of multiplying them.
+-- ============================================================
+DO $seed$
+DECLARE
+  v_musician_id UUID;
+  v_studio_owner_id UUID;
+  v_venue_owner_id UUID;
+  v_producer_id UUID;
+  v_demo_studio_id UUID := '11111111-1111-4111-8111-111111111111';
+  v_team_id UUID := '11111111-1111-4111-8111-111111111112';
+  v_roster_id UUID := '11111111-1111-4111-8111-111111111113';
+  v_project_one_id UUID := '11111111-1111-4111-8111-111111111114';
+  v_project_two_id UUID := '11111111-1111-4111-8111-111111111115';
+  v_role_one_id UUID := '11111111-1111-4111-8111-111111111116';
+  v_role_two_id UUID := '11111111-1111-4111-8111-111111111117';
+  v_hourly_rate NUMERIC := 1800;
+BEGIN
+  SELECT id INTO v_musician_id FROM auth.users WHERE email = 'musician@test.com' LIMIT 1;
+  SELECT id INTO v_studio_owner_id FROM auth.users WHERE email = 'studio@test.com' LIMIT 1;
+  SELECT id INTO v_venue_owner_id FROM auth.users WHERE email = 'manager@test.com' LIMIT 1;
+  SELECT id INTO v_producer_id FROM auth.users WHERE email = 'producer@test.com' LIMIT 1;
+
+  IF v_musician_id IS NULL OR v_studio_owner_id IS NULL OR v_venue_owner_id IS NULL OR v_producer_id IS NULL THEN
+    RAISE NOTICE 'Skipping activity tab coverage seed because one or more demo accounts are missing.';
+    RETURN;
+  END IF;
+
+  INSERT INTO public.profiles (id, email, full_name, role, location, verification_status)
+  VALUES
+    (v_musician_id, 'musician@test.com', 'Gabriel dela Cruz', 'musician', 'Quezon City, Metro Manila', 'APPROVED'),
+    (v_studio_owner_id, 'studio@test.com', 'Maria Santos', 'studio-owner', 'Bulacan, Philippines', 'APPROVED'),
+    (v_venue_owner_id, 'manager@test.com', 'Marco Reyes', 'venue-owner', 'Quezon City, Metro Manila', 'APPROVED'),
+    (v_producer_id, 'producer@test.com', 'Paolo Ramirez', 'producer', 'Pasig City, Metro Manila', 'APPROVED')
+  ON CONFLICT (id) DO UPDATE
+  SET
+    email = EXCLUDED.email,
+    full_name = EXCLUDED.full_name,
+    role = EXCLUDED.role,
+    location = EXCLUDED.location,
+    verification_status = EXCLUDED.verification_status;
+
+  INSERT INTO public.studios (
+    id,
+    owner_id,
+    name,
+    address,
+    hourly_rate,
+    description,
+    amenities,
+    images,
+    latitude,
+    longitude
+  )
+  VALUES (
+    v_demo_studio_id,
+    v_studio_owner_id,
+    'Tab Coverage Studio',
+    'Meycauayan, Bulacan, Philippines',
+    1800,
+    'Demo studio used to populate booking states across the activity tabs.',
+    ARRAY['Recording', 'Mixing', 'Lounge', 'Parking'],
+    ARRAY['https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=1200&fit=crop'],
+    14.7361,
+    120.9605
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    owner_id = EXCLUDED.owner_id,
+    name = EXCLUDED.name,
+    address = EXCLUDED.address,
+    hourly_rate = EXCLUDED.hourly_rate,
+    description = EXCLUDED.description,
+    amenities = EXCLUDED.amenities,
+    images = EXCLUDED.images,
+    latitude = EXCLUDED.latitude,
+    longitude = EXCLUDED.longitude;
+
+  SELECT COALESCE(hourly_rate, 1800)
+  INTO v_hourly_rate
+  FROM public.studios
+  WHERE id = v_demo_studio_id;
+
+  INSERT INTO public.production_teams (id, owner_id, name, description, logo_url)
+  VALUES (
+    v_team_id,
+    v_producer_id,
+    'North Loop Live Productions',
+    'Demo production team for seeded venue, producer, and musician activity tabs.',
+    'https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=600&fit=crop'
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    owner_id = EXCLUDED.owner_id,
+    name = EXCLUDED.name,
+    description = EXCLUDED.description,
+    logo_url = EXCLUDED.logo_url;
+
+  INSERT INTO public.production_team_members (team_id, user_id, role)
+  VALUES (v_team_id, v_producer_id, 'owner')
+  ON CONFLICT (team_id, user_id) DO UPDATE
+  SET role = EXCLUDED.role;
+
+  INSERT INTO public.production_team_roster (
+    id,
+    team_id,
+    entity_kind,
+    profile_id,
+    group_id,
+    added_by_user_id
+  )
+  VALUES (
+    v_roster_id,
+    v_team_id,
+    'musician',
+    v_musician_id,
+    NULL,
+    v_producer_id
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    team_id = EXCLUDED.team_id,
+    entity_kind = EXCLUDED.entity_kind,
+    profile_id = EXCLUDED.profile_id,
+    group_id = EXCLUDED.group_id,
+    added_by_user_id = EXCLUDED.added_by_user_id;
+
+  INSERT INTO public.producer_projects (
+    id,
+    owner_id,
+    team_id,
+    title,
+    description,
+    genre,
+    location,
+    budget_range,
+    start_date,
+    end_date,
+    status,
+    max_roles,
+    is_remote,
+    cover_image_url
+  )
+  VALUES
+    (
+      v_project_one_id,
+      v_producer_id,
+      v_team_id,
+      'North Loop Pop Showcase',
+      'Published project used to seed producer applications and invitations.',
+      'Pop',
+      'Quezon City, Metro Manila',
+      '25000-40000',
+      current_date + 14,
+      current_date + 30,
+      'published',
+      4,
+      false,
+      'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=1200&fit=crop'
+    ),
+    (
+      v_project_two_id,
+      v_producer_id,
+      v_team_id,
+      'Riverside Sessions Launch Week',
+      'Second published project so producer tabs always have at least two rows.',
+      'OPM',
+      'Pasig City, Metro Manila',
+      '18000-32000',
+      current_date + 21,
+      current_date + 40,
+      'published',
+      3,
+      false,
+      'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=1200&fit=crop'
+    )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    owner_id = EXCLUDED.owner_id,
+    team_id = EXCLUDED.team_id,
+    title = EXCLUDED.title,
+    description = EXCLUDED.description,
+    genre = EXCLUDED.genre,
+    location = EXCLUDED.location,
+    budget_range = EXCLUDED.budget_range,
+    start_date = EXCLUDED.start_date,
+    end_date = EXCLUDED.end_date,
+    status = EXCLUDED.status,
+    max_roles = EXCLUDED.max_roles,
+    is_remote = EXCLUDED.is_remote,
+    cover_image_url = EXCLUDED.cover_image_url;
+
+  INSERT INTO public.producer_project_roles (
+    id,
+    project_id,
+    role_title,
+    role_type,
+    description,
+    is_required,
+    max_slots,
+    filled_slots
+  )
+  VALUES
+    (
+      v_role_one_id,
+      v_project_one_id,
+      'Lead Guitarist',
+      'instrument',
+      'Featured guitar chair for the North Loop demo showcase.',
+      true,
+      1,
+      0
+    ),
+    (
+      v_role_two_id,
+      v_project_two_id,
+      'Session Vocalist',
+      'vocal',
+      'Front-line vocal slot for the Riverside Sessions launch week.',
+      true,
+      1,
+      0
+    )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    project_id = EXCLUDED.project_id,
+    role_title = EXCLUDED.role_title,
+    role_type = EXCLUDED.role_type,
+    description = EXCLUDED.description,
+    is_required = EXCLUDED.is_required,
+    max_slots = EXCLUDED.max_slots,
+    filled_slots = EXCLUDED.filled_slots;
+
+  INSERT INTO public.producer_project_applications (
+    id,
+    project_id,
+    role_id,
+    applicant_id,
+    cover_message,
+    status
+  )
+  VALUES
+    (
+      '11111111-1111-4111-8111-111111111301',
+      v_project_one_id,
+      v_role_one_id,
+      v_musician_id,
+      'Gabriel is available for the showcase week and can cover both lead and rhythm support.',
+      'pending'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111302',
+      v_project_two_id,
+      v_role_two_id,
+      v_musician_id,
+      'Gabriel can step in for harmonies, acoustic support, and transitions across the launch set.',
+      'pending'
+    )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    project_id = EXCLUDED.project_id,
+    role_id = EXCLUDED.role_id,
+    applicant_id = EXCLUDED.applicant_id,
+    cover_message = EXCLUDED.cover_message,
+    status = EXCLUDED.status;
+
+  INSERT INTO public.producer_talent_invites (
+    id,
+    project_id,
+    role_id,
+    inviter_id,
+    invitee_id,
+    message,
+    status,
+    expires_at,
+    responded_at
+  )
+  VALUES
+    (
+      '11111111-1111-4111-8111-111111111311',
+      v_project_one_id,
+      v_role_one_id,
+      v_producer_id,
+      v_musician_id,
+      'Invitation for the North Loop showcase rehearsals and performance week.',
+      'pending',
+      now() + interval '14 days',
+      NULL
+    ),
+    (
+      '11111111-1111-4111-8111-111111111312',
+      v_project_two_id,
+      v_role_two_id,
+      v_producer_id,
+      v_musician_id,
+      'Invitation for the Riverside launch sessions and closing performance.',
+      'pending',
+      now() + interval '14 days',
+      NULL
+    )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    project_id = EXCLUDED.project_id,
+    role_id = EXCLUDED.role_id,
+    inviter_id = EXCLUDED.inviter_id,
+    invitee_id = EXCLUDED.invitee_id,
+    message = EXCLUDED.message,
+    status = EXCLUDED.status,
+    expires_at = EXCLUDED.expires_at,
+    responded_at = EXCLUDED.responded_at;
+
+  INSERT INTO public.gigs (
+    id,
+    organizer_id,
+    name,
+    location,
+    budget,
+    description,
+    event_date,
+    status,
+    images,
+    latitude,
+    longitude
+  )
+  VALUES
+    (
+      '11111111-1111-4111-8111-111111111201',
+      v_venue_owner_id,
+      'Tab Coverage Pending Gig 1',
+      'Quezon City, Metro Manila',
+      9000,
+      'Pending demo gig for direct and production applications.',
+      now() + interval '15 days',
+      'open',
+      ARRAY['https://images.unsplash.com/photo-1505236858219-8359eb29e329?w=1200&fit=crop'],
+      14.6760,
+      121.0437
+    ),
+    (
+      '11111111-1111-4111-8111-111111111202',
+      v_venue_owner_id,
+      'Tab Coverage Pending Gig 2',
+      'Makati City, Metro Manila',
+      9500,
+      'Second pending demo gig for activity coverage.',
+      now() + interval '18 days',
+      'open',
+      ARRAY['https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=1200&fit=crop'],
+      14.5547,
+      121.0244
+    ),
+    (
+      '11111111-1111-4111-8111-111111111203',
+      v_venue_owner_id,
+      'Tab Coverage Upcoming Gig 1',
+      'San Juan City, Metro Manila',
+      12000,
+      'Accepted future gig for musician, venue owner, and producer tabs.',
+      now() + interval '6 days',
+      'open',
+      ARRAY['https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=1200&fit=crop'],
+      14.6019,
+      121.0355
+    ),
+    (
+      '11111111-1111-4111-8111-111111111204',
+      v_venue_owner_id,
+      'Tab Coverage Upcoming Gig 2',
+      'Pasig City, Metro Manila',
+      13500,
+      'Second accepted future gig for activity coverage.',
+      now() + interval '9 days',
+      'open',
+      ARRAY['https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=1200&fit=crop'],
+      14.5764,
+      121.0851
+    ),
+    (
+      '11111111-1111-4111-8111-111111111205',
+      v_venue_owner_id,
+      'Tab Coverage Ongoing Gig 1',
+      'Taguig City, Metro Manila',
+      14000,
+      'Accepted same-day gig for ongoing states.',
+      now() + interval '2 hours',
+      'open',
+      ARRAY['https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=1200&fit=crop'],
+      14.5176,
+      121.0509
+    ),
+    (
+      '11111111-1111-4111-8111-111111111206',
+      v_venue_owner_id,
+      'Tab Coverage Ongoing Gig 2',
+      'Mandaluyong City, Metro Manila',
+      14500,
+      'Second accepted same-day gig for ongoing coverage.',
+      now() + interval '5 hours',
+      'open',
+      ARRAY['https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=1200&fit=crop'],
+      14.5794,
+      121.0359
+    ),
+    (
+      '11111111-1111-4111-8111-111111111207',
+      v_venue_owner_id,
+      'Tab Coverage Review Gig 1',
+      'Quezon City, Metro Manila',
+      15000,
+      'Completed gig kept unreviewed for the producer review tab.',
+      now() - interval '3 days',
+      'open',
+      ARRAY['https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=1200&fit=crop'],
+      14.6500,
+      121.0490
+    ),
+    (
+      '11111111-1111-4111-8111-111111111208',
+      v_venue_owner_id,
+      'Tab Coverage Review Gig 2',
+      'Makati City, Metro Manila',
+      15500,
+      'Fired gig used for completed and history states.',
+      now() - interval '6 days',
+      'open',
+      ARRAY['https://images.unsplash.com/photo-1514525253440-b393452e8d26?w=1200&fit=crop'],
+      14.5492,
+      121.0336
+    )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    organizer_id = EXCLUDED.organizer_id,
+    name = EXCLUDED.name,
+    location = EXCLUDED.location,
+    budget = EXCLUDED.budget,
+    description = EXCLUDED.description,
+    event_date = EXCLUDED.event_date,
+    status = EXCLUDED.status,
+    images = EXCLUDED.images,
+    latitude = EXCLUDED.latitude,
+    longitude = EXCLUDED.longitude;
+
+  INSERT INTO public.studio_bookings (
+    id,
+    user_id,
+    studio_id,
+    booking_date,
+    start_time,
+    end_time,
+    base_rate,
+    hours,
+    subtotal,
+    modifiers_applied,
+    final_price,
+    status,
+    notes,
+    buffer_minutes,
+    reviewed_by_customer,
+    reviewed_by_owner,
+    check_in_time,
+    payment_status
+  )
+  VALUES
+    (
+      '11111111-1111-4111-8111-111111111501',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date + 7,
+      time '10:00',
+      time '13:00',
+      v_hourly_rate,
+      3,
+      v_hourly_rate * 3,
+      '{}'::jsonb,
+      v_hourly_rate * 3,
+      'pending',
+      'Pending rehearsal booking for the tab coverage matrix.',
+      30,
+      false,
+      false,
+      NULL,
+      'pending'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111502',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date + 9,
+      time '14:00',
+      time '18:00',
+      v_hourly_rate,
+      4,
+      v_hourly_rate * 4,
+      '{}'::jsonb,
+      v_hourly_rate * 4,
+      'pending',
+      'Second pending studio session for the activity tabs.',
+      30,
+      false,
+      false,
+      NULL,
+      'pending'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111503',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date + 5,
+      time '13:00',
+      time '16:00',
+      v_hourly_rate,
+      3,
+      v_hourly_rate * 3,
+      '{}'::jsonb,
+      v_hourly_rate * 3,
+      'confirmed',
+      'Confirmed future recording block for upcoming coverage.',
+      30,
+      false,
+      false,
+      NULL,
+      'paid'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111504',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date + 11,
+      time '11:00',
+      time '15:00',
+      v_hourly_rate,
+      4,
+      v_hourly_rate * 4,
+      '{}'::jsonb,
+      v_hourly_rate * 4,
+      'confirmed',
+      'Second confirmed future session for upcoming coverage.',
+      30,
+      false,
+      false,
+      NULL,
+      'paid'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111505',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date,
+      (now() - interval '90 minutes')::time,
+      (now() + interval '90 minutes')::time,
+      v_hourly_rate,
+      3,
+      v_hourly_rate * 3,
+      '{}'::jsonb,
+      v_hourly_rate * 3,
+      'checked_in',
+      'Checked-in session used for ongoing coverage.',
+      30,
+      false,
+      false,
+      now() - interval '85 minutes',
+      'paid'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111506',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date,
+      (now() - interval '45 minutes')::time,
+      (now() + interval '135 minutes')::time,
+      v_hourly_rate,
+      3,
+      v_hourly_rate * 3,
+      '{}'::jsonb,
+      v_hourly_rate * 3,
+      'confirmed',
+      'Second same-day session for ongoing coverage.',
+      30,
+      false,
+      false,
+      NULL,
+      'paid'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111507',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date - 3,
+      time '13:00',
+      time '16:00',
+      v_hourly_rate,
+      3,
+      v_hourly_rate * 3,
+      '{}'::jsonb,
+      v_hourly_rate * 3,
+      'completed',
+      'Completed session left unreviewed for the review tab.',
+      30,
+      false,
+      false,
+      now() - interval '3 days' + interval '5 hours',
+      'paid'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111508',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date - 5,
+      time '10:00',
+      time '14:00',
+      v_hourly_rate,
+      4,
+      v_hourly_rate * 4,
+      '{}'::jsonb,
+      v_hourly_rate * 4,
+      'completed',
+      'Second completed session left unreviewed for review coverage.',
+      30,
+      false,
+      false,
+      now() - interval '5 days' + interval '6 hours',
+      'paid'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111509',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date + 2,
+      time '15:00',
+      time '17:00',
+      v_hourly_rate,
+      2,
+      v_hourly_rate * 2,
+      '{}'::jsonb,
+      v_hourly_rate * 2,
+      'cancelled',
+      'Cancelled booking that should land in history.',
+      30,
+      false,
+      false,
+      NULL,
+      'refunded'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111510',
+      v_musician_id,
+      v_demo_studio_id,
+      current_date + 4,
+      time '09:00',
+      time '12:00',
+      v_hourly_rate,
+      3,
+      v_hourly_rate * 3,
+      '{}'::jsonb,
+      v_hourly_rate * 3,
+      'cancelled',
+      'Second cancelled booking for history coverage.',
+      30,
+      false,
+      false,
+      NULL,
+      'refunded'
+    )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    user_id = EXCLUDED.user_id,
+    studio_id = EXCLUDED.studio_id,
+    booking_date = EXCLUDED.booking_date,
+    start_time = EXCLUDED.start_time,
+    end_time = EXCLUDED.end_time,
+    base_rate = EXCLUDED.base_rate,
+    hours = EXCLUDED.hours,
+    subtotal = EXCLUDED.subtotal,
+    modifiers_applied = EXCLUDED.modifiers_applied,
+    final_price = EXCLUDED.final_price,
+    status = EXCLUDED.status,
+    notes = EXCLUDED.notes,
+    buffer_minutes = EXCLUDED.buffer_minutes,
+    reviewed_by_customer = EXCLUDED.reviewed_by_customer,
+    reviewed_by_owner = EXCLUDED.reviewed_by_owner,
+    check_in_time = EXCLUDED.check_in_time,
+    payment_status = EXCLUDED.payment_status;
+
+  INSERT INTO public.gig_applications (
+    id,
+    applicant_id,
+    group_id,
+    gig_id,
+    status,
+    pitch_message,
+    reviewed_by_applicant,
+    is_solo_application,
+    slot_type,
+    submitted_by_user_id,
+    leader_approval_status,
+    production_team_id,
+    production_roster_id
+  )
+  VALUES
+    (
+      '11111111-1111-4111-8111-111111111601',
+      v_musician_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111201',
+      'pending',
+      'Solo set ready for the pending tab coverage block.',
+      false,
+      true,
+      'solo',
+      v_musician_id,
+      NULL,
+      NULL,
+      NULL
+    ),
+    (
+      '11111111-1111-4111-8111-111111111602',
+      v_musician_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111202',
+      'pending',
+      'Second pending direct application for venue and musician tabs.',
+      false,
+      true,
+      'solo',
+      v_musician_id,
+      NULL,
+      NULL,
+      NULL
+    ),
+    (
+      '11111111-1111-4111-8111-111111111603',
+      v_musician_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111203',
+      'accepted',
+      'Confirmed direct application for upcoming coverage.',
+      false,
+      true,
+      'solo',
+      v_musician_id,
+      NULL,
+      NULL,
+      NULL
+    ),
+    (
+      '11111111-1111-4111-8111-111111111604',
+      v_musician_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111204',
+      'accepted',
+      'Second confirmed direct application for upcoming coverage.',
+      false,
+      true,
+      'solo',
+      v_musician_id,
+      NULL,
+      NULL,
+      NULL
+    ),
+    (
+      '11111111-1111-4111-8111-111111111605',
+      v_musician_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111205',
+      'accepted',
+      'Same-day direct application for the ongoing tab.',
+      false,
+      true,
+      'solo',
+      v_musician_id,
+      NULL,
+      NULL,
+      NULL
+    ),
+    (
+      '11111111-1111-4111-8111-111111111606',
+      v_musician_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111206',
+      'accepted',
+      'Second same-day direct application for ongoing coverage.',
+      false,
+      true,
+      'solo',
+      v_musician_id,
+      NULL,
+      NULL,
+      NULL
+    ),
+    (
+      '11111111-1111-4111-8111-111111111607',
+      v_musician_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111207',
+      'completed',
+      'Completed direct application left visible for review or history tabs.',
+      false,
+      true,
+      'solo',
+      v_musician_id,
+      NULL,
+      NULL,
+      NULL
+    ),
+    (
+      '11111111-1111-4111-8111-111111111608',
+      v_musician_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111208',
+      'fired',
+      'Fired direct application for completed and history coverage.',
+      false,
+      true,
+      'solo',
+      v_musician_id,
+      NULL,
+      NULL,
+      NULL
+    ),
+    (
+      '11111111-1111-4111-8111-111111111611',
+      v_producer_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111201',
+      'pending',
+      'Production team application for pending tab coverage.',
+      false,
+      true,
+      'solo',
+      v_producer_id,
+      NULL,
+      v_team_id,
+      v_roster_id
+    ),
+    (
+      '11111111-1111-4111-8111-111111111612',
+      v_producer_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111202',
+      'pending',
+      'Second production team pending application.',
+      false,
+      true,
+      'solo',
+      v_producer_id,
+      NULL,
+      v_team_id,
+      v_roster_id
+    ),
+    (
+      '11111111-1111-4111-8111-111111111613',
+      v_producer_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111203',
+      'accepted',
+      'Production team upcoming application coverage.',
+      false,
+      true,
+      'solo',
+      v_producer_id,
+      NULL,
+      v_team_id,
+      v_roster_id
+    ),
+    (
+      '11111111-1111-4111-8111-111111111614',
+      v_producer_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111204',
+      'accepted',
+      'Second production team upcoming application.',
+      false,
+      true,
+      'solo',
+      v_producer_id,
+      NULL,
+      v_team_id,
+      v_roster_id
+    ),
+    (
+      '11111111-1111-4111-8111-111111111615',
+      v_producer_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111205',
+      'accepted',
+      'Production team same-day application for ongoing coverage.',
+      false,
+      true,
+      'solo',
+      v_producer_id,
+      NULL,
+      v_team_id,
+      v_roster_id
+    ),
+    (
+      '11111111-1111-4111-8111-111111111616',
+      v_producer_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111206',
+      'accepted',
+      'Second production team same-day application for ongoing coverage.',
+      false,
+      true,
+      'solo',
+      v_producer_id,
+      NULL,
+      v_team_id,
+      v_roster_id
+    ),
+    (
+      '11111111-1111-4111-8111-111111111617',
+      v_producer_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111207',
+      'completed',
+      'Completed production team application kept unreviewed for producer review coverage.',
+      false,
+      true,
+      'solo',
+      v_producer_id,
+      NULL,
+      v_team_id,
+      v_roster_id
+    ),
+    (
+      '11111111-1111-4111-8111-111111111618',
+      v_producer_id,
+      NULL,
+      '11111111-1111-4111-8111-111111111208',
+      'fired',
+      'Fired production team application kept unreviewed for producer review coverage.',
+      false,
+      true,
+      'solo',
+      v_producer_id,
+      NULL,
+      v_team_id,
+      v_roster_id
+    )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    applicant_id = EXCLUDED.applicant_id,
+    group_id = EXCLUDED.group_id,
+    gig_id = EXCLUDED.gig_id,
+    status = EXCLUDED.status,
+    pitch_message = EXCLUDED.pitch_message,
+    reviewed_by_applicant = EXCLUDED.reviewed_by_applicant,
+    is_solo_application = EXCLUDED.is_solo_application,
+    slot_type = EXCLUDED.slot_type,
+    submitted_by_user_id = EXCLUDED.submitted_by_user_id,
+    leader_approval_status = EXCLUDED.leader_approval_status,
+    production_team_id = EXCLUDED.production_team_id,
+    production_roster_id = EXCLUDED.production_roster_id;
+
+  INSERT INTO public.venue_partnership_deals (
+    id,
+    venue_owner_id,
+    production_team_id,
+    gig_id,
+    title,
+    status,
+    proposed_by_user_id,
+    accepted_term_version_id,
+    settled_at
+  )
+  VALUES
+    (
+      '11111111-1111-4111-8111-111111111701',
+      v_venue_owner_id,
+      v_team_id,
+      '11111111-1111-4111-8111-111111111207',
+      'Ayala Courtyard Summer Series Settlement',
+      'completed',
+      v_producer_id,
+      NULL,
+      now() - interval '2 days'
+    ),
+    (
+      '11111111-1111-4111-8111-111111111702',
+      v_venue_owner_id,
+      v_team_id,
+      '11111111-1111-4111-8111-111111111208',
+      'Riverside Launch Closing Settlement',
+      'settled',
+      v_producer_id,
+      NULL,
+      now() - interval '5 days'
+    )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    venue_owner_id = EXCLUDED.venue_owner_id,
+    production_team_id = EXCLUDED.production_team_id,
+    gig_id = EXCLUDED.gig_id,
+    title = EXCLUDED.title,
+    status = EXCLUDED.status,
+    proposed_by_user_id = EXCLUDED.proposed_by_user_id,
+    accepted_term_version_id = EXCLUDED.accepted_term_version_id,
+    settled_at = EXCLUDED.settled_at;
+
+  RAISE NOTICE 'Activity tab coverage seed refreshed for musician, studio-owner, venue-owner, and producer demo accounts.';
+END
+$seed$;

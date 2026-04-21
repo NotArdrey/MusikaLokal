@@ -24,7 +24,6 @@ const GLOBAL_NAVBAR_ROUTES = new Set([
     '/add_studio',
     '/ai_suggestions',
     '/bookings',
-    '/chat',
     '/create_playlist',
     '/create_station',
     '/deal_details',
@@ -71,16 +70,17 @@ const logNavbarDebug = (event: string, payload: Record<string, unknown>) => {
 
 type NavbarProps = {
     global?: boolean;
+    forceVisible?: boolean;
 };
 
-function Navbar({ global = false }: NavbarProps) {
+function Navbar({ global = false, forceVisible = false }: NavbarProps) {
     const { colors, isDark } = useTheme();
     const { isGuest, roleResolved, session, userRole } = useAuth();
     const { isBottomOverlayActive } = useBottomOverlay();
     const insets = useSafeAreaInsets();
     const pathname = usePathname();
     const [manageRoute, setManageRoute] = useState('/manage'); // Fallback
-    const shouldRenderGlobalNavbar = global && GLOBAL_NAVBAR_ROUTES.has(pathname);
+    const shouldRenderGlobalNavbar = global && (forceVisible || GLOBAL_NAVBAR_ROUTES.has(pathname));
 
     useEffect(() => {
         if (isGuest || !session?.user?.id) {
@@ -155,6 +155,7 @@ function Navbar({ global = false }: NavbarProps) {
         logNavbarDebug('state', {
             activeTab,
             bottomOffset: NAVBAR_BOTTOM_OFFSET + insets.bottom,
+            forceVisible,
             global,
             isBottomOverlayActive,
             manageRoute,
@@ -162,7 +163,7 @@ function Navbar({ global = false }: NavbarProps) {
             pointerEvents: 'auto',
             visible: shouldRenderGlobalNavbar,
         });
-    }, [activeTab, global, insets.bottom, isBottomOverlayActive, manageRoute, pathname, shouldRenderGlobalNavbar]);
+    }, [activeTab, forceVisible, global, insets.bottom, isBottomOverlayActive, manageRoute, pathname, shouldRenderGlobalNavbar]);
 
     if (!global || !shouldRenderGlobalNavbar) {
         return null;

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { supabase } from "../../lib/supabase";
+import { submitListingRequest } from "../utils/listingRequests";
 
 interface AlertConfig {
   type: "success" | "error" | "warning" | "info";
@@ -69,24 +69,46 @@ export const useBookingRequestAction = ({
       return;
     }
 
+    if (!currentUserId) {
+      setAlertConfig({
+        type: "error",
+        title: "Sign In Required",
+        message: "Please sign in before sending a booking request.",
+      });
+      setAlertVisible(true);
+      return;
+    }
+
     handleConfirm(
       async () => {
         setIsSendingRequest(true);
         try {
           const receiverId = group.type === "Artist" ? group.id : group.owner_id;
           const groupId = group.type === "Group" ? group.id : null;
+          const selectedVenue = userVenues.find((venue: any) => venue?.id === selectedVenueId);
 
-          const { error } = await supabase.from("booking_requests").insert({
-            sender_id: currentUserId,
-            receiver_id: receiverId,
-            group_id: groupId,
-            studio_id: selectedVenueId,
+          if (!receiverId) {
+            throw new Error("We couldn't identify who should receive this request.");
+          }
+
+          await submitListingRequest({
+            currentUserId,
+            receiverUserId: receiverId,
             message: requestMessage,
-            status: "pending",
-            event_details: {},
+            senderEntityType: "venue",
+            senderEntityName: selectedVenue?.name || "Venue",
+            senderEntityId: selectedVenueId,
+            receiverEntityType: group.type === "Artist" ? "musician" : "group",
+            receiverEntityName: group?.name || (group.type === "Artist" ? "Musician" : "Group"),
+            receiverEntityId: group?.id || receiverId,
+            groupId,
+            studioId: selectedVenueId,
+            notificationTitle: "New booking request",
+            notificationMessage: `${selectedVenue?.name || "A venue"} sent you a booking request on MusikaLokal.`,
+            routePath: "/bookings",
+            routeParams: { tab: "Pending" },
+            extraMeta: { source: "listing_details_booking_request" },
           });
-
-          if (error) throw error;
 
           setAlertConfig({
             type: "success",

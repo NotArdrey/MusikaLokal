@@ -23,7 +23,6 @@ import CachedImage from "../src/components/CachedImage";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import GuestSignInGate from "../src/components/GuestSignInGate";
 import Header from "../src/components/header";
-import Modal from "../src/components/modal";
 import Navbar from "../src/components/navbar";
 import Skeleton from "../src/components/Skeleton";
 import { useAuth } from "../src/context/AuthContext";
@@ -212,6 +211,12 @@ const buildConnectionRequestDetailLines = (item: any) =>
       : null,
     `Status: ${item?.status || "Pending"}`,
   ].filter(Boolean);
+
+const isProductionTeamInviteRequest = (item: any) =>
+  item?.type_id === "booking_request" &&
+  item?.sender_entity_type === "production_team" &&
+  item?.request_kind === "invite" &&
+  Boolean(item?.production_team_id);
 
 type Tab =
   | "Applicants"
@@ -629,8 +634,31 @@ export default function BookingsScreen() {
           () => {
             queueRealtimeRefresh();
           },
-        )
-        .on(
+        );
+
+      const { data: ownedGroups } = await supabase
+        .from("groups")
+        .select("id")
+        .eq("owner_id", userId);
+
+      (ownedGroups || []).forEach((group: any) => {
+        if (!group?.id) return;
+
+        liveChannel = liveChannel.on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "booking_requests",
+            filter: `group_id=eq.${group.id}`,
+          },
+          () => {
+            queueRealtimeRefresh();
+          },
+        );
+      });
+
+      liveChannel = liveChannel.on(
           "postgres_changes",
           {
             event: "*",
@@ -1044,20 +1072,69 @@ export default function BookingsScreen() {
 
       let connectionRequestItems: any[] = [];
       try {
-        const { data: requestRows, error: requestError } = await supabase
-          .from("booking_requests")
-          .select(
-            "id, created_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url",
-          )
-          .or(`sender_id.eq.${targetUserId},receiver_id.eq.${targetUserId}`)
-          .in("status", VISIBLE_CONNECTION_REQUEST_STATUSES)
-          .order("created_at", { ascending: false });
+        const connectionRequestSelect =
+          "id, created_at, sender_id, receiver_id, group_id, studio_id, message, status, event_details, attachment_url";
+        const { data: ownedGroups, error: ownedGroupsError } = await supabase
+          .from("groups")
+          .select("id")
+          .eq("owner_id", targetUserId);
 
-        if (requestError) {
-          debugLog("Error fetching connection requests:", requestError);
-        } else if ((requestRows || []).length > 0) {
+        if (ownedGroupsError) {
+          debugLog("Error fetching owned groups for connection requests:", ownedGroupsError);
+        }
+
+        const ownedGroupIds = Array.from(
+          new Set((ownedGroups || []).map((group: any) => group?.id).filter(Boolean)),
+        );
+        const ownedGroupIdSet = new Set(ownedGroupIds);
+
+        const requestResults = await Promise.all([
+          supabase
+            .from("booking_requests")
+            .select(connectionRequestSelect)
+            .or(`sender_id.eq.${targetUserId},receiver_id.eq.${targetUserId}`)
+            .in("status", VISIBLE_CONNECTION_REQUEST_STATUSES)
+            .order("created_at", { ascending: false }),
+          ...(ownedGroupIds.length > 0
+            ? [
+                supabase
+                  .from("booking_requests")
+                  .select(connectionRequestSelect)
+                  .in("group_id", ownedGroupIds)
+                  .in("status", VISIBLE_CONNECTION_REQUEST_STATUSES)
+                  .order("created_at", { ascending: false }),
+              ]
+            : []),
+        ]);
+
+        const requestRowsById = new Map<string, any>();
+        requestResults.forEach((result, index) => {
+          if (result.error) {
+            debugLog(
+              index === 0
+                ? "Error fetching connection requests:"
+                : "Error fetching group-owned connection requests:",
+              result.error,
+            );
+            return;
+          }
+
+          (result.data || []).forEach((request: any) => {
+            if (request?.id && !requestRowsById.has(request.id)) {
+              requestRowsById.set(request.id, request);
+            }
+          });
+        });
+
+        const requestRows = Array.from(requestRowsById.values()).sort(
+          (a: any, b: any) =>
+            new Date(b?.created_at || 0).getTime() -
+            new Date(a?.created_at || 0).getTime(),
+        );
+
+        if (requestRows.length > 0) {
           const profileIds = [...new Set(
-            (requestRows || [])
+            requestRows
               .flatMap((request: any) => [request.sender_id, request.receiver_id])
               .filter(Boolean),
           )];
@@ -1081,7 +1158,7 @@ export default function BookingsScreen() {
             }
           }
 
-          connectionRequestItems = (requestRows || []).map((request: any) => {
+          connectionRequestItems = requestRows.map((request: any) => {
             const eventDetails = request.event_details || {};
             const requestDetails = extractConnectionRequestDetails(
               eventDetails,
@@ -1095,7 +1172,13 @@ export default function BookingsScreen() {
               eventDetails.receiver_entity_name ||
               profileMap.get(request.receiver_id)?.full_name ||
               "User";
-            const isIncoming = request.receiver_id === targetUserId;
+            const isIncoming =
+              request.receiver_id === targetUserId ||
+              Boolean(
+                request.group_id &&
+                  ownedGroupIdSet.has(request.group_id) &&
+                  request.sender_id !== targetUserId,
+              );
             const counterpartyId = isIncoming ? request.sender_id : request.receiver_id;
             const counterpartyProfile = counterpartyId ? profileMap.get(counterpartyId) : null;
             const counterpartyName = isIncoming ? senderEntityName : receiverEntityName;
@@ -1141,6 +1224,8 @@ export default function BookingsScreen() {
               attachment_url: request.attachment_url || null,
               route_path: eventDetails.route || null,
               route_params: eventDetails.route_params || null,
+              viewer_is_group_owner:
+                Boolean(request.group_id && ownedGroupIdSet.has(request.group_id)),
             };
           });
         }
@@ -1398,7 +1483,15 @@ export default function BookingsScreen() {
       const terminalGigApplications = rawReview.filter((item: any) => {
         if (item.type_id !== "gig_application") return false;
         const status = normalizeStatus(item.status);
-        return ["completed", "fired", "declined", "rejected", "cancelled"].includes(status);
+          if (!["completed", "fired", "declined", "rejected", "cancelled"].includes(status)) {
+            return false;
+          }
+
+          if (role === "producer") {
+            return item.reviewed_by_applicant === true;
+          }
+
+          return true;
       });
 
       const historyItems = [
@@ -1427,6 +1520,11 @@ export default function BookingsScreen() {
             // Shows gig applications with status "Fired" or "Completed" (never "Accepted").
             return item.type_id === "gig_application" &&
               (item.status === "Fired" || item.status === "Completed");
+          }
+
+          if (role === "producer") {
+            return item.type_id === "gig_application" &&
+              item.reviewed_by_applicant !== true;
           }
 
           if (item.type_id === "gig_application") return false;
@@ -1844,7 +1942,7 @@ export default function BookingsScreen() {
     if (!userId) return false;
     if (item?.request_direction !== "incoming") return false;
 
-    return item?.receiver_id === userId;
+    return item?.receiver_id === userId || item?.viewer_is_group_owner === true;
   };
 
   const handleConnectionRequestDecision = async (
@@ -1868,18 +1966,92 @@ export default function BookingsScreen() {
     setRequestActionId(item.id);
 
     try {
-      const { data: updatedRequest, error: updateError } = await supabase
-        .from("booking_requests")
-        .update({ status: nextStatus })
-        .eq("id", item.id)
-        .eq("receiver_id", userId)
-        .eq("status", "pending")
-        .select("id")
-        .maybeSingle();
+      const isProductionInvite = isProductionTeamInviteRequest(item);
+      const counterpartyName = item.counterparty_name || item.name || "this user";
 
-      if (updateError) throw updateError;
+      if (isProductionInvite) {
+        const { data, error } = await supabase.functions.invoke("manage-deals", {
+          body: {
+            action: "respond_to_production_team_invite",
+            request_id: item.id,
+            decision: nextStatus,
+          },
+        });
 
-      if (!updatedRequest) {
+        if (error) {
+          console.error("respond_to_production_team_invite failed", {
+            message: error.message,
+            status: (error as any).status,
+            code: (error as any).code,
+            details: (error as any).details,
+            hint: (error as any).hint,
+            context: (error as any).context,
+            body: {
+              action: "respond_to_production_team_invite",
+              request_id: item.id,
+              decision: nextStatus,
+            },
+          });
+          throw error;
+        }
+
+        if (!data?.success) {
+          throw new Error(data?.error || "Failed to update the production team invite.");
+        }
+
+        await fetchBookings(userId);
+
+        const rosterMessage =
+          nextStatus === "accepted"
+            ? data?.roster_added
+              ? item?.group_id
+                ? ` ${item.receiver_entity_name || "Your group"} is now on their production roster.`
+                : " You are now on their production roster."
+              : data?.already_on_roster
+                ? item?.group_id
+                  ? ` ${item.receiver_entity_name || "Your group"} was already on their production roster.`
+                  : " You were already on their production roster."
+                : ""
+            : "";
+
+        showAlert(
+          "success",
+          nextStatus === "accepted" ? "Request accepted" : "Request declined",
+          nextStatus === "accepted"
+            ? `You accepted the production team invite from ${counterpartyName}.${rosterMessage}`
+            : `You declined the production team invite from ${counterpartyName}.`,
+        );
+        return;
+      }
+
+      const responseBody = {
+        action: "respond_to_listing_request",
+        request_id: item.id,
+        decision: nextStatus,
+      };
+
+      const { data, error } = await supabase.functions.invoke("manage-deals", {
+        body: responseBody,
+      });
+
+      if (error) {
+        console.error("respond_to_listing_request failed", {
+          message: error.message,
+          status: (error as any).status,
+          code: (error as any).code,
+          details: (error as any).details,
+          hint: (error as any).hint,
+          context: (error as any).context,
+          body: responseBody,
+        });
+        throw error;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || "Failed to update the connection request.");
+      }
+
+      if (!data?.request) {
         await fetchBookings(userId);
         showAlert(
           "warning",
@@ -1887,35 +2059,6 @@ export default function BookingsScreen() {
           "This connection request is no longer pending.",
         );
         return;
-      }
-
-      const responderName = item.receiver_entity_name || "The recipient";
-      const requestTypeLabel = String(item.type || "connection request").toLowerCase();
-      const counterpartyName = item.counterparty_name || item.name || "this user";
-
-      const { error: notificationError } = await supabase.from("notifications").insert({
-        user_id: item.sender_id,
-        type: "info",
-        title: `${responderName} ${nextStatus === "accepted" ? "accepted" : "declined"} your request`,
-        message: `Your ${requestTypeLabel} was ${nextStatus === "accepted" ? "accepted" : "declined"} by ${responderName}.`,
-        meta: {
-          type: "listing_connection_request_status",
-          request_id: item.id,
-          request_status: nextStatus,
-          sender_entity_type: item.sender_entity_type || null,
-          sender_entity_name: item.sender_entity_name || null,
-          receiver_entity_type: item.receiver_entity_type || null,
-          receiver_entity_name: item.receiver_entity_name || null,
-          listing_id: item.listing_id || null,
-          listing_type: item.listing_type || null,
-          production_team_id: item.production_team_id || null,
-          route: item.route_path || null,
-          route_params: item.route_params || null,
-        },
-      });
-
-      if (notificationError) {
-        console.warn("Failed to create connection request status notification:", notificationError);
       }
 
       await fetchBookings(userId);
@@ -6090,7 +6233,6 @@ export default function BookingsScreen() {
                         : (() => {
                           // Cancel mode
                           if (selectedItem?.type_id === "gig_application") {
-                            // For gig applications
                             if (userRole === "venue-owner") {
                               return "Are you sure you want to revoke this accepted application? The musician will be notified.";
                             } else {

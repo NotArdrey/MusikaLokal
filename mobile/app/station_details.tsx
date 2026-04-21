@@ -183,11 +183,17 @@ export default function StationDetailsScreen() {
   }, [fetchStation, station?.created_at, station?.id, station?.is_active, station?.live_anchor_at, station?.rotation_interval_minutes, station?.updated_at]);
 
   const fetchOwnerPlaylists = useCallback(async () => {
-    if (!userId) return;
+    const targetProfileId = typeof station?.managed_profile_id === "string" && station.managed_profile_id.trim().length > 0
+      ? station.managed_profile_id.trim()
+      : typeof station?.creator_id === "string" && station.creator_id.trim().length > 0
+        ? station.creator_id.trim()
+        : userId;
+
+    if (!targetProfileId) return;
     setLoadingPlaylists(true);
     try {
       const { data } = await supabase.functions.invoke("manage-playlists", {
-        body: { action: "list_my_playlists" },
+        body: { action: "list_user_playlists", user_id: targetProfileId },
       });
       setOwnerPlaylists(data?.data || []);
     } catch (_) {
@@ -195,7 +201,7 @@ export default function StationDetailsScreen() {
     } finally {
       setLoadingPlaylists(false);
     }
-  }, [userId]);
+  }, [station?.creator_id, station?.managed_profile_id, userId]);
 
   const handleEditOpen = () => {
     setEditName(station?.name || "");

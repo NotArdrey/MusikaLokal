@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -16,6 +16,7 @@ import Header from "../src/components/header";
 import Navbar from "../src/components/navbar";
 import CustomAlert, { AlertType } from "../src/components/CustomAlert";
 import { useBottomBarClearance } from "../src/hooks/useBottomBarClearance";
+import { useAuth } from "../src/context/AuthContext";
 import { showTopToast } from "../src/context/TopToastContext";
 import { useTheme } from "../src/context/ThemeContext";
 import {
@@ -61,8 +62,21 @@ type DraftTrackPayload = {
 
 export default function CreatePlaylistScreen() {
   const { colors } = useTheme();
-  const { edit_id } = useLocalSearchParams();
-  const isEditing = !!edit_id;
+  const { loading: authLoading, isGuest } = useAuth();
+  const params = useLocalSearchParams<{ edit_id?: string | string[]; return_to?: string | string[]; return_user_id?: string | string[] }>();
+  const editId = useMemo(() => {
+    const raw = Array.isArray(params.edit_id) ? params.edit_id[0] : params.edit_id;
+    return typeof raw === "string" ? raw.trim() : "";
+  }, [params.edit_id]);
+  const returnTo = useMemo(() => {
+    const raw = Array.isArray(params.return_to) ? params.return_to[0] : params.return_to;
+    return typeof raw === "string" ? raw.trim() : "";
+  }, [params.return_to]);
+  const returnUserId = useMemo(() => {
+    const raw = Array.isArray(params.return_user_id) ? params.return_user_id[0] : params.return_user_id;
+    return typeof raw === "string" ? raw.trim() : "";
+  }, [params.return_user_id]);
+  const isEditing = editId.length > 0;
   const { contentBottomPadding } = useBottomBarClearance(24);
 
   const [title, setTitle] = useState("");
@@ -74,14 +88,63 @@ export default function CreatePlaylistScreen() {
   const [loading, setLoading] = useState(isEditing);
   const [alert, setAlert] = useState<{ type: AlertType; title: string; message: string } | null>(null);
 
+  const logPlaylistInvokeError = useCallback((context: string, error: any, body: Record<string, unknown>) => {
+    console.error(`manage-playlists ${context} failed`, {
+      message: error?.message,
+      status: error?.status,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+      context: error?.context,
+      body,
+    });
+  }, []);
+
+  const ensurePlaylistMutationSession = useCallback(async () => {
+    if (isGuest) {
+      throw new Error("You need to sign in to manage playlists.");
+    }
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    if (session?.access_token) {
+      return session;
+    }
+
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) {
+      throw refreshError;
+    }
+
+    if (!refreshed.session?.access_token) {
+      throw new Error("Your session expired. Please sign in again.");
+    }
+
+    return refreshed.session;
+  }, [isGuest]);
+
   // Load existing playlist for editing
   useEffect(() => {
-    if (!isEditing || !edit_id) return;
+    if (!isEditing || !editId) return;
     (async () => {
       try {
-        const { data } = await supabase.functions.invoke("manage-playlists", {
-          body: { action: "get_playlist_details", playlist_id: edit_id },
+        const body = { action: "get_playlist_details", playlist_id: editId };
+        const { data, error } = await supabase.functions.invoke("manage-playlists", {
+          body,
         });
+
+        if (error) {
+          logPlaylistInvokeError("get_playlist_details", error, body);
+          throw error;
+        }
+
         if (data?.data) {
           setTitle(data.data.title || "");
           setDescription(data.data.description || "");
@@ -90,11 +153,12 @@ export default function CreatePlaylistScreen() {
         }
       } catch (e: any) {
         console.error("Load playlist error:", e);
+        setAlert({ type: "error", title: "Playlist Unavailable", message: e?.message || "Failed to load this playlist." });
       } finally {
         setLoading(false);
       }
     })();
-  }, [edit_id, isEditing]);
+  }, [editId, isEditing, logPlaylistInvokeError]);
 
   const addTrackDraft = useCallback(() => {
     setTrackDrafts((current) => [...current, createTrackDraft()]);
@@ -189,8 +253,15 @@ export default function CreatePlaylistScreen() {
       return;
     }
 
+    if (authLoading) {
+      setAlert({ type: "info", title: "Please Wait", message: "Your session is still loading. Try again in a moment." });
+      return;
+    }
+
     setSaving(true);
     try {
+      await ensurePlaylistMutationSession();
+
       const draftItems = !isEditing ? await prepareDraftTrackPayloads() : [];
       const action = isEditing ? "update_playlist" : "create_playlist";
       const body: any = {
@@ -200,16 +271,23 @@ export default function CreatePlaylistScreen() {
         genre: genre.trim() || null,
         visibility,
       };
-      if (isEditing) body.playlist_id = edit_id;
+      if (isEditing) {
+        if (!editId) {
+          throw new Error("Missing playlist ID.");
+        }
+
+        body.playlist_id = editId;
+      }
 
       const { data, error } = await supabase.functions.invoke("manage-playlists", { body });
 
       if (error) {
+        logPlaylistInvokeError(action, error, body);
         throw error;
       }
 
       if (data?.success) {
-        const playlistId = data.data?.id;
+        const playlistId = data.data?.id || editId;
 
         if (!isEditing && playlistId && draftItems.length > 0) {
           const failedTracks: string[] = [];
@@ -220,21 +298,24 @@ export default function CreatePlaylistScreen() {
                 ? (await uploadPlaylistAudioFile(track.audio_file, playlistId)).publicUrl
                 : track.audio_url;
 
+              const itemBody = {
+                action: "add_playlist_item",
+                playlist_id: playlistId,
+                title: track.title,
+                artist_name: track.artist_name,
+                audio_url: sourceUrl,
+                duration_seconds: track.duration_seconds,
+              };
+
               const { error: itemError } = await supabase.functions.invoke("manage-playlists", {
-                body: {
-                  action: "add_playlist_item",
-                  playlist_id: playlistId,
-                  title: track.title,
-                  artist_name: track.artist_name,
-                  audio_url: sourceUrl,
-                  duration_seconds: track.duration_seconds,
-                },
+                body: itemBody,
               });
 
               if (itemError) {
+                logPlaylistInvokeError("add_playlist_item", itemError, itemBody);
                 throw itemError;
               }
-            } catch (_) {
+            } catch {
               failedTracks.push(track.title);
             }
           }
@@ -254,7 +335,14 @@ export default function CreatePlaylistScreen() {
           message: isEditing ? "Playlist updated." : "Playlist created!",
         });
         if (isEditing) {
-          router.back();
+          if (returnTo === "profile") {
+            router.replace({
+              pathname: "/profile",
+              params: returnUserId ? { userId: returnUserId, refresh: Date.now().toString() } : { refresh: Date.now().toString() },
+            });
+          } else {
+            router.back();
+          }
         } else if (data.data?.id) {
           router.replace({ pathname: "/playlist_details", params: { playlist_id: data.data.id } });
         } else {
@@ -442,10 +530,10 @@ export default function CreatePlaylistScreen() {
           </View>
         )}
 
-        <TouchableOpacity activeOpacity={1}
-          style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}
+        <TouchableOpacity activeOpacity={0.85}
+          style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: saving || authLoading ? 0.6 : 1 }]}
           onPress={handleSave}
-          disabled={saving}
+          disabled={saving || authLoading}
         >
           {saving ? (
             <ActivityIndicator color="#fff" />
